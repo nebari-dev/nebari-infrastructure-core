@@ -1,0 +1,13 @@
+project_name: my-nebari-local
+provider: local
+domain: nebari.local
+
+local:
+  kube_context: "default"
+  node_selectors:
+    general:
+      kubernetes.io/os: linux
+    user:
+      kubernetes.io/os: linux
+    worker:
+      kubernetes.io/os: linux

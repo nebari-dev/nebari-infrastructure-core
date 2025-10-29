@@ -1,0 +1,184 @@
+# Nebari Infrastructure Core (NIC)
+
+Nebari Infrastructure Core is a standalone Go CLI tool that manages cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.
+
+## Features
+
+- **Declarative Infrastructure**: Define your desired state, NIC reconciles actual state to match
+- **Native Cloud SDKs**: Direct integration with AWS, GCP, Azure, and local K3s
+- **Configuration Compatible**: Works with existing `nebari-config.yaml` files
+- **OpenTelemetry Instrumented**: Full distributed tracing support
+- **Structured Logging**: JSON structured logging with slog
+
+## Quick Start
+
+### Build
+
+```bash
+go build -o nic ./cmd/nic
+```
+
+### Usage
+
+```bash
+# Show version and registered providers
+./nic version
+
+# Validate configuration file
+./nic validate -f nebari-config.yaml
+
+# Deploy infrastructure
+./nic deploy -f nebari-config.yaml
+```
+
+## Commands
+
+### `nic deploy`
+
+Deploy infrastructure based on configuration file.
+
+```bash
+./nic deploy -f <config-file>
+```
+
+Options:
+- `-f, --file`: Path to nebari-config.yaml file (required)
+
+### `nic validate`
+
+Validate configuration file without deploying.
+
+```bash
+./nic validate -f <config-file>
+```
+
+Options:
+- `-f, --file`: Path to nebari-config.yaml file (required)
+
+### `nic version`
+
+Show version information and registered providers.
+
+```bash
+./nic version
+```
+
+## Configuration
+
+NIC uses the standard `nebari-config.yaml` format. See `examples/` directory for sample configurations:
+
+- `examples/aws-config.yaml` - AWS/EKS configuration
+- `examples/gcp-config.yaml` - GCP/GKE configuration
+- `examples/azure-config.yaml` - Azure/AKS configuration
+- `examples/local-config.yaml` - Local K3s configuration
+
+## OpenTelemetry Configuration
+
+NIC supports OpenTelemetry tracing with configurable exporters:
+
+### Environment Variables
+
+- `OTEL_EXPORTER`: Exporter type (default: "console")
+  - `console` - Export traces to stdout (development)
+  - `otlp` - Export to OTLP endpoint
+  - `both` - Export to both console and OTLP
+  - `none` - Disable trace export (traces still collected)
+
+- `OTEL_ENDPOINT`: OTLP endpoint (default: "localhost:4317")
+
+### Examples
+
+```bash
+# Console traces (default)
+./nic deploy -f config.yaml
+
+# OTLP traces
+OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
+
+# Both console and OTLP
+OTEL_EXPORTER=both ./nic deploy -f config.yaml
+
+# No trace export
+OTEL_EXPORTER=none ./nic deploy -f config.yaml
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./... -v
+
+# Run with coverage
+go test ./... -cover -coverprofile=coverage.out
+go tool cover -html=coverage.out
+```
+
+### Code Quality
+
+```bash
+# Format code
+go fmt ./...
+
+# Vet code
+go vet ./...
+
+# Lint (requires golangci-lint)
+golangci-lint run
+```
+
+## Architecture
+
+### Project Structure
+
+```
+cmd/nic/              # CLI entry point and commands
+pkg/
+  ├── config/         # Configuration parsing
+  ├── provider/       # Provider interface and registry
+  │   ├── aws/        # AWS provider implementation
+  │   ├── gcp/        # GCP provider implementation
+  │   ├── azure/      # Azure provider implementation
+  │   └── local/      # Local K3s provider implementation
+  └── telemetry/      # OpenTelemetry setup
+```
+
+### Provider Registration
+
+All providers are explicitly registered in `cmd/nic/main.go`:
+
+```go
+registry := provider.NewRegistry()
+registry.Register(ctx, "aws", aws.NewProvider())
+registry.Register(ctx, "gcp", gcp.NewProvider())
+registry.Register(ctx, "azure", azure.NewProvider())
+registry.Register(ctx, "local", local.NewProvider())
+```
+
+## Current Status
+
+**v0.1.0 - Initial Implementation**
+
+This is the initial implementation with stub providers. Each provider currently prints the configuration it receives and returns successfully. Full implementation will follow in subsequent releases.
+
+### Stub Provider Behavior
+
+All providers currently:
+1. Accept configuration via the `Deploy()` method
+2. Print provider name and full configuration as JSON
+3. Return success
+4. Are fully instrumented with OpenTelemetry spans
+
+### Next Steps
+
+- Implement actual AWS provider with native AWS SDK v2
+- Implement GCP provider with Google Cloud Client Libraries
+- Implement Azure provider with Azure SDK for Go
+- Implement local K3s provider
+- Add state management
+- Add import from Terraform functionality
+
+## License
+
+See LICENSE file for details.
