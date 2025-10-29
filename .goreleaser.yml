@@ -1,0 +1,116 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  - id: nic
+    main: ./cmd/nic
+    binary: nic
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - id: nic-archive
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - docs/**/*
+      - examples/**/*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: 'Performance improvements'
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: nebari-dev
+    name: nebari-infrastructure-core
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Nebari Infrastructure Core {{ .Tag }}
+
+    Release of Nebari Infrastructure Core (NIC) version {{ .Tag }}.
+
+    ### Installation
+
+    Download the appropriate binary for your platform from the assets below.
+
+    #### Linux/macOS
+    ```bash
+    # Download and extract
+    tar -xzf nic_{{ .Tag }}_linux_x86_64.tar.gz
+
+    # Move to PATH
+    sudo mv nic /usr/local/bin/
+
+    # Verify installation
+    nic --help
+    ```
+
+    #### Windows
+    Extract the zip file and add the `nic.exe` to your PATH.
+
+  footer: |
+    **Full Changelog**: https://github.com/nebari-dev/nebari-infrastructure-core/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+source:
+  enabled: true
+  name_template: '{{ .ProjectName }}-{{ .Version }}-source'
