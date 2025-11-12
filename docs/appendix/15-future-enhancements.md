@@ -483,7 +483,45 @@ nic stack publish ./my-custom-stack --to nebari-stacks
 
 ---
 
-## 5. Open Questions
+## 5. Configuration Hash for Change Detection
+
+### 5.1 Overview
+
+Add configuration hash tags to resources for faster change detection, avoiding the need to compare all fields during reconciliation.
+
+### 5.2 Implementation
+
+```go
+// Calculate hash of relevant config fields
+func calculateConfigHash(config *Config) string {
+    canonical, _ := json.Marshal(config)
+    hash := sha256.Sum256(canonical)
+    return fmt.Sprintf("sha256:%x", hash[:8])
+}
+
+// Tag resources with config hash
+tags := map[string]string{
+    "nic.nebari.dev/managed-by":    "nic",
+    "nic.nebari.dev/cluster-name":  "nebari-prod",
+    "nic.nebari.dev/resource-type": "vpc",
+    "nic.nebari.dev/version":       "1.0.0",
+    "nic.nebari.dev/config-hash":   calculateConfigHash(config),
+}
+```
+
+### 5.3 Benefits
+
+- **Faster reconciliation**: Compare hash instead of all fields
+- **Change tracking**: Know exactly when config changed
+- **Optimization**: Skip reconciliation if hash matches
+
+### 5.4 Recommendation
+
+Phase 2 optimization after MVP is stable and field-by-field comparison is proven.
+
+---
+
+## 6. Open Questions
 
 1. **Stack Dependencies:** How to handle complex inter-stack dependencies? (DAG-based ordering? Helm hooks?)
 2. **Stack Versioning:** Should stacks have independent version lifecycles? (Recommendation: Yes, use ArgoCD ApplicationSets)

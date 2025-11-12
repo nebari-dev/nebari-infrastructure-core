@@ -7,6 +7,7 @@
 **Decision:** NIC deploys everything in one unified workflow.
 
 **Rationale:**
+
 - Eliminates stage dependency complexity
 - Faster deployment (parallel operations where possible)
 - Easier to reason about (one command: `nic deploy`)
@@ -14,6 +15,7 @@
 - ArgoCD handles application-level dependencies
 
 **Alternatives Considered:**
+
 | Alternative | Rejected Because |
 |-------------|------------------|
 | Keep staged approach | Complexity, state management issues, slower |
@@ -27,6 +29,7 @@
 **Decision:** No state files. Query cloud provider APIs and Kubernetes APIs for actual state on every run.
 
 **Rationale:**
+
 - **No state drift**: Cloud APIs are always the source of truth
 - **No state corruption**: Can't corrupt what doesn't exist
 - **No state backends**: No S3 buckets, DynamoDB tables, or locking complexity
@@ -36,9 +39,10 @@
 - **Easier debugging**: `nic status` just queries cloud APIs
 
 **How It Works:**
+
 ```
 Every `nic deploy` run:
-1. Parse nebari-config.yaml (desired state)
+1. Parse config.yaml (desired state)
 2. Query cloud APIs for resources with NIC tags (actual state)
 3. Compare desired vs actual (automatic drift detection)
 4. Apply changes to reconcile differences
@@ -47,17 +51,18 @@ Every `nic deploy` run:
 
 **Resource Discovery via Tags:**
 All NIC-managed resources are tagged for discovery:
+
 ```go
 tags := map[string]string{
     "nic.nebari.dev/managed-by":    "nic",
     "nic.nebari.dev/cluster-name":  "nebari-prod",
     "nic.nebari.dev/resource-type": "vpc|cluster|node-pool|...",
     "nic.nebari.dev/version":       "1.0.0",
-    "nic.nebari.dev/config-hash":   "sha256:abc123...",
 }
 ```
 
 **Trade-offs:**
+
 - ✅ Advantages: No state management complexity, automatic drift detection
 - ⚠️ Slower: +30-60 seconds for cloud API queries per run
 - ⚠️ Requires cloud access: Can't plan changes offline
@@ -71,6 +76,7 @@ See [Stateless Operation & Resource Discovery](06-stateless-operation.md) for co
 **Decision:** Implement declarative reconciliation using cloud provider SDKs directly.
 
 **Rationale:**
+
 - Full control over API calls
 - Better error messages (no Terraform layer)
 - Faster execution (no plan/apply overhead)
@@ -79,6 +85,7 @@ See [Stateless Operation & Resource Discovery](06-stateless-operation.md) for co
 - Can implement advanced retry logic
 
 **Implementation Pattern:**
+
 ```go
 // Declarative reconciliation loop
 func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error {
@@ -106,6 +113,7 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
 **Decision:** Deploy ArgoCD first via Helm, then use ArgoCD applications for all other foundational software.
 
 **Rationale:**
+
 - GitOps best practices (declarative, version-controlled)
 - Automatic sync and health checks
 - Dependency management (app-of-apps pattern)
@@ -114,6 +122,7 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
 - Clear audit trail (Git history)
 
 **Deployment Order:**
+
 ```
 1. ArgoCD (Helm chart via NIC)
    ↓
@@ -134,6 +143,7 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
 **Decision:** Build a Kubernetes operator that watches `nebari-application` CRDs and automates integration.
 
 **Rationale:**
+
 - Reduces manual configuration (no more copy-paste YAML)
 - Consistent integration across all apps
 - Self-service for developers
@@ -141,6 +151,7 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
 - Native Kubernetes workflow
 
 **Example CRD Usage:**
+
 ```yaml
 apiVersion: nebari.dev/v1alpha1
 kind: NebariApplication
@@ -176,6 +187,7 @@ spec:
 ```
 
 **Operator Actions:**
+
 1. Creates Keycloak OAuth2 client
 2. Configures Envoy Gateway HTTPRoute
 3. Provisions cert-manager Certificate
@@ -190,6 +202,7 @@ spec:
 **Decision:** Instrument all NIC code with OpenTelemetry (traces, metrics, logs).
 
 **Rationale:**
+
 - Debugging deployment issues
 - Performance monitoring
 - Vendor-neutral (can export to any backend)
@@ -197,6 +210,7 @@ spec:
 - Compliance with industry standards
 
 **Implementation:**
+
 - Every provider function wrapped in trace span
 - Structured logging via slog with trace context
 - Custom metrics for resource counts, deployment time, errors
@@ -209,6 +223,7 @@ spec:
 **Decision:** All providers compiled into single binary, registered explicitly in `main()`.
 
 **Rationale:**
+
 - No blank imports (`import _ "..."`) anti-pattern
 - Easy to test and debug
 - Fast startup (no plugin RPC overhead)

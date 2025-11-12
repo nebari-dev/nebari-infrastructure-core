@@ -6,20 +6,21 @@
 
 **Why Stateless:**
 
-| Traditional State-Based | NIC Stateless Approach |
-|------------------------|------------------------|
-| ❌ State files can become out of sync with reality | ✅ Always queries actual cloud state |
-| ❌ State corruption causes outages | ✅ No state to corrupt |
-| ❌ Concurrent operations require locking | ✅ Eventually consistent (cloud APIs handle conflicts) |
-| ❌ State backends add complexity | ✅ No backends needed |
-| ❌ State migration on version upgrades | ✅ No migration needed |
-| ❌ Manual drift detection | ✅ Automatic drift detection every run |
-| ✅ Faster (no cloud API queries) | ⚠️ Slower (queries on every run) |
-| ✅ Works offline for planning | ⚠️ Requires cloud access |
+| Traditional State-Based                            | NIC Stateless Approach                                 |
+| -------------------------------------------------- | ------------------------------------------------------ |
+| ❌ State files can become out of sync with reality | ✅ Always queries actual cloud state                   |
+| ❌ State corruption causes outages                 | ✅ No state to corrupt                                 |
+| ❌ Concurrent operations require locking           | ✅ Eventually consistent (cloud APIs handle conflicts) |
+| ❌ State backends add complexity                   | ✅ No backends needed                                  |
+| ❌ State migration on version upgrades             | ✅ No migration needed                                 |
+| ❌ Manual drift detection                          | ✅ Automatic drift detection every run                 |
+| ✅ Faster (no cloud API queries)                   | ⚠️ Slower (queries on every run)                       |
+| ✅ Works offline for planning                      | ⚠️ Requires cloud access                               |
 
 **Trade-off Accepted:** Slightly slower execution (~30-60 seconds for cloud API queries) in exchange for always-accurate state and zero state management complexity.
 
 **How It Works:**
+
 ```
 Every `nic deploy` run:
 1. Parse config.yaml (desired state)
@@ -38,6 +39,7 @@ Every `nic deploy` run:
 ### 6.2.1 Standard Tag Schema
 
 **Required Tags (All Resources):**
+
 ```go
 type ResourceTags struct {
     // Identifies resource as NIC-managed
@@ -52,12 +54,11 @@ type ResourceTags struct {
     // NIC version that created the resource
     NICVersion string `tag:"nic.nebari.dev/version" value:"1.0.0"`
 
-    // Configuration hash for detecting config changes
-    ConfigHash string `tag:"nic.nebari.dev/config-hash" value:"sha256:abc123..."`
 }
 ```
 
 **Optional Tags:**
+
 ```go
 type OptionalTags struct {
     // Node pool name (for node pools only)
@@ -76,13 +77,14 @@ type OptionalTags struct {
 **AWS Examples:**
 
 **VPC:**
+
 ```go
 tags := map[string]string{
     "nic.nebari.dev/managed-by":     "nic",
     "nic.nebari.dev/cluster-name":   "nebari-prod",
     "nic.nebari.dev/resource-type":  "vpc",
     "nic.nebari.dev/version":        "1.0.0",
-    "nic.nebari.dev/config-hash":    "sha256:abc123...",
+    
     "Name":                          "nebari-prod-vpc",
 }
 
@@ -97,13 +99,14 @@ vpcOutput, err := ec2Client.CreateVpc(ctx, &ec2.CreateVpcInput{
 ```
 
 **EKS Cluster:**
+
 ```go
 tags := map[string]string{
     "nic.nebari.dev/managed-by":     "nic",
     "nic.nebari.dev/cluster-name":   "nebari-prod",
     "nic.nebari.dev/resource-type":  "eks-cluster",
     "nic.nebari.dev/version":        "1.0.0",
-    "nic.nebari.dev/config-hash":    "sha256:abc123...",
+    
 }
 
 _, err := eksClient.CreateCluster(ctx, &eks.CreateClusterInput{
@@ -114,6 +117,7 @@ _, err := eksClient.CreateCluster(ctx, &eks.CreateClusterInput{
 ```
 
 **Node Pool (EKS Node Group):**
+
 ```go
 tags := map[string]string{
     "nic.nebari.dev/managed-by":     "nic",
@@ -121,7 +125,7 @@ tags := map[string]string{
     "nic.nebari.dev/resource-type":  "node-pool",
     "nic.nebari.dev/node-pool":      "general",
     "nic.nebari.dev/version":        "1.0.0",
-    "nic.nebari.dev/config-hash":    "sha256:def456...",
+    
 }
 
 _, err := eksClient.CreateNodegroup(ctx, &eks.CreateNodegroupInput{
@@ -135,13 +139,14 @@ _, err := eksClient.CreateNodegroup(ctx, &eks.CreateNodegroupInput{
 **GCP Examples:**
 
 **GKE Cluster:**
+
 ```go
 labels := map[string]string{
     "nic_nebari_dev_managed-by":    "nic",
     "nic_nebari_dev_cluster-name":  "nebari-prod",
     "nic_nebari_dev_resource-type": "gke-cluster",
     "nic_nebari_dev_version":       "1-0-0", // GCP labels don't allow dots
-    "nic_nebari_dev_config-hash":   "sha256-abc123",
+    
 }
 
 cluster := &containerpb.Cluster{
@@ -152,29 +157,6 @@ cluster := &containerpb.Cluster{
 ```
 
 **Note:** GCP uses "labels" instead of "tags", and has restrictions (no dots, lowercase only). NIC converts tag names appropriately.
-
-### 6.2.3 Config Hash Calculation
-
-**Purpose:** Detect configuration changes without comparing all fields.
-
-```go
-func calculateConfigHash(config *Config) (string, error) {
-    // Serialize config to canonical JSON
-    canonical, err := json.Marshal(config)
-    if err != nil {
-        return "", err
-    }
-
-    // Calculate SHA-256 hash
-    hash := sha256.Sum256(canonical)
-    return fmt.Sprintf("sha256:%x", hash[:8]), nil // First 8 bytes for brevity
-}
-```
-
-**Usage:**
-- Tag all resources with config hash
-- On subsequent runs, if config hash differs → configuration changed → may need resource updates
-- If config hash matches → configuration unchanged → only check for drift
 
 ---
 
@@ -236,6 +218,7 @@ func (p *AWSProvider) DiscoverInfrastructure(ctx context.Context, clusterName st
 ### 6.3.2 Discovery Examples
 
 **Discover VPC (AWS):**
+
 ```go
 func (p *AWSProvider) discoverVPC(ctx context.Context, clusterName string) (*VPCState, error) {
     ctx, span := tracer.Start(ctx, "discoverVPC")
@@ -274,18 +257,16 @@ func (p *AWSProvider) discoverVPC(ctx context.Context, clusterName string) (*VPC
 
     vpc := result.Vpcs[0]
 
-    // Extract config hash from tags
-    configHash := getTagValue(vpc.Tags, "nic.nebari.dev/config-hash")
 
     return &VPCState{
         ID:         *vpc.VpcId,
         CIDR:       *vpc.CidrBlock,
-        ConfigHash: configHash,
     }, nil
 }
 ```
 
 **Discover EKS Cluster:**
+
 ```go
 func (p *AWSProvider) discoverEKSCluster(ctx context.Context, clusterName string) (*ClusterState, error) {
     ctx, span := tracer.Start(ctx, "discoverEKSCluster")
@@ -319,12 +300,12 @@ func (p *AWSProvider) discoverEKSCluster(ctx context.Context, clusterName string
         Endpoint:   *cluster.Endpoint,
         Version:    *cluster.Version,
         Status:     string(cluster.Status),
-        ConfigHash: cluster.Tags["nic.nebari.dev/config-hash"],
     }, nil
 }
 ```
 
 **Discover Node Pools:**
+
 ```go
 func (p *AWSProvider) discoverNodePools(ctx context.Context, clusterName string) ([]NodePoolState, error) {
     ctx, span := tracer.Start(ctx, "discoverNodePools")
@@ -369,7 +350,6 @@ func (p *AWSProvider) discoverNodePools(ctx context.Context, clusterName string)
             MaxSize:      int(*ng.ScalingConfig.MaxSize),
             DesiredSize:  int(*ng.ScalingConfig.DesiredSize),
             Status:       string(ng.Status),
-            ConfigHash:   ng.Tags["nic.nebari.dev/config-hash"],
         })
     }
 
@@ -453,29 +433,23 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired *Config) error {
         return fmt.Errorf("discovering actual state: %w", err)
     }
 
-    // 2. Calculate config hash for desired state
-    desiredConfigHash, err := calculateConfigHash(desired)
-    if err != nil {
-        return fmt.Errorf("calculating config hash: %w", err)
-    }
-
-    // 3. Reconcile VPC
-    if err := p.reconcileVPC(ctx, desired, actual.VPC, desiredConfigHash); err != nil {
+    // 2. Reconcile VPC
+    if err := p.reconcileVPC(ctx, desired, actual.VPC); err != nil {
         return fmt.Errorf("reconciling VPC: %w", err)
     }
 
-    // 4. Reconcile EKS Cluster
-    if err := p.reconcileCluster(ctx, desired, actual.Cluster, desiredConfigHash); err != nil {
+    // 3. Reconcile EKS Cluster
+    if err := p.reconcileCluster(ctx, desired, actual.Cluster); err != nil {
         return fmt.Errorf("reconciling cluster: %w", err)
     }
 
-    // 5. Reconcile Node Pools
-    if err := p.reconcileNodePools(ctx, desired, actual.NodePools, desiredConfigHash); err != nil {
+    // 4. Reconcile Node Pools
+    if err := p.reconcileNodePools(ctx, desired, actual.NodePools); err != nil {
         return fmt.Errorf("reconciling node pools: %w", err)
     }
 
-    // 6. Reconcile Storage
-    if err := p.reconcileStorage(ctx, desired, actual.Storage, desiredConfigHash); err != nil {
+    // 5. Reconcile Storage
+    if err := p.reconcileStorage(ctx, desired, actual.Storage); err != nil {
         return fmt.Errorf("reconciling storage: %w", err)
     }
 
@@ -487,40 +461,33 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired *Config) error {
 ### 6.4.1 Reconcile VPC Example
 
 ```go
-func (p *AWSProvider) reconcileVPC(ctx context.Context, desired *Config, actual *VPCState, desiredHash string) error {
+func (p *AWSProvider) reconcileVPC(ctx context.Context, desired *Config, actual *VPCState) error {
     ctx, span := tracer.Start(ctx, "reconcileVPC")
     defer span.End()
 
     // Case 1: VPC doesn't exist → Create
     if actual == nil {
         slog.InfoContext(ctx, "VPC not found, creating", "cidr", desired.Provider.AWS.VPC.CIDR)
-        return p.createVPC(ctx, desired, desiredHash)
+        return p.createVPC(ctx, desired)
     }
 
-    // Case 2: VPC exists with same config hash → No action needed
-    if actual.ConfigHash == desiredHash {
+    // Case 2: VPC exists and matches desired → No action needed
+    if actual.CIDR == desired.Provider.AWS.VPC.CIDR {
         slog.InfoContext(ctx, "VPC up to date", "vpc_id", actual.ID)
         return nil
     }
 
-    // Case 3: VPC exists with different config hash → Update or Replace
-    slog.InfoContext(ctx, "VPC configuration changed", "vpc_id", actual.ID)
-
-    // VPC CIDR cannot be changed (AWS limitation)
-    if actual.CIDR != desired.Provider.AWS.VPC.CIDR {
-        return fmt.Errorf("VPC CIDR change detected (%s → %s), which requires recreation. Manual intervention required.",
-            actual.CIDR, desired.Provider.AWS.VPC.CIDR)
-    }
-
-    // Update VPC tags (config hash)
-    return p.updateVPCTags(ctx, actual.ID, desired, desiredHash)
+    // Case 3: VPC CIDR changed → Cannot modify, requires recreation
+    slog.WarnContext(ctx, "VPC CIDR change detected", "vpc_id", actual.ID)
+    return fmt.Errorf("VPC CIDR change detected (%s → %s), which requires recreation. Manual intervention required.",
+        actual.CIDR, desired.Provider.AWS.VPC.CIDR)
 }
 ```
 
 ### 6.4.2 Reconcile Node Pools Example
 
 ```go
-func (p *AWSProvider) reconcileNodePools(ctx context.Context, desired *Config, actual []NodePoolState, desiredHash string) error {
+func (p *AWSProvider) reconcileNodePools(ctx context.Context, desired *Config, actual []NodePoolState) error {
     ctx, span := tracer.Start(ctx, "reconcileNodePools")
     defer span.End()
 
@@ -539,7 +506,7 @@ func (p *AWSProvider) reconcileNodePools(ctx context.Context, desired *Config, a
     for name, desiredNP := range desiredPools {
         if _, exists := actualPools[name]; !exists {
             slog.InfoContext(ctx, "creating node pool", "name", name)
-            if err := p.createNodePool(ctx, desired.Name, desiredNP, desiredHash); err != nil {
+            if err := p.createNodePool(ctx, desired.Name, desiredNP); err != nil {
                 return fmt.Errorf("creating node pool %s: %w", name, err)
             }
         }
@@ -555,10 +522,10 @@ func (p *AWSProvider) reconcileNodePools(ctx context.Context, desired *Config, a
             continue
         }
 
-        // Check if update needed
-        if actualNP.ConfigHash != desiredHash || p.nodePoolDiffers(actualNP, desiredNP) {
+        // Check if update needed (compare actual fields)
+        if p.nodePoolDiffers(actualNP, desiredNP) {
             slog.InfoContext(ctx, "updating node pool", "name", name)
-            if err := p.updateNodePool(ctx, desired.Name, desiredNP, actualNP, desiredHash); err != nil {
+            if err := p.updateNodePool(ctx, desired.Name, desiredNP, actualNP); err != nil {
                 return fmt.Errorf("updating node pool %s: %w", name, err)
             }
         } else {
@@ -732,18 +699,18 @@ func (p *AWSProvider) waitForResourceReady(ctx context.Context, resourceID strin
 
 ## 6.7 Comparison: Stateless vs State-Based
 
-| Aspect | Stateless (NIC) | State-Based (Terraform) |
-|--------|-----------------|-------------------------|
-| **State Storage** | None | S3/GCS/Azure Blob/Local |
-| **State Locking** | Not needed | DynamoDB/Cloud Storage/Blob Lease |
-| **Drift Detection** | Automatic (every run) | Manual (`terraform plan`) |
-| **State Corruption Risk** | None | Possible (locks fail, corrupted JSON) |
-| **Concurrent Operations** | Eventual consistency | Locking prevents concurrency |
-| **Performance** | Slower (+30-60s queries) | Faster (cached state) |
-| **Offline Planning** | Not possible | Possible |
-| **Mental Model** | Simple (query, compare, act) | Complex (state, locking, backends) |
-| **Version Upgrades** | No migration | State format migration |
-| **Debugging** | Simple (query cloud) | Complex (inspect state file) |
+| Aspect                    | Stateless (NIC)              | State-Based (Terraform)               |
+| ------------------------- | ---------------------------- | ------------------------------------- |
+| **State Storage**         | None                         | S3/GCS/Azure Blob/Local               |
+| **State Locking**         | Not needed                   | DynamoDB/Cloud Storage/Blob Lease     |
+| **Drift Detection**       | Automatic (every run)        | Manual (`terraform plan`)             |
+| **State Corruption Risk** | None                         | Possible (locks fail, corrupted JSON) |
+| **Concurrent Operations** | Eventual consistency         | Locking prevents concurrency          |
+| **Performance**           | Slower (+30-60s queries)     | Faster (cached state)                 |
+| **Offline Planning**      | Not possible                 | Possible                              |
+| **Mental Model**          | Simple (query, compare, act) | Complex (state, locking, backends)    |
+| **Version Upgrades**      | No migration                 | State format migration                |
+| **Debugging**             | Simple (query cloud)         | Complex (inspect state file)          |
 
 ---
 

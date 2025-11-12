@@ -2,7 +2,7 @@
 
 ### 1.1 Purpose
 
-This document describes the architectural design for Nebari Infrastructure Core (NIC) v2.0, a clean-break redesign that applies seven years of lessons learned from developing and deploying Nebari. NIC is a standalone Go-based platform that provides opinionated Kubernetes deployments with a complete foundational software stack across AWS, GCP, Azure, and on-premises environments.
+This document describes the architectural design for Nebari Infrastructure Core (NIC) v2.0, a clean-break redesign that applies seven years of lessons learned from developing and deploying Nebari. NIC is a standalone command line tool that provides opinionated Kubernetes deployments with a complete foundational software stack across AWS, GCP, Azure, and on-premises environments.
 
 ### 1.2 Core Design Principles
 
@@ -20,6 +20,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 ### 1.3 What NIC Provides
 
 **Complete Platform Stack:**
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Application Layer (Managed by Nebari Operator)             │
@@ -56,6 +57,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 ### 1.4 Scope
 
 **In Scope:**
+
 - Cloud infrastructure provisioning (VPC, managed K8s, node pools, storage, IAM)
 - Kubernetes cluster deployment (production-ready configuration)
 - Foundational software deployment (Keycloak, LGTM, cert-manager, Envoy, ArgoCD)
@@ -68,6 +70,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 - Structured logging via slog
 
 **Out of Scope:**
+
 - Application deployment (handled by users via ArgoCD or kubectl)
 - Legacy Nebari compatibility (clean break)
 - Terraform integration (native SDKs only)
@@ -77,6 +80,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 ### 1.5 Lessons Learned from 7 Years of Nebari
 
 **What We're Keeping:**
+
 - ✅ Opinionated platform approach (reduces decision fatigue)
 - ✅ Multi-cloud support (AWS, GCP, Azure, Local)
 - ✅ Declarative configuration (infrastructure as code)
@@ -84,6 +88,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 - ✅ Observability focus (monitoring from day one)
 
 **What We're Changing:**
+
 - ❌ **Terraform complexity** → ✅ Native SDKs with Go
 - ❌ **Staged deployment fragmentation** → ✅ Unified deployment
 - ❌ **Manual app integration** → ✅ Operator-automated registration
@@ -93,14 +98,14 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 **Key Insights Applied:**
 
-| Insight | Design Impact |
-|---------|---------------|
-| **Users want "batteries included"** | Foundational software deployed by default |
-| **Auth integration is tedious** | Operator automates OAuth client creation |
-| **Observability is an afterthought** | LGTM stack + OpenTelemetry built-in |
-| **Certificate management is painful** | cert-manager + automated ingress TLS |
-| **Terraform state issues cause outages** | Custom state with automatic recovery |
-| **Multi-cloud drift is real** | Provider abstraction enforces consistency |
-| **GitOps reduces deployment errors** | ArgoCD for all foundational components |
+| Insight                                  | Design Impact                             |
+| ---------------------------------------- | ----------------------------------------- |
+| **Users want "batteries included"**      | Foundational software deployed by default |
+| **Auth integration is tedious**          | Operator automates OAuth client creation  |
+| **Observability is an afterthought**     | LGTM stack + OpenTelemetry built-in       |
+| **Certificate management is painful**    | cert-manager + automated ingress TLS      |
+| **Terraform state issues cause outages** | Custom state with automatic recovery      |
+| **Multi-cloud drift is real**            | Provider abstraction enforces consistency |
+| **GitOps reduces deployment errors**     | ArgoCD for all foundational components    |
 
 ---
