@@ -683,15 +683,27 @@ func (p *AWSProvider) discoverWithRetry(ctx context.Context, clusterName string)
 
 // 3. Eventual consistency handling
 func (p *AWSProvider) waitForResourceReady(ctx context.Context, resourceID string, maxWait time.Duration) error {
-    deadline := time.Now().Add(maxWait)
-    for time.Now().Before(deadline) {
-        // Check resource status
-        if ready, err := p.isResourceReady(ctx, resourceID); err == nil && ready {
-            return nil
-        }
-        time.Sleep(5 * time.Second)
+    ctx, cancel := context.WithTimeout(ctx, maxWait)
+    defer cancel()
+
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+
+    // Check immediately (don't wait for first tick)
+    if ready, err := p.isResourceReady(ctx, resourceID); err == nil && ready {
+        return nil
     }
-    return fmt.Errorf("resource %s not ready within %s", resourceID, maxWait)
+
+    for {
+        select {
+        case <-ctx.Done():
+            return fmt.Errorf("resource %s not ready within %s: %w", resourceID, maxWait, ctx.Err())
+        case <-ticker.C:
+            if ready, err := p.isResourceReady(ctx, resourceID); err == nil && ready {
+                return nil
+            }
+        }
+    }
 }
 ```
 
