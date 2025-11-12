@@ -10,7 +10,7 @@
 **Deliverables:**
 - ✅ NIC CLI (`deploy`, `destroy`, `status`, `validate`)
 - ✅ terraform-exec wrapper package
-- ✅ Configuration parsing (nebari-config.yaml → tfvars)
+- ✅ Configuration parsing (config.yaml → tfvars)
 - ✅ Backend configuration generation
 - ✅ Unit tests (>80% coverage)
 - ✅ Terraform module validation tests

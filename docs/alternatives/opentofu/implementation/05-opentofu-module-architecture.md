@@ -8,7 +8,7 @@ nebari-infrastructure-core/
 ├── cmd/nic/               # Go CLI
 ├── pkg/
 │   ├── tofu/             # terraform-exec wrapper
-│   ├── config/           # Parse nebari-config.yaml
+│   ├── config/           # Parse config.yaml
 │   ├── kubernetes/       # Wait for readiness, health checks
 │   └── operator/         # Nebari operator (separate repo, vendored)
 ├── terraform/

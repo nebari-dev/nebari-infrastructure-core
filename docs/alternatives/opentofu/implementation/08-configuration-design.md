@@ -3,14 +3,14 @@
 ### 8.1 Configuration Philosophy
 
 **Same as Native SDK Edition:**
-- New clean configuration format (not constrained by old nebari-config.yaml)
+- New clean configuration format (not constrained by old config.yaml)
 - Optimized for new architecture
 - Clear separation of concerns
 - Validation at parse time
 
 ### 8.2 Configuration Structure
 
-**Example: `nebari-config.yaml`**
+**Example: `config.yaml`**
 ```yaml
 version: "2025.1.0"
 name: nebari-prod

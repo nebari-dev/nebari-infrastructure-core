@@ -46,8 +46,8 @@
 
 **Test Case 1: Fresh Deployment (AWS)**
 ```gherkin
-Given a valid nebari-config.yaml for AWS
-When I run `nic deploy -f nebari-config.yaml`
+Given a valid config.yaml for AWS
+When I run `nic deploy -f config.yaml`
 Then:
   - Terraform backend is configured (S3 + DynamoDB)
   - Terraform modules execute successfully
@@ -65,7 +65,7 @@ Then:
 **Test Case 2: Idempotency**
 ```gherkin
 Given a deployed Nebari platform
-When I run `nic deploy -f nebari-config.yaml` again
+When I run `nic deploy -f config.yaml` again
 Then:
   - Terraform plan shows no changes
   - No infrastructure modifications are made
@@ -75,8 +75,8 @@ Then:
 **Test Case 3: Add Node Pool**
 ```gherkin
 Given a deployed Nebari platform
-When I add a new node pool to nebari-config.yaml
-And I run `nic deploy -f nebari-config.yaml`
+When I add a new node pool to config.yaml
+And I run `nic deploy -f config.yaml`
 Then:
   - Terraform plan shows only new node pool addition
   - New node pool is created
@@ -102,7 +102,7 @@ Then:
 **Test Case 5: Destroy**
 ```gherkin
 Given a deployed Nebari platform
-When I run `nic destroy -f nebari-config.yaml`
+When I run `nic destroy -f config.yaml`
 Then:
   - Terraform destroy executes
   - All Terraform-managed resources are deleted

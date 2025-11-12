@@ -20,42 +20,49 @@
 | Makefile-based orchestration | Not portable, hard to debug, limited error handling |
 | Ansible playbooks | YAML hell, imperative, no true state management |
 
-### 4.2 Decision: Custom State Management (Not Terraform)
+### 4.2 Decision: Stateless Operation (No State Files)
 
 **Context:** Need to track infrastructure state across deployments.
 
-**Decision:** Custom JSON state format with multi-backend support.
+**Decision:** No state files. Query cloud provider APIs and Kubernetes APIs for actual state on every run.
 
 **Rationale:**
-- Simpler format (only what NIC needs)
-- No Terraform/OpenTofu dependency
-- Faster read/write operations
-- Built-in drift detection
-- Automatic state migration and versioning
-- Clean separation from Terraform state complexity
+- **No state drift**: Cloud APIs are always the source of truth
+- **No state corruption**: Can't corrupt what doesn't exist
+- **No state backends**: No S3 buckets, DynamoDB tables, or locking complexity
+- **No state migration**: Version upgrades don't require state format changes
+- **Automatic drift detection**: Every run compares desired vs actual state
+- **Simpler mental model**: Query → Compare → Reconcile
+- **Easier debugging**: `nic status` just queries cloud APIs
 
-**State Format Preview:**
-```json
-{
-  "version": "1.0",
-  "format_version": "2025-01-30",
-  "cluster": {
-    "name": "nebari-prod",
-    "provider": "aws",
-    "region": "us-west-2",
-    "kubernetes_version": "1.29"
-  },
-  "resources": {
-    "vpc": { "id": "vpc-abc123", "cidr": "10.0.0.0/16" },
-    "eks_cluster": { "arn": "...", "endpoint": "https://..." },
-    "node_pools": [ ... ]
-  },
-  "foundational_software": {
-    "argocd": { "version": "2.10.0", "status": "deployed" },
-    "keycloak": { "version": "23.0.0", "status": "deployed" }
-  }
+**How It Works:**
+```
+Every `nic deploy` run:
+1. Parse nebari-config.yaml (desired state)
+2. Query cloud APIs for resources with NIC tags (actual state)
+3. Compare desired vs actual (automatic drift detection)
+4. Apply changes to reconcile differences
+5. Done (no state file written)
+```
+
+**Resource Discovery via Tags:**
+All NIC-managed resources are tagged for discovery:
+```go
+tags := map[string]string{
+    "nic.nebari.dev/managed-by":    "nic",
+    "nic.nebari.dev/cluster-name":  "nebari-prod",
+    "nic.nebari.dev/resource-type": "vpc|cluster|node-pool|...",
+    "nic.nebari.dev/version":       "1.0.0",
+    "nic.nebari.dev/config-hash":   "sha256:abc123...",
 }
 ```
+
+**Trade-offs:**
+- ✅ Advantages: No state management complexity, automatic drift detection
+- ⚠️ Slower: +30-60 seconds for cloud API queries per run
+- ⚠️ Requires cloud access: Can't plan changes offline
+
+See [Stateless Operation & Resource Discovery](06-stateless-operation.md) for complete details.
 
 ### 4.3 Decision: Declarative Semantics with Native SDKs
 

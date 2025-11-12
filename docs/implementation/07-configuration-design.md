@@ -3,14 +3,14 @@
 ### 7.1 Configuration Philosophy
 
 **New Clean Configuration Format:**
-- Not constrained by old nebari-config.yaml
+- Not constrained by old config.yaml
 - Optimized for new architecture
 - Clear separation of concerns
 - Validation at parse time
 
 ### 7.2 Configuration Structure
 
-**Example: `nebari-config.yaml`**
+**Example: `config.yaml`**
 ```yaml
 version: "2025.1.0"
 name: nebari-prod
@@ -146,7 +146,7 @@ features:
 
 **CLI Validation:**
 ```bash
-$ nic validate -f nebari-config.yaml
+$ nic validate -f config.yaml
 ✅ Configuration valid
 
 Summary:

@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. User defines nebari-config.yaml                         │
+│ 1. User defines config.yaml                         │
 │    - Cloud provider (aws/gcp/azure/local)                  │
 │    - Cluster size and node pools                           │
 │    - Foundational software configuration                   │
@@ -15,8 +15,8 @@
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. NIC CLI translates config to Terraform variables        │
-│    $ nic deploy -f nebari-config.yaml                      │
-│    - Generates .tfvars files from nebari-config.yaml       │
+│    $ nic deploy -f config.yaml                      │
+│    - Generates .tfvars files from config.yaml       │
 │    - Selects appropriate provider module                   │
 └─────────────────────────────────────────────────────────────┘
                            ↓
@@ -81,7 +81,7 @@
 **NIC CLI (`cmd/nic`):**
 - Command-line interface for platform management
 - Commands: `deploy`, `destroy`, `status`, `validate`, `plan`, `upgrade`
-- Translates nebari-config.yaml → Terraform variables
+- Translates config.yaml → Terraform variables
 - Orchestrates terraform-exec calls
 - OpenTelemetry tracing for all operations
 - Structured logging via slog

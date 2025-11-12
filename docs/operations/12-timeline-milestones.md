@@ -13,7 +13,7 @@
 - ✅ Provider interface and registry
 - ✅ AWS provider (EKS, VPC, EFS, node pools)
 - ✅ State management (S3 backend, DynamoDB locking)
-- ✅ Configuration parsing (nebari-config.yaml)
+- ✅ Configuration parsing (config.yaml)
 - ✅ Unit tests (>80% coverage)
 - ✅ Integration tests (kind-based)
 

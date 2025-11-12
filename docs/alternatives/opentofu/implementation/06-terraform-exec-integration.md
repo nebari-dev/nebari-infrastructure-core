@@ -236,7 +236,7 @@ func (p *TofuProvider) Deploy(ctx context.Context) error {
         return fmt.Errorf("generating backend config: %w", err)
     }
 
-    // 2. Generate tfvars from nebari-config.yaml
+    // 2. Generate tfvars from config.yaml
     if err := p.generateTfvars(ctx); err != nil {
         return fmt.Errorf("generating tfvars: %w", err)
     }
@@ -356,7 +356,7 @@ func (p *TofuProvider) generateTfvars(ctx context.Context) error {
 
     slog.InfoContext(ctx, "generating terraform variables")
 
-    // Convert nebari-config.yaml to Terraform variables
+    // Convert config.yaml to Terraform variables
     tfvars := map[string]interface{}{
         "provider":                       p.config.Provider.Type,
         "cluster_name":                   p.config.Name,
@@ -467,8 +467,8 @@ func findTofuBinary() (string, error) {
 **Directory Structure During Deployment:**
 ```
 /tmp/nic-<cluster-name>/
-├── backend.tf              # Generated from nebari-config.yaml
-├── terraform.tfvars.json   # Generated from nebari-config.yaml
+├── backend.tf              # Generated from config.yaml
+├── terraform.tfvars.json   # Generated from config.yaml
 ├── main.tf                 # Symlink to terraform/main.tf
 ├── variables.tf            # Symlink to terraform/variables.tf
 ├── outputs.tf              # Symlink to terraform/outputs.tf

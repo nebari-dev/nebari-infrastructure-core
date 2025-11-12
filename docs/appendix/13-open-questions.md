@@ -29,7 +29,7 @@
 ### 13.5 Platform Automation Questions
 
 15. **Git Repository Provisioning:** Should NIC automatically provision Git repositories and setup CI/CD workflows for infrastructure changes?
-    - **Use Case:** `nic init` creates GitHub repo, adds nebari-config.yaml, sets up GitHub Actions/GitLab CI for automated infrastructure updates
+    - **Use Case:** `nic init` creates GitHub repo, adds config.yaml, sets up GitHub Actions/GitLab CI for automated infrastructure updates
     - **Providers:** GitHub, GitLab, Gitea (self-hosted)
     - **Features:** Branch protection, PR-based workflow, automated validation, auto-apply on merge
     - **Recommendation:** Phase 2, start with GitHub integration
@@ -46,7 +46,7 @@
 ### 13.6 Application Stack Questions
 
 17. **Software Stack Specification:** Should NIC support declarative specifications for complete software stacks (databases, message queues, caching, etc.) deployable on top of foundational software?
-    - **Use Case:** Define entire platform + applications in single nebari-config.yaml
+    - **Use Case:** Define entire platform + applications in single config.yaml
     - **Example Stacks:**
       - Data Science: PostgreSQL + Redis + MinIO + JupyterHub + Dask
       - ML Platform: MLflow + Kubeflow + Model Registry + Feature Store
@@ -58,7 +58,7 @@
     - **Structure:**
       ```
       nebari-deployment/
-      ├── nebari-config.yaml          # Platform + stacks
+      ├── config.yaml          # Platform + stacks
       ├── stacks/
       │   ├── postgresql-values.yaml  # DB config
       │   ├── jupyterhub-values.yaml  # App config

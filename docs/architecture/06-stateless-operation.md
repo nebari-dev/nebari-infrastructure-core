@@ -22,7 +22,7 @@
 **How It Works:**
 ```
 Every `nic deploy` run:
-1. Parse nebari-config.yaml (desired state)
+1. Parse config.yaml (desired state)
 2. Query cloud APIs for resources with NIC tags (actual state)
 3. Compare desired vs actual
 4. Apply changes to reconcile
@@ -43,7 +43,7 @@ type ResourceTags struct {
     // Identifies resource as NIC-managed
     ManagedBy string `tag:"nic.nebari.dev/managed-by" value:"nic"`
 
-    // Cluster name from nebari-config.yaml
+    // Cluster name from config.yaml
     ClusterName string `tag:"nic.nebari.dev/cluster-name" value:"nebari-prod"`
 
     // Resource type for filtering
@@ -643,7 +643,7 @@ func (p *AWSProvider) detectDrift(desired *Config, actual *DiscoveredState) *Dri
 ### 6.5.2 Drift Reporting
 
 ```bash
-$ nic deploy -f nebari-config.yaml
+$ nic deploy -f config.yaml
 
 Discovering infrastructure...
 ✓ VPC found: vpc-abc123

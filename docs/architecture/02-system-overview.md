@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. User defines nebari-config.yaml                         │
+│ 1. User defines config.yaml                         │
 │    - Cloud provider (aws/gcp/azure/local)                  │
 │    - Cluster size and node pools                           │
 │    - Foundational software configuration                   │
@@ -15,7 +15,7 @@
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. NIC CLI parses config and plans deployment              │
-│    $ nic deploy -f nebari-config.yaml                      │
+│    $ nic deploy -f config.yaml                      │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐

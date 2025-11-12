@@ -125,7 +125,7 @@ func GetProvider(name string, config Config) (Provider, error) {
 **Consistency Goals:**
 - Same Kubernetes version across all providers
 - Same foundational software versions
-- Same API (nebari-config.yaml works across providers)
+- Same API (config.yaml works across providers)
 - Same outputs (kubeconfig, URLs, credentials)
 
 **Provider-Specific Differences:**

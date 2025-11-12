@@ -6,7 +6,7 @@
 
 **Reconciliation Formula:**
 ```
-Desired State (nebari-config.yaml)
+Desired State (config.yaml)
     ∩
 Actual State (Cloud APIs + K8s APIs)
     =
@@ -66,11 +66,11 @@ func Reconcile(ctx context.Context, config Config) error {
 
 **Scenario 1: Fresh Deployment**
 ```bash
-$ nic deploy -f nebari-config.yaml
+$ nic deploy -f config.yaml
 → Creates: VPC, EKS cluster, node pools, foundational software
 → State: All resources created
 
-$ nic deploy -f nebari-config.yaml  # Run again
+$ nic deploy -f config.yaml  # Run again
 → Creates: Nothing (all resources already exist)
 → State: No changes
 ```
@@ -84,7 +84,7 @@ node_pools:
     max_size: 5  # was 3
 ```
 ```bash
-$ nic deploy -f nebari-config.yaml
+$ nic deploy -f config.yaml
 → Updates: Node pool auto-scaling group (3 → 5 nodes)
 → State: Node pool updated
 ```
@@ -94,7 +94,7 @@ $ nic deploy -f nebari-config.yaml
 # User manually deletes a node pool outside of NIC
 $ aws eks delete-nodegroup --cluster nebari-prod --nodegroup general
 
-$ nic deploy -f nebari-config.yaml
+$ nic deploy -f config.yaml
 → Creates: Node pool 'general' (drift detected and repaired)
 → State: Node pool recreated
 ```

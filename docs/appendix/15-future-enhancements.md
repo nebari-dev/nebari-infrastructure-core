@@ -16,7 +16,7 @@ nic init --provider github --org nebari-team --repo production-platform
 
 # Output:
 # ✓ Created GitHub repository: nebari-team/production-platform
-# ✓ Initialized nebari-config.yaml
+# ✓ Initialized config.yaml
 # ✓ Generated .github/workflows/nic-ci.yml
 # ✓ Generated .github/workflows/nic-deploy.yml
 # ✓ Configured branch protection for main
@@ -24,7 +24,7 @@ nic init --provider github --org nebari-team --repo production-platform
 # ✓ Created initial commit and pushed to main
 #
 # Next steps:
-#   1. Review and edit nebari-config.yaml
+#   1. Review and edit config.yaml
 #   2. Commit changes: git add . && git commit -m "Configure platform"
 #   3. Push to GitHub: git push origin main
 #   4. CI/CD will automatically validate and deploy changes
@@ -48,8 +48,8 @@ nic init --provider github --org nebari-team --repo production-platform
 **Steps:**
 1. Checkout code
 2. Install NIC binary
-3. Run `nic validate -f nebari-config.yaml`
-4. Run `nic plan -f nebari-config.yaml` (dry-run, show changes)
+3. Run `nic validate -f config.yaml`
+4. Run `nic plan -f config.yaml` (dry-run, show changes)
 5. Post plan output as PR comment
 6. Run security scan (checkov/tfsec equivalent for Go/YAML)
 7. Run cost estimation (Infracost-style)
@@ -61,9 +61,9 @@ nic init --provider github --org nebari-team --repo production-platform
 **Steps:**
 1. Checkout code
 2. Install NIC binary
-3. Run `nic validate -f nebari-config.yaml`
+3. Run `nic validate -f config.yaml`
 4. Require manual approval (for production)
-5. Run `nic deploy -f nebari-config.yaml`
+5. Run `nic deploy -f config.yaml`
 6. Run smoke tests (cluster health, foundational software status)
 7. Post deployment summary as GitHub issue/comment
 8. Export deployment metrics to observability platform
@@ -73,7 +73,7 @@ nic init --provider github --org nebari-team --repo production-platform
 **Triggers:** Scheduled (daily at 6 AM UTC)
 
 **Steps:**
-1. Run `nic status -f nebari-config.yaml`
+1. Run `nic status -f config.yaml`
 2. Compare actual vs desired state
 3. Create GitHub issue if drift detected
 4. Notify team (Slack/email integration)
@@ -81,7 +81,7 @@ nic init --provider github --org nebari-team --repo production-platform
 ### 1.5 Configuration
 
 ```yaml
-# nebari-config.yaml
+# config.yaml
 project_name: my-platform
 provider: aws
 
@@ -145,7 +145,7 @@ Enable users to declaratively specify complete software stacks (databases, messa
 ### 2.2 User Experience
 
 ```yaml
-# nebari-config.yaml
+# config.yaml
 project_name: data-science-platform
 provider: aws
 
@@ -317,7 +317,7 @@ NIC's Nebari Operator will automatically handle integration between stacks and f
 
 ```
 nebari-deployment/
-├── nebari-config.yaml                 # Main platform configuration
+├── config.yaml                 # Main platform configuration
 ├── stacks/
 │   ├── postgresql/
 │   │   ├── values.yaml                # PostgreSQL Helm values
@@ -385,7 +385,7 @@ spec:
     targetRevision: 13.2.0
     helm:
       valuesObject:
-        # Merged from nebari-config.yaml + stack defaults
+        # Merged from config.yaml + stack defaults
   destination:
     server: https://kubernetes.default.svc
     namespace: data-stack

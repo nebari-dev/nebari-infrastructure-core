@@ -6,7 +6,7 @@ Nebari Infrastructure Core is a standalone Go CLI tool that manages cloud infras
 
 - **Declarative Infrastructure**: Define your desired state, NIC reconciles actual state to match
 - **Native Cloud SDKs**: Direct integration with AWS, GCP, Azure, and local K3s
-- **Configuration Compatible**: Works with existing `nebari-config.yaml` files
+- **Configuration Compatible**: Works with existing `config.yaml` files
 - **OpenTelemetry Instrumented**: Full distributed tracing support
 - **Structured Logging**: JSON structured logging with slog
 
@@ -25,10 +25,10 @@ go build -o nic ./cmd/nic
 ./nic version
 
 # Validate configuration file
-./nic validate -f nebari-config.yaml
+./nic validate -f config.yaml
 
 # Deploy infrastructure
-./nic deploy -f nebari-config.yaml
+./nic deploy -f config.yaml
 ```
 
 ## Commands
@@ -42,7 +42,7 @@ Deploy infrastructure based on configuration file.
 ```
 
 Options:
-- `-f, --file`: Path to nebari-config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (required)
 
 ### `nic validate`
 
@@ -53,7 +53,7 @@ Validate configuration file without deploying.
 ```
 
 Options:
-- `-f, --file`: Path to nebari-config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (required)
 
 ### `nic version`
 
@@ -65,7 +65,7 @@ Show version information and registered providers.
 
 ## Configuration
 
-NIC uses the standard `nebari-config.yaml` format. See `examples/` directory for sample configurations:
+NIC uses the standard `config.yaml` format. See `examples/` directory for sample configurations:
 
 - `examples/aws-config.yaml` - AWS/EKS configuration
 - `examples/gcp-config.yaml` - GCP/GKE configuration

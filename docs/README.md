@@ -47,7 +47,7 @@ Detailed implementation specifications and technical designs.
    Infrastructure as code using cloud provider SDKs
 
 7. **[Configuration Design](implementation/07-configuration-design.md)**
-   nebari-config.yaml structure and validation
+   config.yaml structure and validation
 
 8. **[Provider Architecture](implementation/08-provider-architecture.md)**
    Multi-cloud provider abstraction and implementation patterns
@@ -202,16 +202,16 @@ go build -o nic cmd/nic/main.go
 ### Basic Usage
 ```bash
 # Validate configuration
-./nic validate -f nebari-config.yaml
+./nic validate -f config.yaml
 
 # Deploy infrastructure and foundational software
-./nic deploy -f nebari-config.yaml
+./nic deploy -f config.yaml
 
 # Check status (queries cloud APIs for actual state)
-./nic status -f nebari-config.yaml
+./nic status -f config.yaml
 
 # Destroy infrastructure
-./nic destroy -f nebari-config.yaml
+./nic destroy -f config.yaml
 ```
 
 ## Development

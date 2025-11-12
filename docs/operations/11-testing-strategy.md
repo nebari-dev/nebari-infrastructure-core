@@ -39,8 +39,8 @@
 
 **Test Case 1: Fresh Deployment (AWS)**
 ```gherkin
-Given a valid nebari-config.yaml for AWS
-When I run `nic deploy -f nebari-config.yaml`
+Given a valid config.yaml for AWS
+When I run `nic deploy -f config.yaml`
 Then:
   - VPC is created with 3 AZs
   - EKS cluster is created (version 1.29)
@@ -56,7 +56,7 @@ Then:
 **Test Case 2: Idempotency**
 ```gherkin
 Given a deployed Nebari platform
-When I run `nic deploy -f nebari-config.yaml` again
+When I run `nic deploy -f config.yaml` again
 Then:
   - No infrastructure changes are made
   - State file is unchanged
@@ -66,8 +66,8 @@ Then:
 **Test Case 3: Add Node Pool**
 ```gherkin
 Given a deployed Nebari platform
-When I add a new node pool to nebari-config.yaml
-And I run `nic deploy -f nebari-config.yaml`
+When I add a new node pool to config.yaml
+And I run `nic deploy -f config.yaml`
 Then:
   - New node pool is created
   - Existing node pools are unchanged
@@ -106,7 +106,7 @@ Then:
 **Test Case 6: Destroy**
 ```gherkin
 Given a deployed Nebari platform
-When I run `nic destroy -f nebari-config.yaml`
+When I run `nic destroy -f config.yaml`
 Then:
   - All ArgoCD applications are deleted
   - Kubernetes cluster is deleted
