@@ -78,6 +78,9 @@ Additional resources and reference materials.
 14. **[Appendix](appendix/14-appendix.md)**
     Glossary, references, and supplementary information
 
+15. **[Future Enhancements](appendix/15-future-enhancements.md)**
+    Detailed specifications for v1.x features: Git automation, software stack specification, full-stack-in-one-repo
+
 ### Alternatives
 
 Alternative implementation approaches for different team needs and priorities.

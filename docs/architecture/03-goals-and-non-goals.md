@@ -2,7 +2,7 @@
 
 ### 3.1 Primary Goals
 
-**v1.0 Goals (MVP - 6 months):**
+**Phase 1 Goals (MVP):**
 1. ✅ Deploy production-ready Kubernetes on AWS, GCP, Azure, Local
 2. ✅ Deploy all foundational software via ArgoCD
 3. ✅ Nebari Operator with basic nebari-application CRD support
@@ -11,15 +11,19 @@
 6. ✅ OpenTelemetry instrumentation throughout NIC
 7. ✅ Comprehensive documentation and examples
 
-**v1.x Goals (Iteration - 6-12 months):**
+**Phase 2 Goals (Iteration):**
 1. Advanced Keycloak integration (SAML, LDAP federation)
 2. Custom Grafana dashboards for NIC-deployed clusters
 3. Automated backup and restore for foundational software
 4. Multi-cluster support (deploy multiple clusters)
 5. Cost optimization features (spot instances, autoscaling)
 6. Compliance profiles (HIPAA, SOC2, PCI-DSS)
+7. **Git repository provisioning** (GitHub/GitLab) with auto-generated CI/CD workflows
+8. **Software stack specification** - Deploy complete stacks (databases, caching, apps) alongside foundational software
+9. **Full-stack-in-one-repo** - Define platform + applications + config in single version-controlled repository
+10. **Stack templates** - Pre-built configurations for common use cases (data science, ML platform, web apps)
 
-**v2.0+ Goals (Future):**
+**Future Goals:**
 1. Service mesh integration (Istio/Linkerd)
 2. Advanced security (OPA/Gatekeeper policies)
 3. Edge deployment support
