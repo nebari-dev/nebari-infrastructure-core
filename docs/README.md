@@ -80,8 +80,28 @@ Additional resources and reference materials.
 
 ### Alternatives
 
-15. **[OpenTofu Alternative Design](alternatives/DESIGN-DOC-OPENTOFU.md)**
-    Alternative implementation using OpenTofu modules and terraform-exec instead of native SDKs
+Alternative implementation approaches for different team needs and priorities.
+
+**[Alternatives Overview](alternatives/README.md)** - Start here to understand available alternatives and choose the right approach for your team.
+
+#### Available Implementations
+
+**Native SDK Edition (Default)** - This documentation
+- Direct cloud SDK usage (aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go)
+- Maximum performance and control
+- Custom state management
+- Full OpenTelemetry instrumentation
+
+**[OpenTofu Edition](alternatives/opentofu/architecture/01-introduction.md)**
+- OpenTofu/Terraform modules via terraform-exec
+- Faster development (reuse existing modules)
+- Standard Terraform state and tooling
+- Familiar to Terraform-experienced teams
+
+**[Comparison: Native SDK vs OpenTofu](alternatives/comparison-native-vs-opentofu.md)**
+- Feature-by-feature comparison
+- Decision criteria and trade-offs
+- When to choose each approach
 
 ## Quick Navigation by Topic
 
@@ -104,10 +124,12 @@ Understand the foundational software stack:
 - [Configuration Design](implementation/07-configuration-design.md)
 
 ### For Architects
-Review key technical decisions:
+Review key technical decisions and implementation alternatives:
 - [Key Architectural Decisions](architecture/04-key-decisions.md)
 - [Stateless Operation & Resource Discovery](architecture/06-stateless-operation.md)
-- [OpenTofu Alternative Design](alternatives/DESIGN-DOC-OPENTOFU.md)
+- [Alternatives Overview](alternatives/README.md) - Compare Native SDK vs OpenTofu approaches
+- [Comparison: Native SDK vs OpenTofu](alternatives/comparison-native-vs-opentofu.md)
+- [OpenTofu Edition Documentation](alternatives/opentofu/architecture/01-introduction.md)
 
 ### For QA Engineers
 Testing and validation:
