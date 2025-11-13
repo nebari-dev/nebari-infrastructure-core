@@ -5,6 +5,7 @@
 **Core Concept:** Users declare desired state, NIC reconciles actual state to match.
 
 **Reconciliation Formula:**
+
 ```
 Desired State (config.yaml)
     ∩
@@ -14,6 +15,7 @@ Actions Needed (create/update/delete)
 ```
 
 **Declarative Guarantees:**
+
 1. **Idempotency**: Running `nic deploy` multiple times with same config → no changes
 2. **Convergence**: Eventually reaches desired state despite transient errors
 3. **Deterministic**: Same config → same infrastructure (given same initial state)
@@ -22,6 +24,7 @@ Actions Needed (create/update/delete)
 ### 5.2 Reconciliation Loop
 
 **High-Level Algorithm:**
+
 ```go
 func Reconcile(ctx context.Context, config Config) error {
     // 1. Parse desired state from config
@@ -57,6 +60,7 @@ func Reconcile(ctx context.Context, config Config) error {
 ```
 
 **Change Types:**
+
 - `Create`: Resource doesn't exist, needs to be created
 - `Update`: Resource exists but properties differ
 - `Delete`: Resource exists but not in desired state
@@ -65,6 +69,7 @@ func Reconcile(ctx context.Context, config Config) error {
 ### 5.3 Idempotency
 
 **Scenario 1: Fresh Deployment**
+
 ```bash
 $ nic deploy -f config.yaml
 → Creates: VPC, EKS cluster, node pools, foundational software
@@ -76,13 +81,15 @@ $ nic deploy -f config.yaml  # Run again
 ```
 
 **Scenario 2: Configuration Change**
+
 ```yaml
 # Change node pool size from 3 to 5
 node_pools:
   - name: general
-    min_size: 3  # was 3
-    max_size: 5  # was 3
+    min_size: 3 # was 3
+    max_size: 5 # was 3
 ```
+
 ```bash
 $ nic deploy -f config.yaml
 → Updates: Node pool auto-scaling group (3 → 5 nodes)
@@ -90,6 +97,7 @@ $ nic deploy -f config.yaml
 ```
 
 **Scenario 3: Drift Repair**
+
 ```bash
 # User manually deletes a node pool outside of NIC
 $ aws eks delete-nodegroup --cluster nebari-prod --nodegroup general
@@ -102,6 +110,7 @@ $ nic deploy -f config.yaml
 ### 5.4 Native SDK Usage
 
 **AWS Example (EKS Cluster):**
+
 ```go
 import (
     "context"
@@ -168,6 +177,7 @@ func (p *AWSProvider) ensureEKSCluster(ctx context.Context, desired ClusterSpec)
 ```
 
 **GCP Example (GKE Cluster):**
+
 ```go
 import (
     container "cloud.google.com/go/container/apiv1"
@@ -229,6 +239,7 @@ func (p *GCPProvider) ensureGKECluster(ctx context.Context, desired ClusterSpec)
 ```
 
 **Kubernetes Example (Namespace):**
+
 ```go
 import (
     corev1 "k8s.io/api/core/v1"
@@ -268,17 +279,19 @@ func (k *K8sManager) ensureNamespace(ctx context.Context, name string, labels ma
 ### 5.5 Error Handling and Rollback
 
 **Partial Failure Strategy:**
+
 - NIC attempts to apply all changes
 - Failures are logged but don't stop entire deployment
-- State file records what succeeded
 - User can re-run `nic deploy` to retry failures
 
 **Automatic Rollback:**
+
 - For critical resources (VPC, cluster), rollback on failure
 - For non-critical resources (dashboards), log error and continue
 - User can manually rollback via `nic destroy` if needed
 
 **Error Types:**
+
 ```go
 type InfrastructureError struct {
     Resource string
@@ -291,18 +304,21 @@ type InfrastructureError struct {
 ### 5.6 Convergence and Eventual Consistency
 
 **Cloud Provider Delays:**
+
 - EKS cluster creation: 10-15 minutes
 - GKE cluster creation: 5-10 minutes
 - AKS cluster creation: 10-15 minutes
 - Node pools: 3-5 minutes
 
 **NIC Handling:**
+
 - Uses waiter patterns (e.g., `eks.NewClusterActiveWaiter`)
 - Polls with exponential backoff
 - Timeout after reasonable period (15 minutes for clusters)
 - Records intermediate state (e.g., "cluster creating")
 
 **Eventual Consistency:**
+
 - Some resources (LoadBalancers, DNS) propagate slowly
 - NIC records expected state immediately
 - Health checks verify actual availability

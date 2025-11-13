@@ -12,9 +12,13 @@ type NebariConfig struct {
 	Azure               *AzureConfig `yaml:"azure,omitempty"`
 	Local               *LocalConfig `yaml:"local,omitempty"`
 
+	// DNS provider configuration (optional)
+	DNSProvider string         `yaml:"dns_provider,omitempty"`
+	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
+
 	// Additional fields can be added as needed
 	// Using map to capture additional fields for lenient parsing
-	AdditionalFields map[string]interface{} `yaml:",inline"`
+	AdditionalFields map[string]any `yaml:",inline"`
 }
 
 // AWSConfig represents AWS-specific configuration
@@ -31,7 +35,7 @@ type AWSConfig struct {
 	VPCCIDRBlock            string                  `yaml:"vpc_cidr_block,omitempty"`
 	PermissionsBoundary     string                  `yaml:"permissions_boundary,omitempty"`
 	Tags                    map[string]string       `yaml:"tags,omitempty"`
-	AdditionalFields        map[string]interface{}  `yaml:",inline"`
+	AdditionalFields        map[string]any  `yaml:",inline"`
 }
 
 // GCPConfig represents GCP-specific configuration
@@ -48,7 +52,7 @@ type GCPConfig struct {
 	Subnetwork                     string                  `yaml:"subnetwork,omitempty"`
 	IPAllocationPolicy             map[string]string       `yaml:"ip_allocation_policy,omitempty"`
 	MasterAuthorizedNetworksConfig map[string]string       `yaml:"master_authorized_networks_config,omitempty"`
-	PrivateClusterConfig           map[string]interface{}  `yaml:"private_cluster_config,omitempty"`
+	PrivateClusterConfig           map[string]any  `yaml:"private_cluster_config,omitempty"`
 	AdditionalFields               map[string]interface{}  `yaml:",inline"`
 }
 
@@ -135,7 +139,7 @@ type GuestAccelerator struct {
 type StorageConfig struct {
 	Type             string                 `yaml:"type,omitempty"`
 	Size             int                    `yaml:"size,omitempty"`
-	AdditionalFields map[string]interface{} `yaml:",inline"`
+	AdditionalFields map[string]any `yaml:",inline"`
 }
 
 // ValidProviders lists the supported providers

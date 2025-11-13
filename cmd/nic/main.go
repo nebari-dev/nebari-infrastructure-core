@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
@@ -19,6 +22,9 @@ import (
 var (
 	// Global provider registry
 	registry *provider.Registry
+
+	// Global DNS provider registry
+	dnsRegistry *dnsprovider.Registry
 
 	// Root command
 	rootCmd = &cobra.Command{
@@ -37,6 +43,10 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 )
 
 func init() {
+	// Load .env file if it exists (silently ignore if not found)
+	// This allows users to optionally use .env for local development
+	_ = godotenv.Load()
+
 	// Initialize provider registry
 	registry = provider.NewRegistry()
 
@@ -57,6 +67,14 @@ func init() {
 
 	if err := registry.Register(ctx, "local", local.NewProvider()); err != nil {
 		log.Fatalf("Failed to register local provider: %v", err)
+	}
+
+	// Initialize DNS provider registry
+	dnsRegistry = dnsprovider.NewRegistry()
+
+	// Register DNS providers explicitly
+	if err := dnsRegistry.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
+		log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
 	}
 
 	// Add subcommands

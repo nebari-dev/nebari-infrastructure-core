@@ -1,0 +1,39 @@
+project_name: my-nebari-aws
+provider: aws
+domain: nebari.example.com
+
+amazon_web_services:
+  region: us-west-2
+  kubernetes_version: "1.28"
+  availability_zones:
+    - us-west-2a
+    - us-west-2b
+  vpc_cidr_block: "10.10.0.0/16"
+  eks_endpoint_access: "public"
+
+  node_groups:
+    general:
+      instance: m5.2xlarge
+      min_nodes: 1
+      max_nodes: 1
+
+    user:
+      instance: m5.xlarge
+      min_nodes: 0
+      max_nodes: 5
+
+    worker:
+      instance: m5.xlarge
+      min_nodes: 0
+      max_nodes: 5
+
+  tags:
+    Environment: development
+    Project: nebari
+
+# DNS configuration (optional)
+# Secrets like API tokens are read from environment variables (see .env.example)
+dns_provider: cloudflare
+dns:
+  zone_name: example.com              # Your Cloudflare zone/domain
+  email: admin@example.com            # Email for Let's Encrypt cert-manager notifications

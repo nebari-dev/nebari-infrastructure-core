@@ -35,7 +35,11 @@ func runVersion(cmd *cobra.Command, args []string) error {
 
 	// Show registered providers
 	providers := registry.List(ctx)
-	fmt.Printf("Registered providers: %v\n", providers)
+	fmt.Printf("Registered cloud providers: %v\n", providers)
+
+	// Show registered DNS providers
+	dnsProviders := dnsRegistry.List(ctx)
+	fmt.Printf("Registered DNS providers: %v\n", dnsProviders)
 
 	return nil
 }
