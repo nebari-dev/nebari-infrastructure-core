@@ -16,7 +16,6 @@
 - ✅ AWS provider (EKS, VPC, EFS, node pools)
 - ✅ State management (S3 backend, DynamoDB locking)
 - ✅ Configuration parsing (config.yaml)
-- ✅ Unit tests (>80% coverage)
 - ✅ Integration tests (kind-based)
 
 **Milestone:** Deploy Kubernetes cluster on AWS via NIC
