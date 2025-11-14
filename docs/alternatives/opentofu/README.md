@@ -8,16 +8,16 @@ This alternative is provided for the development team to evaluate **before imple
 
 ## Quick Comparison
 
-| Aspect | Native SDK Design (Main) | OpenTofu Design (Alternative) |
-|--------|--------------------------|-------------------------------|
+| Aspect                          | Native SDK Design (Main)                                                  | OpenTofu Design (Alternative)                 |
+| ------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------- |
 | **Infrastructure Provisioning** | Direct cloud SDK calls (aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go) | OpenTofu/Terraform modules via terraform-exec |
-| **State Management** | Stateless (queries cloud APIs) | Terraform state files (S3, GCS, Azure Blob) |
-| **External Dependencies** | None (Go binary only) | Requires OpenTofu/Terraform binary |
-| **Module Reuse** | Write custom provider code | Leverage existing Terraform module ecosystem |
-| **Performance** | Fast (direct API calls) | Slower (plan/apply overhead) |
-| **Debugging** | Direct SDK errors | Additional layer (Terraform → cloud API) |
-| **Maturity** | New code, less proven | Battle-tested Terraform modules |
-| **Learning Curve** | Learn cloud SDKs | Leverage existing Terraform knowledge |
+| **State Management**            | Stateless (queries cloud APIs)                                            | Terraform state files (S3, GCS, Azure Blob)   |
+| **External Dependencies**       | None (Go binary only)                                                     | Requires OpenTofu/Terraform binary            |
+| **Module Reuse**                | Write custom provider code                                                | Leverage existing Terraform module ecosystem  |
+| **Performance**                 | Fast (direct API calls)                                                   | Slower (plan/apply overhead)                  |
+| **Debugging**                   | Direct SDK errors                                                         | Additional layer (Terraform → cloud API)      |
+| **Maturity**                    | New code, less proven                                                     | Battle-tested Terraform modules               |
+| **Learning Curve**              | Learn cloud SDKs                                                          | Leverage existing Terraform knowledge         |
 
 ## Strengths and Weaknesses
 
@@ -61,7 +61,7 @@ This alternative is provided for the development team to evaluate **before imple
 
 ## When to Choose Each Design
 
-### Choose Native SDK Design If:
+### Choose Native SDK Design If
 
 - You prioritize **zero external dependencies** (single binary deployment)
 - You want **stateless operation** (no state file management)
@@ -70,7 +70,7 @@ This alternative is provided for the development team to evaluate **before imple
 - Team is comfortable learning cloud SDKs
 - You prefer **simpler deployment** (no Terraform binary management)
 
-### Choose OpenTofu Design If:
+### Choose OpenTofu Design If
 
 - You want to **leverage existing Terraform modules**
 - Team has **strong Terraform expertise**
@@ -85,17 +85,19 @@ The following documents describe the OpenTofu-specific aspects of the alternativ
 
 ### Implementation Details
 
-1. **[OpenTofu Module Architecture](implementation/05-opentofu-module-architecture.md)**
+1. **[OpenTofu Module Architecture](implementation/01-opentofu-module-architecture.md)**
+
    - Module structure and organization
    - How OpenTofu modules are structured per provider
    - Module inputs, outputs, and dependencies
 
-2. **[Terraform-Exec Integration](implementation/06-terraform-exec-integration.md)**
+2. **[Terraform-Exec Integration](implementation/02-terraform-exec-integration.md)**
+
    - How Go code orchestrates OpenTofu via terraform-exec library
    - Command execution, output parsing, error handling
    - Working directory management
 
-3. **[State Management](implementation/07-state-management.md)**
+3. **[State Management](implementation/03-state-management.md)**
    - Terraform state backend configuration
    - State locking mechanisms
    - Handling state drift and conflicts
