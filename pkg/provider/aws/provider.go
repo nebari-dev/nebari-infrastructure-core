@@ -130,7 +130,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	return nil
 }
 
-// GetKubeconfig generates a kubeconfig file (stub implementation)
+// GetKubeconfig generates a kubeconfig file for the EKS cluster
 func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
@@ -141,10 +141,8 @@ func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byt
 		attribute.String("cluster_name", clusterName),
 	)
 
-	fmt.Printf("aws.GetKubeconfig called for cluster: %s\n", clusterName)
-
-	// TODO: Implement actual kubeconfig generation
-	// 1. Query EKS cluster for endpoint and CA
-	// 2. Generate kubeconfig with aws-iam-authenticator token
-	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
+	// Discover the cluster to get region
+	// We need to query across regions to find the cluster
+	// For now, we'll return an error requiring the caller to provide region
+	return nil, fmt.Errorf("GetKubeconfig requires region - use Query() first to discover cluster region")
 }

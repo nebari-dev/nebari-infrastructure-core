@@ -162,28 +162,6 @@ func TestConvertToEC2Tags(t *testing.T) {
 		t.Errorf("Key2 = %q, want %q", tagMap["Key2"], "Value2")
 	}
 }
-
-func TestConvertToEKSTags(t *testing.T) {
-	tags := map[string]string{
-		"Key1": "Value1",
-		"Key2": "Value2",
-	}
-
-	eksTags := ConvertToEKSTags(tags)
-
-	if len(eksTags) != 2 {
-		t.Errorf("Expected 2 EKS tags, got %d", len(eksTags))
-	}
-
-	if eksTags["Key1"] != "Value1" {
-		t.Errorf("Key1 = %q, want %q", eksTags["Key1"], "Value1")
-	}
-
-	if eksTags["Key2"] != "Value2" {
-		t.Errorf("Key2 = %q, want %q", eksTags["Key2"], "Value2")
-	}
-}
-
 func TestGenerateResourceName(t *testing.T) {
 	tests := []struct {
 		name         string

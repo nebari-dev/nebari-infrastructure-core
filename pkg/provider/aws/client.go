@@ -91,16 +91,10 @@ func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	}
 
 	// Validate that credentials are actually available
-	creds, err := cfg.Credentials.Retrieve(ctx)
+	_, err = cfg.Credentials.Retrieve(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return aws.Config{}, fmt.Errorf("failed to retrieve AWS credentials: %w", err)
-	}
-
-	if creds.AccessKeyID == "" {
-		err := fmt.Errorf("AWS credentials not found. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables or configure ~/.aws/credentials")
-		span.RecordError(err)
-		return aws.Config{}, err
 	}
 
 	span.SetAttributes(

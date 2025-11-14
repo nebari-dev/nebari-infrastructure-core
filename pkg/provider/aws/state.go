@@ -1,8 +1,8 @@
 package aws
 
-// AWSInfrastructureState extends the generic InfrastructureState with AWS-specific details
-// This is an in-memory representation populated by querying AWS APIs
-// It is NEVER persisted to disk (stateless architecture)
+// InfrastructureState represents AWS infrastructure state with AWS-specific details.
+// This is an in-memory representation populated by querying AWS APIs.
+// It is NEVER persisted to disk (stateless architecture).
 type InfrastructureState struct {
 	ClusterName string
 	Region      string
