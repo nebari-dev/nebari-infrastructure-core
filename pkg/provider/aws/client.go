@@ -3,11 +3,9 @@ package aws
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -72,41 +70,21 @@ func NewClients(ctx context.Context, region string) (*Clients, error) {
 	return clients, nil
 }
 
-// loadAWSConfig loads AWS configuration with credentials from environment or config files
+// loadAWSConfig loads AWS configuration using the default credential chain
+// The default chain checks in order:
+// 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN)
+// 2. Shared credentials file (~/.aws/credentials)
+// 3. Shared config file (~/.aws/config)
+// 4. ECS/EC2 instance role (if running on AWS infrastructure)
 func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.loadAWSConfig")
 	defer span.End()
 
-	// Check for explicit credentials in environment variables
-	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	sessionToken := os.Getenv("AWS_SESSION_TOKEN")
-
-	var cfg aws.Config
-	var err error
-
-	if accessKeyID != "" && secretAccessKey != "" {
-		// Use explicit credentials from environment
-		span.SetAttributes(attribute.String("aws.credential_source", "environment"))
-
-		cfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(region),
-			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-				accessKeyID,
-				secretAccessKey,
-				sessionToken,
-			)),
-		)
-	} else {
-		// Use default credential chain (config files, instance role, etc.)
-		span.SetAttributes(attribute.String("aws.credential_source", "default_chain"))
-
-		cfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(region),
-		)
-	}
-
+	// Use default credential chain (env vars have highest priority)
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+	)
 	if err != nil {
 		span.RecordError(err)
 		return aws.Config{}, fmt.Errorf("failed to load AWS configuration: %w", err)
@@ -120,7 +98,7 @@ func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	}
 
 	if creds.AccessKeyID == "" {
-		err := fmt.Errorf("AWS credentials not found. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables")
+		err := fmt.Errorf("AWS credentials not found. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables or configure ~/.aws/credentials")
 		span.RecordError(err)
 		return aws.Config{}, err
 	}
