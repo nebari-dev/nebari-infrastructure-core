@@ -47,7 +47,7 @@ type AWSVPCState struct {
 	NATGatewayIDs []string
 
 	// Route table IDs
-	PublicRouteTableID  string
+	PublicRouteTableID   string
 	PrivateRouteTableIDs []string
 
 	// Security group IDs

@@ -29,18 +29,18 @@ const (
 
 // Resource type constants for tagging
 const (
-	ResourceTypeVPC              = "vpc"
-	ResourceTypeSubnet           = "subnet"
-	ResourceTypeInternetGateway  = "internet-gateway"
-	ResourceTypeNATGateway       = "nat-gateway"
-	ResourceTypeRouteTable       = "route-table"
-	ResourceTypeSecurityGroup    = "security-group"
-	ResourceTypeEKSCluster       = "eks-cluster"
-	ResourceTypeNodePool         = "node-pool"
-	ResourceTypeEFS              = "efs"
-	ResourceTypeIAMRole          = "iam-role"
-	ResourceTypeEIP              = "elastic-ip"
-	ResourceTypeLaunchTemplate   = "launch-template"
+	ResourceTypeVPC             = "vpc"
+	ResourceTypeSubnet          = "subnet"
+	ResourceTypeInternetGateway = "internet-gateway"
+	ResourceTypeNATGateway      = "nat-gateway"
+	ResourceTypeRouteTable      = "route-table"
+	ResourceTypeSecurityGroup   = "security-group"
+	ResourceTypeEKSCluster      = "eks-cluster"
+	ResourceTypeNodePool        = "node-pool"
+	ResourceTypeEFS             = "efs"
+	ResourceTypeIAMRole         = "iam-role"
+	ResourceTypeEIP             = "elastic-ip"
+	ResourceTypeLaunchTemplate  = "launch-template"
 )
 
 // GenerateBaseTags creates the base set of NIC tags required for all resources
