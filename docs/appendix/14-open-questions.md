@@ -2,7 +2,7 @@
 
 ### 13.1 Technical Questions
 
-1. **State Encryption:** Should state files be encrypted at rest? (Recommendation: Yes, use cloud-native encryption)
+1. Should we use a stateless SDK driven architecture, maintain state files or use OpenTofu? (Recommendation: No state files for v1)
 2. **Multi-Cluster:** How to manage multiple clusters in one state file? (Options: separate states, or cluster array in state)
 3. **Custom Kubernetes Distributions:** Support for k0s, k3d, RKE2? (v1: No, v2: Maybe)
 4. **Helm Chart Storage:** Where to store foundational software Helm charts? (OCI registry? Git?)
@@ -11,7 +11,7 @@
 ### 13.2 Configuration Questions
 
 6. **Config Validation:** Schema validation via JSON Schema or custom Go validation? (Recommendation: Custom Go + JSON Schema for IDE support)
-7. **Config Inheritance:** Support for base + overlay configs? (Recommendation: Yes, via `extends` field)
+7. **Config Inheritance:** Support for base + overlay configs? (Recommendation: No for MVP, Yes in future versions via `extends` field)
 8. **Secrets Management:** How to handle secrets in config (Keycloak admin password, etc.)? (Options: external secrets operator, sealed secrets, cloud secrets manager)
 
 ### 13.3 Deployment Questions
@@ -22,13 +22,14 @@
 
 ### 13.4 Integration Questions
 
-12. **CI/CD Integration:** Should NIC provide GitHub Actions / GitLab CI templates? (Recommendation: Yes, Phase 1)
+12. **CI/CD Integration:** Should NIC provide GitHub Actions / GitLab CI templates? (Recommendation: Yes, Phase 2)
 13. **Monitoring Integration:** Should NIC phone home telemetry (opt-in)? (Recommendation: Phase 2, opt-in only)
 14. **Marketplace Integration:** Package as AWS Marketplace / GCP Marketplace offering? (Recommendation: Future)
 
 ### 13.5 Platform Automation Questions
 
 15. **Git Repository Provisioning:** Should NIC automatically provision Git repositories and setup CI/CD workflows for infrastructure changes?
+
     - **Use Case:** `nic init` creates GitHub repo, adds config.yaml, sets up GitHub Actions/GitLab CI for automated infrastructure updates
     - **Providers:** GitHub, GitLab, Gitea (self-hosted)
     - **Features:** Branch protection, PR-based workflow, automated validation, auto-apply on merge
@@ -46,6 +47,7 @@
 ### 13.6 Application Stack Questions
 
 17. **Software Stack Specification:** Should NIC support declarative specifications for complete software stacks (databases, message queues, caching, etc.) deployable on top of foundational software?
+
     - **Use Case:** Define entire platform + applications in single config.yaml
     - **Example Stacks:**
       - Data Science: PostgreSQL + Redis + MinIO + JupyterHub + Dask
@@ -55,7 +57,9 @@
     - **Recommendation:** Phase 2, using Helm chart catalogs and pre-defined stack templates
 
 18. **Full Stack in One Repo:** Should users be able to define foundational software + application stacks + configuration in a single repository?
+
     - **Structure:**
+
       ```
       nebari-deployment/
       ├── config.yaml          # Platform + stacks
@@ -66,6 +70,7 @@
       ├── policies/                    # OPA policies
       └── .github/workflows/           # Auto-generated CI/CD
       ```
+
     - **Benefits:** Single source of truth, version controlled, auditable, reproducible
     - **Recommendation:** Phase 2, core feature for platform teams
 

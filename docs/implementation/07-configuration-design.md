@@ -160,31 +160,8 @@ Summary:
 
 ### 7.4 Multi-Environment Support
 
-**Approach: Config overlays**
-```
-nebari-configs/
-├── base.yaml              # Common configuration
-├── dev.yaml              # Development overrides
-├── staging.yaml          # Staging overrides
-└── production.yaml       # Production overrides
-```
+**MVP Approach:** Use separate configuration files per environment (dev.yaml, staging.yaml, production.yaml).
 
-**Dev environment:**
-```yaml
-# dev.yaml
-extends: base.yaml
-
-name: nebari-dev
-kubernetes:
-  node_pools:
-    - name: general
-      min_size: 1  # Override: smaller for dev
-      max_size: 3
-```
-
-**Deployment:**
-```bash
-$ nic deploy -f nebari-configs/dev.yaml
-```
+**Future Enhancement:** Config overlays with base/override pattern (see docs/appendix/15-future-enhancements.md).
 
 ---

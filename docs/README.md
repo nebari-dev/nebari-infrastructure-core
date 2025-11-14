@@ -50,37 +50,43 @@ Detailed implementation specifications and technical designs.
 7. **[Configuration Design](implementation/07-configuration-design.md)**
    config.yaml structure and validation
 
-8. **[Provider Architecture](implementation/08-provider-architecture.md)**
+8. **[Cloud Provider Architecture](implementation/08-cloud-provider-architecture.md)**
    Multi-cloud provider abstraction and implementation patterns
 
-9. **[Foundational Software Stack](implementation/09-foundational-software.md)**
-   Keycloak, LGTM observability, cert-manager, Envoy Gateway, ArgoCD deployment
+9. **[DNS Provider Architecture](implementation/08-dns-provider-architecture.md)**
+   Multi-cloud provider abstraction and implementation patterns
 
-10. **[Nebari Kubernetes Operator](implementation/10-nebari-operator.md)**
+10. **[Foundational Software Stack](implementation/09-foundational-software.md)**
+    Keycloak, LGTM observability, cert-manager, Envoy Gateway, ArgoCD deployment
+
+11. **[Nebari Kubernetes Operator](implementation/10-nebari-operator.md)**
     Custom controller for nebari-application CRD and app lifecycle management
 
 ### Operations
 
 Testing, deployment, and operational procedures.
 
-11. **[Testing Strategy](operations/11-testing-strategy.md)**
+12. **[Testing Strategy](operations/11-testing-strategy.md)**
     Unit, integration, provider, and end-to-end testing approaches
 
-12. **[Timeline and Milestones](operations/12-timeline-milestones.md)**
+13. **[Milestones](operations/12-milestones.md)**
     Development roadmap and release planning
 
 ### Appendix
 
 Additional resources and reference materials.
 
-13. **[Open Questions](appendix/13-open-questions.md)**
+14. **[Open Questions](appendix/13-open-questions.md)**
     Unresolved design decisions and areas needing further investigation
-
-14. **[Appendix](appendix/14-appendix.md)**
-    Glossary, references, and supplementary information
 
 15. **[Future Enhancements](appendix/15-future-enhancements.md)**
     Detailed specifications for v1.x features: Git automation, software stack specification, full-stack-in-one-repo
+
+16. **[Configuration File Reference](appendix/16-configuration-reference.md)**
+    Complete schema and field descriptions for config.yaml
+
+17. **[Appendix](appendix/17-appendix.md)**
+    Glossary, references, and supplementary information
 
 ### Alternatives
 

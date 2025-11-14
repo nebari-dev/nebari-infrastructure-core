@@ -2,13 +2,100 @@
 
 This document provides detailed specifications for future enhancements planned for NIC.
 
-## 1. Git Repository Provisioning & CI/CD Automation
+## 1. Configuration Overlays for Multi-Environment Support
 
 ### 1.1 Overview
 
+Enable config overlays to support DRY (Don't Repeat Yourself) configuration across multiple environments by extending a base configuration with environment-specific overrides.
+
+### 1.2 File Structure
+
+```
+nebari-configs/
+├── base.yaml              # Common configuration
+├── dev.yaml              # Development overrides
+├── staging.yaml          # Staging overrides
+└── production.yaml       # Production overrides
+```
+
+### 1.3 Example Usage
+
+**base.yaml** - shared configuration:
+
+```yaml
+version: "2025.1.0"
+provider:
+  type: aws
+  region: us-west-2
+
+kubernetes:
+  version: "1.29"
+  node_pools:
+    - name: general
+      instance_type: m6i.2xlarge
+      min_size: 3
+      max_size: 10
+```
+
+**dev.yaml** - extends base with development overrides:
+
+```yaml
+extends: base.yaml
+
+name: nebari-dev
+kubernetes:
+  node_pools:
+    - name: general
+      min_size: 1 # Override: smaller for dev
+      max_size: 3
+```
+
+**production.yaml** - extends base with production settings:
+
+```yaml
+extends: base.yaml
+
+name: nebari-prod
+kubernetes:
+  node_pools:
+    - name: general
+      min_size: 5 # Override: larger for production
+      max_size: 20
+```
+
+### 1.4 Deployment
+
+```bash
+# Deploy development environment
+nic deploy -f nebari-configs/dev.yaml
+
+# Deploy production environment
+nic deploy -f nebari-configs/production.yaml
+```
+
+### 1.5 Benefits
+
+- **DRY Principle**: Shared configuration defined once
+- **Consistency**: Common settings guaranteed across environments
+- **Clear Differences**: Environment-specific overrides are explicit
+- **Kustomize-like**: Similar to Kubernetes kustomize pattern
+
+### 1.6 Implementation Considerations
+
+- Recursive merge strategy for nested structures
+- Array merge behavior (replace vs append)
+- Validation of final merged configuration
+- Support for multiple levels of extension (base -> shared -> env-specific)
+
+---
+
+## 2. Git Repository Provisioning & CI/CD Automation
+
+### 2.1 Overview
+
 Enable NIC to automatically provision Git repositories and configure CI/CD workflows for infrastructure automation, providing a complete GitOps experience out of the box.
 
-### 1.2 User Experience
+### 2.2 User Experience
 
 ```bash
 # Initialize new NIC deployment with Git automation
@@ -30,22 +117,23 @@ nic init --provider github --org nebari-team --repo production-platform
 #   4. CI/CD will automatically validate and deploy changes
 ```
 
-### 1.3 Supported Providers
+### 2.3 Supported Providers
 
-| Provider | Priority | Features |
-|----------|----------|----------|
-| **GitHub** | ✅ High | Actions workflows, branch protection, deployment environments, OIDC auth |
-| **GitLab** | ✅ High | CI/CD pipelines, protected branches, deployment approval gates |
-| **Gitea** | 🔄 Medium | Self-hosted, Actions-compatible, basic workflows |
-| **Bitbucket** | ❓ Low | TBD based on demand |
+| Provider      | Priority  | Features                                                                 |
+| ------------- | --------- | ------------------------------------------------------------------------ |
+| **GitHub**    | ✅ High   | Actions workflows, branch protection, deployment environments, OIDC auth |
+| **GitLab**    | ✅ High   | CI/CD pipelines, protected branches, deployment approval gates           |
+| **Gitea**     | 🔄 Medium | Self-hosted, Actions-compatible, basic workflows                         |
+| **Bitbucket** | ❓ Low    | TBD based on demand                                                      |
 
-### 1.4 Generated CI/CD Workflows
+### 2.4 Generated CI/CD Workflows
 
 #### Pull Request Validation Workflow
 
 **Triggers:** Pull request to main branch
 
 **Steps:**
+
 1. Checkout code
 2. Install NIC binary
 3. Run `nic validate -f config.yaml`
@@ -59,6 +147,7 @@ nic init --provider github --org nebari-team --repo production-platform
 **Triggers:** Push to main branch (or manual approval)
 
 **Steps:**
+
 1. Checkout code
 2. Install NIC binary
 3. Run `nic validate -f config.yaml`
@@ -73,12 +162,13 @@ nic init --provider github --org nebari-team --repo production-platform
 **Triggers:** Scheduled (daily at 6 AM UTC)
 
 **Steps:**
+
 1. Run `nic status -f config.yaml`
 2. Compare actual vs desired state
 3. Create GitHub issue if drift detected
 4. Notify team (Slack/email integration)
 
-### 1.5 Configuration
+### 2.5 Configuration
 
 ```yaml
 # config.yaml
@@ -112,7 +202,7 @@ git_automation:
 
     drift_detection:
       enabled: true
-      schedule: "0 6 * * *"  # Daily at 6 AM UTC
+      schedule: "0 6 * * *" # Daily at 6 AM UTC
       notify:
         - type: slack
           webhook_url_secret: SLACK_WEBHOOK
@@ -127,7 +217,7 @@ git_automation:
     - AZURE_CLIENT_SECRET
 ```
 
-### 1.6 Security Considerations
+### 2.6 Security Considerations
 
 - **OIDC Authentication:** Use GitHub/GitLab OIDC for cloud provider authentication (no long-lived secrets)
 - **Secret Management:** Integrate with external secret stores (AWS Secrets Manager, HashiCorp Vault)
@@ -136,13 +226,13 @@ git_automation:
 
 ---
 
-## 2. Software Stack Specification
+## 3. Software Stack Specification
 
-### 2.1 Overview
+### 3.1 Overview
 
 Enable users to declaratively specify complete software stacks (databases, message queues, caching layers, applications) to deploy alongside NIC's foundational software, providing a "full platform in one config" experience.
 
-### 2.2 User Experience
+### 3.2 User Experience
 
 ```yaml
 # config.yaml
@@ -255,11 +345,12 @@ stack_templates:
       - conda-store
 ```
 
-### 2.3 Stack Templates
+### 3.3 Stack Templates
 
 NIC will provide pre-built stack templates for common use cases:
 
 #### Data Science Stack
+
 ```yaml
 stack_templates:
   - name: data-science-complete
@@ -274,6 +365,7 @@ stack_templates:
 ```
 
 #### ML Platform Stack
+
 ```yaml
 stack_templates:
   - name: ml-platform
@@ -288,6 +380,7 @@ stack_templates:
 ```
 
 #### Web Application Stack
+
 ```yaml
 stack_templates:
   - name: web-platform
@@ -300,20 +393,20 @@ stack_templates:
       - cert-manager (TLS)
 ```
 
-### 2.4 Automatic Integration
+### 3.4 Automatic Integration
 
 NIC's Nebari Operator will automatically handle integration between stacks and foundational software:
 
-| Integration | Automatic Configuration |
-|-------------|-------------------------|
-| **Keycloak** | OAuth2 clients for each app, OIDC configuration, user sync |
+| Integration       | Automatic Configuration                                       |
+| ----------------- | ------------------------------------------------------------- |
+| **Keycloak**      | OAuth2 clients for each app, OIDC configuration, user sync    |
 | **Envoy Gateway** | HTTPRoute creation, TLS termination, SecurityPolicy for OAuth |
-| **Grafana** | Import app-specific dashboards, configure data sources |
-| **OpenTelemetry** | ServiceMonitor creation, trace exporters, metrics scraping |
-| **cert-manager** | Certificate requests for app domains |
-| **PostgreSQL** | Database creation, user provisioning, connection secrets |
+| **Grafana**       | Import app-specific dashboards, configure data sources        |
+| **OpenTelemetry** | ServiceMonitor creation, trace exporters, metrics scraping    |
+| **cert-manager**  | Certificate requests for app domains                          |
+| **PostgreSQL**    | Database creation, user provisioning, connection secrets      |
 
-### 2.5 Repository Structure
+### 3.5 Repository Structure
 
 ```
 nebari-deployment/
@@ -347,7 +440,7 @@ nebari-deployment/
     └── drift-detection.yml            # Auto-generated by NIC
 ```
 
-### 2.6 Stack Lifecycle Management
+### 3.6 Stack Lifecycle Management
 
 ```bash
 # Add a new stack to existing deployment
@@ -366,7 +459,7 @@ nic stack templates list
 nic stack status --all
 ```
 
-### 2.7 Integration with ArgoCD
+### 3.7 Integration with ArgoCD
 
 Stacks will be deployed as ArgoCD Applications with proper dependencies:
 
@@ -403,13 +496,13 @@ spec:
 
 ---
 
-## 3. Stack Marketplace & Community
+## 4. Stack Marketplace & Community
 
-### 3.1 Overview
+### 4.1 Overview
 
 Create a community-driven marketplace for sharing stack configurations, templates, and best practices.
 
-### 3.2 Features
+### 4.2 Features
 
 - **Verified Stacks:** Curated, tested stack configurations
 - **Community Stacks:** User-contributed configurations
@@ -417,7 +510,7 @@ Create a community-driven marketplace for sharing stack configurations, template
 - **Security Scanning:** Automated CVE scanning of stack components
 - **Usage Analytics:** Track stack popularity and adoption
 
-### 3.3 Implementation
+### 4.3 Implementation
 
 GitHub-based registry similar to Helm Hub:
 
@@ -437,7 +530,7 @@ nebari-stacks/
 └── index.yaml
 ```
 
-### 3.4 CLI Integration
+### 4.4 CLI Integration
 
 ```bash
 # Search marketplace
@@ -450,14 +543,14 @@ nic stack install nebari-stacks/data-science/jupyterhub
 nic stack publish ./my-custom-stack --to nebari-stacks
 ```
 
-### 3.5 Implementation Phases
+### 4.5 Implementation Phases
 
 - **Phase 2:** Basic marketplace infrastructure
 - **Future:** Full marketplace with community contributions, ratings, security scanning
 
 ---
 
-## 4. Benefits Summary
+## 5. Benefits Summary
 
 ### For Platform Teams
 
@@ -483,13 +576,13 @@ nic stack publish ./my-custom-stack --to nebari-stacks
 
 ---
 
-## 5. Configuration Hash for Change Detection
+## 6. Configuration Hash for Change Detection
 
-### 5.1 Overview
+### 6.1 Overview
 
 Add configuration hash tags to resources for faster change detection, avoiding the need to compare all fields during reconciliation.
 
-### 5.2 Implementation
+### 6.2 Implementation
 
 ```go
 // Calculate hash of relevant config fields
@@ -509,19 +602,19 @@ tags := map[string]string{
 }
 ```
 
-### 5.3 Benefits
+### 6.3 Benefits
 
 - **Faster reconciliation**: Compare hash instead of all fields
 - **Change tracking**: Know exactly when config changed
 - **Optimization**: Skip reconciliation if hash matches
 
-### 5.4 Recommendation
+### 6.4 Recommendation
 
 Phase 2 optimization after MVP is stable and field-by-field comparison is proven.
 
 ---
 
-## 6. Open Questions
+## 7. Open Questions
 
 1. **Stack Dependencies:** How to handle complex inter-stack dependencies? (DAG-based ordering? Helm hooks?)
 2. **Stack Versioning:** Should stacks have independent version lifecycles? (Recommendation: Yes, use ArgoCD ApplicationSets)

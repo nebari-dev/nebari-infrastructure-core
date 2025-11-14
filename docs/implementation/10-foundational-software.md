@@ -4,21 +4,22 @@
 
 **Complete LGTM + Platform Stack:**
 
-| Component | Purpose | Why This Tool |
-|-----------|---------|---------------|
-| **ArgoCD** | GitOps continuous deployment | Industry standard, dependency management, self-healing |
-| **cert-manager** | TLS certificate automation | Let's Encrypt integration, automatic renewal, cloud DNS solvers |
-| **Envoy Gateway** | Ingress & API gateway | Kubernetes Gateway API, future-proof, advanced routing |
-| **Keycloak** | Authentication & authorization | Open source, OIDC/SAML, user federation, battle-tested |
-| **OpenTelemetry Collector** | Telemetry aggregation | Vendor-neutral, metrics/logs/traces, industry standard |
-| **Mimir** | Metrics storage | Prometheus-compatible, horizontally scalable, cost-effective |
-| **Loki** | Log aggregation | LogQL, integrates with Grafana, low-cost storage |
-| **Tempo** | Distributed tracing | OpenTelemetry native, Grafana integration, scalable |
-| **Grafana** | Visualization | Unified dashboards, alerting, LGTM native support |
+| Component                   | Purpose                        | Why This Tool                                                   |
+| --------------------------- | ------------------------------ | --------------------------------------------------------------- |
+| **ArgoCD**                  | GitOps continuous deployment   | Industry standard, dependency management, self-healing          |
+| **cert-manager**            | TLS certificate automation     | Let's Encrypt integration, automatic renewal, cloud DNS solvers |
+| **Envoy Gateway**           | Ingress & API gateway          | Kubernetes Gateway API, future-proof, advanced routing          |
+| **Keycloak**                | Authentication & authorization | Open source, OIDC/SAML, user federation, battle-tested          |
+| **OpenTelemetry Collector** | Telemetry aggregation          | Vendor-neutral, metrics/logs/traces, industry standard          |
+| **Mimir**                   | Metrics storage                | Prometheus-compatible, horizontally scalable, cost-effective    |
+| **Loki**                    | Log aggregation                | LogQL, integrates with Grafana, low-cost storage                |
+| **Tempo**                   | Distributed tracing            | OpenTelemetry native, Grafana integration, scalable             |
+| **Grafana**                 | Visualization                  | Unified dashboards, alerting, LGTM native support               |
 
 ### 9.2 Deployment Architecture
 
 **ArgoCD App-of-Apps Pattern:**
+
 ```
 ArgoCD (Deployed by NIC via Helm)
   ├── App: cert-manager (Priority: 1)
@@ -33,6 +34,7 @@ ArgoCD (Deployed by NIC via Helm)
 ```
 
 **Repository Structure:**
+
 ```
 nebari-foundational-software/
 ├── argocd-apps/
@@ -128,6 +130,7 @@ func (d *Deployer) installArgoCD(ctx context.Context) error {
 ```
 
 **Post-Installation:**
+
 - Create ArgoCD Applications for foundational software
 - Configure SSO with Keycloak (after Keycloak deploys)
 - Set up RBAC (admin group from Keycloak)
@@ -137,12 +140,14 @@ func (d *Deployer) installArgoCD(ctx context.Context) error {
 **Purpose:** Automated TLS certificate management
 
 **Features:**
+
 - Let's Encrypt integration (HTTP-01 and DNS-01 challenges)
 - Automatic certificate renewal
 - Wildcard certificate support
-- Cloud DNS solver support (Route53, Cloud DNS, Azure DNS)
+- Cloud DNS solver support (Route53, Cloud DNS, Azure DNS, Cloudflare)
 
 **Example ClusterIssuer:**
+
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -156,7 +161,7 @@ spec:
       name: letsencrypt-prod-key
     solvers:
       - dns01:
-          route53:  # For AWS
+          route53: # For AWS
             region: us-west-2
 ```
 
@@ -165,6 +170,7 @@ spec:
 **Purpose:** Modern ingress controller using Kubernetes Gateway API
 
 **Features:**
+
 - Gateway API (v1 stable)
 - Advanced routing (header-based, weight-based)
 - TLS termination (via cert-manager)
@@ -172,6 +178,7 @@ spec:
 - OpenTelemetry tracing
 
 **Example Gateway:**
+
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -197,6 +204,7 @@ spec:
 **Purpose:** Centralized authentication and authorization
 
 **Features:**
+
 - OAuth2 / OIDC provider
 - User federation (LDAP, Active Directory)
 - Social login (Google, GitHub, etc.)
@@ -204,11 +212,13 @@ spec:
 - User self-service (password reset, profile management)
 
 **Deployment:**
+
 - High-availability mode (2+ replicas)
 - PostgreSQL database for persistence
 - Ingress: `https://auth.nebari.example.com`
 
 **Integration:**
+
 - ArgoCD SSO
 - Grafana SSO
 - Nebari Operator (OAuth client creation for apps)
@@ -218,12 +228,14 @@ spec:
 **Purpose:** Centralized telemetry collection
 
 **Features:**
+
 - Receives metrics, logs, traces
 - Protocol support: OTLP, Prometheus, Jaeger, Zipkin
 - Processing pipelines (filtering, sampling, batching)
 - Export to LGTM stack
 
 **Example Configuration:**
+
 ```yaml
 receivers:
   otlp:
@@ -235,7 +247,7 @@ receivers:
   prometheus:
     config:
       scrape_configs:
-        - job_name: 'kubernetes-pods'
+        - job_name: "kubernetes-pods"
           # Scrape pods with prometheus.io/scrape annotation
 
 processors:
@@ -272,6 +284,7 @@ service:
 **Purpose:** Scalable Prometheus-compatible metrics storage
 
 **Features:**
+
 - Horizontally scalable
 - Long-term storage (object storage: S3/GCS/Azure Blob)
 - Prometheus-compatible query API
@@ -279,6 +292,7 @@ service:
 - Compaction and downsampling
 
 **Storage:**
+
 - Short-term: In-cluster (PersistentVolumes)
 - Long-term: Cloud object storage (90 days retention)
 
@@ -287,12 +301,14 @@ service:
 **Purpose:** Scalable log aggregation
 
 **Features:**
+
 - LogQL query language (similar to PromQL)
 - Label-based indexing (cost-effective)
 - Cloud object storage for logs
 - Grafana native integration
 
 **Collection:**
+
 - Promtail DaemonSet (node logs)
 - OpenTelemetry Collector (application logs)
 
@@ -301,12 +317,14 @@ service:
 **Purpose:** Distributed tracing backend
 
 **Features:**
+
 - OpenTelemetry native
 - TraceQL query language
 - Object storage for traces
 - Integration with Grafana and Loki
 
 **Use Cases:**
+
 - Request tracing across microservices
 - Performance debugging
 - Dependency visualization
@@ -316,6 +334,7 @@ service:
 **Purpose:** Unified visualization and alerting
 
 **Features:**
+
 - Dashboards for metrics, logs, traces
 - Alerting with multiple notification channels
 - Data source management (Mimir, Loki, Tempo)
@@ -323,6 +342,7 @@ service:
 - Dashboard provisioning via ConfigMaps
 
 **Pre-configured Dashboards:**
+
 - Kubernetes cluster overview
 - Node resources
 - Pod resources
@@ -332,6 +352,7 @@ service:
 ### 9.4 Health Checks and Readiness
 
 **NIC Health Check Loop:**
+
 ```go
 func (d *Deployer) waitForFoundationalSoftware(ctx context.Context) error {
     ctx, span := tracer.Start(ctx, "waitForFoundationalSoftware")
