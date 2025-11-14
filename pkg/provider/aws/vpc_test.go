@@ -111,7 +111,7 @@ func TestReconcileVPC_CIDRMismatch(t *testing.T) {
 		},
 	}
 
-	actual := &AWSVPCState{
+	actual := &VPCState{
 		VPCID: "vpc-123456",
 		CIDR:  "10.10.0.0/16", // Different from desired
 	}
@@ -149,7 +149,7 @@ func TestReconcileVPC_CIDRMatch(t *testing.T) {
 		},
 	}
 
-	actual := &AWSVPCState{
+	actual := &VPCState{
 		VPCID: "vpc-123456",
 		CIDR:  "10.10.0.0/16", // Matches desired
 	}

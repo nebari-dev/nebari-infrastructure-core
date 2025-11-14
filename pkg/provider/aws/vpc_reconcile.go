@@ -11,7 +11,7 @@ import (
 )
 
 // reconcileVPC compares desired VPC configuration against actual state and reconciles differences
-func (p *Provider) reconcileVPC(ctx context.Context, clients *AWSClients, cfg *config.NebariConfig, actual *AWSVPCState) error {
+func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *config.NebariConfig, actual *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.reconcileVPC")
 	defer span.End()

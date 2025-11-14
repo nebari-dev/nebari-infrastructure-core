@@ -16,8 +16,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// AWSClients holds all AWS service clients needed for infrastructure management
-type AWSClients struct {
+// Clients holds all AWS service clients needed for infrastructure management
+type Clients struct {
 	EC2Client *ec2.Client
 	EKSClient *eks.Client
 	IAMClient *iam.Client
@@ -26,11 +26,11 @@ type AWSClients struct {
 	Region    string
 }
 
-// NewAWSClients creates and initializes all AWS service clients
+// NewClients creates and initializes all AWS service clients
 // Credentials are loaded from environment variables or AWS config files
-func NewAWSClients(ctx context.Context, region string) (*AWSClients, error) {
+func NewClients(ctx context.Context, region string) (*Clients, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.NewAWSClients")
+	ctx, span := tracer.Start(ctx, "aws.NewClients")
 	defer span.End()
 
 	span.SetAttributes(
@@ -56,7 +56,7 @@ func NewAWSClients(ctx context.Context, region string) (*AWSClients, error) {
 	}
 
 	// Create service clients
-	clients := &AWSClients{
+	clients := &Clients{
 		EC2Client: ec2.NewFromConfig(cfg),
 		EKSClient: eks.NewFromConfig(cfg),
 		IAMClient: iam.NewFromConfig(cfg),

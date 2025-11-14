@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-func TestNewAWSClients_RequiresRegion(t *testing.T) {
+func TestNewClients_RequiresRegion(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with empty region
-	_, err := NewAWSClients(ctx, "")
+	_, err := NewClients(ctx, "")
 	if err == nil {
 		t.Error("Expected error when region is empty, got nil")
 	}
@@ -20,7 +20,7 @@ func TestNewAWSClients_RequiresRegion(t *testing.T) {
 	}
 }
 
-func TestNewAWSClients_WithMockCredentials(t *testing.T) {
+func TestNewClients_WithMockCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	// Set mock credentials
@@ -32,7 +32,7 @@ func TestNewAWSClients_WithMockCredentials(t *testing.T) {
 	}()
 
 	// This should succeed with mock credentials (won't make actual AWS calls in unit tests)
-	clients, err := NewAWSClients(ctx, "us-west-2")
+	clients, err := NewClients(ctx, "us-west-2")
 
 	if err != nil {
 		t.Errorf("Expected no error with mock credentials, got: %v", err)
@@ -64,7 +64,7 @@ func TestNewAWSClients_WithMockCredentials(t *testing.T) {
 	}
 }
 
-func TestNewAWSClients_WithoutCredentials(t *testing.T) {
+func TestNewClients_WithoutCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	// Clear credentials
@@ -75,14 +75,14 @@ func TestNewAWSClients_WithoutCredentials(t *testing.T) {
 	// Attempt to create clients without credentials
 	// This might succeed if there are credentials in ~/.aws/credentials
 	// or fail if there are no credentials available
-	_, err := NewAWSClients(ctx, "us-west-2")
+	_, err := NewClients(ctx, "us-west-2")
 
 	// We can't assert success or failure here because it depends on the environment
 	// Just ensure the function doesn't panic
 	_ = err
 }
 
-func TestNewAWSClients_DifferentRegions(t *testing.T) {
+func TestNewClients_DifferentRegions(t *testing.T) {
 	ctx := context.Background()
 
 	// Set mock credentials
@@ -97,7 +97,7 @@ func TestNewAWSClients_DifferentRegions(t *testing.T) {
 
 	for _, region := range regions {
 		t.Run(region, func(t *testing.T) {
-			clients, err := NewAWSClients(ctx, region)
+			clients, err := NewClients(ctx, region)
 			if err != nil {
 				t.Errorf("Failed to create clients for region %s: %v", region, err)
 			}

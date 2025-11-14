@@ -10,20 +10,24 @@ import (
 )
 
 const (
-	// NIC tag keys (all resources must have these)
-	TagManagedBy    = "nic.nebari.dev/managed-by"
-	TagClusterName  = "nic.nebari.dev/cluster-name"
+	// TagManagedBy is the NIC tag key for managed-by (all resources must have this)
+	TagManagedBy = "nic.nebari.dev/managed-by"
+	// TagClusterName is the NIC tag key for cluster-name (all resources must have this)
+	TagClusterName = "nic.nebari.dev/cluster-name"
+	// TagResourceType is the NIC tag key for resource-type (all resources must have this)
 	TagResourceType = "nic.nebari.dev/resource-type"
-	TagVersion      = "nic.nebari.dev/version"
+	// TagVersion is the NIC tag key for version (all resources must have this)
+	TagVersion = "nic.nebari.dev/version"
 
-	// Optional tag keys
-	TagNodePool    = "nic.nebari.dev/node-pool"
+	// TagNodePool is the optional NIC tag key for node pool name
+	TagNodePool = "nic.nebari.dev/node-pool"
+	// TagEnvironment is the optional NIC tag key for environment
 	TagEnvironment = "nic.nebari.dev/environment"
 
-	// NIC version (updated with each release)
+	// NICVersion is the current NIC version (updated with each release)
 	NICVersion = "0.1.0"
 
-	// Managed by value
+	// ManagedByValue is the value used for the managed-by tag
 	ManagedByValue = "nic"
 )
 

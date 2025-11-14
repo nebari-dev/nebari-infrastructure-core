@@ -3,28 +3,28 @@ package aws
 // AWSInfrastructureState extends the generic InfrastructureState with AWS-specific details
 // This is an in-memory representation populated by querying AWS APIs
 // It is NEVER persisted to disk (stateless architecture)
-type AWSInfrastructureState struct {
+type InfrastructureState struct {
 	ClusterName string
 	Region      string
 
 	// VPC and networking
-	VPC *AWSVPCState
+	VPC *VPCState
 
 	// EKS cluster
-	Cluster *AWSClusterState
+	Cluster *ClusterState
 
 	// EKS node groups
-	NodeGroups []AWSNodeGroupState
+	NodeGroups []NodeGroupState
 
 	// EFS storage
-	Storage *AWSStorageState
+	Storage *StorageState
 
 	// IAM roles
-	IAMRoles *AWSIAMRoles
+	IAMRoles *IAMRoles
 }
 
-// AWSVPCState represents AWS VPC state discovered from EC2 APIs
-type AWSVPCState struct {
+// VPCState represents AWS VPC state discovered from EC2 APIs
+type VPCState struct {
 	// VPC ID
 	VPCID string
 
@@ -57,8 +57,8 @@ type AWSVPCState struct {
 	Tags map[string]string
 }
 
-// AWSClusterState represents EKS cluster state discovered from EKS APIs
-type AWSClusterState struct {
+// ClusterState represents EKS cluster state discovered from EKS APIs
+type ClusterState struct {
 	// Cluster name
 	Name string
 
@@ -104,8 +104,8 @@ type AWSClusterState struct {
 	CreatedAt string
 }
 
-// AWSNodeGroupState represents EKS node group state discovered from EKS APIs
-type AWSNodeGroupState struct {
+// NodeGroupState represents EKS node group state discovered from EKS APIs
+type NodeGroupState struct {
 	// Node group name
 	Name string
 
@@ -145,7 +145,7 @@ type AWSNodeGroupState struct {
 	Labels map[string]string
 
 	// Kubernetes taints
-	Taints []AWSTaint
+	Taints []Taint
 
 	// Launch template info
 	LaunchTemplateID      string
@@ -158,7 +158,7 @@ type AWSNodeGroupState struct {
 	Tags map[string]string
 
 	// Health status
-	Health AWSNodeGroupHealth
+	Health NodeGroupHealth
 
 	// Created timestamp
 	CreatedAt string
@@ -167,21 +167,21 @@ type AWSNodeGroupState struct {
 	ModifiedAt string
 }
 
-// AWSTaint represents a Kubernetes taint on AWS node groups
-type AWSTaint struct {
+// Taint represents a Kubernetes taint on AWS node groups
+type Taint struct {
 	Key    string
 	Value  string
 	Effect string // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
 }
 
-// AWSNodeGroupHealth represents the health status of a node group
-type AWSNodeGroupHealth struct {
+// NodeGroupHealth represents the health status of a node group
+type NodeGroupHealth struct {
 	// Issues affecting node group
 	Issues []string
 }
 
-// AWSStorageState represents EFS state discovered from EFS APIs
-type AWSStorageState struct {
+// StorageState represents EFS state discovered from EFS APIs
+type StorageState struct {
 	// File system ID
 	FileSystemID string
 
@@ -201,7 +201,7 @@ type AWSStorageState struct {
 	ProvisionedThroughputMiBps float64
 
 	// Mount target IDs and subnets
-	MountTargets []AWSMountTarget
+	MountTargets []MountTarget
 
 	// Security group IDs for mount targets
 	SecurityGroupIDs []string
@@ -222,8 +222,8 @@ type AWSStorageState struct {
 	CreatedAt string
 }
 
-// AWSMountTarget represents an EFS mount target
-type AWSMountTarget struct {
+// MountTarget represents an EFS mount target
+type MountTarget struct {
 	// Mount target ID
 	MountTargetID string
 
@@ -240,8 +240,8 @@ type AWSMountTarget struct {
 	LifeCycleState string
 }
 
-// AWSIAMRoles represents IAM roles created for the cluster
-type AWSIAMRoles struct {
+// IAMRoles represents IAM roles created for the cluster
+type IAMRoles struct {
 	// EKS cluster service role
 	ClusterRoleARN string
 

@@ -12,7 +12,7 @@ import (
 )
 
 // DiscoverVPC discovers existing VPC infrastructure by querying AWS with NIC tags
-func (p *Provider) DiscoverVPC(ctx context.Context, clients *AWSClients, clusterName string) (*AWSVPCState, error) {
+func (p *Provider) DiscoverVPC(ctx context.Context, clients *Clients, clusterName string) (*VPCState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.DiscoverVPC")
 	defer span.End()
@@ -43,7 +43,7 @@ func (p *Provider) DiscoverVPC(ctx context.Context, clients *AWSClients, cluster
 
 	vpc := result.Vpcs[0]
 
-	vpcState := &AWSVPCState{
+	vpcState := &VPCState{
 		VPCID: *vpc.VpcId,
 		CIDR:  *vpc.CidrBlock,
 		Tags:  convertEC2TagsToMap(vpc.Tags),
@@ -66,7 +66,7 @@ func (p *Provider) DiscoverVPC(ctx context.Context, clients *AWSClients, cluster
 }
 
 // discoverVPCResources discovers all resources associated with the VPC
-func (p *Provider) discoverVPCResources(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverVPCResources(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverVPCResources")
 	defer span.End()
@@ -100,7 +100,7 @@ func (p *Provider) discoverVPCResources(ctx context.Context, clients *AWSClients
 }
 
 // discoverSubnets discovers subnets tagged with NIC tags
-func (p *Provider) discoverSubnets(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverSubnets(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverSubnets")
 	defer span.End()
@@ -155,7 +155,7 @@ func (p *Provider) discoverSubnets(ctx context.Context, clients *AWSClients, clu
 }
 
 // discoverInternetGateway discovers the internet gateway attached to the VPC
-func (p *Provider) discoverInternetGateway(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverInternetGateway(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverInternetGateway")
 	defer span.End()
@@ -179,7 +179,7 @@ func (p *Provider) discoverInternetGateway(ctx context.Context, clients *AWSClie
 }
 
 // discoverNATGateways discovers NAT gateways in the VPC
-func (p *Provider) discoverNATGateways(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverNATGateways(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverNATGateways")
 	defer span.End()
@@ -209,7 +209,7 @@ func (p *Provider) discoverNATGateways(ctx context.Context, clients *AWSClients,
 }
 
 // discoverRouteTables discovers route tables in the VPC
-func (p *Provider) discoverRouteTables(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverRouteTables(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverRouteTables")
 	defer span.End()
@@ -257,7 +257,7 @@ func (p *Provider) discoverRouteTables(ctx context.Context, clients *AWSClients,
 }
 
 // discoverSecurityGroups discovers security groups in the VPC
-func (p *Provider) discoverSecurityGroups(ctx context.Context, clients *AWSClients, clusterName string, vpcState *AWSVPCState) error {
+func (p *Provider) discoverSecurityGroups(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.discoverSecurityGroups")
 	defer span.End()
