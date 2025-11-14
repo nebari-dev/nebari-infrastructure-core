@@ -12,6 +12,8 @@ Nebari Infrastructure Core (NIC) is a next-generation, opinionated Kubernetes de
 - **Stateless Architecture**: No state files - queries cloud APIs for actual state on every run
 - **Tag-Based Discovery**: All resources tagged for identification and ownership tracking
 - **Native Cloud SDKs**: Direct use of aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go
+- Why not use Terraform or Pulumi instead of Native cloud sdks?  Seems like terraform allows for some re-usable, shared config between cloud providers that I'm assuming won't be possible using the various Native Cloud SDKs.
+- What about if we decide to deploy to Digital Ocean again in the future.  It doesn't have a native cloud SDK that I could find.
 - **Complete Observability**: LGTM stack (Loki, Grafana, Tempo, Mimir) with OpenTelemetry
 - **Integrated Authentication**: Keycloak with OIDC/SAML support
 - **GitOps Ready**: ArgoCD for continuous deployment of applications

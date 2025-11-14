@@ -20,6 +20,7 @@
 6. Compliance profiles (HIPAA, SOC2, PCI-DSS)
 7. **Git repository provisioning** (GitHub/GitLab) with auto-generated CI/CD workflows
 8. **Software stack specification** - Deploy complete stacks (databases, caching, apps) alongside foundational software
+^ I'm very curious to see what this will look like.  It seems like we'll have to create a generic way for applications to deploy databases, redis, and anything else they might need.
 9. **Full-stack-in-one-repo** - Define platform + applications + config in single version-controlled repository
 10. **Stack templates** - Pre-built configurations for common use cases (data science, ML platform, web apps)
 

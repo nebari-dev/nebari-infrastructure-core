@@ -185,6 +185,7 @@ spec:
       - name: "JupyterHub Overview"
         source: "https://..."
 ```
+^ Is this CRD schema stable enough considering we're going to have like various software packs?  Like it can only depend on the core software stack components, right?  e.g. What if we add an MLOps software pack.  Do we need a different NebariApplication schema for applications now?
 
 **Operator Actions:**
 

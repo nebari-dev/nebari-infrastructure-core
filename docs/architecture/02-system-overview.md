@@ -12,6 +12,7 @@
 │    - Foundational software configuration                   │
 │    - Domain and TLS settings                               │
 └─────────────────────────────────────────────────────────────┘
+^ Instead of user, maybe we should call them an admin to differentiate.
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. NIC CLI parses config and plans deployment              │

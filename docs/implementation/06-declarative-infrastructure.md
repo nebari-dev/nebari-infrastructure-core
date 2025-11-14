@@ -54,10 +54,12 @@ func Reconcile(ctx context.Context, config Config) error {
     if err := SaveState(ctx, newState); err != nil {
         return fmt.Errorf("saving state: %w", err)
     }
+    // I see the SaveState fn, do we have state files?  What is it saving?
 
     return nil
 }
 ```
+It feels like we are re-creating terraform/pulumi.  Why not just use them?  We gain the benefit of broad community support which is huge.  Free updates as cloud services change over time.  We had enough trouble just updating the tf modules in Nebari.  Now we have to create the "updated module" ourselves.
 
 **Change Types:**
 

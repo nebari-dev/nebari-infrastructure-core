@@ -14,6 +14,7 @@
 **2. Integration Tests:**
 
 - Provider operations against mock cloud APIs
+Seems like a bunch of extra effort to mock 3 (and possibly more eventually) cloud APIs
 - State backend operations (local, mock S3/GCS/Azure)
 - Kubernetes operations against kind clusters
 - ArgoCD application deployment

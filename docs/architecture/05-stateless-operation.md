@@ -18,6 +18,7 @@
 | ✅ Works offline for planning                      | ⚠️ Requires cloud access                               |
 
 **Trade-off Accepted:** Slightly slower execution (~30-60 seconds for cloud API queries) in exchange for always-accurate state and zero state management complexity.
+30-60 seconds could be optimistic.  We might hit rate limits, etc.  Is this based on any testing so far?
 
 **How It Works:**
 

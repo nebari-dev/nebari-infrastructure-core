@@ -37,6 +37,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 │ ├── Envoy Gateway (Ingress & API Gateway)                 │
 │ └── ArgoCD (GitOps Continuous Deployment)                 │
 └─────────────────────────────────────────────────────────────┘
+I think we should add a secrets management solution to the Foundational Software. We've talked about having one for years and years to Nebari classic.  Nearly all applications are going to need it IMO.
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ Kubernetes Cluster (Deployed by NIC)                       │
