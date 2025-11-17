@@ -25,9 +25,9 @@ type KubeconfigUser struct {
 
 // KubeconfigExec represents the exec section for AWS IAM authentication
 type KubeconfigExec struct {
-	APIVersion string   `yaml:"apiVersion"`
-	Command    string   `yaml:"command"`
-	Args       []string `yaml:"args"`
+	APIVersion string          `yaml:"apiVersion"`
+	Command    string          `yaml:"command"`
+	Args       []string        `yaml:"args"`
 	Env        []KubeconfigEnv `yaml:"env,omitempty"`
 }
 
@@ -45,8 +45,8 @@ type KubeconfigContext struct {
 
 // KubeconfigNamedCluster represents a named cluster
 type KubeconfigNamedCluster struct {
-	Name    string             `yaml:"name"`
-	Cluster KubeconfigCluster  `yaml:"cluster"`
+	Name    string            `yaml:"name"`
+	Cluster KubeconfigCluster `yaml:"cluster"`
 }
 
 // KubeconfigNamedContext represents a named context

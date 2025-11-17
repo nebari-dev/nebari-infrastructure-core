@@ -66,20 +66,20 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 
 	// Build VPC config - use private subnets for control plane
 	vpcConfig := &ekstypes.VpcConfigRequest{
-		SubnetIds:              vpc.PrivateSubnetIDs,
-		EndpointPublicAccess:   aws.Bool(endpointPublic),
-		EndpointPrivateAccess:  aws.Bool(endpointPrivate),
-		PublicAccessCidrs:      []string{"0.0.0.0/0"}, // Can be restricted in config
-		SecurityGroupIds:       vpc.SecurityGroupIDs,
+		SubnetIds:             vpc.PrivateSubnetIDs,
+		EndpointPublicAccess:  aws.Bool(endpointPublic),
+		EndpointPrivateAccess: aws.Bool(endpointPrivate),
+		PublicAccessCidrs:     []string{"0.0.0.0/0"}, // Can be restricted in config
+		SecurityGroupIds:      vpc.SecurityGroupIDs,
 	}
 
 	// Build create cluster input
 	createInput := &eks.CreateClusterInput{
-		Name:    aws.String(clusterName),
-		Version: aws.String(k8sVersion),
-		RoleArn: aws.String(iamRoles.ClusterRoleARN),
+		Name:               aws.String(clusterName),
+		Version:            aws.String(k8sVersion),
+		RoleArn:            aws.String(iamRoles.ClusterRoleARN),
 		ResourcesVpcConfig: vpcConfig,
-		Tags:    eksTags,
+		Tags:               eksTags,
 	}
 
 	// Enable envelope encryption with KMS if configured

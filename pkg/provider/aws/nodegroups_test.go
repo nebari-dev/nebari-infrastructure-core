@@ -23,11 +23,11 @@ func TestConvertEKSNodeGroupToState(t *testing.T) {
 			MaxSize:     aws.Int32(5),
 			DesiredSize: aws.Int32(3),
 		},
-		Subnets:     []string{"subnet-1", "subnet-2"},
-		NodeRole:    aws.String("arn:aws:iam::123456789012:role/test-node-role"),
-		AmiType:     ekstypes.AMITypesAl2X8664,
-		DiskSize:    aws.Int32(20),
-		Labels:      map[string]string{"node-group": "worker"},
+		Subnets:  []string{"subnet-1", "subnet-2"},
+		NodeRole: aws.String("arn:aws:iam::123456789012:role/test-node-role"),
+		AmiType:  ekstypes.AMITypesAl2X8664,
+		DiskSize: aws.Int32(20),
+		Labels:   map[string]string{"node-group": "worker"},
 		Taints: []ekstypes.Taint{
 			{
 				Key:    aws.String("dedicated"),
