@@ -322,21 +322,45 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		attribute.String("region", region),
 	)
 
-	// TODO: Implement actual destroy logic in reverse order:
-	// 1. Delete node groups (wait for deletion)
-	// 2. Delete EKS cluster (wait for deletion)
-	// 3. Delete EFS (if implemented)
-	// 4. Delete NAT gateways, Internet Gateway, Subnets, VPC (wait for deletion)
-	// 5. Delete IAM roles (detach policies first)
-	// 6. Release Elastic IPs
-	//
-	// For now, return an error indicating this is not implemented
-	// to prevent accidental resource deletion without proper testing
+	// Initialize AWS clients
+	clients, err := NewClients(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create AWS clients: %w", err)
+	}
 
-	_ = ctx // ctx will be used when implementation is complete
-	err := fmt.Errorf("Destroy is not yet implemented - manual cleanup required for cluster: %s", clusterName)
-	span.RecordError(err)
-	return err
+	// Destroy infrastructure in reverse order of creation
+	// This ensures dependencies are respected
+
+	// 1. Delete all node groups first
+	if err := p.deleteNodeGroups(ctx, clients, clusterName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete node groups: %w", err)
+	}
+
+	// 2. Delete EKS cluster
+	if err := p.deleteEKSCluster(ctx, clients, clusterName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete EKS cluster: %w", err)
+	}
+
+	// 3. Delete VPC and all associated resources
+	if err := p.deleteVPC(ctx, clients, clusterName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete VPC: %w", err)
+	}
+
+	// 4. Delete IAM roles (detach policies first)
+	if err := p.deleteIAMRoles(ctx, clients, clusterName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete IAM roles: %w", err)
+	}
+
+	span.SetAttributes(
+		attribute.Bool("destroy_complete", true),
+	)
+
+	return nil
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
