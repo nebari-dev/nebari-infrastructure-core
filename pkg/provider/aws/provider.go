@@ -366,6 +366,8 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
+// Note: This method requires region information which is not provided in the interface
+// For AWS, use GetKubeconfigWithRegion directly or discover the cluster region first
 func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
@@ -376,9 +378,10 @@ func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byt
 		attribute.String("cluster_name", clusterName),
 	)
 
-	// Discover the cluster to get region
-	// We need to query across regions to find the cluster
-	// For now, we'll return an error requiring the caller to provide region
-	_ = ctx // ctx will be used when implementation is complete
-	return nil, fmt.Errorf("GetKubeconfig requires region - use Query() first to discover cluster region")
+	// AWS requires region to generate kubeconfig
+	// The GetKubeconfig interface doesn't provide region, so we return an error
+	// Users should call GetKubeconfigWithRegion directly
+	err := fmt.Errorf("GetKubeconfig requires region parameter - use GetKubeconfigWithRegion() or discover cluster region first")
+	span.RecordError(err)
+	return nil, err
 }

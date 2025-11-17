@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"context"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -279,5 +280,20 @@ func TestKubeconfigYAMLKeys(t *testing.T) {
 		if !containsSubstring([]string{yamlStr}, key) {
 			t.Errorf("YAML should contain key %q", key)
 		}
+	}
+}
+
+func TestGetKubeconfig_RequiresRegion(t *testing.T) {
+	p := NewProvider()
+	ctx := context.Background()
+
+	_, err := p.GetKubeconfig(ctx, "test-cluster")
+	if err == nil {
+		t.Fatal("GetKubeconfig() should return error when region is not provided")
+	}
+
+	expectedMsg := "GetKubeconfig requires region parameter"
+	if err.Error()[:len(expectedMsg)] != expectedMsg {
+		t.Errorf("Expected error message to start with %q, got %q", expectedMsg, err.Error())
 	}
 }
