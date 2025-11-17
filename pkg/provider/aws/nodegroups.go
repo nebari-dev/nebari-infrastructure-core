@@ -33,6 +33,9 @@ const (
 )
 
 // createNodeGroups creates all EKS node groups defined in the configuration
+// TODO: This will be called from reconcileNodeGroups() when creating new node groups
+//
+//nolint:unused
 func (p *Provider) createNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles) ([]NodeGroupState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.createNodeGroups")

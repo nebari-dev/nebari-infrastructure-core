@@ -72,6 +72,9 @@ type Kubeconfig struct {
 }
 
 // generateKubeconfig generates a kubeconfig file for the EKS cluster
+// TODO: This will be called from GetKubeconfig() once Query() is implemented
+//
+//nolint:unused
 func (p *Provider) generateKubeconfig(ctx context.Context, clients *Clients, clusterName string, region string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")

@@ -186,6 +186,7 @@ func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.Inf
 
 	// TODO: Implement actual discovery logic by querying AWS APIs
 	// For now, return nil to indicate no infrastructure found
+	_ = ctx // ctx will be used when implementation is complete
 	return nil, nil
 }
 
@@ -321,6 +322,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	// For now, return an error indicating this is not implemented
 	// to prevent accidental resource deletion without proper testing
 
+	_ = ctx // ctx will be used when implementation is complete
 	err := fmt.Errorf("Destroy is not yet implemented - manual cleanup required for cluster: %s", clusterName)
 	span.RecordError(err)
 	return err
@@ -340,5 +342,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byt
 	// Discover the cluster to get region
 	// We need to query across regions to find the cluster
 	// For now, we'll return an error requiring the caller to provide region
+	_ = ctx // ctx will be used when implementation is complete
 	return nil, fmt.Errorf("GetKubeconfig requires region - use Query() first to discover cluster region")
 }

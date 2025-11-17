@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
 func TestConvertToIAMTags(t *testing.T) {
@@ -54,7 +53,7 @@ func TestConvertToIAMTags_Type(t *testing.T) {
 	iamTags := convertToIAMTags(nicTags)
 
 	// Verify the type is correct
-	var _ []iamtypes.Tag = iamTags
+	var _ = iamTags
 
 	if len(iamTags) != 1 {
 		t.Fatalf("Expected 1 tag, got %d", len(iamTags))

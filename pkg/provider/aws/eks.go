@@ -52,10 +52,11 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 	// Values: "public", "private", "public-and-private"
 	endpointPublic := DefaultEndpointPublic
 	endpointPrivate := DefaultEndpointPrivate
-	if cfg.AmazonWebServices.EKSEndpointAccess == "private" {
+	switch cfg.AmazonWebServices.EKSEndpointAccess {
+	case "private":
 		endpointPublic = false
 		endpointPrivate = true
-	} else if cfg.AmazonWebServices.EKSEndpointAccess == "public-and-private" {
+	case "public-and-private":
 		endpointPublic = true
 		endpointPrivate = true
 	}

@@ -93,10 +93,11 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	// Check if endpoint access needs update
 	desiredPublic := DefaultEndpointPublic
 	desiredPrivate := DefaultEndpointPrivate
-	if cfg.AmazonWebServices.EKSEndpointAccess == "private" {
+	switch cfg.AmazonWebServices.EKSEndpointAccess {
+	case "private":
 		desiredPublic = false
 		desiredPrivate = true
-	} else if cfg.AmazonWebServices.EKSEndpointAccess == "public-and-private" {
+	case "public-and-private":
 		desiredPublic = true
 		desiredPrivate = true
 	}

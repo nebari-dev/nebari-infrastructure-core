@@ -2,7 +2,6 @@ package aws
 
 import (
 	"context"
-	"os"
 	"testing"
 )
 
@@ -24,12 +23,8 @@ func TestNewClients_WithMockCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	// Set mock credentials
-	os.Setenv("AWS_ACCESS_KEY_ID", "test-key-id")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
-	defer func() {
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-	}()
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-key-id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
 	// This should succeed with mock credentials (won't make actual AWS calls in unit tests)
 	clients, err := NewClients(ctx, "us-west-2")
@@ -68,9 +63,9 @@ func TestNewClients_WithoutCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	// Clear credentials
-	os.Unsetenv("AWS_ACCESS_KEY_ID")
-	os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-	os.Unsetenv("AWS_SESSION_TOKEN")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
 
 	// Attempt to create clients without credentials
 	// This might succeed if there are credentials in ~/.aws/credentials
@@ -86,12 +81,8 @@ func TestNewClients_DifferentRegions(t *testing.T) {
 	ctx := context.Background()
 
 	// Set mock credentials
-	os.Setenv("AWS_ACCESS_KEY_ID", "test-key-id")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
-	defer func() {
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-	}()
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-key-id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 
 	regions := []string{"us-west-2", "us-east-1", "eu-west-1", "ap-southeast-1"}
 
@@ -112,12 +103,8 @@ func TestNewClients_DifferentRegions(t *testing.T) {
 func TestLoadAWSConfig_WithExplicitCredentials(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-	defer func() {
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-	}()
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
 
 	cfg, err := loadAWSConfig(ctx, "us-west-2")
 	if err != nil {
@@ -142,14 +129,9 @@ func TestLoadAWSConfig_WithExplicitCredentials(t *testing.T) {
 func TestLoadAWSConfig_WithSessionToken(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
-	os.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-	os.Setenv("AWS_SESSION_TOKEN", "test-session-token")
-	defer func() {
-		os.Unsetenv("AWS_ACCESS_KEY_ID")
-		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-		os.Unsetenv("AWS_SESSION_TOKEN")
-	}()
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+	t.Setenv("AWS_SESSION_TOKEN", "test-session-token")
 
 	cfg, err := loadAWSConfig(ctx, "us-west-2")
 	if err != nil {
