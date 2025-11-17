@@ -29,7 +29,7 @@ const (
 // createVPC creates a complete VPC with subnets, IGW, NAT gateways, route tables, and security groups
 func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.NebariConfig) (*VPCState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createVPC")
+	_, span := tracer.Start(ctx, "aws.createVPC")
 	defer span.End()
 
 	clusterName := cfg.ProjectName
@@ -155,7 +155,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 // createVPCResource creates the VPC resource
 func (p *Provider) createVPCResource(ctx context.Context, clients *Clients, clusterName, cidr string, userTags map[string]string) (*types.Vpc, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createVPCResource")
+	_, span := tracer.Start(ctx, "aws.createVPCResource")
 	defer span.End()
 
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeVPC)
@@ -185,7 +185,7 @@ func (p *Provider) createVPCResource(ctx context.Context, clients *Clients, clus
 // enableVPCDNS enables DNS hostnames and DNS support for the VPC (required for EKS)
 func (p *Provider) enableVPCDNS(ctx context.Context, clients *Clients, vpcID string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.enableVPCDNS")
+	_, span := tracer.Start(ctx, "aws.enableVPCDNS")
 	defer span.End()
 
 	// Enable DNS hostnames
@@ -214,7 +214,7 @@ func (p *Provider) enableVPCDNS(ctx context.Context, clients *Clients, vpcID str
 // createInternetGateway creates and attaches an internet gateway to the VPC
 func (p *Provider) createInternetGateway(ctx context.Context, clients *Clients, clusterName, vpcID string, userTags map[string]string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createInternetGateway")
+	_, span := tracer.Start(ctx, "aws.createInternetGateway")
 	defer span.End()
 
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeInternetGateway)
@@ -254,7 +254,7 @@ func (p *Provider) createInternetGateway(ctx context.Context, clients *Clients, 
 // getAvailabilityZones returns the list of availability zones to use
 func (p *Provider) getAvailabilityZones(ctx context.Context, clients *Clients, awsCfg *config.AWSConfig) ([]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.getAvailabilityZones")
+	_, span := tracer.Start(ctx, "aws.getAvailabilityZones")
 	defer span.End()
 
 	// If user specified AZs, use those
@@ -303,7 +303,7 @@ func (p *Provider) getAvailabilityZones(ctx context.Context, clients *Clients, a
 // createSubnets creates either public or private subnets across multiple AZs
 func (p *Provider) createSubnets(ctx context.Context, clients *Clients, clusterName, vpcID, vpcCIDR string, azs []string, public bool, userTags map[string]string) ([]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createSubnets")
+	_, span := tracer.Start(ctx, "aws.createSubnets")
 	defer span.End()
 
 	subnetType := "private"
@@ -390,7 +390,7 @@ func (p *Provider) calculateSubnetCIDR(vpcCIDR string, index int, public bool) s
 // createNATGateways creates NAT gateways in public subnets (one per AZ for HA)
 func (p *Provider) createNATGateways(ctx context.Context, clients *Clients, clusterName string, publicSubnetIDs, azs []string, userTags map[string]string) ([]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createNATGateways")
+	_, span := tracer.Start(ctx, "aws.createNATGateways")
 	defer span.End()
 
 	natGatewayIDs := make([]string, 0, len(publicSubnetIDs))
@@ -457,7 +457,7 @@ func (p *Provider) createNATGateways(ctx context.Context, clients *Clients, clus
 // createPublicRouteTable creates a route table for public subnets with route to IGW
 func (p *Provider) createPublicRouteTable(ctx context.Context, clients *Clients, clusterName, vpcID, igwID string, publicSubnetIDs []string, userTags map[string]string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createPublicRouteTable")
+	_, span := tracer.Start(ctx, "aws.createPublicRouteTable")
 	defer span.End()
 
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeRouteTable)
@@ -511,7 +511,7 @@ func (p *Provider) createPublicRouteTable(ctx context.Context, clients *Clients,
 // createPrivateRouteTables creates route tables for private subnets with routes to NAT gateways
 func (p *Provider) createPrivateRouteTables(ctx context.Context, clients *Clients, clusterName, vpcID string, natGatewayIDs, privateSubnetIDs []string, userTags map[string]string) ([]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createPrivateRouteTables")
+	_, span := tracer.Start(ctx, "aws.createPrivateRouteTables")
 	defer span.End()
 
 	routeTableIDs := make([]string, 0, len(privateSubnetIDs))
@@ -570,7 +570,7 @@ func (p *Provider) createPrivateRouteTables(ctx context.Context, clients *Client
 // createClusterSecurityGroup creates a security group for the EKS cluster
 func (p *Provider) createClusterSecurityGroup(ctx context.Context, clients *Clients, clusterName, vpcID string, userTags map[string]string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createClusterSecurityGroup")
+	_, span := tracer.Start(ctx, "aws.createClusterSecurityGroup")
 	defer span.End()
 
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeSecurityGroup)

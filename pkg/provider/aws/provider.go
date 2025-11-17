@@ -34,7 +34,7 @@ func (p *Provider) Name() string {
 // Validate validates the AWS configuration with pre-flight checks
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.Validate")
+	_, span := tracer.Start(ctx, "aws.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -157,7 +157,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 // Deploy deploys AWS infrastructure using stateless reconciliation
 func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.Deploy")
+	_, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -181,7 +181,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 // Query discovers the current state of AWS infrastructure (stub implementation)
 func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.InfrastructureState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.Query")
+	_, span := tracer.Start(ctx, "aws.Query")
 	defer span.End()
 
 	span.SetAttributes(
@@ -200,7 +200,7 @@ func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.Inf
 // Reconcile reconciles AWS infrastructure state using stateless discovery
 func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.Reconcile")
+	_, span := tracer.Start(ctx, "aws.Reconcile")
 	defer span.End()
 
 	// Enforce timeout for the entire reconciliation operation
@@ -310,7 +310,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 // Destroy tears down AWS infrastructure in reverse order
 func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.Destroy")
+	_, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
 
 	clusterName := cfg.ProjectName
@@ -342,7 +342,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
 func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
+	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(

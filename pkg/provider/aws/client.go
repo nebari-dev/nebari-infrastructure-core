@@ -30,7 +30,7 @@ type Clients struct {
 // Credentials are loaded from environment variables or AWS config files
 func NewClients(ctx context.Context, region string) (*Clients, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.NewClients")
+	_, span := tracer.Start(ctx, "aws.NewClients")
 	defer span.End()
 
 	span.SetAttributes(
@@ -80,7 +80,7 @@ func NewClients(ctx context.Context, region string) (*Clients, error) {
 // 4. ECS/EC2 instance role (if running on AWS infrastructure)
 func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.loadAWSConfig")
+	_, span := tracer.Start(ctx, "aws.loadAWSConfig")
 	defer span.End()
 
 	// Create custom retry strategy with exponential backoff

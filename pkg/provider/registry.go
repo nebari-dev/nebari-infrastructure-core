@@ -25,7 +25,7 @@ func NewRegistry() *Registry {
 // Register registers a provider with the given name
 func (r *Registry) Register(ctx context.Context, name string, provider Provider) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "registry.Register")
+	_, span := tracer.Start(ctx, "registry.Register")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("provider.name", name))
@@ -46,7 +46,7 @@ func (r *Registry) Register(ctx context.Context, name string, provider Provider)
 // Get retrieves a provider by name
 func (r *Registry) Get(ctx context.Context, name string) (Provider, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "registry.Get")
+	_, span := tracer.Start(ctx, "registry.Get")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("provider.name", name))

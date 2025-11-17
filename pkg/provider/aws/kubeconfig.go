@@ -77,7 +77,7 @@ type Kubeconfig struct {
 //nolint:unused
 func (p *Provider) generateKubeconfig(ctx context.Context, clients *Clients, clusterName string, region string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
+	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(

@@ -20,7 +20,16 @@ repos:
 
       - id: go-vet
         name: go vet
-        entry: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+        always_run: true
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run
+        args: [--fix]
         language: system
         types: [go]
         pass_filenames: false

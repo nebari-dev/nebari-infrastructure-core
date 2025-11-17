@@ -25,7 +25,7 @@ func NewRegistry() *Registry {
 // Register registers a DNS provider with the given name
 func (r *Registry) Register(ctx context.Context, name string, provider DNSProvider) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "dnsregistry.Register")
+	_, span := tracer.Start(ctx, "dnsregistry.Register")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("dns_provider.name", name))
@@ -46,7 +46,7 @@ func (r *Registry) Register(ctx context.Context, name string, provider DNSProvid
 // Get retrieves a DNS provider by name
 func (r *Registry) Get(ctx context.Context, name string) (DNSProvider, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "dnsregistry.Get")
+	_, span := tracer.Start(ctx, "dnsregistry.Get")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("dns_provider.name", name))

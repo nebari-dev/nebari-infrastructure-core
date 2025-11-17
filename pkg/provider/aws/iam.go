@@ -64,7 +64,7 @@ var eksNodeManagedPolicies = []string{
 // discoverIAMRoles discovers existing IAM roles for the cluster
 func (p *Provider) discoverIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverIAMRoles")
+	_, span := tracer.Start(ctx, "aws.discoverIAMRoles")
 	defer span.End()
 
 	span.SetAttributes(
@@ -105,7 +105,7 @@ func (p *Provider) discoverIAMRoles(ctx context.Context, clients *Clients, clust
 // discoverIAMRole discovers a single IAM role by name
 func (p *Provider) discoverIAMRole(ctx context.Context, clients *Clients, roleName string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverIAMRole")
+	_, span := tracer.Start(ctx, "aws.discoverIAMRole")
 	defer span.End()
 
 	span.SetAttributes(
@@ -134,7 +134,7 @@ func (p *Provider) discoverIAMRole(ctx context.Context, clients *Clients, roleNa
 // ensureIAMRoles discovers existing IAM roles or creates them if they don't exist
 func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.ensureIAMRoles")
+	_, span := tracer.Start(ctx, "aws.ensureIAMRoles")
 	defer span.End()
 
 	span.SetAttributes(
@@ -156,7 +156,7 @@ func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, cluster
 // createIAMRoles creates both the EKS cluster role and node role
 func (p *Provider) createIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createIAMRoles")
+	_, span := tracer.Start(ctx, "aws.createIAMRoles")
 	defer span.End()
 
 	span.SetAttributes(
@@ -194,7 +194,7 @@ func (p *Provider) createIAMRoles(ctx context.Context, clients *Clients, cluster
 // createEKSClusterRole creates the IAM role for the EKS cluster
 func (p *Provider) createEKSClusterRole(ctx context.Context, clients *Clients, clusterName string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createEKSClusterRole")
+	_, span := tracer.Start(ctx, "aws.createEKSClusterRole")
 	defer span.End()
 
 	roleName := GenerateResourceName(clusterName, "cluster-role", "")
@@ -251,7 +251,7 @@ func (p *Provider) createEKSClusterRole(ctx context.Context, clients *Clients, c
 // createEKSNodeRole creates the IAM role for EKS worker nodes
 func (p *Provider) createEKSNodeRole(ctx context.Context, clients *Clients, clusterName string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createEKSNodeRole")
+	_, span := tracer.Start(ctx, "aws.createEKSNodeRole")
 	defer span.End()
 
 	roleName := GenerateResourceName(clusterName, "node-role", "")

@@ -128,6 +128,41 @@ go vet ./...
 golangci-lint run
 ```
 
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to ensure code quality before commits. The hooks automatically run formatting, linting, and tests.
+
+#### Installation
+
+```bash
+# Install pre-commit hooks (one-time setup)
+pre-commit install
+```
+
+#### Usage
+
+Pre-commit hooks will automatically run on `git commit`. To manually run all hooks:
+
+```bash
+# Run all pre-commit hooks on all files
+pre-commit run --all-files
+
+# Run specific hook
+pre-commit run golangci-lint --all-files
+```
+
+#### Configured Hooks
+
+- **trailing-whitespace**: Remove trailing whitespace
+- **end-of-file-fixer**: Ensure files end with newline
+- **check-yaml**: Validate YAML files
+- **check-added-large-files**: Prevent large files from being committed
+- **check-merge-conflict**: Detect merge conflict markers
+- **go-fmt**: Format Go code with `gofmt -s -w`
+- **go-vet**: Run `go vet` for static analysis
+- **golangci-lint**: Run comprehensive linting with auto-fix
+- **go-test**: Run all tests with `go test -v ./...`
+
 ## Architecture
 
 ### Project Structure

@@ -32,7 +32,7 @@ const (
 // createEKSCluster creates an EKS cluster with the specified configuration
 func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, iamRoles *IAMRoles) (*ClusterState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.createEKSCluster")
+	_, span := tracer.Start(ctx, "aws.createEKSCluster")
 	defer span.End()
 
 	clusterName := cfg.ProjectName

@@ -14,7 +14,7 @@ import (
 // DiscoverVPC discovers existing VPC infrastructure by querying AWS with NIC tags
 func (p *Provider) DiscoverVPC(ctx context.Context, clients *Clients, clusterName string) (*VPCState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.DiscoverVPC")
+	_, span := tracer.Start(ctx, "aws.DiscoverVPC")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("cluster_name", clusterName))
@@ -68,7 +68,7 @@ func (p *Provider) DiscoverVPC(ctx context.Context, clients *Clients, clusterNam
 // discoverVPCResources discovers all resources associated with the VPC
 func (p *Provider) discoverVPCResources(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverVPCResources")
+	_, span := tracer.Start(ctx, "aws.discoverVPCResources")
 	defer span.End()
 
 	// Discover subnets
@@ -102,7 +102,7 @@ func (p *Provider) discoverVPCResources(ctx context.Context, clients *Clients, c
 // discoverSubnets discovers subnets tagged with NIC tags
 func (p *Provider) discoverSubnets(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverSubnets")
+	_, span := tracer.Start(ctx, "aws.discoverSubnets")
 	defer span.End()
 
 	filters := BuildTagFilter(clusterName, ResourceTypeSubnet)
@@ -157,7 +157,7 @@ func (p *Provider) discoverSubnets(ctx context.Context, clients *Clients, cluste
 // discoverInternetGateway discovers the internet gateway attached to the VPC
 func (p *Provider) discoverInternetGateway(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverInternetGateway")
+	_, span := tracer.Start(ctx, "aws.discoverInternetGateway")
 	defer span.End()
 
 	filters := BuildTagFilter(clusterName, ResourceTypeInternetGateway)
@@ -181,7 +181,7 @@ func (p *Provider) discoverInternetGateway(ctx context.Context, clients *Clients
 // discoverNATGateways discovers NAT gateways in the VPC
 func (p *Provider) discoverNATGateways(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverNATGateways")
+	_, span := tracer.Start(ctx, "aws.discoverNATGateways")
 	defer span.End()
 
 	filters := BuildTagFilter(clusterName, ResourceTypeNATGateway)
@@ -211,7 +211,7 @@ func (p *Provider) discoverNATGateways(ctx context.Context, clients *Clients, cl
 // discoverRouteTables discovers route tables in the VPC
 func (p *Provider) discoverRouteTables(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverRouteTables")
+	_, span := tracer.Start(ctx, "aws.discoverRouteTables")
 	defer span.End()
 
 	filters := BuildTagFilter(clusterName, ResourceTypeRouteTable)
@@ -259,7 +259,7 @@ func (p *Provider) discoverRouteTables(ctx context.Context, clients *Clients, cl
 // discoverSecurityGroups discovers security groups in the VPC
 func (p *Provider) discoverSecurityGroups(ctx context.Context, clients *Clients, clusterName string, vpcState *VPCState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.discoverSecurityGroups")
+	_, span := tracer.Start(ctx, "aws.discoverSecurityGroups")
 	defer span.End()
 
 	filters := BuildTagFilter(clusterName, ResourceTypeSecurityGroup)

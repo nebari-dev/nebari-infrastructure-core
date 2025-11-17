@@ -28,7 +28,7 @@ func (p *Provider) Name() string {
 // Validate validates the GCP configuration (stub implementation)
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.Validate")
+	_, span := tracer.Start(ctx, "gcp.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -43,7 +43,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 // Deploy deploys GCP infrastructure (stub implementation)
 func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.Deploy")
+	_, span := tracer.Start(ctx, "gcp.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -73,7 +73,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 // Query discovers the current state of GCP infrastructure (stub implementation)
 func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.InfrastructureState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.Query")
+	_, span := tracer.Start(ctx, "gcp.Query")
 	defer span.End()
 
 	span.SetAttributes(
@@ -88,7 +88,7 @@ func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.Inf
 // Reconcile reconciles GCP infrastructure state (stub implementation)
 func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.Reconcile")
+	_, span := tracer.Start(ctx, "gcp.Reconcile")
 	defer span.End()
 
 	span.SetAttributes(
@@ -103,7 +103,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 // Destroy tears down GCP infrastructure (stub implementation)
 func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.Destroy")
+	_, span := tracer.Start(ctx, "gcp.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -118,7 +118,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 // GetKubeconfig generates a kubeconfig file (stub implementation)
 func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "gcp.GetKubeconfig")
+	_, span := tracer.Start(ctx, "gcp.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(

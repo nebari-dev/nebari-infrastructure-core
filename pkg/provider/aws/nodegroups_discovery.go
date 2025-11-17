@@ -13,7 +13,7 @@ import (
 // DiscoverNodeGroups discovers all EKS node groups for a cluster and validates NIC tags
 func (p *Provider) DiscoverNodeGroups(ctx context.Context, clients *Clients, clusterName string) ([]NodeGroupState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.DiscoverNodeGroups")
+	_, span := tracer.Start(ctx, "aws.DiscoverNodeGroups")
 	defer span.End()
 
 	span.SetAttributes(

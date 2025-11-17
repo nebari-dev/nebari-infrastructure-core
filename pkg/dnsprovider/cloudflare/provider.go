@@ -32,7 +32,7 @@ func (p *Provider) Name() string {
 // Initialize sets up the Cloudflare DNS provider with credentials (stub implementation)
 func (p *Provider) Initialize(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.Initialize")
+	_, span := tracer.Start(ctx, "cloudflare.Initialize")
 	defer span.End()
 
 	span.SetAttributes(
@@ -80,7 +80,7 @@ func (p *Provider) Initialize(ctx context.Context, cfg *config.NebariConfig) err
 // GetRecord retrieves a specific DNS record by name and type (stub implementation)
 func (p *Provider) GetRecord(ctx context.Context, name string, recordType string) (*dnsprovider.DNSRecord, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.GetRecord")
+	_, span := tracer.Start(ctx, "cloudflare.GetRecord")
 	defer span.End()
 
 	if p.config == nil {
@@ -104,7 +104,7 @@ func (p *Provider) GetRecord(ctx context.Context, name string, recordType string
 // AddRecord creates a new DNS record (stub implementation)
 func (p *Provider) AddRecord(ctx context.Context, record dnsprovider.DNSRecord) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.AddRecord")
+	_, span := tracer.Start(ctx, "cloudflare.AddRecord")
 	defer span.End()
 
 	if p.config == nil {
@@ -129,7 +129,7 @@ func (p *Provider) AddRecord(ctx context.Context, record dnsprovider.DNSRecord) 
 // UpdateRecord updates an existing DNS record (stub implementation)
 func (p *Provider) UpdateRecord(ctx context.Context, record dnsprovider.DNSRecord) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.UpdateRecord")
+	_, span := tracer.Start(ctx, "cloudflare.UpdateRecord")
 	defer span.End()
 
 	if p.config == nil {
@@ -154,7 +154,7 @@ func (p *Provider) UpdateRecord(ctx context.Context, record dnsprovider.DNSRecor
 // DeleteRecord deletes a DNS record by name and type (stub implementation)
 func (p *Provider) DeleteRecord(ctx context.Context, name string, recordType string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.DeleteRecord")
+	_, span := tracer.Start(ctx, "cloudflare.DeleteRecord")
 	defer span.End()
 
 	if p.config == nil {
@@ -177,7 +177,7 @@ func (p *Provider) DeleteRecord(ctx context.Context, name string, recordType str
 // EnsureRecord ensures a record exists with the given properties (stub implementation)
 func (p *Provider) EnsureRecord(ctx context.Context, record dnsprovider.DNSRecord) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.EnsureRecord")
+	_, span := tracer.Start(ctx, "cloudflare.EnsureRecord")
 	defer span.End()
 
 	if p.config == nil {
@@ -202,7 +202,7 @@ func (p *Provider) EnsureRecord(ctx context.Context, record dnsprovider.DNSRecor
 // GetCertManagerConfig returns configuration for cert-manager (stub implementation)
 func (p *Provider) GetCertManagerConfig(ctx context.Context) (map[string]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "cloudflare.GetCertManagerConfig")
+	_, span := tracer.Start(ctx, "cloudflare.GetCertManagerConfig")
 	defer span.End()
 
 	if p.config == nil {

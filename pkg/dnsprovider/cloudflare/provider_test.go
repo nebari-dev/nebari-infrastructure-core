@@ -76,10 +76,18 @@ func TestInitialize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variable
 			if tt.envToken != "" {
-				os.Setenv("CLOUDFLARE_API_TOKEN", tt.envToken)
-				defer os.Unsetenv("CLOUDFLARE_API_TOKEN")
+				if err := os.Setenv("CLOUDFLARE_API_TOKEN", tt.envToken); err != nil {
+					t.Fatalf("Failed to set env var: %v", err)
+				}
+				defer func() {
+					if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
+						t.Logf("Failed to unset env var: %v", err)
+					}
+				}()
 			} else {
-				os.Unsetenv("CLOUDFLARE_API_TOKEN")
+				if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
+					t.Logf("Failed to unset env var: %v", err)
+				}
 			}
 
 			err := provider.Initialize(ctx, tt.cfg)
@@ -107,8 +115,14 @@ func TestGetRecord(t *testing.T) {
 	}
 
 	// Initialize provider
-	os.Setenv("CLOUDFLARE_API_TOKEN", "test-token")
-	defer os.Unsetenv("CLOUDFLARE_API_TOKEN")
+	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
+		t.Fatalf("Failed to set env var: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
+			t.Logf("Failed to unset env var: %v", err)
+		}
+	}()
 
 	cfg := &config.NebariConfig{
 		ProjectName: "test",
@@ -137,8 +151,14 @@ func TestEnsureRecord(t *testing.T) {
 	provider := NewProvider()
 
 	// Initialize provider
-	os.Setenv("CLOUDFLARE_API_TOKEN", "test-token")
-	defer os.Unsetenv("CLOUDFLARE_API_TOKEN")
+	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
+		t.Fatalf("Failed to set env var: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
+			t.Logf("Failed to unset env var: %v", err)
+		}
+	}()
 
 	cfg := &config.NebariConfig{
 		ProjectName: "test",
@@ -170,8 +190,14 @@ func TestGetCertManagerConfig(t *testing.T) {
 	provider := NewProvider()
 
 	// Initialize provider
-	os.Setenv("CLOUDFLARE_API_TOKEN", "test-token")
-	defer os.Unsetenv("CLOUDFLARE_API_TOKEN")
+	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
+		t.Fatalf("Failed to set env var: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
+			t.Logf("Failed to unset env var: %v", err)
+		}
+	}()
 
 	cfg := &config.NebariConfig{
 		ProjectName: "test",

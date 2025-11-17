@@ -16,7 +16,7 @@ import (
 // reconcileNodeGroups reconciles desired node group configuration with actual state
 func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, actual []NodeGroupState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.reconcileNodeGroups")
+	_, span := tracer.Start(ctx, "aws.reconcileNodeGroups")
 	defer span.End()
 
 	clusterName := cfg.ProjectName
@@ -93,7 +93,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 // reconcileNodeGroup reconciles a single node group
 func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, nodeGroupName string, desired config.AWSNodeGroup, actual *NodeGroupState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.reconcileNodeGroup")
+	_, span := tracer.Start(ctx, "aws.reconcileNodeGroup")
 	defer span.End()
 
 	clusterName := cfg.ProjectName

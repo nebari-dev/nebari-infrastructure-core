@@ -15,7 +15,7 @@ import (
 // reconcileCluster reconciles the desired EKS cluster configuration with actual state
 func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, iamRoles *IAMRoles, actual *ClusterState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.reconcileCluster")
+	_, span := tracer.Start(ctx, "aws.reconcileCluster")
 	defer span.End()
 
 	clusterName := cfg.ProjectName

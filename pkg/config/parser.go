@@ -15,7 +15,7 @@ import (
 // exists and is valid. Additional validation can be added later.
 func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "config.ParseConfig")
+	_, span := tracer.Start(ctx, "config.ParseConfig")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("config.file", filePath))

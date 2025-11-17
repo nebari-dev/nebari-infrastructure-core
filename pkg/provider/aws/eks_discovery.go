@@ -13,7 +13,7 @@ import (
 // DiscoverCluster discovers an EKS cluster by name and validates NIC tags
 func (p *Provider) DiscoverCluster(ctx context.Context, clients *Clients, clusterName string) (*ClusterState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.DiscoverCluster")
+	_, span := tracer.Start(ctx, "aws.DiscoverCluster")
 	defer span.End()
 
 	span.SetAttributes(

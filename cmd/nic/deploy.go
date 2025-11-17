@@ -26,7 +26,10 @@ resources to establish a fully functional Nebari cluster.`,
 
 func init() {
 	deployCmd.Flags().StringVarP(&deployConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
-	deployCmd.MarkFlagRequired("file")
+	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
+	if err := deployCmd.MarkFlagRequired("file"); err != nil {
+		panic(err)
+	}
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
