@@ -86,7 +86,7 @@ func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	// Create custom retry strategy with exponential backoff
 	// This improves resilience for transient failures and rate limiting
 	retryer := retry.NewStandard(func(so *retry.StandardOptions) {
-		so.MaxAttempts = 5           // Maximum 5 attempts (1 initial + 4 retries)
+		so.MaxAttempts = 5               // Maximum 5 attempts (1 initial + 4 retries)
 		so.MaxBackoff = 30 * time.Second // Maximum backoff of 30 seconds
 	})
 
