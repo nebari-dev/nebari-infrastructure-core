@@ -3,12 +3,19 @@ package aws
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+)
+
+const (
+	// ReconcileTimeout is the maximum time allowed for a complete reconciliation operation
+	// This includes VPC, IAM, EKS cluster, and node group operations
+	ReconcileTimeout = 45 * time.Minute
 )
 
 // Provider implements the AWS provider
@@ -196,6 +203,11 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 	ctx, span := tracer.Start(ctx, "aws.Reconcile")
 	defer span.End()
 
+	// Enforce timeout for the entire reconciliation operation
+	reconcileCtx, cancel := context.WithTimeout(ctx, ReconcileTimeout)
+	defer cancel()
+	ctx = reconcileCtx
+
 	clusterName := cfg.ProjectName
 	region := cfg.AmazonWebServices.Region
 
@@ -203,6 +215,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		attribute.String("provider", "aws"),
 		attribute.String("cluster_name", clusterName),
 		attribute.String("region", region),
+		attribute.String("timeout", ReconcileTimeout.String()),
 	)
 
 	// Initialize AWS clients

@@ -3,8 +3,10 @@ package aws
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
@@ -81,9 +83,19 @@ func loadAWSConfig(ctx context.Context, region string) (aws.Config, error) {
 	ctx, span := tracer.Start(ctx, "aws.loadAWSConfig")
 	defer span.End()
 
+	// Create custom retry strategy with exponential backoff
+	// This improves resilience for transient failures and rate limiting
+	retryer := retry.NewStandard(func(so *retry.StandardOptions) {
+		so.MaxAttempts = 5           // Maximum 5 attempts (1 initial + 4 retries)
+		so.MaxBackoff = 30 * time.Second // Maximum backoff of 30 seconds
+	})
+
 	// Use default credential chain (env vars have highest priority)
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(region),
+		config.WithRetryer(func() aws.Retryer {
+			return retryer
+		}),
 	)
 	if err != nil {
 		span.RecordError(err)

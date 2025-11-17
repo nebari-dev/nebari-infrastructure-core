@@ -10,6 +10,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"golang.org/x/sync/errgroup"
 )
 
 // reconcileNodeGroups reconciles desired node group configuration with actual state
@@ -35,38 +36,57 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		}
 	}
 
-	// Reconcile each desired node group
+	// Use errgroup for parallel node group reconciliation
+	// This improves performance when managing multiple node groups
+	g, gctx := errgroup.WithContext(ctx)
+
+	// Reconcile each desired node group in parallel
 	for nodeGroupName, nodeGroupConfig := range cfg.AmazonWebServices.NodeGroups {
-		actualNodeGroup, exists := actualNodeGroups[nodeGroupName]
+		// Capture loop variables for goroutine
+		ngName := nodeGroupName
+		ngConfig := nodeGroupConfig
+		actualNG, exists := actualNodeGroups[nodeGroupName]
 
-		if !exists {
-			// Node group doesn't exist - create it
-			span.SetAttributes(
-				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "create"),
-			)
+		g.Go(func() error {
+			if !exists {
+				// Node group doesn't exist - create it
+				span.SetAttributes(
+					attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "create"),
+				)
 
-			_, err := p.createNodeGroup(ctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
-			if err != nil {
-				span.RecordError(err)
-				return fmt.Errorf("failed to create node group %s: %w", nodeGroupName, err)
+				_, err := p.createNodeGroup(gctx, clients, cfg, vpc, cluster, iamRoles, ngName, ngConfig)
+				if err != nil {
+					span.RecordError(err)
+					return fmt.Errorf("failed to create node group %s: %w", ngName, err)
+				}
+				return nil
 			}
-		} else {
+
 			// Node group exists - check if updates are needed
 			span.SetAttributes(
-				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "update"),
+				attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "update"),
 			)
 
-			err := p.reconcileNodeGroup(ctx, clients, cfg, nodeGroupName, nodeGroupConfig, actualNodeGroup)
+			err := p.reconcileNodeGroup(gctx, clients, cfg, ngName, ngConfig, actualNG)
 			if err != nil {
 				span.RecordError(err)
-				return fmt.Errorf("failed to reconcile node group %s: %w", nodeGroupName, err)
+				return fmt.Errorf("failed to reconcile node group %s: %w", ngName, err)
 			}
-		}
+			return nil
+		})
+	}
+
+	// Wait for all node group operations to complete
+	// If any operation fails, all operations will be cancelled via context
+	if err := g.Wait(); err != nil {
+		span.RecordError(err)
+		return err
 	}
 
 	// TODO: Handle node groups that exist in actual but not in desired
 	// For now, we don't delete node groups automatically
 
+	span.SetAttributes(attribute.Bool("parallel_reconciliation", true))
 	return nil
 }
 
