@@ -178,7 +178,9 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	return p.Reconcile(ctx, cfg)
 }
 
-// Query discovers the current state of AWS infrastructure (stub implementation)
+// Query discovers the current state of AWS infrastructure
+// Note: This method requires region information which is not provided in the interface
+// For AWS, use the Reconcile method with a config, or call QueryWithRegion directly
 func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.InfrastructureState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Query")
@@ -189,12 +191,12 @@ func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.Inf
 		attribute.String("cluster_name", clusterName),
 	)
 
-	fmt.Printf("aws.Query called for cluster: %s\n", clusterName)
-
-	// TODO: Implement actual discovery logic by querying AWS APIs
-	// For now, return nil to indicate no infrastructure found
-	_ = ctx // ctx will be used when implementation is complete
-	return nil, nil
+	// AWS requires region to query infrastructure
+	// The Query interface doesn't provide region, so we return an error
+	// Users should call QueryWithRegion directly or use Reconcile with config
+	err := fmt.Errorf("Query requires region parameter - use QueryWithRegion() or provide config via Reconcile()")
+	span.RecordError(err)
+	return nil, err
 }
 
 // Reconcile reconciles AWS infrastructure state using stateless discovery
