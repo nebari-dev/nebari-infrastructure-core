@@ -61,6 +61,98 @@ var eksNodeManagedPolicies = []string{
 	"arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
 }
 
+// discoverIAMRoles discovers existing IAM roles for the cluster
+func (p *Provider) discoverIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.discoverIAMRoles")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+	)
+
+	// Discover cluster role
+	clusterRoleName := GenerateResourceName(clusterName, "cluster-role", "")
+	clusterRoleARN, err := p.discoverIAMRole(ctx, clients, clusterRoleName)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil // Role doesn't exist
+	}
+
+	// Discover node role
+	nodeRoleName := GenerateResourceName(clusterName, "node-role", "")
+	nodeRoleARN, err := p.discoverIAMRole(ctx, clients, nodeRoleName)
+	if err != nil {
+		span.RecordError(err)
+		return nil, nil // Role doesn't exist
+	}
+
+	iamRoles := &IAMRoles{
+		ClusterRoleARN:      clusterRoleARN,
+		NodeRoleARN:         nodeRoleARN,
+		ServiceAccountRoles: make(map[string]string),
+	}
+
+	span.SetAttributes(
+		attribute.String("cluster_role_arn", clusterRoleARN),
+		attribute.String("node_role_arn", nodeRoleARN),
+		attribute.Bool("roles_discovered", true),
+	)
+
+	return iamRoles, nil
+}
+
+// discoverIAMRole discovers a single IAM role by name
+func (p *Provider) discoverIAMRole(ctx context.Context, clients *Clients, roleName string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.discoverIAMRole")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("role_name", roleName),
+	)
+
+	getRoleInput := &iam.GetRoleInput{
+		RoleName: aws.String(roleName),
+	}
+
+	getRoleOutput, err := clients.IAMClient.GetRole(ctx, getRoleInput)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("role %s not found: %w", roleName, err)
+	}
+
+	roleARN := aws.ToString(getRoleOutput.Role.Arn)
+
+	span.SetAttributes(
+		attribute.String("role_arn", roleARN),
+	)
+
+	return roleARN, nil
+}
+
+// ensureIAMRoles discovers existing IAM roles or creates them if they don't exist
+func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.ensureIAMRoles")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+	)
+
+	// Try to discover existing roles
+	iamRoles, err := p.discoverIAMRoles(ctx, clients, clusterName)
+	if err == nil && iamRoles != nil {
+		span.SetAttributes(attribute.String("action", "discovered"))
+		return iamRoles, nil
+	}
+
+	// Roles don't exist, create them
+	span.SetAttributes(attribute.String("action", "create"))
+	return p.createIAMRoles(ctx, clients, clusterName)
+}
+
 // createIAMRoles creates both the EKS cluster role and node role
 func (p *Provider) createIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")

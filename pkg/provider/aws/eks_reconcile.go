@@ -60,6 +60,13 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	if actual.Version != desiredVersion {
+		// Validate that the version upgrade is valid (must be incremental)
+		err := validateK8sVersionUpgrade(ctx, actual.Version, desiredVersion)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("invalid Kubernetes version upgrade: %w", err)
+		}
+
 		// Version update is a separate operation
 		span.SetAttributes(
 			attribute.String("version_update.from", actual.Version),
@@ -71,7 +78,7 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 			Version: aws.String(desiredVersion),
 		}
 
-		_, err := clients.EKSClient.UpdateClusterVersion(ctx, versionUpdateInput)
+		_, err = clients.EKSClient.UpdateClusterVersion(ctx, versionUpdateInput)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to update EKS cluster version: %w", err)
@@ -83,7 +90,10 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 			Name: aws.String(clusterName),
 		}
 
-		_, err = waiter.WaitForOutput(ctx, describeInput, EKSClusterUpdateTimeout)
+		waitCtx, cancel := context.WithTimeout(ctx, EKSClusterUpdateTimeout)
+		defer cancel()
+
+		_, err = waiter.WaitForOutput(waitCtx, describeInput, EKSClusterUpdateTimeout)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed waiting for EKS cluster version update: %w", err)
@@ -91,28 +101,19 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Check if endpoint access needs update
-	desiredPublic := DefaultEndpointPublic
-	desiredPrivate := DefaultEndpointPrivate
-	switch cfg.AmazonWebServices.EKSEndpointAccess {
-	case "private":
-		desiredPublic = false
-		desiredPrivate = true
-	case "public-and-private":
-		desiredPublic = true
-		desiredPrivate = true
-	}
+	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)
 
-	if actual.EndpointPublic != desiredPublic || actual.EndpointPrivate != desiredPrivate {
+	if actual.EndpointPublic != endpointConfig.PublicAccess || actual.EndpointPrivate != endpointConfig.PrivateAccess {
 		updateNeeded = true
 		updateInput.ResourcesVpcConfig = &ekstypes.VpcConfigRequest{
-			EndpointPublicAccess:  aws.Bool(desiredPublic),
-			EndpointPrivateAccess: aws.Bool(desiredPrivate),
+			EndpointPublicAccess:  aws.Bool(endpointConfig.PublicAccess),
+			EndpointPrivateAccess: aws.Bool(endpointConfig.PrivateAccess),
 		}
 
 		span.SetAttributes(
 			attribute.Bool("endpoint_access.update_needed", true),
-			attribute.Bool("endpoint_access.desired_public", desiredPublic),
-			attribute.Bool("endpoint_access.desired_private", desiredPrivate),
+			attribute.Bool("endpoint_access.desired_public", endpointConfig.PublicAccess),
+			attribute.Bool("endpoint_access.desired_private", endpointConfig.PrivateAccess),
 		)
 	}
 
@@ -154,7 +155,10 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 			Name: aws.String(clusterName),
 		}
 
-		_, err = waiter.WaitForOutput(ctx, describeInput, EKSClusterUpdateTimeout)
+		waitCtx, cancel := context.WithTimeout(ctx, EKSClusterUpdateTimeout)
+		defer cancel()
+
+		_, err = waiter.WaitForOutput(waitCtx, describeInput, EKSClusterUpdateTimeout)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed waiting for EKS cluster update: %w", err)

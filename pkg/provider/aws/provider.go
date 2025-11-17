@@ -239,13 +239,11 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		return err
 	}
 
-	// 3. Create or discover IAM roles
-	// For now, we create IAM roles if they don't exist
-	// TODO: Implement IAM role discovery
-	iamRoles, err := p.createIAMRoles(ctx, clients, clusterName)
+	// 3. Ensure IAM roles (discover existing or create new ones)
+	iamRoles, err := p.ensureIAMRoles(ctx, clients, clusterName)
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to create IAM roles: %w", err)
+		return fmt.Errorf("failed to ensure IAM roles: %w", err)
 	}
 
 	// 4. Discover EKS cluster

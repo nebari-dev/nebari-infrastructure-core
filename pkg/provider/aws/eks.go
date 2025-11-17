@@ -49,28 +49,24 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Determine endpoint access based on EKSEndpointAccess setting
-	// Values: "public", "private", "public-and-private"
-	endpointPublic := DefaultEndpointPublic
-	endpointPrivate := DefaultEndpointPrivate
-	switch cfg.AmazonWebServices.EKSEndpointAccess {
-	case "private":
-		endpointPublic = false
-		endpointPrivate = true
-	case "public-and-private":
-		endpointPublic = true
-		endpointPrivate = true
-	}
+	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)
 
 	// Generate tags
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeEKSCluster)
 	eksTags := convertToEKSTags(nicTags)
 
+	// Get public access CIDRs (default to all if not specified)
+	publicAccessCidrs := cfg.AmazonWebServices.EKSPublicAccessCIDRs
+	if len(publicAccessCidrs) == 0 {
+		publicAccessCidrs = []string{"0.0.0.0/0"}
+	}
+
 	// Build VPC config - use private subnets for control plane
 	vpcConfig := &ekstypes.VpcConfigRequest{
 		SubnetIds:             vpc.PrivateSubnetIDs,
-		EndpointPublicAccess:  aws.Bool(endpointPublic),
-		EndpointPrivateAccess: aws.Bool(endpointPrivate),
-		PublicAccessCidrs:     []string{"0.0.0.0/0"}, // Can be restricted in config
+		EndpointPublicAccess:  aws.Bool(endpointConfig.PublicAccess),
+		EndpointPrivateAccess: aws.Bool(endpointConfig.PrivateAccess),
+		PublicAccessCidrs:     publicAccessCidrs,
 		SecurityGroupIds:      vpc.SecurityGroupIDs,
 	}
 

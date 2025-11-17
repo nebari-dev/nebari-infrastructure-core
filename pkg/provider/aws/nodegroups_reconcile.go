@@ -195,7 +195,10 @@ func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg
 			NodegroupName: aws.String(fullNodeGroupName),
 		}
 
-		_, err = waiter.WaitForOutput(ctx, describeInput, NodeGroupUpdateTimeout)
+		waitCtx, cancel := context.WithTimeout(ctx, NodeGroupUpdateTimeout)
+		defer cancel()
+
+		_, err = waiter.WaitForOutput(waitCtx, describeInput, NodeGroupUpdateTimeout)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed waiting for node group update: %w", err)
