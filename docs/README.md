@@ -100,7 +100,6 @@ Alternative implementation approaches for different team needs and priorities.
 
 - Direct cloud SDK usage (aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go)
 - Maximum performance and control
-- Custom state management
 - Full OpenTelemetry instrumentation
 
 **[OpenTofu Edition](alternatives/opentofu/architecture/01-introduction.md)**

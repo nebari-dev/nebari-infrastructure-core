@@ -114,7 +114,7 @@
 | Design Choice                        | Rationale                                                               |
 | ------------------------------------ | ----------------------------------------------------------------------- |
 | **Native SDKs vs Terraform**         | Direct control, better error messages, faster execution, no HCL layer   |
-| **Custom State vs Terraform State**  | Simpler format, no Terraform dependency, optimized for our use case     |
+| **Stateless vs Terraform State**     | Actual Infrastruture is source of truth                                 |
 | **ArgoCD for Foundational Software** | GitOps best practices, dependency management, declarative updates       |
 | **Operator for App Registration**    | Automates repetitive tasks, reduces human error, consistent integration |
 | **LGTM Stack vs Custom**             | Industry-standard, proven at scale, unified Grafana Labs ecosystem      |

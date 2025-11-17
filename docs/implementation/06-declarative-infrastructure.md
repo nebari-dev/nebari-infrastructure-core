@@ -49,12 +49,6 @@ func Reconcile(ctx context.Context, config Config) error {
         }
     }
 
-    // 5. Update state file
-    newState := BuildState(desired, actual)
-    if err := SaveState(ctx, newState); err != nil {
-        return fmt.Errorf("saving state: %w", err)
-    }
-
     return nil
 }
 ```

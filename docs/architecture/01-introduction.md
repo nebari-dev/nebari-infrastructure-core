@@ -98,14 +98,14 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 **Key Insights Applied:**
 
-| Insight                                  | Design Impact                             |
-| ---------------------------------------- | ----------------------------------------- |
-| **Users want "batteries included"**      | Foundational software deployed by default |
-| **Auth integration is tedious**          | Operator automates OAuth client creation  |
-| **Observability is an afterthought**     | LGTM stack + OpenTelemetry built-in       |
-| **Certificate management is painful**    | cert-manager + automated ingress TLS      |
-| **Terraform state issues cause outages** | Custom state with automatic recovery      |
-| **Multi-cloud drift is real**            | Provider abstraction enforces consistency |
-| **GitOps reduces deployment errors**     | ArgoCD for all foundational components    |
+| Insight                                  | Design Impact                                         |
+| ---------------------------------------- | ----------------------------------------------------- |
+| **Users want "batteries included"**      | Foundational software deployed by default             |
+| **Auth integration is tedious**          | Operator automates OAuth client creation              |
+| **Observability is an afterthought**     | LGTM stack + OpenTelemetry built-in                   |
+| **Certificate management is painful**    | cert-manager + automated ingress TLS                  |
+| **Terraform state issues cause outages** | Stateless design uses actual infra as source of truth |
+| **Multi-cloud drift is real**            | Provider abstraction enforces consistency             |
+| **GitOps reduces deployment errors**     | ArgoCD for all foundational components                |
 
 ---

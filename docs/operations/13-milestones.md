@@ -6,7 +6,6 @@
 
 - Core NIC CLI with provider abstraction
 - AWS provider implementation
-- Custom state management
 - Basic testing infrastructure
 
 **Deliverables:**
@@ -14,7 +13,6 @@
 - ✅ NIC CLI (`deploy`, `destroy`, `status`, `validate`)
 - ✅ Provider interface and registry
 - ✅ AWS provider (EKS, VPC, EFS, node pools)
-- ✅ State management (S3 backend, DynamoDB locking)
 - ✅ Configuration parsing (config.yaml)
 - ✅ Integration tests (kind-based)
 

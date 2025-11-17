@@ -13,7 +13,6 @@ This directory contains documentation for alternative implementation approaches 
 **Key Characteristics:**
 
 - Direct API calls to AWS, GCP, Azure via native SDKs
-- Custom state management and resource discovery
 - Maximum performance and control
 - Full OpenTelemetry instrumentation
 - Single binary deployment
