@@ -83,8 +83,45 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		return err
 	}
 
-	// TODO: Handle node groups that exist in actual but not in desired
-	// For now, we don't delete node groups automatically
+	// Handle orphaned node groups (exist in actual but not in desired)
+	// These are node groups that were previously created but removed from config
+	orphanedNodeGroups := []string{}
+	for nodePoolName, actualNG := range actualNodeGroups {
+		if _, exists := cfg.AmazonWebServices.NodeGroups[nodePoolName]; !exists {
+			orphanedNodeGroups = append(orphanedNodeGroups, actualNG.Name)
+		}
+	}
+
+	if len(orphanedNodeGroups) > 0 {
+		span.SetAttributes(
+			attribute.Int("orphaned_node_groups", len(orphanedNodeGroups)),
+		)
+
+		// Delete orphaned node groups in parallel
+		g2, gctx2 := errgroup.WithContext(ctx)
+
+		for _, ngName := range orphanedNodeGroups {
+			nodeGroupName := ngName // Capture for goroutine
+
+			g2.Go(func() error {
+				span.SetAttributes(
+					attribute.String(fmt.Sprintf("orphaned_node_group.%s.action", nodeGroupName), "delete"),
+				)
+
+				err := p.deleteNodeGroup(gctx2, clients, clusterName, nodeGroupName)
+				if err != nil {
+					span.RecordError(err)
+					return fmt.Errorf("failed to delete orphaned node group %s: %w", nodeGroupName, err)
+				}
+				return nil
+			})
+		}
+
+		if err := g2.Wait(); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
 
 	span.SetAttributes(attribute.Bool("parallel_reconciliation", true))
 	return nil

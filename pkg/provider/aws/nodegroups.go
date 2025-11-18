@@ -32,46 +32,6 @@ const (
 	NodeGroupDeleteTimeout = 15 * time.Minute
 )
 
-// createNodeGroups creates all EKS node groups defined in the configuration
-// TODO: This will be called from reconcileNodeGroups() when creating new node groups
-//
-//nolint:unused
-func (p *Provider) createNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles) ([]NodeGroupState, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.createNodeGroups")
-	defer span.End()
-
-	clusterName := cfg.ProjectName
-
-	span.SetAttributes(
-		attribute.String("cluster_name", clusterName),
-		attribute.Int("node_group_count", len(cfg.AmazonWebServices.NodeGroups)),
-	)
-
-	nodeGroupStates := make([]NodeGroupState, 0, len(cfg.AmazonWebServices.NodeGroups))
-
-	// Create each node group
-	for nodeGroupName, nodeGroupConfig := range cfg.AmazonWebServices.NodeGroups {
-		span.SetAttributes(
-			attribute.String(fmt.Sprintf("node_group.%s.instance", nodeGroupName), nodeGroupConfig.Instance),
-		)
-
-		nodeGroupState, err := p.createNodeGroup(ctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
-		if err != nil {
-			span.RecordError(err)
-			return nil, fmt.Errorf("failed to create node group %s: %w", nodeGroupName, err)
-		}
-
-		nodeGroupStates = append(nodeGroupStates, *nodeGroupState)
-	}
-
-	span.SetAttributes(
-		attribute.Int("created_node_groups", len(nodeGroupStates)),
-	)
-
-	return nodeGroupStates, nil
-}
-
 // createNodeGroup creates a single EKS node group
 func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, nodeGroupName string, nodeGroupConfig config.AWSNodeGroup) (*NodeGroupState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
