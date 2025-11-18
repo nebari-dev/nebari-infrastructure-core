@@ -17,11 +17,12 @@ import (
 )
 
 // Clients holds all AWS service clients needed for infrastructure management
+// Uses interfaces to enable mocking for unit tests
 type Clients struct {
-	EC2Client *ec2.Client
-	EKSClient *eks.Client
-	IAMClient *iam.Client
-	EFSClient *efs.Client
+	EC2Client EC2ClientAPI
+	EKSClient EKSClientAPI
+	IAMClient IAMClientAPI
+	EFSClient *efs.Client // Not yet interfaced - no methods currently used
 	Config    aws.Config
 	Region    string
 }

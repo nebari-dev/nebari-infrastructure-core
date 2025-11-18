@@ -131,164 +131,158 @@ func TestConvertEKSNodeGroupToState_MinimalNodeGroup(t *testing.T) {
 	}
 }
 
-func TestCheckLabelsUpdate_NoUpdate(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
+func TestCheckLabelsUpdate(t *testing.T) {
+	tests := []struct {
+		name         string
+		desired      config.AWSNodeGroup
+		actual       *NodeGroupState
+		expectUpdate bool
+	}{
+		{
+			name: "no update when labels match",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+			},
+			actual: &NodeGroupState{
+				Labels: map[string]string{
+					"node-group": "worker",
+				},
+				Tags: map[string]string{
+					TagNodePool: "worker",
+				},
+			},
+			expectUpdate: false,
+		},
+		{
+			name: "update needed when labels are missing",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+			},
+			actual: &NodeGroupState{
+				Labels: map[string]string{},
+				Tags: map[string]string{
+					TagNodePool: "worker",
+				},
+			},
+			expectUpdate: true,
+		},
 	}
 
-	actual := &NodeGroupState{
-		Labels: map[string]string{
-			"node-group": "worker",
-		},
-		Tags: map[string]string{
-			TagNodePool: "worker",
-		},
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{}
+			needsUpdate := p.checkLabelsUpdate(tt.desired, tt.actual)
 
-	needsUpdate := p.checkLabelsUpdate(desired, actual)
-
-	if needsUpdate {
-		t.Error("Should not need update when labels match")
+			if needsUpdate != tt.expectUpdate {
+				t.Errorf("checkLabelsUpdate() = %v, want %v", needsUpdate, tt.expectUpdate)
+			}
+		})
 	}
 }
 
-func TestCheckLabelsUpdate_UpdateNeeded(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
-	}
-
-	actual := &NodeGroupState{
-		Labels: map[string]string{},
-		Tags: map[string]string{
-			TagNodePool: "worker",
+func TestCheckTaintsUpdate(t *testing.T) {
+	tests := []struct {
+		name         string
+		desired      config.AWSNodeGroup
+		actual       *NodeGroupState
+		expectUpdate bool
+	}{
+		{
+			name: "no update when both have no taints",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+				Taints:   []config.Taint{},
+			},
+			actual: &NodeGroupState{
+				Taints: []Taint{},
+			},
+			expectUpdate: false,
+		},
+		{
+			name: "no update when taints match",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+				Taints: []config.Taint{
+					{
+						Key:    "dedicated",
+						Value:  "worker",
+						Effect: "NoSchedule",
+					},
+				},
+			},
+			actual: &NodeGroupState{
+				Taints: []Taint{
+					{
+						Key:    "dedicated",
+						Value:  "worker",
+						Effect: "NoSchedule",
+					},
+				},
+			},
+			expectUpdate: false,
+		},
+		{
+			name: "update needed when taints don't match",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+				Taints: []config.Taint{
+					{
+						Key:    "dedicated",
+						Value:  "worker",
+						Effect: "NoSchedule",
+					},
+				},
+			},
+			actual: &NodeGroupState{
+				Taints: []Taint{
+					{
+						Key:    "dedicated",
+						Value:  "gpu",
+						Effect: "NoSchedule",
+					},
+				},
+			},
+			expectUpdate: true,
+		},
+		{
+			name: "update needed when taint counts differ",
+			desired: config.AWSNodeGroup{
+				Instance: "m5.large",
+				Taints: []config.Taint{
+					{
+						Key:    "taint1",
+						Value:  "value1",
+						Effect: "NoSchedule",
+					},
+					{
+						Key:    "taint2",
+						Value:  "value2",
+						Effect: "NoExecute",
+					},
+				},
+			},
+			actual: &NodeGroupState{
+				Taints: []Taint{
+					{
+						Key:    "taint1",
+						Value:  "value1",
+						Effect: "NoSchedule",
+					},
+				},
+			},
+			expectUpdate: true,
 		},
 	}
 
-	needsUpdate := p.checkLabelsUpdate(desired, actual)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{}
+			needsUpdate := p.checkTaintsUpdate(tt.desired, tt.actual)
 
-	if !needsUpdate {
-		t.Error("Should need update when labels are missing")
-	}
-}
-
-func TestCheckTaintsUpdate_NoTaints(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
-		Taints:   []config.Taint{},
-	}
-
-	actual := &NodeGroupState{
-		Taints: []Taint{},
-	}
-
-	needsUpdate := p.checkTaintsUpdate(desired, actual)
-
-	if needsUpdate {
-		t.Error("Should not need update when both have no taints")
-	}
-}
-
-func TestCheckTaintsUpdate_TaintsMatch(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
-		Taints: []config.Taint{
-			{
-				Key:    "dedicated",
-				Value:  "worker",
-				Effect: "NoSchedule",
-			},
-		},
-	}
-
-	actual := &NodeGroupState{
-		Taints: []Taint{
-			{
-				Key:    "dedicated",
-				Value:  "worker",
-				Effect: "NoSchedule",
-			},
-		},
-	}
-
-	needsUpdate := p.checkTaintsUpdate(desired, actual)
-
-	if needsUpdate {
-		t.Error("Should not need update when taints match")
-	}
-}
-
-func TestCheckTaintsUpdate_TaintsMismatch(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
-		Taints: []config.Taint{
-			{
-				Key:    "dedicated",
-				Value:  "worker",
-				Effect: "NoSchedule",
-			},
-		},
-	}
-
-	actual := &NodeGroupState{
-		Taints: []Taint{
-			{
-				Key:    "dedicated",
-				Value:  "gpu",
-				Effect: "NoSchedule",
-			},
-		},
-	}
-
-	needsUpdate := p.checkTaintsUpdate(desired, actual)
-
-	if !needsUpdate {
-		t.Error("Should need update when taints don't match")
-	}
-}
-
-func TestCheckTaintsUpdate_DifferentCount(t *testing.T) {
-	p := &Provider{}
-
-	desired := config.AWSNodeGroup{
-		Instance: "m5.large",
-		Taints: []config.Taint{
-			{
-				Key:    "taint1",
-				Value:  "value1",
-				Effect: "NoSchedule",
-			},
-			{
-				Key:    "taint2",
-				Value:  "value2",
-				Effect: "NoExecute",
-			},
-		},
-	}
-
-	actual := &NodeGroupState{
-		Taints: []Taint{
-			{
-				Key:    "taint1",
-				Value:  "value1",
-				Effect: "NoSchedule",
-			},
-		},
-	}
-
-	needsUpdate := p.checkTaintsUpdate(desired, actual)
-
-	if !needsUpdate {
-		t.Error("Should need update when taint counts differ")
+			if needsUpdate != tt.expectUpdate {
+				t.Errorf("checkTaintsUpdate() = %v, want %v", needsUpdate, tt.expectUpdate)
+			}
+		})
 	}
 }
 
