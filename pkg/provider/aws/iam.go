@@ -132,6 +132,8 @@ func (p *Provider) discoverIAMRole(ctx context.Context, clients *Clients, roleNa
 }
 
 // ensureIAMRoles discovers existing IAM roles or creates them if they don't exist
+// Note: Pure orchestration function - delegates to discoverIAMRoles() or createIAMRoles().
+// Unit test coverage via helper functions.
 func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, clusterName string) (*IAMRoles, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.ensureIAMRoles")

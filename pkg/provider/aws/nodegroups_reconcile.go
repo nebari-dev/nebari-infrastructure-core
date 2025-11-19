@@ -14,6 +14,8 @@ import (
 )
 
 // reconcileNodeGroups reconciles desired node group configuration with actual state
+// Note: Pure orchestration function - delegates to createNodeGroup() and reconcileNodeGroup().
+// Unit test coverage via helper functions.
 func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, actual []NodeGroupState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.reconcileNodeGroups")
@@ -128,6 +130,8 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 }
 
 // reconcileNodeGroup reconciles a single node group
+// Note: Pure orchestration function - delegates to update functions based on diffs.
+// Unit test coverage via helper functions (checkLabelsUpdate, checkTaintsUpdate, updateNodeGroupScaling).
 func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, nodeGroupName string, desired config.AWSNodeGroup, actual *NodeGroupState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.reconcileNodeGroup")

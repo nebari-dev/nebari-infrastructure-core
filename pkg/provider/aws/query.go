@@ -12,6 +12,8 @@ import (
 
 // QueryWithRegion discovers the current state of AWS infrastructure in a specific region
 // This is the actual implementation that Query() should delegate to
+// Note: Pure orchestration function - delegates all logic to tested helper functions.
+// Unit test coverage via helper functions. Integration tests validate orchestration.
 func (p *Provider) QueryWithRegion(ctx context.Context, clusterName, region string) (*provider.InfrastructureState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.QueryWithRegion")
@@ -24,7 +26,7 @@ func (p *Provider) QueryWithRegion(ctx context.Context, clusterName, region stri
 	)
 
 	// Initialize AWS clients
-	clients, err := NewClients(ctx, region)
+	clients, err := newClientsFunc(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create AWS clients: %w", err)

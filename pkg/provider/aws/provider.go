@@ -200,6 +200,8 @@ func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.Inf
 }
 
 // Reconcile reconciles AWS infrastructure state using stateless discovery
+// Note: Pure orchestration function - delegates all logic to tested helper functions.
+// Unit test coverage via helper functions. Integration tests validate orchestration.
 func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Reconcile")
@@ -221,7 +223,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 	)
 
 	// Initialize AWS clients
-	clients, err := NewClients(ctx, region)
+	clients, err := newClientsFunc(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create AWS clients: %w", err)
@@ -310,6 +312,8 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 }
 
 // Destroy tears down AWS infrastructure in reverse order
+// Note: Pure orchestration function - delegates all logic to tested helper functions.
+// Unit test coverage via helper functions. Integration tests validate orchestration.
 func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Destroy")
@@ -325,7 +329,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	)
 
 	// Initialize AWS clients
-	clients, err := NewClients(ctx, region)
+	clients, err := newClientsFunc(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create AWS clients: %w", err)

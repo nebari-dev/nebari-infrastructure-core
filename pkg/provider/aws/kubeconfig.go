@@ -72,6 +72,8 @@ type Kubeconfig struct {
 }
 
 // GetKubeconfigWithRegion generates a kubeconfig file for the EKS cluster in a specific region
+// Note: Thin wrapper that creates clients and delegates to generateKubeconfig().
+// Unit test coverage via generateKubeconfig().
 func (p *Provider) GetKubeconfigWithRegion(ctx context.Context, clusterName, region string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.GetKubeconfigWithRegion")
@@ -83,7 +85,7 @@ func (p *Provider) GetKubeconfigWithRegion(ctx context.Context, clusterName, reg
 	)
 
 	// Initialize AWS clients
-	clients, err := NewClients(ctx, region)
+	clients, err := newClientsFunc(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create AWS clients: %w", err)
@@ -93,6 +95,8 @@ func (p *Provider) GetKubeconfigWithRegion(ctx context.Context, clusterName, reg
 }
 
 // generateKubeconfig generates a kubeconfig file for the EKS cluster
+// Note: Pure orchestration function - delegates to DiscoverCluster() and formats YAML.
+// Unit test coverage via DiscoverCluster().
 func (p *Provider) generateKubeconfig(ctx context.Context, clients *Clients, clusterName string, region string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.GetKubeconfig")

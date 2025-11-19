@@ -27,6 +27,10 @@ type Clients struct {
 	Region    string
 }
 
+// newClientsFunc is a variable that holds the NewClients function
+// This allows tests to override client creation for mocking
+var newClientsFunc = NewClients
+
 // NewClients creates and initializes all AWS service clients
 // Credentials are loaded from environment variables or AWS config files
 func NewClients(ctx context.Context, region string) (*Clients, error) {
