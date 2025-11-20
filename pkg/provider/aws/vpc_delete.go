@@ -3,6 +3,8 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -27,20 +29,14 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 
 	// Discover the VPC first
 	vpc, err := p.DiscoverVPC(ctx, clients, clusterName)
-	if err != nil {
-		// VPC doesn't exist - nothing to delete
+	if err != nil || vpc == nil {
+		// VPC doesn't exist - but we should still clean up orphaned EIPs
 		span.SetAttributes(attribute.Bool("vpc_exists", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found").
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found, checking for orphaned resources").
 			WithResource("vpc"))
-		return nil
-	}
 
-	if vpc == nil {
-		// VPC doesn't exist - nothing to delete
-		span.SetAttributes(attribute.Bool("vpc_exists", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found").
-			WithResource("vpc"))
-		return nil
+		// Clean up any orphaned EIPs even if VPC is gone
+		return p.cleanupOrphanedEIPs(ctx, clients, clusterName)
 	}
 
 	vpcID := vpc.VPCID
@@ -64,7 +60,7 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 	// 7. VPC
 
 	// 1. Delete NAT Gateways
-	if err := p.deleteNATGateways(ctx, clients, vpcID); err != nil {
+	if err := p.deleteNATGateways(ctx, clients, vpcID, clusterName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete NAT gateways: %w", err)
 	}
@@ -113,24 +109,130 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 	return nil
 }
 
-// deleteNATGateways deletes all NAT gateways in the VPC
-func (p *Provider) deleteNATGateways(ctx context.Context, clients *Clients, vpcID string) error {
+// cleanupOrphanedEIPs finds and releases any EIPs tagged with this cluster that have no associations
+// This is useful for cleaning up EIPs when the VPC/NAT Gateways are already deleted
+func (p *Provider) cleanupOrphanedEIPs(ctx context.Context, clients *Clients, clusterName string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.cleanupOrphanedEIPs")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	// Query all EIPs for this cluster
+	allClusterEIPs, err := clients.EC2Client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{
+		Filters: []types.Filter{
+			{
+				Name:   strPtr("domain"),
+				Values: []string{"vpc"},
+			},
+			{
+				Name:   strPtr("tag:nic.nebari.dev/cluster-name"),
+				Values: []string{clusterName},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to describe cluster EIPs: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("total_cluster_eips_found", len(allClusterEIPs.Addresses)))
+
+	if len(allClusterEIPs.Addresses) == 0 {
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "No orphaned EIPs found").
+			WithResource("eip"))
+		return nil
+	}
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Releasing orphaned Elastic IPs").
+		WithResource("eip").
+		WithAction("releasing").
+		WithMetadata("count", len(allClusterEIPs.Addresses)))
+
+	// Release all unassociated EIPs
+	eipsReleased := 0
+	eipsSkipped := 0
+
+	for _, addr := range allClusterEIPs.Addresses {
+		// Skip EIPs that are still associated with something
+		if addr.AssociationId != nil {
+			eipsSkipped++
+			span.SetAttributes(attribute.String(fmt.Sprintf("eip_skipped.%s", *addr.AllocationId), "still_associated"))
+			continue
+		}
+
+		// Release EIP
+		if addr.AllocationId != nil {
+			_, err := clients.EC2Client.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
+				AllocationId: addr.AllocationId,
+			})
+			if err != nil {
+				span.RecordError(err)
+				span.SetAttributes(attribute.String(fmt.Sprintf("eip_release_error.%s", *addr.AllocationId), err.Error()))
+				// Continue trying to release other EIPs
+			} else {
+				eipsReleased++
+				span.SetAttributes(attribute.String(fmt.Sprintf("eip_released.%s", *addr.AllocationId), *addr.AllocationId))
+			}
+		}
+	}
+
+	span.SetAttributes(
+		attribute.Int("eips_released", eipsReleased),
+		attribute.Int("eips_skipped", eipsSkipped),
+	)
+
+	if eipsReleased > 0 {
+		status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
+			WithResource("eip").
+			WithAction("released").
+			WithMetadata("count", eipsReleased))
+	}
+
+	return nil
+}
+
+// deleteNATGateways deletes all NAT gateways in the VPC and releases associated EIPs
+func (p *Provider) deleteNATGateways(ctx context.Context, clients *Clients, vpcID string, clusterName string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.deleteNATGateways")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("vpc_id", vpcID))
+	span.SetAttributes(
+		attribute.String("vpc_id", vpcID),
+		attribute.String("cluster_name", clusterName),
+	)
+
+	// Step 0: Query ALL EIPs for this cluster first (including orphaned ones)
+	// This must be done BEFORE deleting NAT Gateways because AWS stops returning
+	// EIP allocation IDs once a NAT Gateway transitions to "deleted" state
+	allClusterEIPs, err := clients.EC2Client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{
+		Filters: []types.Filter{
+			{
+				Name:   strPtr("domain"),
+				Values: []string{"vpc"},
+			},
+			{
+				Name:   strPtr("tag:nic.nebari.dev/cluster-name"),
+				Values: []string{clusterName},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to describe cluster EIPs: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("total_cluster_eips_found", len(allClusterEIPs.Addresses)))
 
 	// Describe NAT gateways in this VPC
+	// Note: Don't filter by state - we want to find ALL NAT Gateways in this VPC
+	// including those in "available", "pending", "failed", or even "deleting" states
 	output, err := clients.EC2Client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{
 		Filter: []types.Filter{
 			{
 				Name:   strPtr("vpc-id"),
 				Values: []string{vpcID},
-			},
-			{
-				Name:   strPtr("state"),
-				Values: []string{"available", "pending"},
 			},
 		},
 	})
@@ -139,40 +241,97 @@ func (p *Provider) deleteNATGateways(ctx context.Context, clients *Clients, vpcI
 		return fmt.Errorf("failed to describe NAT gateways: %w", err)
 	}
 
-	if len(output.NatGateways) == 0 {
+	span.SetAttributes(attribute.Int("nat_gateways_found", len(output.NatGateways)))
+
+	if len(output.NatGateways) == 0 && len(allClusterEIPs.Addresses) == 0 {
 		span.SetAttributes(attribute.Int("nat_gateways_deleted", 0))
 		return nil
 	}
 
-	span.SetAttributes(attribute.Int("nat_gateways_to_delete", len(output.NatGateways)))
+	// Step 1: Initiate NAT Gateway deletions
+	natGatewayIDs := make([]string, 0, len(output.NatGateways))
 
-	// Delete each NAT gateway
 	for _, ng := range output.NatGateways {
 		natGatewayID := *ng.NatGatewayId
+		state := string(ng.State)
 
+		span.SetAttributes(attribute.String(fmt.Sprintf("nat_gateway.%s.state", natGatewayID), state))
+
+		// Skip deletion if NAT Gateway is already deleted
+		if state == "deleted" {
+			continue
+		}
+
+		// Skip deletion if NAT Gateway is already being deleted, but track it for waiting
+		if state == "deleting" {
+			natGatewayIDs = append(natGatewayIDs, natGatewayID)
+			continue
+		}
+
+		natGatewayIDs = append(natGatewayIDs, natGatewayID)
+
+		// Initiate deletion
 		_, err := clients.EC2Client.DeleteNatGateway(ctx, &ec2.DeleteNatGatewayInput{
 			NatGatewayId: &natGatewayID,
 		})
 		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to delete NAT gateway %s: %w", natGatewayID, err)
-		}
-
-		// Release associated Elastic IPs after NAT gateway deletion
-		for _, addr := range ng.NatGatewayAddresses {
-			if addr.AllocationId != nil {
-				_, err := clients.EC2Client.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
-					AllocationId: addr.AllocationId,
-				})
-				if err != nil {
-					// Log but don't fail - EIP might already be released
-					span.RecordError(err)
-				}
+			// If deletion fails because it's already being deleted, that's OK
+			if !strings.Contains(err.Error(), "NatGatewayNotFound") {
+				span.RecordError(err)
+				return fmt.Errorf("failed to delete NAT gateway %s: %w", natGatewayID, err)
 			}
 		}
 	}
 
-	span.SetAttributes(attribute.Int("nat_gateways_deleted", len(output.NatGateways)))
+	span.SetAttributes(attribute.Int("nat_gateways_to_delete", len(natGatewayIDs)))
+
+	// Step 2: Wait for all NAT Gateways to be deleted
+	for _, natGatewayID := range natGatewayIDs {
+		waiter := ec2.NewNatGatewayDeletedWaiter(clients.EC2Client)
+		err := waiter.Wait(ctx, &ec2.DescribeNatGatewaysInput{
+			NatGatewayIds: []string{natGatewayID},
+		}, 10*time.Minute) // NAT Gateway deletion can take up to 10 minutes
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed waiting for NAT gateway %s deletion: %w", natGatewayID, err)
+		}
+	}
+
+	// Step 3: Release ALL cluster EIPs (both from NAT Gateways and orphaned ones)
+	// We release all EIPs we found in Step 0, not just ones from NAT Gateways
+	// This ensures we clean up EIPs even if their NAT Gateway is already deleted
+	eipsReleased := 0
+	eipsSkipped := 0
+
+	for _, addr := range allClusterEIPs.Addresses {
+		// Skip EIPs that are still associated with something
+		if addr.AssociationId != nil {
+			eipsSkipped++
+			span.SetAttributes(attribute.String(fmt.Sprintf("eip_skipped.%s", *addr.AllocationId), "still_associated"))
+			continue
+		}
+
+		// Release EIP
+		if addr.AllocationId != nil {
+			_, err := clients.EC2Client.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
+				AllocationId: addr.AllocationId,
+			})
+			if err != nil {
+				span.RecordError(err)
+				span.SetAttributes(attribute.String(fmt.Sprintf("eip_release_error.%s", *addr.AllocationId), err.Error()))
+				// Continue trying to release other EIPs
+			} else {
+				eipsReleased++
+				span.SetAttributes(attribute.String(fmt.Sprintf("eip_released.%s", *addr.AllocationId), *addr.AllocationId))
+			}
+		}
+	}
+
+	span.SetAttributes(
+		attribute.Int("nat_gateways_deleted", len(natGatewayIDs)),
+		attribute.Int("total_eips_released", eipsReleased),
+		attribute.Int("eips_skipped", eipsSkipped),
+	)
 
 	return nil
 }

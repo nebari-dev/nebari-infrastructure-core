@@ -32,6 +32,12 @@ func TestDeleteVPC(t *testing.T) {
 						Vpcs: []types.Vpc{},
 					}, nil
 				}
+				// Mock cleanup orphaned EIPs - no EIPs found
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{},
+					}, nil
+				}
 			},
 			expectError: false,
 		},
@@ -79,28 +85,50 @@ func TestDeleteNATGateways(t *testing.T) {
 	tests := []struct {
 		name        string
 		vpcID       string
+		clusterName string
 		mockSetup   func(*MockEC2Client)
 		expectError bool
 		errorMsg    string
 	}{
 		{
-			name:  "successful deletion of NAT gateways with EIPs",
-			vpcID: "vpc-123",
+			name:        "successful deletion of NAT gateways with EIPs",
+			vpcID:       "vpc-123",
+			clusterName: "test-cluster",
 			mockSetup: func(m *MockEC2Client) {
+				callCount := 0
 				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					callCount++
+					// First call: return NAT Gateways in "available" state
+					if callCount == 1 {
+						return &ec2.DescribeNatGatewaysOutput{
+							NatGateways: []types.NatGateway{
+								{
+									NatGatewayId: aws.String("nat-123"),
+									State:        types.NatGatewayStateAvailable,
+									NatGatewayAddresses: []types.NatGatewayAddress{
+										{AllocationId: aws.String("eipalloc-123")},
+									},
+								},
+								{
+									NatGatewayId: aws.String("nat-456"),
+									State:        types.NatGatewayStateAvailable,
+									NatGatewayAddresses: []types.NatGatewayAddress{
+										{AllocationId: aws.String("eipalloc-456")},
+									},
+								},
+							},
+						}, nil
+					}
+					// Subsequent calls (for waiter): return "deleted" state
 					return &ec2.DescribeNatGatewaysOutput{
 						NatGateways: []types.NatGateway{
 							{
 								NatGatewayId: aws.String("nat-123"),
-								NatGatewayAddresses: []types.NatGatewayAddress{
-									{AllocationId: aws.String("eipalloc-123")},
-								},
+								State:        types.NatGatewayStateDeleted,
 							},
 							{
 								NatGatewayId: aws.String("nat-456"),
-								NatGatewayAddresses: []types.NatGatewayAddress{
-									{AllocationId: aws.String("eipalloc-456")},
-								},
+								State:        types.NatGatewayStateDeleted,
 							},
 						},
 					}, nil
@@ -111,25 +139,53 @@ func TestDeleteNATGateways(t *testing.T) {
 				m.ReleaseAddressFunc = func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
 					return &ec2.ReleaseAddressOutput{}, nil
 				}
-			},
-			expectError: false,
-		},
-		{
-			name:  "no NAT gateways - no error",
-			vpcID: "vpc-123",
-			mockSetup: func(m *MockEC2Client) {
-				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
-					return &ec2.DescribeNatGatewaysOutput{
-						NatGateways: []types.NatGateway{},
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					// Return no orphaned EIPs
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{},
 					}, nil
 				}
 			},
 			expectError: false,
 		},
 		{
-			name:  "error describing NAT gateways",
-			vpcID: "vpc-123",
+			name:        "no NAT gateways - no error",
+			vpcID:       "vpc-123",
+			clusterName: "test-cluster",
 			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return &ec2.DescribeNatGatewaysOutput{
+						NatGateways: []types.NatGateway{},
+					}, nil
+				}
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{},
+					}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:        "error describing cluster EIPs",
+			vpcID:       "vpc-123",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return nil, fmt.Errorf("AccessDenied: Not authorized")
+				}
+			},
+			expectError: true,
+			errorMsg:    "failed to describe cluster EIPs",
+		},
+		{
+			name:        "error describing NAT gateways",
+			vpcID:       "vpc-123",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{Addresses: []types.Address{}}, nil
+				}
 				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
 					return nil, fmt.Errorf("AccessDenied: Not authorized")
 				}
@@ -151,7 +207,7 @@ func TestDeleteNATGateways(t *testing.T) {
 
 			p := NewProvider()
 			ctx := context.Background()
-			err := p.deleteNATGateways(ctx, clients, tt.vpcID)
+			err := p.deleteNATGateways(ctx, clients, tt.vpcID, tt.clusterName)
 
 			if tt.expectError {
 				if err == nil {

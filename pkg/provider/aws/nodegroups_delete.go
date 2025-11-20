@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -10,6 +11,16 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
 )
+
+// isResourceNotFound checks if an error is a ResourceNotFoundException from AWS
+func isResourceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for ResourceNotFoundException in error message
+	return strings.Contains(err.Error(), "ResourceNotFoundException") ||
+		strings.Contains(err.Error(), "404")
+}
 
 // deleteNodeGroups deletes all node groups for a cluster
 func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clusterName string) error {
@@ -28,6 +39,13 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 
 	nodeGroups, err := p.DiscoverNodeGroups(ctx, clients, clusterName)
 	if err != nil {
+		// Check if cluster doesn't exist - that's OK, nothing to delete
+		if isResourceNotFound(err) {
+			span.SetAttributes(attribute.Bool("cluster_not_found", true))
+			status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "Cluster not found, no node groups to delete").
+				WithResource("node-group"))
+			return nil
+		}
 		span.RecordError(err)
 		return fmt.Errorf("failed to discover node groups: %w", err)
 	}

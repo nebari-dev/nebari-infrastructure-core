@@ -131,6 +131,7 @@ type MockEC2Client struct {
 	ModifySubnetAttributeFunc         func(ctx context.Context, params *ec2.ModifySubnetAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error)
 	ModifyVpcAttributeFunc            func(ctx context.Context, params *ec2.ModifyVpcAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error)
 	ReleaseAddressFunc                func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error)
+	DescribeAddressesFunc             func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error)
 }
 
 func (m *MockEC2Client) AllocateAddress(ctx context.Context, params *ec2.AllocateAddressInput, optFns ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
@@ -370,6 +371,13 @@ func (m *MockEC2Client) ReleaseAddress(ctx context.Context, params *ec2.ReleaseA
 		return m.ReleaseAddressFunc(ctx, params, optFns...)
 	}
 	return nil, fmt.Errorf("ReleaseAddressFunc not implemented")
+}
+
+func (m *MockEC2Client) DescribeAddresses(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+	if m.DescribeAddressesFunc != nil {
+		return m.DescribeAddressesFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("DescribeAddressesFunc not implemented")
 }
 
 // MockIAMClient is a mock implementation of IAMClientAPI for testing
