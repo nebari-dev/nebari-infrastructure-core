@@ -744,8 +744,12 @@ func (p *Provider) configureClusterSecurityGroupRules(ctx context.Context, clien
 		IpPermissions: ingressRules,
 	})
 	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("AuthorizeSecurityGroupIngress failed: %w", err)
+		// If the rule already exists, that's fine - treat as success (idempotent)
+		if !strings.Contains(err.Error(), "InvalidPermission.Duplicate") {
+			span.RecordError(err)
+			return fmt.Errorf("AuthorizeSecurityGroupIngress failed: %w", err)
+		}
+		span.SetAttributes(attribute.Bool("ingress_rule_already_exists", true))
 	}
 
 	// Egress rules: Allow all outbound traffic (required for NAT gateway, pulling images, etc.)
@@ -766,8 +770,13 @@ func (p *Provider) configureClusterSecurityGroupRules(ctx context.Context, clien
 		IpPermissions: egressRules,
 	})
 	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("AuthorizeSecurityGroupEgress failed: %w", err)
+		// AWS automatically creates a default egress rule (allow all to 0.0.0.0/0)
+		// If the rule already exists, that's fine - treat as success
+		if !strings.Contains(err.Error(), "InvalidPermission.Duplicate") {
+			span.RecordError(err)
+			return fmt.Errorf("AuthorizeSecurityGroupEgress failed: %w", err)
+		}
+		span.SetAttributes(attribute.Bool("egress_rule_already_exists", true))
 	}
 
 	return nil

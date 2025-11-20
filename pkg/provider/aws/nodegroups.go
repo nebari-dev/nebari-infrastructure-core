@@ -141,16 +141,9 @@ func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *c
 		createInput.Taints = eksTaints
 	}
 
-	// Attach cluster security group to nodes for cluster-node communication
-	// This is critical for private endpoint access where nodes must be able to reach the control plane
-	if len(vpc.SecurityGroupIDs) > 0 {
-		createInput.RemoteAccess = &ekstypes.RemoteAccessConfig{
-			SourceSecurityGroups: vpc.SecurityGroupIDs,
-		}
-		span.SetAttributes(
-			attribute.StringSlice("security_groups", vpc.SecurityGroupIDs),
-		)
-	}
+	// Note: Security groups are automatically applied to nodes through the VPC/subnet configuration
+	// We don't need to set RemoteAccess unless SSH access is explicitly required
+	// The cluster security group allows node-to-node and node-to-control-plane communication
 
 	// Create the node group
 	createOutput, err := clients.EKSClient.CreateNodegroup(ctx, createInput)
