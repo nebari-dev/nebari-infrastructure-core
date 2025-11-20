@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
@@ -21,6 +22,10 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 	)
 
 	// Discover all node groups for this cluster
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Discovering node groups").
+		WithResource("node-group").
+		WithAction("discovering"))
+
 	nodeGroups, err := p.DiscoverNodeGroups(ctx, clients, clusterName)
 	if err != nil {
 		span.RecordError(err)
@@ -29,10 +34,16 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 
 	if len(nodeGroups) == 0 {
 		span.SetAttributes(attribute.Int("node_groups_deleted", 0))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "No node groups to delete").
+			WithResource("node-group"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Int("node_groups_to_delete", len(nodeGroups)))
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting node groups").
+		WithResource("node-group").
+		WithAction("deleting").
+		WithMetadata("count", len(nodeGroups)))
 
 	// Delete node groups in parallel using errgroup
 	g, gctx := errgroup.WithContext(ctx)
@@ -56,6 +67,11 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 		attribute.Bool("parallel_deletion", true),
 	)
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Node groups deleted").
+		WithResource("node-group").
+		WithAction("deleted").
+		WithMetadata("count", len(nodeGroups)))
+
 	return nil
 }
 
@@ -69,6 +85,11 @@ func (p *Provider) deleteNodeGroup(ctx context.Context, clients *Clients, cluste
 		attribute.String("cluster_name", clusterName),
 		attribute.String("node_group_name", nodeGroupName),
 	)
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting node group").
+		WithResource("node-group").
+		WithAction("deleting").
+		WithMetadata("node_group", nodeGroupName))
 
 	// Initiate deletion
 	_, err := clients.EKSClient.DeleteNodegroup(ctx, &eks.DeleteNodegroupInput{
@@ -95,6 +116,11 @@ func (p *Provider) deleteNodeGroup(ctx context.Context, clients *Clients, cluste
 	}
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Node group deleted").
+		WithResource("node-group").
+		WithAction("deleted").
+		WithMetadata("node_group", nodeGroupName))
 
 	return nil
 }

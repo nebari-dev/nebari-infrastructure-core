@@ -81,6 +81,7 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(deployCmd)
+	rootCmd.AddCommand(destroyCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(versionCmd)
 }

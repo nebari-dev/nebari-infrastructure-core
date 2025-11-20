@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -19,21 +20,34 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 		attribute.String("cluster_name", clusterName),
 	)
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking EKS cluster").
+		WithResource("eks-cluster").
+		WithAction("discovering"))
+
 	// Try to discover the cluster first
 	cluster, err := p.DiscoverCluster(ctx, clients, clusterName)
 	if err != nil {
 		// Cluster doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("cluster_exists", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "EKS cluster not found").
+			WithResource("eks-cluster"))
 		return nil
 	}
 
 	if cluster == nil {
 		// Cluster doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("cluster_exists", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "EKS cluster not found").
+			WithResource("eks-cluster"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("cluster_exists", true))
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting EKS cluster").
+		WithResource("eks-cluster").
+		WithAction("deleting").
+		WithMetadata("cluster_name", clusterName))
 
 	// Initiate deletion
 	_, err = clients.EKSClient.DeleteCluster(ctx, &eks.DeleteClusterInput{
@@ -58,6 +72,11 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 	}
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "EKS cluster deleted").
+		WithResource("eks-cluster").
+		WithAction("deleted").
+		WithMetadata("cluster_name", clusterName))
 
 	return nil
 }

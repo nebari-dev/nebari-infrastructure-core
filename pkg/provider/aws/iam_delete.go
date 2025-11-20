@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -19,21 +20,33 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 		attribute.String("cluster_name", clusterName),
 	)
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking IAM roles").
+		WithResource("iam-role").
+		WithAction("discovering"))
+
 	// Try to discover existing roles first
 	iamRoles, err := p.discoverIAMRoles(ctx, clients, clusterName)
 	if err != nil {
 		// Roles don't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("roles_exist", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "IAM roles not found").
+			WithResource("iam-role"))
 		return nil
 	}
 
 	if iamRoles == nil {
 		// Roles don't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("roles_exist", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "IAM roles not found").
+			WithResource("iam-role"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("roles_exist", true))
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting IAM roles").
+		WithResource("iam-role").
+		WithAction("deleting"))
 
 	rolesDeleted := 0
 
@@ -61,6 +74,11 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 		attribute.Int("roles_deleted", rolesDeleted),
 		attribute.Bool("deletion_complete", true),
 	)
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "IAM roles deleted").
+		WithResource("iam-role").
+		WithAction("deleted").
+		WithMetadata("count", rolesDeleted))
 
 	return nil
 }

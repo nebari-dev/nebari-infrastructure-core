@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -20,17 +21,25 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 		attribute.String("cluster_name", clusterName),
 	)
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking VPC").
+		WithResource("vpc").
+		WithAction("discovering"))
+
 	// Discover the VPC first
 	vpc, err := p.DiscoverVPC(ctx, clients, clusterName)
 	if err != nil {
 		// VPC doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("vpc_exists", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found").
+			WithResource("vpc"))
 		return nil
 	}
 
 	if vpc == nil {
 		// VPC doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("vpc_exists", false))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found").
+			WithResource("vpc"))
 		return nil
 	}
 
@@ -39,6 +48,11 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 		attribute.Bool("vpc_exists", true),
 		attribute.String("vpc_id", vpcID),
 	)
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting VPC and networking resources").
+		WithResource("vpc").
+		WithAction("deleting").
+		WithMetadata("vpc_id", vpcID))
 
 	// Delete resources in correct order to respect dependencies:
 	// 1. NAT Gateways (release Elastic IPs)
@@ -90,6 +104,11 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 	}
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC and networking resources deleted").
+		WithResource("vpc").
+		WithAction("deleted").
+		WithMetadata("vpc_id", vpcID))
 
 	return nil
 }

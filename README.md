@@ -29,6 +29,9 @@ go build -o nic ./cmd/nic
 
 # Deploy infrastructure
 ./nic deploy -f config.yaml
+
+# Destroy infrastructure
+./nic destroy -f config.yaml
 ```
 
 ## Commands
@@ -55,6 +58,35 @@ Validate configuration file without deploying.
 Options:
 - `-f, --file`: Path to config.yaml file (required)
 
+### `nic destroy`
+
+Destroy all infrastructure resources in reverse order of creation.
+
+```bash
+./nic destroy -f <config-file>
+```
+
+Options:
+- `-f, --file`: Path to config.yaml file (required)
+- `--auto-approve`: Skip confirmation prompt and destroy immediately
+- `--dry-run`: Show what would be destroyed without actually deleting
+- `--force`: Continue destruction even if some resources fail to delete
+- `--timeout`: Override default timeout (e.g., '45m', '1h')
+
+**WARNING**: This operation is destructive and cannot be undone. By default, you will be prompted to confirm before destruction begins.
+
+Example with dry-run:
+```bash
+# Preview what would be destroyed
+./nic destroy -f config.yaml --dry-run
+
+# Destroy with confirmation prompt
+./nic destroy -f config.yaml
+
+# Destroy without confirmation
+./nic destroy -f config.yaml --auto-approve
+```
+
 ### `nic version`
 
 Show version information and registered providers.
@@ -78,19 +110,22 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 
 ### Environment Variables
 
-- `OTEL_EXPORTER`: Exporter type (default: "console")
-  - `console` - Export traces to stdout (development)
+- `OTEL_EXPORTER`: Exporter type (default: "none")
+  - `none` - Disable trace export (traces still collected, default for production)
+  - `console` - Export traces to stdout (development/debugging)
   - `otlp` - Export to OTLP endpoint
   - `both` - Export to both console and OTLP
-  - `none` - Disable trace export (traces still collected)
 
 - `OTEL_ENDPOINT`: OTLP endpoint (default: "localhost:4317")
 
 ### Examples
 
 ```bash
-# Console traces (default)
+# No trace export (default - production use)
 ./nic deploy -f config.yaml
+
+# Console traces (debugging)
+OTEL_EXPORTER=console ./nic deploy -f config.yaml
 
 # OTLP traces
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
