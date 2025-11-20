@@ -53,6 +53,9 @@ type VPCState struct {
 	// Security group IDs
 	SecurityGroupIDs []string
 
+	// VPC Endpoint IDs (for private clusters)
+	VPCEndpointIDs []string
+
 	// VPC tags
 	Tags map[string]string
 }

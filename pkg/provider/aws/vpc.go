@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 const (
@@ -66,6 +67,12 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 		attribute.StringSlice("availability_zones", azs),
 	)
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating VPC").
+		WithResource("vpc").
+		WithAction("creating").
+		WithMetadata("cidr", vpcCIDR).
+		WithMetadata("availability_zones", len(azs)))
+
 	// Step 1: Create VPC
 	vpcState := &VPCState{
 		CIDR:              vpcCIDR,
@@ -79,6 +86,11 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.VPCID = *vpc.VpcId
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC created").
+		WithResource("vpc").
+		WithAction("created").
+		WithMetadata("vpc_id", vpcState.VPCID))
+
 	// Step 2: Enable DNS hostnames and DNS support
 	if err := p.enableVPCDNS(ctx, clients, vpcState.VPCID); err != nil {
 		span.RecordError(err)
@@ -86,6 +98,10 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 
 	// Step 3: Create Internet Gateway
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating internet gateway").
+		WithResource("internet-gateway").
+		WithAction("creating"))
+
 	igwID, err := p.createInternetGateway(ctx, clients, clusterName, vpcState.VPCID, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
@@ -94,6 +110,11 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	vpcState.InternetGatewayID = igwID
 
 	// Step 4: Create public and private subnets
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating subnets").
+		WithResource("subnet").
+		WithAction("creating").
+		WithMetadata("az_count", len(azs)))
+
 	publicSubnets, err := p.createSubnets(ctx, clients, clusterName, vpcState.VPCID, vpcCIDR, azs, true, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
@@ -109,6 +130,11 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	vpcState.PrivateSubnetIDs = privateSubnets
 
 	// Step 5: Create NAT Gateways (one per public subnet for HA)
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating NAT gateways").
+		WithResource("nat-gateway").
+		WithAction("creating").
+		WithMetadata("count", len(publicSubnets)))
+
 	natGatewayIDs, err := p.createNATGateways(ctx, clients, clusterName, publicSubnets, azs, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
@@ -116,7 +142,16 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.NATGatewayIDs = natGatewayIDs
 
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "NAT gateways created").
+		WithResource("nat-gateway").
+		WithAction("created").
+		WithMetadata("count", len(natGatewayIDs)))
+
 	// Step 6: Create route tables and routes
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating route tables").
+		WithResource("route-table").
+		WithAction("creating"))
+
 	publicRouteTableID, err := p.createPublicRouteTable(ctx, clients, clusterName, vpcState.VPCID, igwID, publicSubnets, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
@@ -139,6 +174,25 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.SecurityGroupIDs = []string{sgID}
 
+	// Step 8: Create VPC endpoints for private cluster access
+	// VPC endpoints are required for nodes in private subnets to communicate with AWS services
+	// This is critical when using private-only EKS endpoint access
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating VPC endpoints for private cluster").
+		WithResource("vpc-endpoint").
+		WithAction("creating"))
+
+	vpcEndpointIDs, err := p.createVPCEndpoints(ctx, clients, clusterName, vpcState.VPCID, vpcState.PrivateSubnetIDs, sgID, awsCfg.Region, awsCfg.Tags)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to create VPC endpoints: %w", err)
+	}
+	vpcState.VPCEndpointIDs = vpcEndpointIDs
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC endpoints created").
+		WithResource("vpc-endpoint").
+		WithAction("created").
+		WithMetadata("count", len(vpcEndpointIDs)))
+
 	// Add user tags
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeVPC)
 	vpcState.Tags = MergeTags(ctx, nicTags, awsCfg.Tags)
@@ -149,6 +203,13 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 		attribute.Int("private_subnets", len(vpcState.PrivateSubnetIDs)),
 		attribute.Int("nat_gateways", len(vpcState.NATGatewayIDs)),
 	)
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC infrastructure created").
+		WithResource("vpc").
+		WithAction("created").
+		WithMetadata("vpc_id", vpcState.VPCID).
+		WithMetadata("public_subnets", len(vpcState.PublicSubnetIDs)).
+		WithMetadata("private_subnets", len(vpcState.PrivateSubnetIDs)))
 
 	return vpcState, nil
 }
@@ -596,5 +657,287 @@ func (p *Provider) createClusterSecurityGroup(ctx context.Context, clients *Clie
 
 	sgID := *sgResult.GroupId
 	span.SetAttributes(attribute.String("security_group_id", sgID))
+
+	// Add security group rules for cluster-node communication
+	if err := p.configureClusterSecurityGroupRules(ctx, clients, sgID); err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to configure security group rules: %w", err)
+	}
+
 	return sgID, nil
+}
+
+// configureClusterSecurityGroupRules adds ingress and egress rules for EKS cluster-node communication
+func (p *Provider) configureClusterSecurityGroupRules(ctx context.Context, clients *Clients, sgID string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.configureClusterSecurityGroupRules")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("security_group_id", sgID))
+
+	// Ingress rules: Allow nodes to communicate with control plane
+	ingressRules := []types.IpPermission{
+		{
+			// Allow HTTPS (443) from nodes to control plane
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int32(443),
+			ToPort:     aws.Int32(443),
+			UserIdGroupPairs: []types.UserIdGroupPair{
+				{
+					GroupId:     aws.String(sgID),
+					Description: aws.String("Allow nodes to communicate with cluster API server"),
+				},
+			},
+		},
+		{
+			// Allow kubelet API (10250) from control plane to nodes
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int32(10250),
+			ToPort:     aws.Int32(10250),
+			UserIdGroupPairs: []types.UserIdGroupPair{
+				{
+					GroupId:     aws.String(sgID),
+					Description: aws.String("Allow control plane to communicate with nodes kubelet"),
+				},
+			},
+		},
+		{
+			// Allow DNS TCP (53) within cluster
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int32(53),
+			ToPort:     aws.Int32(53),
+			UserIdGroupPairs: []types.UserIdGroupPair{
+				{
+					GroupId:     aws.String(sgID),
+					Description: aws.String("Allow DNS TCP communication within cluster"),
+				},
+			},
+		},
+		{
+			// Allow DNS UDP (53) within cluster
+			IpProtocol: aws.String("udp"),
+			FromPort:   aws.Int32(53),
+			ToPort:     aws.Int32(53),
+			UserIdGroupPairs: []types.UserIdGroupPair{
+				{
+					GroupId:     aws.String(sgID),
+					Description: aws.String("Allow DNS UDP communication within cluster"),
+				},
+			},
+		},
+		{
+			// Allow node-to-node communication on ephemeral ports (for CoreDNS, node port services, etc.)
+			IpProtocol: aws.String("tcp"),
+			FromPort:   aws.Int32(1025),
+			ToPort:     aws.Int32(65535),
+			UserIdGroupPairs: []types.UserIdGroupPair{
+				{
+					GroupId:     aws.String(sgID),
+					Description: aws.String("Allow node-to-node communication"),
+				},
+			},
+		},
+	}
+
+	_, err := clients.EC2Client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       aws.String(sgID),
+		IpPermissions: ingressRules,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("AuthorizeSecurityGroupIngress failed: %w", err)
+	}
+
+	// Egress rules: Allow all outbound traffic (required for NAT gateway, pulling images, etc.)
+	egressRules := []types.IpPermission{
+		{
+			IpProtocol: aws.String("-1"), // -1 means all protocols
+			IpRanges: []types.IpRange{
+				{
+					CidrIp:      aws.String("0.0.0.0/0"),
+					Description: aws.String("Allow all outbound traffic"),
+				},
+			},
+		},
+	}
+
+	_, err = clients.EC2Client.AuthorizeSecurityGroupEgress(ctx, &ec2.AuthorizeSecurityGroupEgressInput{
+		GroupId:       aws.String(sgID),
+		IpPermissions: egressRules,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("AuthorizeSecurityGroupEgress failed: %w", err)
+	}
+
+	return nil
+}
+
+// createVPCEndpoints creates VPC endpoints required for private EKS clusters
+// These endpoints allow nodes in private subnets to communicate with AWS services without internet access
+func (p *Provider) createVPCEndpoints(ctx context.Context, clients *Clients, clusterName, vpcID string, privateSubnetIDs []string, securityGroupID, region string, userTags map[string]string) ([]string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.createVPCEndpoints")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("vpc_id", vpcID),
+		attribute.Int("subnet_count", len(privateSubnetIDs)),
+	)
+
+	// Define required VPC endpoints for private EKS clusters
+	// Interface endpoints: Required for AWS API calls from nodes
+	interfaceEndpoints := []string{
+		fmt.Sprintf("com.amazonaws.%s.ec2", region),                  // EC2 API
+		fmt.Sprintf("com.amazonaws.%s.ecr.api", region),              // ECR API (pull images)
+		fmt.Sprintf("com.amazonaws.%s.ecr.dkr", region),              // ECR Docker registry
+		fmt.Sprintf("com.amazonaws.%s.sts", region),                  // STS for IAM authentication
+		fmt.Sprintf("com.amazonaws.%s.eks", region),                  // EKS API
+		fmt.Sprintf("com.amazonaws.%s.eks-auth", region),             // EKS Pod Identity (2024+)
+		fmt.Sprintf("com.amazonaws.%s.logs", region),                 // CloudWatch Logs
+		fmt.Sprintf("com.amazonaws.%s.elasticloadbalancing", region), // ELB for load balancers
+		fmt.Sprintf("com.amazonaws.%s.autoscaling", region),          // Auto Scaling
+	}
+
+	// Gateway endpoints: Required for S3 (pulling image layers)
+	gatewayEndpoints := []string{
+		fmt.Sprintf("com.amazonaws.%s.s3", region), // S3 for image layers
+	}
+
+	var endpointIDs []string
+
+	// Create interface endpoints (one per service, accessible from all private subnets)
+	for _, serviceName := range interfaceEndpoints {
+		endpointID, err := p.createInterfaceEndpoint(ctx, clients, clusterName, vpcID, privateSubnetIDs, securityGroupID, serviceName, userTags)
+		if err != nil {
+			span.RecordError(err)
+			// Continue creating other endpoints even if one fails
+			// Log the error but don't fail the entire VPC creation
+			span.SetAttributes(attribute.String(fmt.Sprintf("failed_endpoint.%s", serviceName), err.Error()))
+			continue
+		}
+		endpointIDs = append(endpointIDs, endpointID)
+	}
+
+	// Create gateway endpoints (S3)
+	for _, serviceName := range gatewayEndpoints {
+		endpointID, err := p.createGatewayEndpoint(ctx, clients, clusterName, vpcID, serviceName, userTags)
+		if err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.String(fmt.Sprintf("failed_endpoint.%s", serviceName), err.Error()))
+			continue
+		}
+		endpointIDs = append(endpointIDs, endpointID)
+	}
+
+	span.SetAttributes(attribute.Int("endpoints_created", len(endpointIDs)))
+
+	return endpointIDs, nil
+}
+
+// createInterfaceEndpoint creates an interface VPC endpoint for a specific AWS service
+func (p *Provider) createInterfaceEndpoint(ctx context.Context, clients *Clients, clusterName, vpcID string, subnetIDs []string, securityGroupID, serviceName string, userTags map[string]string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.createInterfaceEndpoint")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("service_name", serviceName),
+		attribute.String("vpc_id", vpcID),
+	)
+
+	// Generate tags
+	nicTags := GenerateBaseTags(ctx, clusterName, "vpc-endpoint")
+	nicTags["Name"] = fmt.Sprintf("%s-vpce-%s", clusterName, serviceName[strings.LastIndex(serviceName, ".")+1:])
+	allTags := MergeTags(ctx, nicTags, userTags)
+
+	input := &ec2.CreateVpcEndpointInput{
+		VpcId:             aws.String(vpcID),
+		ServiceName:       aws.String(serviceName),
+		VpcEndpointType:   types.VpcEndpointTypeInterface,
+		SubnetIds:         subnetIDs,
+		SecurityGroupIds:  []string{securityGroupID},
+		PrivateDnsEnabled: aws.Bool(true), // Enable private DNS for seamless AWS service access
+		TagSpecifications: []types.TagSpecification{
+			{
+				ResourceType: types.ResourceTypeVpcEndpoint,
+				Tags:         ConvertToEC2Tags(allTags),
+			},
+		},
+	}
+
+	output, err := clients.EC2Client.CreateVpcEndpoint(ctx, input)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to create interface endpoint for %s: %w", serviceName, err)
+	}
+
+	endpointID := aws.ToString(output.VpcEndpoint.VpcEndpointId)
+	span.SetAttributes(attribute.String("endpoint_id", endpointID))
+
+	return endpointID, nil
+}
+
+// createGatewayEndpoint creates a gateway VPC endpoint (for S3)
+func (p *Provider) createGatewayEndpoint(ctx context.Context, clients *Clients, clusterName, vpcID, serviceName string, userTags map[string]string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.createGatewayEndpoint")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("service_name", serviceName),
+		attribute.String("vpc_id", vpcID),
+	)
+
+	// Generate tags
+	nicTags := GenerateBaseTags(ctx, clusterName, "vpc-endpoint")
+	nicTags["Name"] = fmt.Sprintf("%s-vpce-s3", clusterName)
+	allTags := MergeTags(ctx, nicTags, userTags)
+
+	// Gateway endpoints need route table IDs (not subnet IDs)
+	// We'll discover route tables tagged with this cluster
+	routeTablesInput := &ec2.DescribeRouteTablesInput{
+		Filters: BuildTagFilter(clusterName, "route-table"),
+	}
+
+	routeTablesOutput, err := clients.EC2Client.DescribeRouteTables(ctx, routeTablesInput)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to describe route tables: %w", err)
+	}
+
+	var routeTableIDs []string
+	for _, rt := range routeTablesOutput.RouteTables {
+		routeTableIDs = append(routeTableIDs, aws.ToString(rt.RouteTableId))
+	}
+
+	if len(routeTableIDs) == 0 {
+		err := fmt.Errorf("no route tables found for cluster %s", clusterName)
+		span.RecordError(err)
+		return "", err
+	}
+
+	input := &ec2.CreateVpcEndpointInput{
+		VpcId:           aws.String(vpcID),
+		ServiceName:     aws.String(serviceName),
+		VpcEndpointType: types.VpcEndpointTypeGateway,
+		RouteTableIds:   routeTableIDs,
+		TagSpecifications: []types.TagSpecification{
+			{
+				ResourceType: types.ResourceTypeVpcEndpoint,
+				Tags:         ConvertToEC2Tags(allTags),
+			},
+		},
+	}
+
+	output, err := clients.EC2Client.CreateVpcEndpoint(ctx, input)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to create gateway endpoint for %s: %w", serviceName, err)
+	}
+
+	endpointID := aws.ToString(output.VpcEndpoint.VpcEndpointId)
+	span.SetAttributes(attribute.String("endpoint_id", endpointID))
+
+	return endpointID, nil
 }

@@ -144,7 +144,7 @@ func TestCreateNodeGroup(t *testing.T) {
 							NodegroupName: params.NodegroupName,
 							Status:        ekstypes.NodegroupStatusActive,
 							InstanceTypes: []string{"g4dn.xlarge"},
-							AmiType:       ekstypes.AMITypesAl2X8664Gpu,
+							AmiType:       ekstypes.AMITypesAl2023X8664Nvidia,
 							CapacityType:  ekstypes.CapacityTypesOnDemand,
 						},
 					}, nil
@@ -152,8 +152,8 @@ func TestCreateNodeGroup(t *testing.T) {
 			},
 			expectError: false,
 			validateCall: func(t *testing.T, input *eks.CreateNodegroupInput) {
-				if input.AmiType != ekstypes.AMITypesAl2X8664Gpu {
-					t.Errorf("AmiType = %v, want AL2_x86_64_GPU", input.AmiType)
+				if input.AmiType != ekstypes.AMITypesAl2023X8664Nvidia {
+					t.Errorf("AmiType = %v, want AL2023_x86_64_NVIDIA", input.AmiType)
 				}
 			},
 		},
@@ -325,6 +325,104 @@ func TestCreateNodeGroup(t *testing.T) {
 				}
 				if *input.ScalingConfig.DesiredSize != 1 {
 					t.Errorf("Default DesiredSize = %v, want 1", *input.ScalingConfig.DesiredSize)
+				}
+			},
+		},
+		{
+			name: "node group with explicit AL2023 ARM64 AMI type",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-cluster",
+				Provider:    "aws",
+			},
+			vpc: &VPCState{
+				PrivateSubnetIDs: []string{"subnet-1"},
+			},
+			cluster: &ClusterState{
+				Name: "test-cluster",
+			},
+			iamRoles: &IAMRoles{
+				NodeRoleARN: "arn:aws:iam::123:role/node-role",
+			},
+			nodeGroupName: "arm64",
+			nodeGroupConfig: config.AWSNodeGroup{
+				Instance: "m7g.xlarge",
+				MinNodes: 1,
+				MaxNodes: 3,
+				AMIType:  "AL2023_ARM_64_STANDARD",
+			},
+			mockSetup: func(m *MockEKSClient) {
+				m.CreateNodegroupFunc = func(ctx context.Context, params *eks.CreateNodegroupInput, optFns ...func(*eks.Options)) (*eks.CreateNodegroupOutput, error) {
+					return &eks.CreateNodegroupOutput{
+						Nodegroup: &ekstypes.Nodegroup{
+							NodegroupName: params.NodegroupName,
+							Status:        ekstypes.NodegroupStatusCreating,
+						},
+					}, nil
+				}
+				m.DescribeNodegroupFunc = func(ctx context.Context, params *eks.DescribeNodegroupInput, optFns ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error) {
+					return &eks.DescribeNodegroupOutput{
+						Nodegroup: &ekstypes.Nodegroup{
+							NodegroupName: params.NodegroupName,
+							Status:        ekstypes.NodegroupStatusActive,
+							InstanceTypes: []string{"m7g.xlarge"},
+							AmiType:       ekstypes.AMITypesAl2023Arm64Standard,
+						},
+					}, nil
+				}
+			},
+			expectError: false,
+			validateCall: func(t *testing.T, input *eks.CreateNodegroupInput) {
+				if input.AmiType != ekstypes.AMITypesAl2023Arm64Standard {
+					t.Errorf("AmiType = %v, want AL2023_ARM_64_STANDARD", input.AmiType)
+				}
+			},
+		},
+		{
+			name: "node group with explicit AL2023 Neuron AMI type",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-cluster",
+				Provider:    "aws",
+			},
+			vpc: &VPCState{
+				PrivateSubnetIDs: []string{"subnet-1"},
+			},
+			cluster: &ClusterState{
+				Name: "test-cluster",
+			},
+			iamRoles: &IAMRoles{
+				NodeRoleARN: "arn:aws:iam::123:role/node-role",
+			},
+			nodeGroupName: "neuron",
+			nodeGroupConfig: config.AWSNodeGroup{
+				Instance: "inf2.xlarge",
+				MinNodes: 0,
+				MaxNodes: 2,
+				AMIType:  "AL2023_x86_64_NEURON",
+			},
+			mockSetup: func(m *MockEKSClient) {
+				m.CreateNodegroupFunc = func(ctx context.Context, params *eks.CreateNodegroupInput, optFns ...func(*eks.Options)) (*eks.CreateNodegroupOutput, error) {
+					return &eks.CreateNodegroupOutput{
+						Nodegroup: &ekstypes.Nodegroup{
+							NodegroupName: params.NodegroupName,
+							Status:        ekstypes.NodegroupStatusCreating,
+						},
+					}, nil
+				}
+				m.DescribeNodegroupFunc = func(ctx context.Context, params *eks.DescribeNodegroupInput, optFns ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error) {
+					return &eks.DescribeNodegroupOutput{
+						Nodegroup: &ekstypes.Nodegroup{
+							NodegroupName: params.NodegroupName,
+							Status:        ekstypes.NodegroupStatusActive,
+							InstanceTypes: []string{"inf2.xlarge"},
+							AmiType:       ekstypes.AMITypesAl2023X8664Neuron,
+						},
+					}, nil
+				}
+			},
+			expectError: false,
+			validateCall: func(t *testing.T, input *eks.CreateNodegroupInput) {
+				if input.AmiType != ekstypes.AMITypesAl2023X8664Neuron {
+					t.Errorf("AmiType = %v, want AL2023_x86_64_NEURON", input.AmiType)
 				}
 			},
 		},

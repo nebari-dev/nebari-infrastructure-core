@@ -17,14 +17,14 @@ const (
 	// ResourceTypeNodeGroup is the resource type for EKS node groups
 	ResourceTypeNodeGroup = "eks-node-group"
 
-	// DefaultAMIType is the default AMI type for node groups (Amazon Linux 2 x86_64)
-	DefaultAMIType = ekstypes.AMITypesAl2X8664
+	// DefaultAMIType is the default AMI type for node groups (Amazon Linux 2023 x86_64)
+	DefaultAMIType = ekstypes.AMITypesAl2023X8664Standard
 	// DefaultCapacityType is the default capacity type for node groups (on-demand instances)
 	DefaultCapacityType = ekstypes.CapacityTypesOnDemand
 	// DefaultDiskSize is the default disk size in GB for node group instances
 	DefaultDiskSize = 20
 
-	// NodeGroupCreateTimeout is the maximum time to wait for node group creation (5-10 minutes typical)
+	// NodeGroupCreateTimeout is the maximum time to wait for node group creation (typically 5-10 minutes)
 	NodeGroupCreateTimeout = 15 * time.Minute
 	// NodeGroupUpdateTimeout is the maximum time to wait for node group updates
 	NodeGroupUpdateTimeout = 15 * time.Minute
@@ -101,10 +101,15 @@ func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *c
 		eksTaints = append(eksTaints, eksTaint)
 	}
 
-	// Determine AMI type based on GPU flag
+	// Determine AMI type based on configuration
 	amiType := DefaultAMIType
-	if nodeGroupConfig.GPU {
-		amiType = ekstypes.AMITypesAl2X8664Gpu
+
+	// Allow explicit AMI type override
+	if nodeGroupConfig.AMIType != "" {
+		amiType = parseAMIType(nodeGroupConfig.AMIType)
+	} else if nodeGroupConfig.GPU {
+		// GPU flag defaults to AL2023 NVIDIA AMI
+		amiType = ekstypes.AMITypesAl2023X8664Nvidia
 	}
 
 	// Determine capacity type based on Spot flag
@@ -134,6 +139,17 @@ func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *c
 	// Add taints if specified
 	if len(eksTaints) > 0 {
 		createInput.Taints = eksTaints
+	}
+
+	// Attach cluster security group to nodes for cluster-node communication
+	// This is critical for private endpoint access where nodes must be able to reach the control plane
+	if len(vpc.SecurityGroupIDs) > 0 {
+		createInput.RemoteAccess = &ekstypes.RemoteAccessConfig{
+			SourceSecurityGroups: vpc.SecurityGroupIDs,
+		}
+		span.SetAttributes(
+			attribute.StringSlice("security_groups", vpc.SecurityGroupIDs),
+		)
 	}
 
 	// Create the node group
@@ -261,4 +277,65 @@ func convertEKSNodeGroupToState(nodeGroup *ekstypes.Nodegroup) *NodeGroupState {
 	)
 
 	return state
+}
+
+// parseAMIType converts string AMI type to ekstypes.AMITypes
+func parseAMIType(amiTypeStr string) ekstypes.AMITypes {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(context.Background(), "aws.parseAMIType")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("ami_type_input", amiTypeStr))
+
+	var amiType ekstypes.AMITypes
+
+	switch amiTypeStr {
+	// AL2023 types (preferred)
+	case "AL2023_x86_64_STANDARD":
+		amiType = ekstypes.AMITypesAl2023X8664Standard
+	case "AL2023_ARM_64_STANDARD":
+		amiType = ekstypes.AMITypesAl2023Arm64Standard
+	case "AL2023_x86_64_NVIDIA":
+		amiType = ekstypes.AMITypesAl2023X8664Nvidia
+	case "AL2023_ARM_64_NVIDIA":
+		amiType = ekstypes.AMITypesAl2023Arm64Nvidia
+	case "AL2023_x86_64_NEURON":
+		amiType = ekstypes.AMITypesAl2023X8664Neuron
+
+	// AL2 types (legacy support)
+	case "AL2_x86_64":
+		amiType = ekstypes.AMITypesAl2X8664
+	case "AL2_x86_64_GPU":
+		amiType = ekstypes.AMITypesAl2X8664Gpu
+	case "AL2_ARM_64":
+		amiType = ekstypes.AMITypesAl2Arm64
+
+	// Bottlerocket types (for completeness)
+	case "BOTTLEROCKET_x86_64":
+		amiType = ekstypes.AMITypesBottlerocketX8664
+	case "BOTTLEROCKET_ARM_64":
+		amiType = ekstypes.AMITypesBottlerocketArm64
+	case "BOTTLEROCKET_x86_64_NVIDIA":
+		amiType = ekstypes.AMITypesBottlerocketX8664Nvidia
+	case "BOTTLEROCKET_ARM_64_NVIDIA":
+		amiType = ekstypes.AMITypesBottlerocketArm64Nvidia
+
+	// Windows types (for completeness)
+	case "WINDOWS_CORE_2019_x86_64":
+		amiType = ekstypes.AMITypesWindowsCore2019X8664
+	case "WINDOWS_FULL_2019_x86_64":
+		amiType = ekstypes.AMITypesWindowsFull2019X8664
+	case "WINDOWS_CORE_2022_x86_64":
+		amiType = ekstypes.AMITypesWindowsCore2022X8664
+	case "WINDOWS_FULL_2022_x86_64":
+		amiType = ekstypes.AMITypesWindowsFull2022X8664
+
+	default:
+		// If unknown, use default AL2023
+		amiType = DefaultAMIType
+		span.SetAttributes(attribute.Bool("unknown_ami_type", true))
+	}
+
+	span.SetAttributes(attribute.String("ami_type_output", string(amiType)))
+	return amiType
 }

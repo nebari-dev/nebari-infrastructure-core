@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -47,6 +48,12 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 	if k8sVersion == "" {
 		k8sVersion = DefaultKubernetesVersion
 	}
+
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating EKS cluster").
+		WithResource("eks-cluster").
+		WithAction("creating").
+		WithMetadata("cluster_name", clusterName).
+		WithMetadata("kubernetes_version", k8sVersion))
 
 	// Determine endpoint access based on EKSEndpointAccess setting
 	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)

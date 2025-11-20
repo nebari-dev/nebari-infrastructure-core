@@ -166,7 +166,10 @@ func convertToProviderState(
 	for _, ng := range nodeGroups {
 		// Determine if GPU enabled based on instance type or AMI type
 		isGPU := false
-		if ng.AMIType == "AL2_x86_64_GPU" || ng.AMIType == "AL2_ARM_64_GPU" {
+		if ng.AMIType == "AL2_x86_64_GPU" || ng.AMIType == "AL2_ARM_64_GPU" ||
+			ng.AMIType == "AL2023_x86_64_NVIDIA" || ng.AMIType == "AL2023_ARM_64_NVIDIA" ||
+			ng.AMIType == "AL2023_x86_64_NEURON" ||
+			ng.AMIType == "BOTTLEROCKET_x86_64_NVIDIA" || ng.AMIType == "BOTTLEROCKET_ARM_64_NVIDIA" {
 			isGPU = true
 		}
 		// Also check instance types for GPU instances (g*, p*, inf*)

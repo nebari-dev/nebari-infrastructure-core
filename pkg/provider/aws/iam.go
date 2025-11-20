@@ -9,6 +9,8 @@ import (
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 const (
@@ -144,14 +146,25 @@ func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, cluster
 	)
 
 	// Try to discover existing roles
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking for existing IAM roles").
+		WithResource("iam-role").
+		WithAction("discovering"))
+
 	iamRoles, err := p.discoverIAMRoles(ctx, clients, clusterName)
 	if err == nil && iamRoles != nil {
 		span.SetAttributes(attribute.String("action", "discovered"))
+		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "Found existing IAM roles").
+			WithResource("iam-role").
+			WithAction("discovered"))
 		return iamRoles, nil
 	}
 
 	// Roles don't exist, create them
 	span.SetAttributes(attribute.String("action", "create"))
+	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating IAM roles").
+		WithResource("iam-role").
+		WithAction("creating"))
+
 	return p.createIAMRoles(ctx, clients, clusterName)
 }
 

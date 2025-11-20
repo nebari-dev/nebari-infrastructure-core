@@ -5,6 +5,8 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
@@ -84,7 +86,20 @@ func init() {
 }
 
 func main() {
-	ctx := context.Background()
+	// Create cancellable context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Launch goroutine to handle signals
+	go func() {
+		sig := <-sigChan
+		slog.Warn("Received interrupt signal, initiating graceful shutdown", "signal", sig.String())
+		cancel() // Cancel context to stop all operations
+	}()
 
 	// Setup OpenTelemetry
 	_, shutdown, err := telemetry.Setup(ctx)
@@ -93,13 +108,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() {
-		if err := shutdown(ctx); err != nil {
+		// Use a fresh context for shutdown in case main context is cancelled
+		shutdownCtx := context.Background()
+		if err := shutdown(shutdownCtx); err != nil {
 			slog.Error("Failed to shutdown telemetry", "error", err)
 		}
 	}()
 
-	// Execute root command
-	if err := rootCmd.Execute(); err != nil {
+	// Execute root command with cancellable context
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		// Don't log error if it was due to context cancellation (graceful shutdown)
+		if ctx.Err() == context.Canceled {
+			slog.Info("Shutdown complete")
+			os.Exit(130) // Exit code 130 indicates terminated by Ctrl+C
+		}
 		slog.Error("Command execution failed", "error", err)
 		os.Exit(1)
 	}

@@ -3,8 +3,11 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 )
@@ -95,34 +98,39 @@ func (m *MockEKSClient) UpdateNodegroupConfig(ctx context.Context, params *eks.U
 
 // MockEC2Client is a mock implementation of EC2ClientAPI for testing
 type MockEC2Client struct {
-	AllocateAddressFunc           func(ctx context.Context, params *ec2.AllocateAddressInput, optFns ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error)
-	AssociateRouteTableFunc       func(ctx context.Context, params *ec2.AssociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error)
-	AttachInternetGatewayFunc     func(ctx context.Context, params *ec2.AttachInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.AttachInternetGatewayOutput, error)
-	CreateInternetGatewayFunc     func(ctx context.Context, params *ec2.CreateInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.CreateInternetGatewayOutput, error)
-	CreateNatGatewayFunc          func(ctx context.Context, params *ec2.CreateNatGatewayInput, optFns ...func(*ec2.Options)) (*ec2.CreateNatGatewayOutput, error)
-	CreateRouteFunc               func(ctx context.Context, params *ec2.CreateRouteInput, optFns ...func(*ec2.Options)) (*ec2.CreateRouteOutput, error)
-	CreateRouteTableFunc          func(ctx context.Context, params *ec2.CreateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.CreateRouteTableOutput, error)
-	CreateSecurityGroupFunc       func(ctx context.Context, params *ec2.CreateSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error)
-	CreateSubnetFunc              func(ctx context.Context, params *ec2.CreateSubnetInput, optFns ...func(*ec2.Options)) (*ec2.CreateSubnetOutput, error)
-	CreateVpcFunc                 func(ctx context.Context, params *ec2.CreateVpcInput, optFns ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error)
-	DeleteInternetGatewayFunc     func(ctx context.Context, params *ec2.DeleteInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteInternetGatewayOutput, error)
-	DeleteNatGatewayFunc          func(ctx context.Context, params *ec2.DeleteNatGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteNatGatewayOutput, error)
-	DeleteRouteTableFunc          func(ctx context.Context, params *ec2.DeleteRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error)
-	DeleteSecurityGroupFunc       func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
-	DeleteSubnetFunc              func(ctx context.Context, params *ec2.DeleteSubnetInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSubnetOutput, error)
-	DeleteVpcFunc                 func(ctx context.Context, params *ec2.DeleteVpcInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcOutput, error)
-	DescribeAvailabilityZonesFunc func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error)
-	DescribeInternetGatewaysFunc  func(ctx context.Context, params *ec2.DescribeInternetGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
-	DescribeNatGatewaysFunc       func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
-	DescribeRouteTablesFunc       func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error)
-	DescribeSecurityGroupsFunc    func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
-	DescribeSubnetsFunc           func(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
-	DescribeVpcsFunc              func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
-	DetachInternetGatewayFunc     func(ctx context.Context, params *ec2.DetachInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DetachInternetGatewayOutput, error)
-	DisassociateRouteTableFunc    func(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error)
-	ModifySubnetAttributeFunc     func(ctx context.Context, params *ec2.ModifySubnetAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error)
-	ModifyVpcAttributeFunc        func(ctx context.Context, params *ec2.ModifyVpcAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error)
-	ReleaseAddressFunc            func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error)
+	AllocateAddressFunc               func(ctx context.Context, params *ec2.AllocateAddressInput, optFns ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error)
+	AssociateRouteTableFunc           func(ctx context.Context, params *ec2.AssociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.AssociateRouteTableOutput, error)
+	AttachInternetGatewayFunc         func(ctx context.Context, params *ec2.AttachInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.AttachInternetGatewayOutput, error)
+	AuthorizeSecurityGroupEgressFunc  func(ctx context.Context, params *ec2.AuthorizeSecurityGroupEgressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error)
+	AuthorizeSecurityGroupIngressFunc func(ctx context.Context, params *ec2.AuthorizeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error)
+	CreateInternetGatewayFunc         func(ctx context.Context, params *ec2.CreateInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.CreateInternetGatewayOutput, error)
+	CreateNatGatewayFunc              func(ctx context.Context, params *ec2.CreateNatGatewayInput, optFns ...func(*ec2.Options)) (*ec2.CreateNatGatewayOutput, error)
+	CreateRouteFunc                   func(ctx context.Context, params *ec2.CreateRouteInput, optFns ...func(*ec2.Options)) (*ec2.CreateRouteOutput, error)
+	CreateRouteTableFunc              func(ctx context.Context, params *ec2.CreateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.CreateRouteTableOutput, error)
+	CreateSecurityGroupFunc           func(ctx context.Context, params *ec2.CreateSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.CreateSecurityGroupOutput, error)
+	CreateSubnetFunc                  func(ctx context.Context, params *ec2.CreateSubnetInput, optFns ...func(*ec2.Options)) (*ec2.CreateSubnetOutput, error)
+	CreateVpcFunc                     func(ctx context.Context, params *ec2.CreateVpcInput, optFns ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error)
+	CreateVpcEndpointFunc             func(ctx context.Context, params *ec2.CreateVpcEndpointInput, optFns ...func(*ec2.Options)) (*ec2.CreateVpcEndpointOutput, error)
+	DeleteInternetGatewayFunc         func(ctx context.Context, params *ec2.DeleteInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteInternetGatewayOutput, error)
+	DeleteVpcEndpointsFunc            func(ctx context.Context, params *ec2.DeleteVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error)
+	DeleteNatGatewayFunc              func(ctx context.Context, params *ec2.DeleteNatGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteNatGatewayOutput, error)
+	DeleteRouteTableFunc              func(ctx context.Context, params *ec2.DeleteRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error)
+	DeleteSecurityGroupFunc           func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
+	DeleteSubnetFunc                  func(ctx context.Context, params *ec2.DeleteSubnetInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSubnetOutput, error)
+	DeleteVpcFunc                     func(ctx context.Context, params *ec2.DeleteVpcInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcOutput, error)
+	DescribeAvailabilityZonesFunc     func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error)
+	DescribeInternetGatewaysFunc      func(ctx context.Context, params *ec2.DescribeInternetGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
+	DescribeNatGatewaysFunc           func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
+	DescribeRouteTablesFunc           func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error)
+	DescribeSecurityGroupsFunc        func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	DescribeSubnetsFunc               func(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeVpcEndpointsFunc          func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error)
+	DescribeVpcsFunc                  func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
+	DetachInternetGatewayFunc         func(ctx context.Context, params *ec2.DetachInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DetachInternetGatewayOutput, error)
+	DisassociateRouteTableFunc        func(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error)
+	ModifySubnetAttributeFunc         func(ctx context.Context, params *ec2.ModifySubnetAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error)
+	ModifyVpcAttributeFunc            func(ctx context.Context, params *ec2.ModifyVpcAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error)
+	ReleaseAddressFunc                func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error)
 }
 
 func (m *MockEC2Client) AllocateAddress(ctx context.Context, params *ec2.AllocateAddressInput, optFns ...func(*ec2.Options)) (*ec2.AllocateAddressOutput, error) {
@@ -144,6 +152,20 @@ func (m *MockEC2Client) AttachInternetGateway(ctx context.Context, params *ec2.A
 		return m.AttachInternetGatewayFunc(ctx, params, optFns...)
 	}
 	return nil, fmt.Errorf("AttachInternetGatewayFunc not implemented")
+}
+
+func (m *MockEC2Client) AuthorizeSecurityGroupEgress(ctx context.Context, params *ec2.AuthorizeSecurityGroupEgressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {
+	if m.AuthorizeSecurityGroupEgressFunc != nil {
+		return m.AuthorizeSecurityGroupEgressFunc(ctx, params, optFns...)
+	}
+	return &ec2.AuthorizeSecurityGroupEgressOutput{}, nil
+}
+
+func (m *MockEC2Client) AuthorizeSecurityGroupIngress(ctx context.Context, params *ec2.AuthorizeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
+	if m.AuthorizeSecurityGroupIngressFunc != nil {
+		return m.AuthorizeSecurityGroupIngressFunc(ctx, params, optFns...)
+	}
+	return &ec2.AuthorizeSecurityGroupIngressOutput{}, nil
 }
 
 func (m *MockEC2Client) CreateInternetGateway(ctx context.Context, params *ec2.CreateInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.CreateInternetGatewayOutput, error) {
@@ -195,6 +217,21 @@ func (m *MockEC2Client) CreateVpc(ctx context.Context, params *ec2.CreateVpcInpu
 	return nil, fmt.Errorf("CreateVpcFunc not implemented")
 }
 
+func (m *MockEC2Client) CreateVpcEndpoint(ctx context.Context, params *ec2.CreateVpcEndpointInput, optFns ...func(*ec2.Options)) (*ec2.CreateVpcEndpointOutput, error) {
+	if m.CreateVpcEndpointFunc != nil {
+		return m.CreateVpcEndpointFunc(ctx, params, optFns...)
+	}
+	// Default implementation - return success with a mock endpoint ID
+	endpointID := fmt.Sprintf("vpce-%s", aws.ToString(params.ServiceName)[strings.LastIndex(aws.ToString(params.ServiceName), ".")+1:])
+	return &ec2.CreateVpcEndpointOutput{
+		VpcEndpoint: &ec2types.VpcEndpoint{
+			VpcEndpointId: aws.String(endpointID),
+			ServiceName:   params.ServiceName,
+			State:         ec2types.StateAvailable,
+		},
+	}, nil
+}
+
 func (m *MockEC2Client) DeleteInternetGateway(ctx context.Context, params *ec2.DeleteInternetGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteInternetGatewayOutput, error) {
 	if m.DeleteInternetGatewayFunc != nil {
 		return m.DeleteInternetGatewayFunc(ctx, params, optFns...)
@@ -237,6 +274,13 @@ func (m *MockEC2Client) DeleteVpc(ctx context.Context, params *ec2.DeleteVpcInpu
 	return nil, fmt.Errorf("DeleteVpcFunc not implemented")
 }
 
+func (m *MockEC2Client) DeleteVpcEndpoints(ctx context.Context, params *ec2.DeleteVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
+	if m.DeleteVpcEndpointsFunc != nil {
+		return m.DeleteVpcEndpointsFunc(ctx, params, optFns...)
+	}
+	return &ec2.DeleteVpcEndpointsOutput{}, nil
+}
+
 func (m *MockEC2Client) DescribeAvailabilityZones(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
 	if m.DescribeAvailabilityZonesFunc != nil {
 		return m.DescribeAvailabilityZonesFunc(ctx, params, optFns...)
@@ -277,6 +321,13 @@ func (m *MockEC2Client) DescribeSubnets(ctx context.Context, params *ec2.Describ
 		return m.DescribeSubnetsFunc(ctx, params, optFns...)
 	}
 	return nil, fmt.Errorf("DescribeSubnetsFunc not implemented")
+}
+
+func (m *MockEC2Client) DescribeVpcEndpoints(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+	if m.DescribeVpcEndpointsFunc != nil {
+		return m.DescribeVpcEndpointsFunc(ctx, params, optFns...)
+	}
+	return &ec2.DescribeVpcEndpointsOutput{}, nil
 }
 
 func (m *MockEC2Client) DescribeVpcs(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {

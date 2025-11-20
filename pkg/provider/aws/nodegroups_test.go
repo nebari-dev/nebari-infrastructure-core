@@ -298,7 +298,7 @@ func TestNodeGroupDefaultConstants(t *testing.T) {
 		actual   interface{}
 		expected interface{}
 	}{
-		{"DefaultAMIType", DefaultAMIType, ekstypes.AMITypesAl2X8664},
+		{"DefaultAMIType", DefaultAMIType, ekstypes.AMITypesAl2023X8664Standard},
 		{"DefaultCapacityType", DefaultCapacityType, ekstypes.CapacityTypesOnDemand},
 		{"DefaultDiskSize", DefaultDiskSize, 20},
 		{"NodeGroupCreateTimeout", NodeGroupCreateTimeout, 15 * time.Minute},
@@ -419,5 +419,50 @@ func TestConvertEKSNodeGroupToState_NilValues(t *testing.T) {
 
 	if state.ModifiedAt != "" {
 		t.Error("ModifiedAt should be empty")
+	}
+}
+
+func TestParseAMIType(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected ekstypes.AMITypes
+	}{
+		// AL2023 types (preferred)
+		{"AL2023 x86_64 standard", "AL2023_x86_64_STANDARD", ekstypes.AMITypesAl2023X8664Standard},
+		{"AL2023 ARM64 standard", "AL2023_ARM_64_STANDARD", ekstypes.AMITypesAl2023Arm64Standard},
+		{"AL2023 x86_64 NVIDIA", "AL2023_x86_64_NVIDIA", ekstypes.AMITypesAl2023X8664Nvidia},
+		{"AL2023 ARM64 NVIDIA", "AL2023_ARM_64_NVIDIA", ekstypes.AMITypesAl2023Arm64Nvidia},
+		{"AL2023 x86_64 Neuron", "AL2023_x86_64_NEURON", ekstypes.AMITypesAl2023X8664Neuron},
+
+		// AL2 types (legacy)
+		{"AL2 x86_64", "AL2_x86_64", ekstypes.AMITypesAl2X8664},
+		{"AL2 x86_64 GPU", "AL2_x86_64_GPU", ekstypes.AMITypesAl2X8664Gpu},
+		{"AL2 ARM64", "AL2_ARM_64", ekstypes.AMITypesAl2Arm64},
+
+		// Bottlerocket types
+		{"Bottlerocket x86_64", "BOTTLEROCKET_x86_64", ekstypes.AMITypesBottlerocketX8664},
+		{"Bottlerocket ARM64", "BOTTLEROCKET_ARM_64", ekstypes.AMITypesBottlerocketArm64},
+		{"Bottlerocket x86_64 NVIDIA", "BOTTLEROCKET_x86_64_NVIDIA", ekstypes.AMITypesBottlerocketX8664Nvidia},
+		{"Bottlerocket ARM64 NVIDIA", "BOTTLEROCKET_ARM_64_NVIDIA", ekstypes.AMITypesBottlerocketArm64Nvidia},
+
+		// Windows types
+		{"Windows Core 2019", "WINDOWS_CORE_2019_x86_64", ekstypes.AMITypesWindowsCore2019X8664},
+		{"Windows Full 2019", "WINDOWS_FULL_2019_x86_64", ekstypes.AMITypesWindowsFull2019X8664},
+		{"Windows Core 2022", "WINDOWS_CORE_2022_x86_64", ekstypes.AMITypesWindowsCore2022X8664},
+		{"Windows Full 2022", "WINDOWS_FULL_2022_x86_64", ekstypes.AMITypesWindowsFull2022X8664},
+
+		// Unknown/default
+		{"Unknown AMI type", "UNKNOWN_AMI", DefaultAMIType},
+		{"Empty string", "", DefaultAMIType},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseAMIType(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseAMIType(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
 	}
 }

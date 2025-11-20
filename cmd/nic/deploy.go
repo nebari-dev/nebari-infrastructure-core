@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 var (
@@ -33,7 +36,8 @@ func init() {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	// Get cancellable context from cobra (for signal handling)
+	ctx := cmd.Context()
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.deploy")
 	defer span.End()
@@ -41,6 +45,44 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	span.SetAttributes(attribute.String("config.file", deployConfigFile))
 
 	slog.Info("Starting deployment", "config_file", deployConfigFile)
+
+	// Create status channel for progress updates
+	statusCh := make(chan status.StatusUpdate, 100)
+	ctx = status.WithChannel(ctx, statusCh)
+
+	// Start goroutine to log status updates
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		logStatusUpdates(statusCh)
+	}()
+
+	// Ensure status channel is closed and all messages are logged before exit
+	defer func() {
+		close(statusCh)
+
+		// Wait for logger goroutine with timeout to prevent hanging
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// All status messages logged successfully
+		case <-time.After(5 * time.Second):
+			slog.Warn("Timeout waiting for status messages to flush, some messages may be lost")
+		}
+	}()
+
+	// Handle context cancellation (from signal interrupt)
+	defer func() {
+		if ctx.Err() == context.Canceled {
+			slog.Warn("Deployment interrupted by user")
+		}
+	}()
 
 	// Parse configuration
 	cfg, err := config.ParseConfig(ctx, deployConfigFile)
@@ -75,4 +117,44 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
 	return nil
+}
+
+// logStatusUpdates reads status updates from the channel and logs them
+// This function runs in a goroutine and exits when the channel is closed
+func logStatusUpdates(statusCh <-chan status.StatusUpdate) {
+	for update := range statusCh {
+		// Build structured logging attributes
+		attrs := []any{
+			"message", update.Message,
+		}
+
+		if update.Resource != "" {
+			attrs = append(attrs, "resource", update.Resource)
+		}
+
+		if update.Action != "" {
+			attrs = append(attrs, "action", update.Action)
+		}
+
+		// Add metadata as individual attributes
+		for key, value := range update.Metadata {
+			attrs = append(attrs, key, value)
+		}
+
+		// Log at appropriate level
+		switch update.Level {
+		case status.LevelInfo:
+			slog.Info("Status", attrs...)
+		case status.LevelProgress:
+			slog.Info("Progress", attrs...)
+		case status.LevelSuccess:
+			slog.Info("Success", attrs...)
+		case status.LevelWarning:
+			slog.Warn("Warning", attrs...)
+		case status.LevelError:
+			slog.Error("Error", attrs...)
+		default:
+			slog.Info("Status", attrs...)
+		}
+	}
 }

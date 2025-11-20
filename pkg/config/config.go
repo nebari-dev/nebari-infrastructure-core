@@ -98,6 +98,7 @@ type AWSNodeGroup struct {
 	MaxNodes            int     `yaml:"max_nodes,omitempty"`
 	Taints              []Taint `yaml:"taints,omitempty"`
 	GPU                 bool    `yaml:"gpu,omitempty"`
+	AMIType             string  `yaml:"ami_type,omitempty"`
 	SingleSubnet        bool    `yaml:"single_subnet,omitempty"`
 	PermissionsBoundary string  `yaml:"permissions_boundary,omitempty"`
 	Spot                bool    `yaml:"spot,omitempty"`

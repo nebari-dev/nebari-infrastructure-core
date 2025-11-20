@@ -241,6 +241,24 @@ func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg
 		return err
 	}
 
+	// Check for AMI type changes (also immutable)
+	desiredAMIType := string(DefaultAMIType)
+	if desired.AMIType != "" {
+		desiredAMIType = desired.AMIType
+	} else if desired.GPU {
+		desiredAMIType = string(ekstypes.AMITypesAl2023X8664Nvidia)
+	}
+
+	if actual.AMIType != desiredAMIType {
+		err := fmt.Errorf("node group AMI type is immutable and cannot be changed (current: %s, desired: %s). Manual intervention required - destroy and recreate node group", actual.AMIType, desiredAMIType)
+		span.RecordError(err)
+		span.SetAttributes(
+			attribute.String("current_ami_type", actual.AMIType),
+			attribute.String("desired_ami_type", desiredAMIType),
+		)
+		return err
+	}
+
 	// Apply updates if needed
 	if updateNeeded {
 		_, err := clients.EKSClient.UpdateNodegroupConfig(ctx, updateInput)
