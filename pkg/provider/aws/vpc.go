@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -443,7 +444,7 @@ func (p *Provider) createNATGateways(ctx context.Context, clients *Clients, clus
 		waiter := ec2.NewNatGatewayAvailableWaiter(clients.EC2Client)
 		err := waiter.Wait(ctx, &ec2.DescribeNatGatewaysInput{
 			NatGatewayIds: []string{natID},
-		}, 5*60) // 5 minutes timeout (in seconds)
+		}, 10*time.Minute) // 10 minutes timeout
 		if err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("NAT gateway %s did not become available: %w", natID, err)
