@@ -16,10 +16,10 @@ func TestParseK8sVersion(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:      "valid version 1.28",
-			version:   "1.28",
+			name:      "valid version 1.34",
+			version:   "1.34",
 			wantMajor: 1,
-			wantMinor: 28,
+			wantMinor: 34,
 			wantErr:   false,
 		},
 		{
@@ -111,14 +111,14 @@ func TestValidateK8sVersionUpgrade(t *testing.T) {
 	}{
 		{
 			name:    "no upgrade - same version",
-			current: "1.28",
-			desired: "1.28",
+			current: "1.34",
+			desired: "1.34",
 			wantErr: false,
 		},
 		{
 			name:    "valid upgrade - one minor version",
-			current: "1.28",
-			desired: "1.29",
+			current: "1.33",
+			desired: "1.34",
 			wantErr: false,
 		},
 		{
@@ -129,8 +129,8 @@ func TestValidateK8sVersionUpgrade(t *testing.T) {
 		},
 		{
 			name:        "invalid upgrade - skip minor version",
-			current:     "1.28",
-			desired:     "1.30",
+			current:     "1.32",
+			desired:     "1.34",
 			wantErr:     true,
 			errContains: "cannot skip Kubernetes minor versions",
 		},
@@ -143,14 +143,14 @@ func TestValidateK8sVersionUpgrade(t *testing.T) {
 		},
 		{
 			name:        "invalid - downgrade",
-			current:     "1.29",
-			desired:     "1.28",
+			current:     "1.34",
+			desired:     "1.33",
 			wantErr:     true,
 			errContains: "cannot downgrade",
 		},
 		{
 			name:        "invalid - major version change",
-			current:     "1.28",
+			current:     "1.34",
 			desired:     "2.0",
 			wantErr:     true,
 			errContains: "cannot change Kubernetes major version",
@@ -158,13 +158,13 @@ func TestValidateK8sVersionUpgrade(t *testing.T) {
 		{
 			name:        "invalid current version format",
 			current:     "invalid",
-			desired:     "1.29",
+			desired:     "1.34",
 			wantErr:     true,
 			errContains: "invalid current Kubernetes version",
 		},
 		{
 			name:        "invalid desired version format",
-			current:     "1.28",
+			current:     "1.34",
 			desired:     "invalid",
 			wantErr:     true,
 			errContains: "invalid desired Kubernetes version",

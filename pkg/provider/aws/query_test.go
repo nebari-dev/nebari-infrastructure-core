@@ -25,7 +25,7 @@ func TestConvertToProviderState(t *testing.T) {
 				Name:                 "test-cluster",
 				ARN:                  "arn:aws:eks:us-west-2:123456789012:cluster/test-cluster",
 				Endpoint:             "https://ABC123.eks.us-west-2.amazonaws.com",
-				Version:              "1.28",
+				Version:              "1.34",
 				Status:               "ACTIVE",
 				CertificateAuthority: "LS0tLS1CRUdJTi...",
 			},
@@ -48,8 +48,8 @@ func TestConvertToProviderState(t *testing.T) {
 				if state.Cluster.Name != "test-cluster" {
 					t.Errorf("Expected cluster name test-cluster, got %s", state.Cluster.Name)
 				}
-				if state.Cluster.Version != "1.28" {
-					t.Errorf("Expected version 1.28, got %s", state.Cluster.Version)
+				if state.Cluster.Version != "1.34" {
+					t.Errorf("Expected version 1.34, got %s", state.Cluster.Version)
 				}
 				if state.Cluster.Status != "ACTIVE" {
 					t.Errorf("Expected status ACTIVE, got %s", state.Cluster.Status)
@@ -74,7 +74,7 @@ func TestConvertToProviderState(t *testing.T) {
 				Name:     "test-cluster",
 				ARN:      "arn:aws:eks:us-west-2:123456789012:cluster/test-cluster",
 				Endpoint: "https://ABC123.eks.us-west-2.amazonaws.com",
-				Version:  "1.28",
+				Version:  "1.34",
 				Status:   "ACTIVE",
 			},
 			validateFunc: func(t *testing.T, state *provider.InfrastructureState) {
@@ -104,7 +104,7 @@ func TestConvertToProviderState(t *testing.T) {
 			region:      "us-west-2",
 			cluster: &ClusterState{
 				Name:    "test-cluster",
-				Version: "1.28",
+				Version: "1.34",
 				Status:  "ACTIVE",
 			},
 			nodeGroups: []NodeGroupState{
@@ -214,7 +214,7 @@ func TestConvertToProviderState(t *testing.T) {
 				Name:                "test",
 				ARN:                 "arn:aws:eks:us-west-2:123:cluster/test",
 				Endpoint:            "https://test.eks.amazonaws.com",
-				Version:             "1.28",
+				Version:             "1.34",
 				Status:              "ACTIVE",
 				VPCID:               "vpc-123",
 				EndpointPublic:      true,
@@ -264,7 +264,7 @@ func TestConvertToProviderState(t *testing.T) {
 			region:      "us-west-2",
 			cluster: &ClusterState{
 				Name:    "test",
-				Version: "1.28",
+				Version: "1.34",
 				Status:  "ACTIVE",
 			},
 			nodeGroups: []NodeGroupState{},
@@ -283,7 +283,7 @@ func TestConvertToProviderState(t *testing.T) {
 			region:      "us-west-2",
 			cluster: &ClusterState{
 				Name:    "test",
-				Version: "1.28",
+				Version: "1.34",
 			},
 			validateFunc: func(t *testing.T, state *provider.InfrastructureState) {
 				if state == nil {

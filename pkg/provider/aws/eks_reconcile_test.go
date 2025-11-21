@@ -74,7 +74,7 @@ func TestReconcileCluster(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 				},
 			},
 			vpc: &VPCState{
@@ -83,7 +83,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:            "test-cluster",
-				Version:         "1.28",
+				Version:         "1.34",
 				VPCID:           "vpc-12345",
 				EndpointPublic:  true,
 				EndpointPrivate: false,
@@ -107,7 +107,7 @@ func TestReconcileCluster(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.29",
+					KubernetesVersion: "1.34",
 				},
 			},
 			vpc: &VPCState{
@@ -116,7 +116,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:            "test-cluster",
-				Version:         "1.28",
+				Version:         "1.33",
 				VPCID:           "vpc-12345",
 				EndpointPublic:  true,
 				EndpointPrivate: false,
@@ -137,7 +137,7 @@ func TestReconcileCluster(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:    params.Name,
 							Status:  ekstypes.ClusterStatusActive,
-							Version: aws.String("1.29"),
+							Version: aws.String("1.34"),
 						},
 					}, nil
 				}
@@ -151,7 +151,7 @@ func TestReconcileCluster(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 					EKSEndpointAccess: "private",
 				},
 			},
@@ -161,7 +161,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:            "test-cluster",
-				Version:         "1.28",
+				Version:         "1.34",
 				VPCID:           "vpc-12345",
 				EndpointPublic:  true,
 				EndpointPrivate: false,
@@ -195,7 +195,7 @@ func TestReconcileCluster(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 				},
 			},
 			vpc: &VPCState{
@@ -204,7 +204,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:            "test-cluster",
-				Version:         "1.28",
+				Version:         "1.34",
 				VPCID:           "vpc-12345",
 				EndpointPublic:  true,
 				EndpointPrivate: false,
@@ -264,7 +264,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:    "test-cluster",
-				Version: "1.28",
+				Version: "1.34",
 				VPCID:   "vpc-12345",
 			},
 			mockSetup: func(m *MockEKSClient) {
@@ -280,7 +280,7 @@ func TestReconcileCluster(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.29",
+					KubernetesVersion: "1.34",
 				},
 			},
 			vpc: &VPCState{
@@ -289,7 +289,7 @@ func TestReconcileCluster(t *testing.T) {
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
 				Name:            "test-cluster",
-				Version:         "1.28",
+				Version:         "1.33",
 				VPCID:           "vpc-12345",
 				EndpointPublic:  true,
 				EndpointPrivate: false,

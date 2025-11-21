@@ -42,7 +42,7 @@ func TestValidate_TableDriven(t *testing.T) {
 				Provider:    "aws",
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 					NodeGroups: map[string]config.AWSNodeGroup{
 						"general": {Instance: "t3.medium", MinNodes: 1, MaxNodes: 3},
 					},

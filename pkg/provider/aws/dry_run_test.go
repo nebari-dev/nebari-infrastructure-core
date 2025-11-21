@@ -31,7 +31,7 @@ func TestDryRunDeploy(t *testing.T) {
 				DryRun:      true,
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 					VPCCIDRBlock:      "10.0.0.0/16",
 					NodeGroups: map[string]config.AWSNodeGroup{
 						"general": {
@@ -133,7 +133,7 @@ func TestDryRunDeploy(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:    aws.String("test-cluster"),
 							Arn:     aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
-							Version: aws.String("1.28"),
+							Version: aws.String("1.34"),
 							Status:  ekstypes.ClusterStatusActive,
 							Tags: map[string]string{
 								TagManagedBy:   ManagedByValue,
@@ -186,7 +186,7 @@ func TestDryRunDeploy(t *testing.T) {
 				DryRun:      true,
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 					NodeGroups: map[string]config.AWSNodeGroup{
 						"general": {
 							Instance: "t3.medium",
@@ -207,7 +207,7 @@ func TestDryRunDeploy(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:    aws.String("test-cluster"),
 							Arn:     aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
-							Version: aws.String("1.28"),
+							Version: aws.String("1.34"),
 							Status:  ekstypes.ClusterStatusActive,
 							Tags: map[string]string{
 								TagManagedBy:   ManagedByValue,
@@ -256,7 +256,7 @@ func TestDryRunDeploy(t *testing.T) {
 				DryRun:      true,
 				AmazonWebServices: &config.AWSConfig{
 					Region:            "us-west-2",
-					KubernetesVersion: "1.28",
+					KubernetesVersion: "1.34",
 					NodeGroups: map[string]config.AWSNodeGroup{
 						"gpu": {
 							Instance: "g4dn.xlarge",
@@ -418,7 +418,7 @@ func TestDryRunDestroy(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:     aws.String("test-cluster"),
 							Arn:      aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
-							Version:  aws.String("1.28"),
+							Version:  aws.String("1.34"),
 							Status:   ekstypes.ClusterStatusActive,
 							Endpoint: aws.String("https://ABC123.gr7.us-west-2.eks.amazonaws.com"),
 							Tags: map[string]string{
@@ -487,7 +487,7 @@ func TestDryRunDestroy(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:     aws.String("test-cluster"),
 							Arn:      aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
-							Version:  aws.String("1.28"),
+							Version:  aws.String("1.34"),
 							Status:   ekstypes.ClusterStatusActive,
 							Endpoint: aws.String("https://ABC123.gr7.us-west-2.eks.amazonaws.com"),
 							Tags: map[string]string{

@@ -23,7 +23,7 @@ func TestConvertEKSClusterToState(t *testing.T) {
 				Name:     aws.String("test-cluster"),
 				Arn:      aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
 				Endpoint: aws.String("https://ABCDEF123456.gr7.us-west-2.eks.amazonaws.com"),
-				Version:  aws.String("1.28"),
+				Version:  aws.String("1.34"),
 				Status:   ekstypes.ClusterStatusActive,
 				CertificateAuthority: &ekstypes.Certificate{
 					Data: aws.String("LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t"),
@@ -72,8 +72,8 @@ func TestConvertEKSClusterToState(t *testing.T) {
 				if state.Status != string(ekstypes.ClusterStatusActive) {
 					t.Errorf("Status = %v, want %v", state.Status, ekstypes.ClusterStatusActive)
 				}
-				if state.Version != "1.28" {
-					t.Errorf("Version = %v, want %v", state.Version, "1.28")
+				if state.Version != "1.34" {
+					t.Errorf("Version = %v, want %v", state.Version, "1.34")
 				}
 				if state.VPCID != "vpc-123456" {
 					t.Errorf("VPCID = %v, want %v", state.VPCID, "vpc-123456")
@@ -103,7 +103,7 @@ func TestConvertEKSClusterToState(t *testing.T) {
 			cluster: &ekstypes.Cluster{
 				Name:    aws.String("minimal-cluster"),
 				Arn:     aws.String("arn:aws:eks:us-west-2:123456789012:cluster/minimal-cluster"),
-				Version: aws.String("1.28"),
+				Version: aws.String("1.34"),
 				Status:  ekstypes.ClusterStatusCreating,
 			},
 			validateFunc: func(t *testing.T, state *ClusterState) {
@@ -125,7 +125,7 @@ func TestConvertEKSClusterToState(t *testing.T) {
 			name: "logging disabled",
 			cluster: &ekstypes.Cluster{
 				Name:    aws.String("test-cluster"),
-				Version: aws.String("1.28"),
+				Version: aws.String("1.34"),
 				Status:  ekstypes.ClusterStatusActive,
 				Logging: &ekstypes.Logging{
 					ClusterLogging: []ekstypes.LogSetup{
@@ -148,7 +148,7 @@ func TestConvertEKSClusterToState(t *testing.T) {
 			name: "nil optional values",
 			cluster: &ekstypes.Cluster{
 				Name:    aws.String("test-cluster"),
-				Version: aws.String("1.28"),
+				Version: aws.String("1.34"),
 				Status:  ekstypes.ClusterStatusActive,
 				// All optional fields nil
 				CertificateAuthority: nil,
@@ -304,7 +304,7 @@ func TestEKSConstants(t *testing.T) {
 		expected interface{}
 	}{
 		{"ResourceTypeEKSCluster", ResourceTypeEKSCluster, "eks-cluster"},
-		{"DefaultKubernetesVersion", DefaultKubernetesVersion, "1.28"},
+		{"DefaultKubernetesVersion", DefaultKubernetesVersion, "1.34"},
 		{"DefaultEndpointPublic", DefaultEndpointPublic, true},
 		{"DefaultEndpointPrivate", DefaultEndpointPrivate, false},
 		{"EKSClusterCreateTimeout", EKSClusterCreateTimeout, 20 * time.Minute},

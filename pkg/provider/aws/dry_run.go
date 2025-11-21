@@ -85,7 +85,7 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	fmt.Println("\n☸️  EKS Cluster:")
 	desiredVersion := cfg.AmazonWebServices.KubernetesVersion
 	if desiredVersion == "" {
-		desiredVersion = "1.28" // default
+		desiredVersion = "1.34" // default
 	}
 	if actualCluster == nil {
 		fmt.Printf("   • Cluster: WILL CREATE (version %s)\n", desiredVersion)

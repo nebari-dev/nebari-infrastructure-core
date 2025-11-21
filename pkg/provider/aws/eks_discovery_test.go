@@ -29,7 +29,7 @@ func TestDiscoverCluster(t *testing.T) {
 							Name:     aws.String("test-cluster"),
 							Arn:      aws.String("arn:aws:eks:us-west-2:123456789012:cluster/test-cluster"),
 							Endpoint: aws.String("https://ABC123.eks.us-west-2.amazonaws.com"),
-							Version:  aws.String("1.28"),
+							Version:  aws.String("1.34"),
 							Status:   ekstypes.ClusterStatusActive,
 							CertificateAuthority: &ekstypes.Certificate{
 								Data: aws.String("LS0tLS1CRUdJTi=="),
@@ -58,8 +58,8 @@ func TestDiscoverCluster(t *testing.T) {
 				if state.Status != string(ekstypes.ClusterStatusActive) {
 					t.Errorf("Status = %v, want %v", state.Status, ekstypes.ClusterStatusActive)
 				}
-				if state.Version != "1.28" {
-					t.Errorf("Version = %v, want 1.28", state.Version)
+				if state.Version != "1.34" {
+					t.Errorf("Version = %v, want 1.34", state.Version)
 				}
 				if state.VPCID != "vpc-12345" {
 					t.Errorf("VPCID = %v, want vpc-12345", state.VPCID)
@@ -88,7 +88,7 @@ func TestDiscoverCluster(t *testing.T) {
 					return &eks.DescribeClusterOutput{
 						Cluster: &ekstypes.Cluster{
 							Name:    aws.String("unmanaged-cluster"),
-							Version: aws.String("1.28"),
+							Version: aws.String("1.34"),
 							Status:  ekstypes.ClusterStatusActive,
 							Tags:    nil, // Nil tags
 						},
@@ -106,7 +106,7 @@ func TestDiscoverCluster(t *testing.T) {
 					return &eks.DescribeClusterOutput{
 						Cluster: &ekstypes.Cluster{
 							Name:    aws.String("unmanaged-cluster2"),
-							Version: aws.String("1.28"),
+							Version: aws.String("1.34"),
 							Status:  ekstypes.ClusterStatusActive,
 							Tags:    map[string]string{"some-tag": "some-value"}, // Tags exist but no NIC tags
 						},
@@ -125,7 +125,7 @@ func TestDiscoverCluster(t *testing.T) {
 						Cluster: &ekstypes.Cluster{
 							Name:    aws.String("creating-cluster"),
 							Arn:     aws.String("arn:aws:eks:us-west-2:123456789012:cluster/creating-cluster"),
-							Version: aws.String("1.28"),
+							Version: aws.String("1.34"),
 							Status:  ekstypes.ClusterStatusCreating,
 							Tags: map[string]string{
 								TagManagedBy:    ManagedByValue,

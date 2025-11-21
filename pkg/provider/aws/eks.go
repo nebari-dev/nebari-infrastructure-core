@@ -16,7 +16,7 @@ import (
 
 const (
 	// DefaultKubernetesVersion is the default Kubernetes version for EKS clusters
-	DefaultKubernetesVersion = "1.28"
+	DefaultKubernetesVersion = "1.34"
 	// DefaultEndpointPublic is the default public endpoint access setting
 	DefaultEndpointPublic = true
 	// DefaultEndpointPrivate is the default private endpoint access setting
@@ -156,11 +156,8 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 }
 
 // convertEKSClusterToState converts an EKS cluster API response to ClusterState
+// Note: Pure data transformation - no tracing needed
 func convertEKSClusterToState(cluster *ekstypes.Cluster) *ClusterState {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(context.Background(), "aws.convertEKSClusterToState")
-	defer span.End()
-
 	state := &ClusterState{
 		Name:     aws.ToString(cluster.Name),
 		ARN:      aws.ToString(cluster.Arn),
@@ -216,29 +213,17 @@ func convertEKSClusterToState(cluster *ekstypes.Cluster) *ClusterState {
 		state.CreatedAt = cluster.CreatedAt.Format(time.RFC3339)
 	}
 
-	span.SetAttributes(
-		attribute.String("cluster_name", state.Name),
-		attribute.String("cluster_status", state.Status),
-	)
-
 	return state
 }
 
 // convertToEKSTags converts NIC tags to EKS tag format (map[string]string)
+// Note: Pure data transformation - no tracing needed
 func convertToEKSTags(nicTags map[string]string) map[string]string {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(context.Background(), "aws.convertToEKSTags")
-	defer span.End()
-
 	// EKS tags are already map[string]string, so just return a copy
 	tags := make(map[string]string, len(nicTags))
 	for k, v := range nicTags {
 		tags[k] = v
 	}
-
-	span.SetAttributes(
-		attribute.Int("tag_count", len(tags)),
-	)
 
 	return tags
 }

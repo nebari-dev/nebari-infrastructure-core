@@ -84,7 +84,7 @@ func TestReconcileVPC_NoExistingVPC(t *testing.T) {
 		Provider:    "aws",
 		AmazonWebServices: &config.AWSConfig{
 			Region:            "us-west-2",
-			KubernetesVersion: "1.28",
+			KubernetesVersion: "1.34",
 			VPCCIDRBlock:      "10.10.0.0/16",
 		},
 	}
@@ -106,7 +106,7 @@ func TestReconcileVPC_CIDRMismatch(t *testing.T) {
 		Provider:    "aws",
 		AmazonWebServices: &config.AWSConfig{
 			Region:            "us-west-2",
-			KubernetesVersion: "1.28",
+			KubernetesVersion: "1.34",
 			VPCCIDRBlock:      "10.20.0.0/16", // Different from actual
 		},
 	}
@@ -144,7 +144,7 @@ func TestReconcileVPC_CIDRMatch(t *testing.T) {
 		Provider:    "aws",
 		AmazonWebServices: &config.AWSConfig{
 			Region:            "us-west-2",
-			KubernetesVersion: "1.28",
+			KubernetesVersion: "1.34",
 			VPCCIDRBlock:      "10.10.0.0/16",
 		},
 	}

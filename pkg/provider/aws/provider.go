@@ -59,7 +59,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 
 	// Validate Kubernetes version format
 	if awsCfg.KubernetesVersion != "" {
-		// Basic validation - should be like "1.28", "1.29", etc.
+		// Basic validation - should be like "1.34", "1.29", etc.
 		if len(awsCfg.KubernetesVersion) < 3 {
 			err := fmt.Errorf("invalid Kubernetes version format: %s", awsCfg.KubernetesVersion)
 			span.RecordError(err)

@@ -12,7 +12,7 @@ import (
 
 // validateK8sVersionUpgrade validates that a Kubernetes version upgrade is valid.
 // EKS requires incremental upgrades - you cannot skip minor versions.
-// For example: 1.28 → 1.30 is invalid (must go 1.28 → 1.29 → 1.30)
+// For example: 1.34 → 1.30 is invalid (must go 1.34 → 1.29 → 1.30)
 func validateK8sVersionUpgrade(ctx context.Context, current, desired string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.validateK8sVersionUpgrade")
@@ -91,7 +91,7 @@ func validateK8sVersionUpgrade(ctx context.Context, current, desired string) err
 	return nil
 }
 
-// parseK8sVersion parses a Kubernetes version string like "1.28" into major and minor components
+// parseK8sVersion parses a Kubernetes version string like "1.34" into major and minor components
 func parseK8sVersion(version string) (major, minor int, err error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(context.Background(), "aws.parseK8sVersion")
@@ -101,7 +101,7 @@ func parseK8sVersion(version string) (major, minor int, err error) {
 
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 {
-		err = fmt.Errorf("version must be in format 'major.minor' (e.g., '1.28'), got: %s", version)
+		err = fmt.Errorf("version must be in format 'major.minor' (e.g., '1.34'), got: %s", version)
 		span.RecordError(err)
 		return 0, 0, err
 	}

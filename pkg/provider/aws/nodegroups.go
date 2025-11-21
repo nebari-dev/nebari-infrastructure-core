@@ -184,11 +184,8 @@ func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *c
 }
 
 // convertEKSNodeGroupToState converts an EKS node group API response to NodeGroupState
+// Note: Pure data transformation - no tracing needed
 func convertEKSNodeGroupToState(nodeGroup *ekstypes.Nodegroup) *NodeGroupState {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(context.Background(), "aws.convertEKSNodeGroupToState")
-	defer span.End()
-
 	state := &NodeGroupState{
 		Name:        aws.ToString(nodeGroup.NodegroupName),
 		ARN:         aws.ToString(nodeGroup.NodegroupArn),
@@ -264,21 +261,12 @@ func convertEKSNodeGroupToState(nodeGroup *ekstypes.Nodegroup) *NodeGroupState {
 		state.ModifiedAt = nodeGroup.ModifiedAt.Format(time.RFC3339)
 	}
 
-	span.SetAttributes(
-		attribute.String("node_group_name", state.Name),
-		attribute.String("node_group_status", state.Status),
-	)
-
 	return state
 }
 
 // parseAMIType converts string AMI type to ekstypes.AMITypes
+// Note: Pure data transformation - no tracing needed
 func parseAMIType(amiTypeStr string) ekstypes.AMITypes {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(context.Background(), "aws.parseAMIType")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("ami_type_input", amiTypeStr))
 
 	var amiType ekstypes.AMITypes
 
@@ -326,9 +314,7 @@ func parseAMIType(amiTypeStr string) ekstypes.AMITypes {
 	default:
 		// If unknown, use default AL2023
 		amiType = DefaultAMIType
-		span.SetAttributes(attribute.Bool("unknown_ami_type", true))
 	}
 
-	span.SetAttributes(attribute.String("ami_type_output", string(amiType)))
 	return amiType
 }

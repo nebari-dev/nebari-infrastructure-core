@@ -4,7 +4,7 @@ domain: cmcandrew-nebari.openteams.app
 
 amazon_web_services:
   region: us-west-2
-  kubernetes_version: "1.32"
+  kubernetes_version: "1.34"
   availability_zones:
     - us-west-2a
     - us-west-2b
@@ -29,25 +29,25 @@ amazon_web_services:
       max_nodes: 5
 
     # Example: GPU node group with AL2023 NVIDIA AMI
-    # gpu:
-    #   instance: g5.xlarge
-    #   min_nodes: 0
-    #   max_nodes: 3
-    #   gpu: true  # Uses AL2023_x86_64_NVIDIA AMI
+    gpu:
+      instance: g5.xlarge
+      min_nodes: 0
+      max_nodes: 3
+      gpu: true # Uses AL2023_x86_64_NVIDIA AMI
 
     # Example: ARM64 Graviton node group
-    # graviton:
-    #   instance: m7g.xlarge
-    #   min_nodes: 0
-    #   max_nodes: 5
-    #   ami_type: AL2023_ARM_64_STANDARD
+    graviton:
+      instance: m7g.xlarge
+      min_nodes: 0
+      max_nodes: 5
+      ami_type: AL2023_ARM_64_STANDARD
 
     # Example: AWS Neuron (Inferentia/Trainium) node group
-    # neuron:
-    #   instance: inf2.xlarge
-    #   min_nodes: 0
-    #   max_nodes: 2
-    #   ami_type: AL2023_x86_64_NEURON
+    neuron:
+      instance: inf2.xlarge
+      min_nodes: 0
+      max_nodes: 2
+      ami_type: AL2023_x86_64_NEURON
 
   tags:
     Environment: development
