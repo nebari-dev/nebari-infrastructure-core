@@ -144,13 +144,13 @@ func TestDryRunDeploy(t *testing.T) {
 				}
 				// Existing node group needs updates
 				eksMock.ListNodegroupsFunc = func(ctx context.Context, params *eks.ListNodegroupsInput, optFns ...func(*eks.Options)) (*eks.ListNodegroupsOutput, error) {
-					return &eks.ListNodegroupsOutput{Nodegroups: []string{"general"}}, nil
+					return &eks.ListNodegroupsOutput{Nodegroups: []string{"test-cluster-ng-general"}}, nil
 				}
 				eksMock.DescribeNodegroupFunc = func(ctx context.Context, params *eks.DescribeNodegroupInput, optFns ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error) {
 					return &eks.DescribeNodegroupOutput{
 						Nodegroup: &ekstypes.Nodegroup{
-							NodegroupName: aws.String("general"),
-							NodegroupArn:  aws.String("arn:aws:eks:us-west-2:123456789012:nodegroup/test-cluster/general/123"),
+							NodegroupName: aws.String("test-cluster-ng-general"),
+							NodegroupArn:  aws.String("arn:aws:eks:us-west-2:123456789012:nodegroup/test-cluster/test-cluster-ng-general/123"),
 							InstanceTypes: []string{"t3.medium"},
 							ScalingConfig: &ekstypes.NodegroupScalingConfig{
 								MinSize:     aws.Int32(1),
@@ -163,6 +163,7 @@ func TestDryRunDeploy(t *testing.T) {
 							Tags: map[string]string{
 								TagManagedBy:   ManagedByValue,
 								TagClusterName: "test-cluster",
+								TagNodePool:    "general",
 							},
 						},
 					}, nil
@@ -222,6 +223,11 @@ func TestDryRunDeploy(t *testing.T) {
 				}
 				eksMock.DescribeNodegroupFunc = func(ctx context.Context, params *eks.DescribeNodegroupInput, optFns ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error) {
 					name := *params.NodegroupName
+					// Map AWS node group names to their node pool names (from TagNodePool)
+					nodePoolName := name
+					if name == "orphaned-group" {
+						nodePoolName = "orphaned" // Not in config
+					}
 					return &eks.DescribeNodegroupOutput{
 						Nodegroup: &ekstypes.Nodegroup{
 							NodegroupName: aws.String(name),
@@ -238,6 +244,7 @@ func TestDryRunDeploy(t *testing.T) {
 							Tags: map[string]string{
 								TagManagedBy:   ManagedByValue,
 								TagClusterName: "test-cluster",
+								TagNodePool:    nodePoolName,
 							},
 						},
 					}, nil

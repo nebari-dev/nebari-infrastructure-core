@@ -100,10 +100,14 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	// Analyze Node Groups
 	fmt.Println("\n🖥️  Node Groups:")
 	desiredNodeGroups := cfg.AmazonWebServices.NodeGroups
+	// Build map of actual node groups by node pool name (from tags), matching reconciliation logic
 	actualNodeGroupMap := make(map[string]*NodeGroupState)
 	for i := range actualNodeGroups {
 		ng := &actualNodeGroups[i]
-		actualNodeGroupMap[ng.Name] = ng
+		nodePoolName, ok := ng.Tags[TagNodePool]
+		if ok {
+			actualNodeGroupMap[nodePoolName] = ng
+		}
 	}
 
 	// Check for creates and updates
