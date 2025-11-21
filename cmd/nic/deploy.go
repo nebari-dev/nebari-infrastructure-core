@@ -118,5 +118,51 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
+	// Print DNS guidance if no DNS provider is configured
+	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
+		printDNSGuidance(cfg)
+	}
+
 	return nil
+}
+
+// printDNSGuidance prints instructions for manual DNS configuration
+func printDNSGuidance(cfg *config.NebariConfig) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  DNS CONFIGURATION REQUIRED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  No DNS provider is configured. To access your services, you must manually")
+	fmt.Println("  configure the following DNS records with your DNS provider:")
+	fmt.Println()
+	fmt.Printf("  Domain: %s\n", cfg.Domain)
+	fmt.Println()
+	fmt.Println("  Required DNS Records:")
+	fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
+	fmt.Println("  │ Type  │ Name                          │ Value                          │")
+	fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
+	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", cfg.Domain)
+	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", "*."+cfg.Domain)
+	fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
+	fmt.Println()
+	fmt.Println("  To get the load balancer endpoint, run:")
+	fmt.Println()
+	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'\n")
+	fmt.Println()
+	fmt.Println("  Or for IP-based load balancers:")
+	fmt.Println()
+	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'\n")
+	fmt.Println()
+	fmt.Println("  Note: Use CNAME records for hostname-based load balancers (AWS),")
+	fmt.Println("        or A records for IP-based load balancers (GCP, Azure).")
+	fmt.Println()
+	fmt.Println("  To automate DNS management, add a dns_provider to your configuration:")
+	fmt.Println()
+	fmt.Println("    dns_provider: cloudflare")
+	fmt.Println("    dns:")
+	fmt.Println("      zone_name: example.com")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
 }
