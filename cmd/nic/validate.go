@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -34,7 +33,8 @@ func init() {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	// Get cancellable context from cobra (for signal handling)
+	ctx := cmd.Context()
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()
