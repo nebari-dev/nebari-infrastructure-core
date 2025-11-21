@@ -20,7 +20,8 @@ const (
 	// DefaultEndpointPublic is the default public endpoint access setting
 	DefaultEndpointPublic = true
 	// DefaultEndpointPrivate is the default private endpoint access setting
-	DefaultEndpointPrivate = false
+	// Enabled by default so nodes in private subnets can reach the API directly
+	DefaultEndpointPrivate = true
 
 	// EKSClusterCreateTimeout is the maximum time to wait for cluster creation (10-15 minutes typical)
 	EKSClusterCreateTimeout = 20 * time.Minute

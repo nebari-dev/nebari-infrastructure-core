@@ -86,8 +86,8 @@ func TestReconcileCluster(t *testing.T) {
 				Version:           "1.34",
 				VPCID:             "vpc-12345",
 				EndpointPublic:    true,
-				EndpointPrivate:   false,
-				PublicAccessCIDRs: []string{"0.0.0.0/0"}, // Default value
+				EndpointPrivate:   true, // Default value
+				PublicAccessCIDRs: []string{"0.0.0.0/0"},
 				EnabledLogTypes: []string{
 					string(ekstypes.LogTypeApi),
 					string(ekstypes.LogTypeAudit),
@@ -120,8 +120,8 @@ func TestReconcileCluster(t *testing.T) {
 				Version:           "1.33",
 				VPCID:             "vpc-12345",
 				EndpointPublic:    true,
-				EndpointPrivate:   false,
-				PublicAccessCIDRs: []string{"0.0.0.0/0"}, // Default value
+				EndpointPrivate:   true, // Default value
+				PublicAccessCIDRs: []string{"0.0.0.0/0"},
 				EnabledLogTypes: []string{
 					string(ekstypes.LogTypeApi),
 					string(ekstypes.LogTypeAudit),

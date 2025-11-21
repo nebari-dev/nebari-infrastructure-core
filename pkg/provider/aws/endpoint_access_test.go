@@ -36,13 +36,13 @@ func TestGetEndpointAccessConfig(t *testing.T) {
 			name:              "default (empty string)",
 			endpointAccess:    "",
 			wantPublicAccess:  true,
-			wantPrivateAccess: false,
+			wantPrivateAccess: true,
 		},
 		{
-			name:              "invalid value defaults to public",
+			name:              "invalid value defaults to public-and-private",
 			endpointAccess:    "invalid",
 			wantPublicAccess:  true,
-			wantPrivateAccess: false,
+			wantPrivateAccess: true,
 		},
 	}
 

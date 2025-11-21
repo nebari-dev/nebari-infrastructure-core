@@ -306,7 +306,7 @@ func TestEKSConstants(t *testing.T) {
 		{"ResourceTypeEKSCluster", ResourceTypeEKSCluster, "eks-cluster"},
 		{"DefaultKubernetesVersion", DefaultKubernetesVersion, "1.34"},
 		{"DefaultEndpointPublic", DefaultEndpointPublic, true},
-		{"DefaultEndpointPrivate", DefaultEndpointPrivate, false},
+		{"DefaultEndpointPrivate", DefaultEndpointPrivate, true},
 		{"EKSClusterCreateTimeout", EKSClusterCreateTimeout, 20 * time.Minute},
 		{"EKSClusterUpdateTimeout", EKSClusterUpdateTimeout, 20 * time.Minute},
 		{"EKSClusterDeleteTimeout", EKSClusterDeleteTimeout, 15 * time.Minute},

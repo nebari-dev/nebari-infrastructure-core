@@ -15,7 +15,7 @@ type EndpointAccessConfig struct {
 
 // getEndpointAccessConfig determines the endpoint access configuration based on the EKSEndpointAccess setting.
 // Valid values: "public", "private", "public-and-private"
-// Default: public access enabled, private access disabled
+// Default: both public and private access enabled (recommended for nodes in private subnets)
 func getEndpointAccessConfig(ctx context.Context, endpointAccess string) EndpointAccessConfig {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.getEndpointAccessConfig")
@@ -37,9 +37,11 @@ func getEndpointAccessConfig(ctx context.Context, endpointAccess string) Endpoin
 	case "public-and-private":
 		config.PublicAccess = true
 		config.PrivateAccess = true
-	case "public", "":
-		// Use defaults (public=true, private=false)
-		// Empty string also defaults to public
+	case "public":
+		// Public only - disable private access
+		config.PrivateAccess = false
+	case "":
+		// Use defaults (public=true, private=true)
 	}
 
 	span.SetAttributes(
