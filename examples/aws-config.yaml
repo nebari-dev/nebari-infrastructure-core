@@ -49,6 +49,17 @@ amazon_web_services:
       max_nodes: 2
       ami_type: AL2023_x86_64_NEURON
 
+  # EFS configuration for shared storage (optional)
+  # Creates an EFS file system with mount targets in each private subnet
+  efs:
+    enabled: true
+    performance_mode: generalPurpose  # generalPurpose or maxIO
+    throughput_mode: bursting         # bursting, provisioned, or elastic
+    encrypted: true
+    # storage_class_name: efs-sc      # Name for the K8s StorageClass (default: efs-sc)
+    # kms_key_id: ""                  # Optional: KMS key ARN for encryption
+    # provisioned_mbps: 100           # Required if throughput_mode is provisioned
+
   tags:
     Environment: development
     Project: nebari

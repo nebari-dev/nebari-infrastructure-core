@@ -54,8 +54,45 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		return err
 	}
 
-	// Case 3: VPC exists and CIDR matches → No action needed
+	// Validate availability zones are immutable (if specified in config)
+	// AZs determine subnet placement which cannot be changed without recreation
+	if len(awsCfg.AvailabilityZones) > 0 && len(actual.AvailabilityZones) > 0 {
+		if !stringSlicesEqualVPC(awsCfg.AvailabilityZones, actual.AvailabilityZones) {
+			err := fmt.Errorf(
+				"VPC availability zones mismatch detected (actual: %v, desired: %v). "+
+					"Availability zones are immutable and require manual intervention to change. "+
+					"You must destroy the existing VPC and recreate it, or update your configuration to match the actual AZs",
+				actual.AvailabilityZones,
+				awsCfg.AvailabilityZones,
+			)
+			span.RecordError(err)
+			return err
+		}
+	}
+
+	// Case 3: VPC exists and immutable fields match → No action needed
 	span.SetAttributes(attribute.String("action", "none"))
 
 	return nil
+}
+
+// stringSlicesEqualVPC compares two string slices for equality (order-independent)
+func stringSlicesEqualVPC(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create maps for comparison (order-independent)
+	aMap := make(map[string]bool, len(a))
+	for _, v := range a {
+		aMap[v] = true
+	}
+
+	for _, v := range b {
+		if !aMap[v] {
+			return false
+		}
+	}
+
+	return true
 }

@@ -161,6 +161,101 @@ func TestReconcileVPC_CIDRMatch(t *testing.T) {
 	}
 }
 
+func TestReconcileVPC_AvailabilityZonesMismatch(t *testing.T) {
+	p := &Provider{}
+	ctx := context.Background()
+
+	cfg := &config.NebariConfig{
+		ProjectName: "test-cluster",
+		Provider:    "aws",
+		AmazonWebServices: &config.AWSConfig{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			VPCCIDRBlock:      "10.10.0.0/16",
+			AvailabilityZones: []string{"us-west-2a", "us-west-2b", "us-west-2c"}, // Different AZs
+		},
+	}
+
+	actual := &VPCState{
+		VPCID:             "vpc-123456",
+		CIDR:              "10.10.0.0/16",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Original AZs (missing 2c)
+	}
+
+	// This should return an error about immutable AZs
+	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	if err == nil {
+		t.Error("Expected error for availability zones mismatch, got nil")
+	}
+
+	// Check error message mentions immutable
+	if err != nil && len(err.Error()) > 0 {
+		errMsg := err.Error()
+		if !containsSubstring([]string{errMsg}, "availability zones") {
+			t.Errorf("Error message should mention availability zones: %v", errMsg)
+		}
+		if !containsSubstring([]string{errMsg}, "immutable") {
+			t.Errorf("Error message should mention immutable: %v", errMsg)
+		}
+	}
+}
+
+func TestReconcileVPC_AvailabilityZonesMatch(t *testing.T) {
+	p := &Provider{}
+	ctx := context.Background()
+
+	cfg := &config.NebariConfig{
+		ProjectName: "test-cluster",
+		Provider:    "aws",
+		AmazonWebServices: &config.AWSConfig{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			VPCCIDRBlock:      "10.10.0.0/16",
+			AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Same AZs
+		},
+	}
+
+	actual := &VPCState{
+		VPCID:             "vpc-123456",
+		CIDR:              "10.10.0.0/16",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Same AZs
+	}
+
+	// This should succeed with no changes
+	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	if err != nil {
+		t.Errorf("Expected no error when AZs match, got: %v", err)
+	}
+}
+
+func TestReconcileVPC_AvailabilityZonesNotSpecifiedInConfig(t *testing.T) {
+	p := &Provider{}
+	ctx := context.Background()
+
+	cfg := &config.NebariConfig{
+		ProjectName: "test-cluster",
+		Provider:    "aws",
+		AmazonWebServices: &config.AWSConfig{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			VPCCIDRBlock:      "10.10.0.0/16",
+			// No AvailabilityZones specified - should not error
+		},
+	}
+
+	actual := &VPCState{
+		VPCID:             "vpc-123456",
+		CIDR:              "10.10.0.0/16",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Actual has AZs
+	}
+
+	// This should succeed - no AZs specified in config means no comparison
+	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	if err != nil {
+		t.Errorf("Expected no error when AZs not specified in config, got: %v", err)
+	}
+}
+
 func TestContains(t *testing.T) {
 	tests := []struct {
 		name  string

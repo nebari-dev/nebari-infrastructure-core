@@ -259,6 +259,22 @@ func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg
 		return err
 	}
 
+	// Check for capacity type (Spot) changes (also immutable)
+	desiredCapacityType := string(DefaultCapacityType) // ON_DEMAND
+	if desired.Spot {
+		desiredCapacityType = string(ekstypes.CapacityTypesSpot)
+	}
+
+	if actual.CapacityType != desiredCapacityType {
+		err := fmt.Errorf("node group capacity type (Spot) is immutable and cannot be changed (current: %s, desired: %s). Manual intervention required - destroy and recreate node group", actual.CapacityType, desiredCapacityType)
+		span.RecordError(err)
+		span.SetAttributes(
+			attribute.String("current_capacity_type", actual.CapacityType),
+			attribute.String("desired_capacity_type", desiredCapacityType),
+		)
+		return err
+	}
+
 	// Apply updates if needed
 	if updateNeeded {
 		_, err := clients.EKSClient.UpdateNodegroupConfig(ctx, updateInput)

@@ -233,26 +233,35 @@ registry.Register(ctx, "local", local.NewProvider())
 
 ## Current Status
 
-**v0.1.0 - Initial Implementation**
+### AWS Provider (Fully Implemented)
 
-This is the initial implementation with stub providers. Each provider currently prints the configuration it receives and returns successfully. Full implementation will follow in subsequent releases.
+The AWS provider has complete native SDK implementation with stateless reconciliation:
 
-### Stub Provider Behavior
+- **VPC**: Creates/manages VPC, subnets, internet gateway, NAT gateways, route tables, security groups
+- **EKS**: Creates/manages EKS cluster with version upgrades, logging, endpoint access configuration
+- **Node Groups**: Parallel creation/update/deletion with scaling, labels, and taints
+- **EFS**: Optional shared storage with mount targets
+- **IAM**: Service roles and node instance profiles
 
-All providers currently:
+**Reconciliation behavior:**
+- Discovers actual state by querying AWS APIs with NIC tags (`nic.nebari.dev/*`)
+- Compares all config attributes against actual state
+- Creates missing resources, updates mutable fields, deletes orphaned resources
+- Errors on immutable field changes requiring manual intervention:
+  - VPC: CIDR, availability zones
+  - EKS: KMS encryption key
+  - Node Groups: instance type, AMI type, capacity type (Spot)
+  - EFS: performance mode, encryption, KMS key
 
-1. Accept configuration via the `Deploy()` method
-2. Print provider name and full configuration as JSON
-3. Return success
-4. Are fully instrumented with OpenTelemetry spans
+### GCP, Azure, Local Providers (Stubs)
+
+These providers are stub implementations that print config as JSON and return success. Native SDK implementation pending.
 
 ### Next Steps
 
-- Implement actual AWS provider with native AWS SDK v2
 - Implement GCP provider with Google Cloud Client Libraries
 - Implement Azure provider with Azure SDK for Go
 - Implement local K3s provider
-- Add state management
 - Add import from Terraform functionality
 
 ## License

@@ -42,7 +42,19 @@ type AWSConfig struct {
 	VPCCIDRBlock            string                  `yaml:"vpc_cidr_block,omitempty"`
 	PermissionsBoundary     string                  `yaml:"permissions_boundary,omitempty"`
 	Tags                    map[string]string       `yaml:"tags,omitempty"`
+	EFS                     *EFSConfig              `yaml:"efs,omitempty"`
 	AdditionalFields        map[string]any          `yaml:",inline"`
+}
+
+// EFSConfig represents AWS EFS configuration for shared storage
+type EFSConfig struct {
+	Enabled          bool   `yaml:"enabled,omitempty"`
+	PerformanceMode  string `yaml:"performance_mode,omitempty"` // generalPurpose or maxIO
+	ThroughputMode   string `yaml:"throughput_mode,omitempty"`  // bursting, provisioned, or elastic
+	ProvisionedMBps  int    `yaml:"provisioned_mbps,omitempty"` // Required if throughput_mode is provisioned
+	Encrypted        bool   `yaml:"encrypted,omitempty"`
+	KMSKeyID         string `yaml:"kms_key_id,omitempty"`
+	StorageClassName string `yaml:"storage_class_name,omitempty"` // Name for the K8s StorageClass (default: efs-sc)
 }
 
 // GCPConfig represents GCP-specific configuration

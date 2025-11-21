@@ -294,6 +294,22 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		return fmt.Errorf("failed to reconcile node groups: %w", err)
 	}
 
+	// 8. Discover EFS storage (if configured)
+	if cfg.AmazonWebServices.EFS != nil && cfg.AmazonWebServices.EFS.Enabled {
+		actualEFS, err := p.DiscoverEFS(ctx, clients, clusterName)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to discover EFS: %w", err)
+		}
+
+		// 9. Reconcile EFS storage
+		_, err = p.reconcileEFS(ctx, clients, cfg, actualVPC, actualEFS)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to reconcile EFS: %w", err)
+		}
+	}
+
 	span.SetAttributes(
 		attribute.Bool("reconciliation_complete", true),
 	)
@@ -349,37 +365,58 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		}
 	}
 
-	// 2. Delete EKS cluster
-	if err := p.deleteEKSCluster(ctx, clients, clusterName); err != nil {
+	// 2. Delete EFS storage (must happen before VPC deletion due to mount targets)
+	efsStorage, err := p.DiscoverEFS(ctx, clients, clusterName)
+	if err != nil {
 		span.RecordError(err)
 		if forceMode {
-			errs = append(errs, fmt.Errorf("failed to delete EKS cluster: %w", err))
+			errs = append(errs, fmt.Errorf("failed to discover EFS: %w", err))
 		} else {
-			return fmt.Errorf("failed to delete EKS cluster: %w", err)
+			return fmt.Errorf("failed to discover EFS: %w", err)
+		}
+	}
+	if efsStorage != nil {
+		if err := p.deleteEFS(ctx, clients, efsStorage); err != nil {
+			span.RecordError(err)
+			if forceMode {
+				errs = append(errs, fmt.Errorf("failed to delete EFS: %w", err))
+			} else {
+				return fmt.Errorf("failed to delete EFS: %w", err)
+			}
 		}
 	}
 
-	// 3. Delete VPC and all associated resources
-	if err := p.deleteVPC(ctx, clients, clusterName); err != nil {
-		span.RecordError(err)
+	// 3. Delete EKS cluster
+	if deleteErr := p.deleteEKSCluster(ctx, clients, clusterName); deleteErr != nil {
+		span.RecordError(deleteErr)
 		if forceMode {
-			errs = append(errs, fmt.Errorf("failed to delete VPC: %w", err))
+			errs = append(errs, fmt.Errorf("failed to delete EKS cluster: %w", deleteErr))
 		} else {
-			return fmt.Errorf("failed to delete VPC: %w", err)
+			return fmt.Errorf("failed to delete EKS cluster: %w", deleteErr)
 		}
 	}
 
-	// 4. Delete IAM roles (detach policies first)
-	if err := p.deleteIAMRoles(ctx, clients, clusterName); err != nil {
-		span.RecordError(err)
+	// 4. Delete VPC and all associated resources
+	if vpcErr := p.deleteVPC(ctx, clients, clusterName); vpcErr != nil {
+		span.RecordError(vpcErr)
 		if forceMode {
-			errs = append(errs, fmt.Errorf("failed to delete IAM roles: %w", err))
+			errs = append(errs, fmt.Errorf("failed to delete VPC: %w", vpcErr))
 		} else {
-			return fmt.Errorf("failed to delete IAM roles: %w", err)
+			return fmt.Errorf("failed to delete VPC: %w", vpcErr)
 		}
 	}
 
-	// 5. Verification loop: keep cleaning up orphaned resources until none remain
+	// 5. Delete IAM roles (detach policies first)
+	if iamErr := p.deleteIAMRoles(ctx, clients, clusterName); iamErr != nil {
+		span.RecordError(iamErr)
+		if forceMode {
+			errs = append(errs, fmt.Errorf("failed to delete IAM roles: %w", iamErr))
+		} else {
+			return fmt.Errorf("failed to delete IAM roles: %w", iamErr)
+		}
+	}
+
+	// 6. Verification loop: keep cleaning up orphaned resources until none remain
 	// This handles resources that may have been missed or became orphaned during deletion
 	const maxVerificationPasses = 3
 	for pass := 1; pass <= maxVerificationPasses; pass++ {

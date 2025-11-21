@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 )
@@ -75,9 +76,21 @@ type IAMClientAPI interface {
 	ListRolePolicies(ctx context.Context, params *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
 }
 
+// EFSClientAPI defines the interface for EFS operations used by this provider
+// This minimal interface includes only the methods actually called by the provider
+type EFSClientAPI interface {
+	CreateFileSystem(ctx context.Context, params *efs.CreateFileSystemInput, optFns ...func(*efs.Options)) (*efs.CreateFileSystemOutput, error)
+	DeleteFileSystem(ctx context.Context, params *efs.DeleteFileSystemInput, optFns ...func(*efs.Options)) (*efs.DeleteFileSystemOutput, error)
+	DescribeFileSystems(ctx context.Context, params *efs.DescribeFileSystemsInput, optFns ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error)
+	CreateMountTarget(ctx context.Context, params *efs.CreateMountTargetInput, optFns ...func(*efs.Options)) (*efs.CreateMountTargetOutput, error)
+	DeleteMountTarget(ctx context.Context, params *efs.DeleteMountTargetInput, optFns ...func(*efs.Options)) (*efs.DeleteMountTargetOutput, error)
+	DescribeMountTargets(ctx context.Context, params *efs.DescribeMountTargetsInput, optFns ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error)
+}
+
 // Compile-time verification that the AWS SDK clients implement our interfaces
 var (
 	_ EKSClientAPI = (*eks.Client)(nil)
 	_ EC2ClientAPI = (*ec2.Client)(nil)
 	_ IAMClientAPI = (*iam.Client)(nil)
+	_ EFSClientAPI = (*efs.Client)(nil)
 )

@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 )
@@ -448,9 +449,62 @@ func (m *MockIAMClient) ListRolePolicies(ctx context.Context, params *iam.ListRo
 	return nil, fmt.Errorf("ListRolePoliciesFunc not implemented")
 }
 
+// MockEFSClient is a mock implementation of EFSClientAPI for testing
+type MockEFSClient struct {
+	CreateFileSystemFunc     func(ctx context.Context, params *efs.CreateFileSystemInput, optFns ...func(*efs.Options)) (*efs.CreateFileSystemOutput, error)
+	DeleteFileSystemFunc     func(ctx context.Context, params *efs.DeleteFileSystemInput, optFns ...func(*efs.Options)) (*efs.DeleteFileSystemOutput, error)
+	DescribeFileSystemsFunc  func(ctx context.Context, params *efs.DescribeFileSystemsInput, optFns ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error)
+	CreateMountTargetFunc    func(ctx context.Context, params *efs.CreateMountTargetInput, optFns ...func(*efs.Options)) (*efs.CreateMountTargetOutput, error)
+	DeleteMountTargetFunc    func(ctx context.Context, params *efs.DeleteMountTargetInput, optFns ...func(*efs.Options)) (*efs.DeleteMountTargetOutput, error)
+	DescribeMountTargetsFunc func(ctx context.Context, params *efs.DescribeMountTargetsInput, optFns ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error)
+}
+
+func (m *MockEFSClient) CreateFileSystem(ctx context.Context, params *efs.CreateFileSystemInput, optFns ...func(*efs.Options)) (*efs.CreateFileSystemOutput, error) {
+	if m.CreateFileSystemFunc != nil {
+		return m.CreateFileSystemFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("CreateFileSystemFunc not implemented")
+}
+
+func (m *MockEFSClient) DeleteFileSystem(ctx context.Context, params *efs.DeleteFileSystemInput, optFns ...func(*efs.Options)) (*efs.DeleteFileSystemOutput, error) {
+	if m.DeleteFileSystemFunc != nil {
+		return m.DeleteFileSystemFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("DeleteFileSystemFunc not implemented")
+}
+
+func (m *MockEFSClient) DescribeFileSystems(ctx context.Context, params *efs.DescribeFileSystemsInput, optFns ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error) {
+	if m.DescribeFileSystemsFunc != nil {
+		return m.DescribeFileSystemsFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("DescribeFileSystemsFunc not implemented")
+}
+
+func (m *MockEFSClient) CreateMountTarget(ctx context.Context, params *efs.CreateMountTargetInput, optFns ...func(*efs.Options)) (*efs.CreateMountTargetOutput, error) {
+	if m.CreateMountTargetFunc != nil {
+		return m.CreateMountTargetFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("CreateMountTargetFunc not implemented")
+}
+
+func (m *MockEFSClient) DeleteMountTarget(ctx context.Context, params *efs.DeleteMountTargetInput, optFns ...func(*efs.Options)) (*efs.DeleteMountTargetOutput, error) {
+	if m.DeleteMountTargetFunc != nil {
+		return m.DeleteMountTargetFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("DeleteMountTargetFunc not implemented")
+}
+
+func (m *MockEFSClient) DescribeMountTargets(ctx context.Context, params *efs.DescribeMountTargetsInput, optFns ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error) {
+	if m.DescribeMountTargetsFunc != nil {
+		return m.DescribeMountTargetsFunc(ctx, params, optFns...)
+	}
+	return nil, fmt.Errorf("DescribeMountTargetsFunc not implemented")
+}
+
 // Compile-time verification that mocks implement the interfaces
 var (
 	_ EKSClientAPI = (*MockEKSClient)(nil)
 	_ EC2ClientAPI = (*MockEC2Client)(nil)
 	_ IAMClientAPI = (*MockIAMClient)(nil)
+	_ EFSClientAPI = (*MockEFSClient)(nil)
 )

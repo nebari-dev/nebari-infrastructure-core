@@ -82,11 +82,12 @@ func TestReconcileCluster(t *testing.T) {
 			},
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
-				Name:            "test-cluster",
-				Version:         "1.34",
-				VPCID:           "vpc-12345",
-				EndpointPublic:  true,
-				EndpointPrivate: false,
+				Name:              "test-cluster",
+				Version:           "1.34",
+				VPCID:             "vpc-12345",
+				EndpointPublic:    true,
+				EndpointPrivate:   false,
+				PublicAccessCIDRs: []string{"0.0.0.0/0"}, // Default value
 				EnabledLogTypes: []string{
 					string(ekstypes.LogTypeApi),
 					string(ekstypes.LogTypeAudit),
@@ -115,11 +116,12 @@ func TestReconcileCluster(t *testing.T) {
 			},
 			iamRoles: &IAMRoles{},
 			actual: &ClusterState{
-				Name:            "test-cluster",
-				Version:         "1.33",
-				VPCID:           "vpc-12345",
-				EndpointPublic:  true,
-				EndpointPrivate: false,
+				Name:              "test-cluster",
+				Version:           "1.33",
+				VPCID:             "vpc-12345",
+				EndpointPublic:    true,
+				EndpointPrivate:   false,
+				PublicAccessCIDRs: []string{"0.0.0.0/0"}, // Default value
 				EnabledLogTypes: []string{
 					string(ekstypes.LogTypeApi),
 					string(ekstypes.LogTypeAudit),
@@ -308,6 +310,116 @@ func TestReconcileCluster(t *testing.T) {
 			},
 			expectError: true,
 			errorMsg:    "failed to update EKS cluster version",
+		},
+		{
+			name: "cluster exists - KMS key change attempted (immutable)",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-cluster",
+				Provider:    "aws",
+				AmazonWebServices: &config.AWSConfig{
+					Region:    "us-west-2",
+					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Different KMS key
+				},
+			},
+			vpc: &VPCState{
+				VPCID: "vpc-12345",
+			},
+			iamRoles: &IAMRoles{},
+			actual: &ClusterState{
+				Name:                "test-cluster",
+				Version:             "1.34",
+				VPCID:               "vpc-12345",
+				EncryptionKMSKeyARN: "arn:aws:kms:us-west-2:123456789:key/original-key", // Original KMS key
+				EndpointPublic:      true,
+				EndpointPrivate:     false,
+				PublicAccessCIDRs:   []string{"0.0.0.0/0"},
+			},
+			mockSetup: func(m *MockEKSClient) {
+				// No API calls should be made
+			},
+			expectError: true,
+			errorMsg:    "encryption configuration is immutable",
+		},
+		{
+			name: "cluster exists - KMS key added when none existed (immutable)",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-cluster",
+				Provider:    "aws",
+				AmazonWebServices: &config.AWSConfig{
+					Region:    "us-west-2",
+					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Adding KMS key
+				},
+			},
+			vpc: &VPCState{
+				VPCID: "vpc-12345",
+			},
+			iamRoles: &IAMRoles{},
+			actual: &ClusterState{
+				Name:                "test-cluster",
+				Version:             "1.34",
+				VPCID:               "vpc-12345",
+				EncryptionKMSKeyARN: "", // No KMS key originally
+				EndpointPublic:      true,
+				EndpointPrivate:     false,
+				PublicAccessCIDRs:   []string{"0.0.0.0/0"},
+			},
+			mockSetup: func(m *MockEKSClient) {
+				// No API calls should be made
+			},
+			expectError: true,
+			errorMsg:    "encryption configuration is immutable",
+		},
+		{
+			name: "cluster exists - public access CIDRs update needed",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-cluster",
+				Provider:    "aws",
+				AmazonWebServices: &config.AWSConfig{
+					Region:               "us-west-2",
+					KubernetesVersion:    "1.34",
+					EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"}, // New CIDRs
+				},
+			},
+			vpc: &VPCState{
+				VPCID: "vpc-12345",
+			},
+			iamRoles: &IAMRoles{},
+			actual: &ClusterState{
+				Name:              "test-cluster",
+				Version:           "1.34",
+				VPCID:             "vpc-12345",
+				EndpointPublic:    true,
+				EndpointPrivate:   false,
+				PublicAccessCIDRs: []string{"0.0.0.0/0"}, // Original CIDR
+				EnabledLogTypes: []string{
+					string(ekstypes.LogTypeApi),
+					string(ekstypes.LogTypeAudit),
+					string(ekstypes.LogTypeAuthenticator),
+					string(ekstypes.LogTypeControllerManager),
+					string(ekstypes.LogTypeScheduler),
+				},
+			},
+			mockSetup: func(m *MockEKSClient) {
+				m.UpdateClusterConfigFunc = func(ctx context.Context, params *eks.UpdateClusterConfigInput, optFns ...func(*eks.Options)) (*eks.UpdateClusterConfigOutput, error) {
+					// Verify the CIDRs are being set correctly
+					if params.ResourcesVpcConfig == nil {
+						return nil, fmt.Errorf("expected ResourcesVpcConfig to be set")
+					}
+					if len(params.ResourcesVpcConfig.PublicAccessCidrs) != 2 {
+						return nil, fmt.Errorf("expected 2 CIDRs, got %d", len(params.ResourcesVpcConfig.PublicAccessCidrs))
+					}
+					return &eks.UpdateClusterConfigOutput{}, nil
+				}
+				m.DescribeClusterFunc = func(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
+					return &eks.DescribeClusterOutput{
+						Cluster: &ekstypes.Cluster{
+							Name:   params.Name,
+							Status: ekstypes.ClusterStatusActive,
+						},
+					}, nil
+				}
+			},
+			expectError: false,
 		},
 	}
 

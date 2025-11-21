@@ -47,6 +47,17 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 		return err
 	}
 
+	// Validate immutable field: KMS encryption configuration
+	desiredKMSArn := cfg.AmazonWebServices.EKSKMSArn
+	if actual.EncryptionKMSKeyARN != desiredKMSArn {
+		// Both empty is fine, but any change is an error
+		if actual.EncryptionKMSKeyARN != "" || desiredKMSArn != "" {
+			err := fmt.Errorf("EKS cluster encryption configuration is immutable and cannot be changed (current: %q, desired: %q). Manual intervention required - destroy and recreate cluster", actual.EncryptionKMSKeyARN, desiredKMSArn)
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	// Update mutable fields if needed
 	updateNeeded := false
 	updateInput := &eks.UpdateClusterConfigInput{
@@ -103,15 +114,27 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	// Check if endpoint access needs update
 	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)
 
-	if actual.EndpointPublic != endpointConfig.PublicAccess || actual.EndpointPrivate != endpointConfig.PrivateAccess {
+	// Get desired public access CIDRs (default to all if not specified)
+	desiredPublicAccessCIDRs := cfg.AmazonWebServices.EKSPublicAccessCIDRs
+	if len(desiredPublicAccessCIDRs) == 0 {
+		desiredPublicAccessCIDRs = []string{"0.0.0.0/0"}
+	}
+
+	// Check if endpoint access or public access CIDRs need update
+	endpointAccessNeedsUpdate := actual.EndpointPublic != endpointConfig.PublicAccess || actual.EndpointPrivate != endpointConfig.PrivateAccess
+	publicAccessCIDRsNeedUpdate := !stringSlicesEqual(actual.PublicAccessCIDRs, desiredPublicAccessCIDRs)
+
+	if endpointAccessNeedsUpdate || publicAccessCIDRsNeedUpdate {
 		updateNeeded = true
 		updateInput.ResourcesVpcConfig = &ekstypes.VpcConfigRequest{
 			EndpointPublicAccess:  aws.Bool(endpointConfig.PublicAccess),
 			EndpointPrivateAccess: aws.Bool(endpointConfig.PrivateAccess),
+			PublicAccessCidrs:     desiredPublicAccessCIDRs,
 		}
 
 		span.SetAttributes(
-			attribute.Bool("endpoint_access.update_needed", true),
+			attribute.Bool("endpoint_access.update_needed", endpointAccessNeedsUpdate),
+			attribute.Bool("public_access_cidrs.update_needed", publicAccessCIDRsNeedUpdate),
 			attribute.Bool("endpoint_access.desired_public", endpointConfig.PublicAccess),
 			attribute.Bool("endpoint_access.desired_private", endpointConfig.PrivateAccess),
 		)
@@ -205,4 +228,25 @@ func (p *Provider) checkLoggingUpdate(actual *ClusterState) bool {
 	}
 
 	return false
+}
+
+// stringSlicesEqual compares two string slices for equality (order-independent)
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create maps for comparison (order-independent)
+	aMap := make(map[string]bool, len(a))
+	for _, v := range a {
+		aMap[v] = true
+	}
+
+	for _, v := range b {
+		if !aMap[v] {
+			return false
+		}
+	}
+
+	return true
 }

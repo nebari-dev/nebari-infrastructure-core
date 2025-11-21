@@ -22,7 +22,7 @@ type Clients struct {
 	EC2Client EC2ClientAPI
 	EKSClient EKSClientAPI
 	IAMClient IAMClientAPI
-	EFSClient *efs.Client // Not yet interfaced - no methods currently used
+	EFSClient EFSClientAPI
 	Config    aws.Config
 	Region    string
 }
