@@ -282,3 +282,73 @@ func TestDiscoverNodeGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverNodeGroupsPagination(t *testing.T) {
+	clusterName := "test-cluster"
+
+	// Create mock client that returns paginated results
+	mockEKS := &MockEKSClient{}
+	callCount := 0
+	mockEKS.ListNodegroupsFunc = func(ctx context.Context, params *eks.ListNodegroupsInput, optFns ...func(*eks.Options)) (*eks.ListNodegroupsOutput, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			// First page
+			return &eks.ListNodegroupsOutput{
+				Nodegroups: []string{"nodegroup-1", "nodegroup-2"},
+				NextToken:  aws.String("token-page-2"),
+			}, nil
+		case 2:
+			// Second page
+			return &eks.ListNodegroupsOutput{
+				Nodegroups: []string{"nodegroup-3"},
+				NextToken:  nil, // Last page
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected call count: %d", callCount)
+		}
+	}
+
+	// All node groups have NIC tags
+	mockEKS.DescribeNodegroupFunc = func(ctx context.Context, params *eks.DescribeNodegroupInput, optFns ...func(*eks.Options)) (*eks.DescribeNodegroupOutput, error) {
+		return &eks.DescribeNodegroupOutput{
+			Nodegroup: &ekstypes.Nodegroup{
+				NodegroupName: params.NodegroupName,
+				ClusterName:   params.ClusterName,
+				Status:        ekstypes.NodegroupStatusActive,
+				Tags: map[string]string{
+					TagManagedBy:   ManagedByValue,
+					TagClusterName: clusterName,
+				},
+				ScalingConfig: &ekstypes.NodegroupScalingConfig{
+					MinSize:     aws.Int32(1),
+					MaxSize:     aws.Int32(3),
+					DesiredSize: aws.Int32(2),
+				},
+			},
+		}, nil
+	}
+
+	clients := &Clients{
+		EKSClient: mockEKS,
+		Region:    "us-west-2",
+	}
+
+	p := NewProvider()
+	ctx := context.Background()
+	states, err := p.DiscoverNodeGroups(ctx, clients, clusterName)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Should have found all 3 node groups across both pages
+	if len(states) != 3 {
+		t.Errorf("Expected 3 node groups from pagination, got %d", len(states))
+	}
+
+	// Verify ListNodegroups was called twice (pagination)
+	if callCount != 2 {
+		t.Errorf("Expected 2 ListNodegroups calls for pagination, got %d", callCount)
+	}
+}

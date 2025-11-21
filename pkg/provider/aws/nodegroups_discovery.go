@@ -20,30 +20,43 @@ func (p *Provider) DiscoverNodeGroups(ctx context.Context, clients *Clients, clu
 		attribute.String("cluster_name", clusterName),
 	)
 
-	// List all node groups for this cluster
-	listInput := &eks.ListNodegroupsInput{
-		ClusterName: aws.String(clusterName),
+	// List all node groups for this cluster with pagination
+	var allNodeGroups []string
+	var nextToken *string
+
+	for {
+		listInput := &eks.ListNodegroupsInput{
+			ClusterName: aws.String(clusterName),
+			NextToken:   nextToken,
+		}
+
+		listOutput, err := clients.EKSClient.ListNodegroups(ctx, listInput)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to list node groups for cluster %s: %w", clusterName, err)
+		}
+
+		allNodeGroups = append(allNodeGroups, listOutput.Nodegroups...)
+
+		if listOutput.NextToken == nil {
+			break
+		}
+		nextToken = listOutput.NextToken
 	}
 
-	listOutput, err := clients.EKSClient.ListNodegroups(ctx, listInput)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to list node groups for cluster %s: %w", clusterName, err)
-	}
-
-	if len(listOutput.Nodegroups) == 0 {
+	if len(allNodeGroups) == 0 {
 		span.SetAttributes(attribute.Int("node_group_count", 0))
 		return []NodeGroupState{}, nil
 	}
 
 	span.SetAttributes(
-		attribute.Int("node_group_count", len(listOutput.Nodegroups)),
+		attribute.Int("node_group_count", len(allNodeGroups)),
 	)
 
-	nodeGroupStates := make([]NodeGroupState, 0, len(listOutput.Nodegroups))
+	nodeGroupStates := make([]NodeGroupState, 0, len(allNodeGroups))
 
 	// Describe each node group and validate NIC tags
-	for _, nodeGroupName := range listOutput.Nodegroups {
+	for _, nodeGroupName := range allNodeGroups {
 		describeInput := &eks.DescribeNodegroupInput{
 			ClusterName:   aws.String(clusterName),
 			NodegroupName: aws.String(nodeGroupName),

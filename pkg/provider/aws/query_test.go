@@ -1,46 +1,10 @@
 package aws
 
 import (
-	"context"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
-
-// TestQuery tests the Query function
-func TestQuery(t *testing.T) {
-	tests := []struct {
-		name        string
-		clusterName string
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name:        "requires region",
-			clusterName: "test-cluster",
-			expectError: true,
-			errorMsg:    "Query requires region parameter",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := NewProvider()
-			ctx := context.Background()
-
-			_, err := p.Query(ctx, tt.clusterName)
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatal("Query() should return error when region is not provided")
-				}
-				if err.Error()[:len(tt.errorMsg)] != tt.errorMsg {
-					t.Errorf("Expected error message to start with %q, got %q", tt.errorMsg, err.Error())
-				}
-			}
-		})
-	}
-}
 
 // TestConvertToProviderState tests conversion to provider state
 func TestConvertToProviderState(t *testing.T) {

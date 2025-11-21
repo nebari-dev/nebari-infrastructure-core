@@ -18,10 +18,6 @@ type Provider interface {
 	// This is a high-level method that orchestrates resource creation
 	Deploy(ctx context.Context, config *config.NebariConfig) error
 
-	// Query discovers the current state of infrastructure from cloud APIs
-	// Returns nil InfrastructureState if no infrastructure found
-	Query(ctx context.Context, clusterName string) (*InfrastructureState, error)
-
 	// Reconcile compares desired config against actual state and reconciles differences
 	// This is the core stateless reconciliation method
 	Reconcile(ctx context.Context, config *config.NebariConfig) error

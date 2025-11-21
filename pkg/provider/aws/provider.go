@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 const (
@@ -163,6 +162,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	span.SetAttributes(
 		attribute.String("provider", "aws"),
 		attribute.String("project_name", cfg.ProjectName),
+		attribute.Bool("dry_run", cfg.DryRun),
 	)
 
 	if cfg.AmazonWebServices == nil {
@@ -174,29 +174,13 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	region := cfg.AmazonWebServices.Region
 	span.SetAttributes(attribute.String("aws.region", region))
 
+	// Handle dry-run mode
+	if cfg.DryRun {
+		return p.dryRunDeploy(ctx, cfg)
+	}
+
 	// Use Reconcile to deploy infrastructure (Reconcile initializes its own clients)
 	return p.Reconcile(ctx, cfg)
-}
-
-// Query discovers the current state of AWS infrastructure
-// Note: This method requires region information which is not provided in the interface
-// For AWS, use the Reconcile method with a config, or call QueryWithRegion directly
-func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.InfrastructureState, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.Query")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "aws"),
-		attribute.String("cluster_name", clusterName),
-	)
-
-	// AWS requires region to query infrastructure
-	// The Query interface doesn't provide region, so we return an error
-	// Users should call QueryWithRegion directly or use Reconcile with config
-	err := fmt.Errorf("Query requires region parameter - use QueryWithRegion() or provide config via Reconcile()")
-	span.RecordError(err)
-	return nil, err
 }
 
 // Reconcile reconciles AWS infrastructure state using stateless discovery
@@ -207,8 +191,14 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 	_, span := tracer.Start(ctx, "aws.Reconcile")
 	defer span.End()
 
+	// Determine timeout - use config override if set, otherwise default
+	timeout := ReconcileTimeout
+	if cfg.Timeout > 0 {
+		timeout = cfg.Timeout
+	}
+
 	// Enforce timeout for the entire reconciliation operation
-	reconcileCtx, cancel := context.WithTimeout(ctx, ReconcileTimeout)
+	reconcileCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ctx = reconcileCtx
 
@@ -219,7 +209,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		attribute.String("provider", "aws"),
 		attribute.String("cluster_name", clusterName),
 		attribute.String("region", region),
-		attribute.String("timeout", ReconcileTimeout.String()),
+		attribute.String("timeout", timeout.String()),
 	)
 
 	// Initialize AWS clients
@@ -321,11 +311,14 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 
 	clusterName := cfg.ProjectName
 	region := cfg.AmazonWebServices.Region
+	forceMode := cfg.Force
 
 	span.SetAttributes(
 		attribute.String("provider", "aws"),
 		attribute.String("cluster_name", clusterName),
 		attribute.String("region", region),
+		attribute.Bool("dry_run", cfg.DryRun),
+		attribute.Bool("force", forceMode),
 	)
 
 	// Initialize AWS clients
@@ -335,31 +328,55 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return fmt.Errorf("failed to create AWS clients: %w", err)
 	}
 
+	// Handle dry-run mode
+	if cfg.DryRun {
+		return p.dryRunDestroy(ctx, clients, clusterName, region)
+	}
+
 	// Destroy infrastructure in reverse order of creation
 	// This ensures dependencies are respected
+	// In force mode, we continue even if some resources fail to delete
+
+	var errs []error
 
 	// 1. Delete all node groups first
 	if err := p.deleteNodeGroups(ctx, clients, clusterName); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to delete node groups: %w", err)
+		if forceMode {
+			errs = append(errs, fmt.Errorf("failed to delete node groups: %w", err))
+		} else {
+			return fmt.Errorf("failed to delete node groups: %w", err)
+		}
 	}
 
 	// 2. Delete EKS cluster
 	if err := p.deleteEKSCluster(ctx, clients, clusterName); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to delete EKS cluster: %w", err)
+		if forceMode {
+			errs = append(errs, fmt.Errorf("failed to delete EKS cluster: %w", err))
+		} else {
+			return fmt.Errorf("failed to delete EKS cluster: %w", err)
+		}
 	}
 
 	// 3. Delete VPC and all associated resources
 	if err := p.deleteVPC(ctx, clients, clusterName); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to delete VPC: %w", err)
+		if forceMode {
+			errs = append(errs, fmt.Errorf("failed to delete VPC: %w", err))
+		} else {
+			return fmt.Errorf("failed to delete VPC: %w", err)
+		}
 	}
 
 	// 4. Delete IAM roles (detach policies first)
 	if err := p.deleteIAMRoles(ctx, clients, clusterName); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to delete IAM roles: %w", err)
+		if forceMode {
+			errs = append(errs, fmt.Errorf("failed to delete IAM roles: %w", err))
+		} else {
+			return fmt.Errorf("failed to delete IAM roles: %w", err)
+		}
 	}
 
 	// 5. Verification loop: keep cleaning up orphaned resources until none remain
@@ -371,7 +388,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		orphansFound, err := p.cleanupOrphanedResources(ctx, clients, clusterName)
 		if err != nil {
 			span.RecordError(err)
-			return fmt.Errorf("failed during orphan cleanup pass %d: %w", pass, err)
+			if forceMode {
+				errs = append(errs, fmt.Errorf("failed during orphan cleanup pass %d: %w", pass, err))
+				break // Don't continue verification passes if cleanup fails
+			} else {
+				return fmt.Errorf("failed during orphan cleanup pass %d: %w", pass, err)
+			}
 		}
 
 		if !orphansFound {
@@ -382,6 +404,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		if pass == maxVerificationPasses {
 			span.SetAttributes(attribute.Bool("max_verification_passes_reached", true))
 		}
+	}
+
+	// In force mode, return combined errors if any occurred
+	if len(errs) > 0 {
+		span.SetAttributes(attribute.Int("force_mode_errors", len(errs)))
+		return fmt.Errorf("destroy completed with %d errors (force mode): %v", len(errs), errs)
 	}
 
 	span.SetAttributes(

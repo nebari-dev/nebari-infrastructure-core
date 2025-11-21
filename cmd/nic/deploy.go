@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,19 +16,25 @@ import (
 
 var (
 	deployConfigFile string
+	deployDryRun     bool
+	deployTimeout    string
 
 	deployCmd = &cobra.Command{
 		Use:   "deploy",
 		Short: "Deploy infrastructure based on configuration file",
 		Long: `Deploy cloud infrastructure and Kubernetes resources based on the
 provided nebari-config.yaml file. This command will create all necessary
-resources to establish a fully functional Nebari cluster.`,
+resources to establish a fully functional Nebari cluster.
+
+Use --dry-run to preview changes without applying them.`,
 		RunE: runDeploy,
 	}
 )
 
 func init() {
 	deployCmd.Flags().StringVarP(&deployConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
+	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
+	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
 	if err := deployCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
@@ -42,40 +48,20 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	ctx, span := tracer.Start(ctx, "cmd.deploy")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("config.file", deployConfigFile))
+	span.SetAttributes(
+		attribute.String("config.file", deployConfigFile),
+		attribute.Bool("dry_run", deployDryRun),
+	)
 
-	slog.Info("Starting deployment", "config_file", deployConfigFile)
+	if deployDryRun {
+		slog.Info("Starting deployment (dry-run)", "config_file", deployConfigFile)
+	} else {
+		slog.Info("Starting deployment", "config_file", deployConfigFile)
+	}
 
-	// Create status channel for progress updates
-	statusCh := make(chan status.Update, 100)
-	ctx = status.WithChannel(ctx, statusCh)
-
-	// Start goroutine to log status updates
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logUpdates(statusCh)
-	}()
-
-	// Ensure status channel is closed and all messages are logged before exit
-	defer func() {
-		close(statusCh)
-
-		// Wait for logger goroutine with timeout to prevent hanging
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// All status messages logged successfully
-		case <-time.After(5 * time.Second):
-			slog.Warn("Timeout waiting for status messages to flush, some messages may be lost")
-		}
-	}()
+	// Setup status handler for progress updates
+	ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
+	defer cleanupStatus()
 
 	// Handle context cancellation (from signal interrupt)
 	defer func() {
@@ -97,6 +83,22 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
+	// Set runtime options from CLI flags
+	cfg.DryRun = deployDryRun
+
+	// Apply custom timeout if specified
+	if deployTimeout != "" {
+		duration, err := time.ParseDuration(deployTimeout)
+		if err != nil {
+			span.RecordError(err)
+			slog.Error("Invalid timeout duration", "error", err, "timeout", deployTimeout)
+			return fmt.Errorf("invalid timeout duration %q: %w", deployTimeout, err)
+		}
+		cfg.Timeout = duration
+		span.SetAttributes(attribute.String("timeout", deployTimeout))
+		slog.Info("Using custom timeout", "timeout", duration)
+	}
+
 	// Get the appropriate provider
 	provider, err := registry.Get(ctx, cfg.Provider)
 	if err != nil {
@@ -117,44 +119,4 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
 	return nil
-}
-
-// logUpdates reads status updates from the channel and logs them
-// This function runs in a goroutine and exits when the channel is closed
-func logUpdates(statusCh <-chan status.Update) {
-	for update := range statusCh {
-		// Build structured logging attributes
-		attrs := []any{
-			"message", update.Message,
-		}
-
-		if update.Resource != "" {
-			attrs = append(attrs, "resource", update.Resource)
-		}
-
-		if update.Action != "" {
-			attrs = append(attrs, "action", update.Action)
-		}
-
-		// Add metadata as individual attributes
-		for key, value := range update.Metadata {
-			attrs = append(attrs, key, value)
-		}
-
-		// Log at appropriate level
-		switch update.Level {
-		case status.LevelInfo:
-			slog.Info("Status", attrs...)
-		case status.LevelProgress:
-			slog.Info("Progress", attrs...)
-		case status.LevelSuccess:
-			slog.Info("Success", attrs...)
-		case status.LevelWarning:
-			slog.Warn("Warning", attrs...)
-		case status.LevelError:
-			slog.Error("Error", attrs...)
-		default:
-			slog.Info("Status", attrs...)
-		}
-	}
 }

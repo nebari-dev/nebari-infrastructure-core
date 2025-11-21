@@ -3,7 +3,16 @@ package status
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
+)
+
+const (
+	// DefaultChannelSize is the default buffer size for the status channel
+	DefaultChannelSize = 100
+
+	// DefaultFlushTimeout is the default timeout for flushing remaining messages on shutdown
+	DefaultFlushTimeout = 5 * time.Second
 )
 
 // Level represents the severity level of a status update
@@ -158,4 +167,70 @@ func Error(ctx context.Context, message string) {
 // Errorf sends a formatted error status update
 func Errorf(ctx context.Context, format string, args ...interface{}) {
 	Sendf(ctx, LevelError, format, args...)
+}
+
+// Handler is a function that processes status updates
+// It is called for each update received on the channel
+type Handler func(Update)
+
+// CleanupFunc is called to close the status channel and wait for the handler to finish
+// It should be deferred immediately after calling StartHandler
+type CleanupFunc func()
+
+// StartHandler creates a status channel, attaches it to the context, and starts a goroutine
+// to process updates using the provided handler function.
+//
+// Returns:
+//   - A new context with the status channel attached
+//   - A cleanup function that must be deferred to ensure proper shutdown
+//
+// The cleanup function will:
+//  1. Close the status channel
+//  2. Wait for the handler goroutine to finish processing remaining messages
+//  3. Timeout after DefaultFlushTimeout to prevent hanging
+//
+// Example usage:
+//
+//	ctx, cleanup := status.StartHandler(ctx, func(update status.Update) {
+//	    slog.Info("Status", "message", update.Message)
+//	})
+//	defer cleanup()
+func StartHandler(ctx context.Context, handler Handler) (context.Context, CleanupFunc) {
+	return StartHandlerWithOptions(ctx, handler, DefaultChannelSize, DefaultFlushTimeout)
+}
+
+// StartHandlerWithOptions is like StartHandler but allows customizing the channel size and flush timeout
+func StartHandlerWithOptions(ctx context.Context, handler Handler, channelSize int, flushTimeout time.Duration) (context.Context, CleanupFunc) {
+	ch := make(chan Update, channelSize)
+	ctx = WithChannel(ctx, ch)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		for update := range ch {
+			handler(update)
+		}
+	}()
+
+	cleanup := func() {
+		close(ch)
+
+		// Wait for handler goroutine with timeout to prevent hanging
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// All status messages processed successfully
+		case <-time.After(flushTimeout):
+			// Timeout - some messages may be lost, but we don't block shutdown
+		}
+	}
+
+	return ctx, cleanup
 }

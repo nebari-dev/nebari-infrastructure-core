@@ -51,46 +51,53 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 		WithMetadata("vpc_id", vpcID))
 
 	// Delete resources in correct order to respect dependencies:
-	// 1. NAT Gateways (release Elastic IPs)
-	// 2. Internet Gateway
-	// 3. Route table associations
-	// 4. Route tables (non-main)
-	// 5. Subnets
-	// 6. Security groups (non-default)
-	// 7. VPC
+	// 1. VPC Endpoints (must be deleted before subnets/security groups)
+	// 2. NAT Gateways (release Elastic IPs)
+	// 3. Internet Gateway
+	// 4. Route table associations
+	// 5. Route tables (non-main)
+	// 6. Subnets
+	// 7. Security groups (non-default)
+	// 8. VPC
 
-	// 1. Delete NAT Gateways
+	// 1. Delete VPC Endpoints
+	if err := p.deleteVPCEndpoints(ctx, clients, vpcID); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete VPC endpoints: %w", err)
+	}
+
+	// 2. Delete NAT Gateways
 	if err := p.deleteNATGateways(ctx, clients, vpcID, clusterName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete NAT gateways: %w", err)
 	}
 
-	// 2. Delete Internet Gateway
+	// 3. Delete Internet Gateway
 	if err := p.deleteInternetGateway(ctx, clients, vpcID); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete internet gateway: %w", err)
 	}
 
-	// 3. Delete route table associations (handled in deleteRouteTables)
-	// 4. Delete route tables
+	// 4. Delete route table associations (handled in deleteRouteTables)
+	// 5. Delete route tables
 	if err := p.deleteRouteTables(ctx, clients, vpcID); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete route tables: %w", err)
 	}
 
-	// 5. Delete subnets
+	// 6. Delete subnets
 	if err := p.deleteSubnets(ctx, clients, vpcID); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete subnets: %w", err)
 	}
 
-	// 6. Delete security groups (except default)
+	// 7. Delete security groups (except default)
 	if err := p.deleteSecurityGroups(ctx, clients, vpcID); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to delete security groups: %w", err)
 	}
 
-	// 7. Delete VPC
+	// 8. Delete VPC
 	_, err = clients.EC2Client.DeleteVpc(ctx, &ec2.DeleteVpcInput{
 		VpcId: &vpcID,
 	})
@@ -676,6 +683,64 @@ func (p *Provider) deleteSecurityGroups(ctx context.Context, clients *Clients, v
 	}
 
 	span.SetAttributes(attribute.Int("security_groups_deleted", deletedCount))
+
+	return nil
+}
+
+// deleteVPCEndpoints deletes all VPC endpoints in the VPC
+func (p *Provider) deleteVPCEndpoints(ctx context.Context, clients *Clients, vpcID string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.deleteVPCEndpoints")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("vpc_id", vpcID))
+
+	// Describe VPC endpoints in this VPC
+	output, err := clients.EC2Client.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
+		Filters: []types.Filter{
+			{
+				Name:   strPtr("vpc-id"),
+				Values: []string{vpcID},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to describe VPC endpoints: %w", err)
+	}
+
+	if len(output.VpcEndpoints) == 0 {
+		span.SetAttributes(attribute.Int("vpc_endpoints_deleted", 0))
+		return nil
+	}
+
+	span.SetAttributes(attribute.Int("vpc_endpoints_to_delete", len(output.VpcEndpoints)))
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting VPC endpoints").
+		WithResource("vpc-endpoint").
+		WithAction("deleting").
+		WithMetadata("count", len(output.VpcEndpoints)))
+
+	// Collect endpoint IDs to delete
+	endpointIDs := make([]string, 0, len(output.VpcEndpoints))
+	for _, ep := range output.VpcEndpoints {
+		if ep.VpcEndpointId != nil {
+			endpointIDs = append(endpointIDs, *ep.VpcEndpointId)
+		}
+	}
+
+	// Delete all VPC endpoints in a single call
+	if len(endpointIDs) > 0 {
+		_, err := clients.EC2Client.DeleteVpcEndpoints(ctx, &ec2.DeleteVpcEndpointsInput{
+			VpcEndpointIds: endpointIDs,
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to delete VPC endpoints: %w", err)
+		}
+	}
+
+	span.SetAttributes(attribute.Int("vpc_endpoints_deleted", len(endpointIDs)))
 
 	return nil
 }

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -81,6 +80,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
+	// Set runtime options from CLI flags
+	cfg.DryRun = destroyDryRun
+	cfg.Force = destroyForce
+
 	// Apply custom timeout if specified
 	if destroyTimeout != "" {
 		duration, err := time.ParseDuration(destroyTimeout)
@@ -89,14 +92,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			slog.Error("Invalid timeout duration", "error", err, "timeout", destroyTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", destroyTimeout, err)
 		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, duration)
-		defer cancel()
+		cfg.Timeout = duration
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
 		slog.Info("Using custom timeout", "timeout", duration)
 	}
 
-	// Show what will be destroyed and get confirmation
+	// Show what will be destroyed and get confirmation (skip for dry-run)
 	if !destroyAutoApprove && !destroyDryRun {
 		if err := confirmDestruction(cfg); err != nil {
 			span.RecordError(err)
@@ -105,48 +106,9 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Dry-run mode: show what would be destroyed without actually deleting
-	if destroyDryRun {
-		return runDryRun(ctx, cfg)
-	}
-
-	// Create status channel for progress updates
-	statusCh := make(chan status.Update, 100)
-	ctx = status.WithChannel(ctx, statusCh)
-
-	// Store force flag in context for provider access
-	if destroyForce {
-		type contextKey string
-		ctx = context.WithValue(ctx, contextKey("destroy.force"), true)
-		span.SetAttributes(attribute.Bool("force_enabled", true))
-	}
-
-	// Start goroutine to log status updates
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logUpdates(statusCh)
-	}()
-
-	// Ensure status channel is closed and all messages are logged before exit
-	defer func() {
-		close(statusCh)
-
-		// Wait for logger goroutine with timeout to prevent hanging
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// All status messages logged successfully
-		case <-time.After(5 * time.Second):
-			slog.Warn("Timeout waiting for status messages to flush, some messages may be lost")
-		}
-	}()
+	// Setup status handler for progress updates
+	ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
+	defer cleanupStatus()
 
 	// Handle context cancellation (from signal interrupt)
 	defer func() {
@@ -232,73 +194,5 @@ func confirmDestruction(cfg *config.NebariConfig) error {
 
 	span.SetAttributes(attribute.Bool("confirmed", true))
 	fmt.Println()
-	return nil
-}
-
-// runDryRun shows what would be destroyed without actually deleting
-func runDryRun(ctx context.Context, cfg *config.NebariConfig) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "cmd.runDryRun")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", cfg.Provider),
-		attribute.String("project_name", cfg.ProjectName),
-	)
-
-	slog.Info("Dry-run mode: showing what would be destroyed", "provider", cfg.Provider)
-
-	fmt.Println("\n🔍 DRY RUN: The following resources would be destroyed:")
-	fmt.Printf("   Provider:     %s\n", cfg.Provider)
-	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
-
-	// Show provider-specific details
-	switch cfg.Provider {
-	case "aws":
-		if cfg.AmazonWebServices != nil {
-			fmt.Printf("   Region:       %s\n", cfg.AmazonWebServices.Region)
-			fmt.Println("\n   Resources that would be deleted:")
-			fmt.Println("   • EKS Node Groups")
-			for nodeGroupName := range cfg.AmazonWebServices.NodeGroups {
-				fmt.Printf("     - %s\n", nodeGroupName)
-			}
-			fmt.Println("   • EKS Cluster")
-			fmt.Println("   • VPC and Networking")
-			fmt.Println("     - VPC Endpoints")
-			fmt.Println("     - NAT Gateways")
-			fmt.Println("     - Internet Gateway")
-			fmt.Println("     - Route Tables")
-			fmt.Println("     - Subnets")
-			fmt.Println("     - Security Groups")
-			fmt.Println("   • IAM Roles")
-			fmt.Println("     - EKS Cluster Role")
-			fmt.Println("     - EKS Node Role")
-		}
-	case "gcp":
-		if cfg.GoogleCloudPlatform != nil {
-			fmt.Printf("   Project:      %s\n", cfg.GoogleCloudPlatform.Project)
-			fmt.Printf("   Region:       %s\n", cfg.GoogleCloudPlatform.Region)
-			fmt.Println("\n   Resources that would be deleted:")
-			fmt.Println("   • GKE Cluster")
-			fmt.Println("   • VPC Network")
-			fmt.Println("   • IAM Service Accounts")
-		}
-	case "azure":
-		if cfg.Azure != nil {
-			fmt.Printf("   Region:       %s\n", cfg.Azure.Region)
-			fmt.Println("\n   Resources that would be deleted:")
-			fmt.Println("   • AKS Cluster")
-			fmt.Println("   • Virtual Network")
-			fmt.Println("   • Resource Group")
-		}
-	case "local":
-		fmt.Println("\n   Resources that would be deleted:")
-		fmt.Println("   • K3s Cluster")
-	}
-
-	fmt.Println("\n✓ Dry-run complete. No resources were actually deleted.")
-	fmt.Println("  Run without --dry-run flag to perform actual destruction.")
-
-	span.SetAttributes(attribute.Bool("dry_run_complete", true))
 	return nil
 }

@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 // Provider implements the Azure provider
@@ -65,21 +64,6 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	fmt.Printf("azure.Deploy called with the following parameters:\n%s\n", string(configJSON))
 
 	return nil
-}
-
-// Query discovers the current state of Azure infrastructure (stub implementation)
-func (p *Provider) Query(ctx context.Context, clusterName string) (*provider.InfrastructureState, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "azure.Query")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "azure"),
-		attribute.String("cluster_name", clusterName),
-	)
-
-	fmt.Printf("azure.Query called for cluster: %s\n", clusterName)
-	return nil, nil
 }
 
 // Reconcile reconciles Azure infrastructure state (stub implementation)

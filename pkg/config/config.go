@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // NebariConfig represents the parsed nebari-config.yaml structure
 type NebariConfig struct {
 	ProjectName string `yaml:"project_name"`
@@ -19,6 +21,11 @@ type NebariConfig struct {
 	// Additional fields can be added as needed
 	// Using map to capture additional fields for lenient parsing
 	AdditionalFields map[string]any `yaml:",inline"`
+
+	// Runtime options (set by CLI, not from YAML file)
+	DryRun  bool          `yaml:"-"` // Preview changes without applying them
+	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
+	Timeout time.Duration `yaml:"-"` // Override default operation timeout
 }
 
 // AWSConfig represents AWS-specific configuration

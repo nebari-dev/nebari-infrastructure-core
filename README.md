@@ -45,6 +45,7 @@ Deploy infrastructure based on configuration file.
 ```
 
 Options:
+
 - `-f, --file`: Path to config.yaml file (required)
 
 ### `nic validate`
@@ -56,6 +57,7 @@ Validate configuration file without deploying.
 ```
 
 Options:
+
 - `-f, --file`: Path to config.yaml file (required)
 
 ### `nic destroy`
@@ -67,6 +69,7 @@ Destroy all infrastructure resources in reverse order of creation.
 ```
 
 Options:
+
 - `-f, --file`: Path to config.yaml file (required)
 - `--auto-approve`: Skip confirmation prompt and destroy immediately
 - `--dry-run`: Show what would be destroyed without actually deleting
@@ -76,6 +79,7 @@ Options:
 **WARNING**: This operation is destructive and cannot be undone. By default, you will be prompted to confirm before destruction begins.
 
 Example with dry-run:
+
 ```bash
 # Preview what would be destroyed
 ./nic destroy -f config.yaml --dry-run
@@ -111,7 +115,8 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 ### Environment Variables
 
 - `OTEL_EXPORTER`: Exporter type (default: "none")
-  - `none` - Disable trace export (traces still collected, default for production)
+
+  - `none` - Disable trace export (traces still collected, default)
   - `console` - Export traces to stdout (development/debugging)
   - `otlp` - Export to OTLP endpoint
   - `both` - Export to both console and OTLP
@@ -121,7 +126,7 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 ### Examples
 
 ```bash
-# No trace export (default - production use)
+# No trace export (default)
 ./nic deploy -f config.yaml
 
 # Console traces (debugging)
@@ -235,6 +240,7 @@ This is the initial implementation with stub providers. Each provider currently 
 ### Stub Provider Behavior
 
 All providers currently:
+
 1. Accept configuration via the `Deploy()` method
 2. Print provider name and full configuration as JSON
 3. Return success

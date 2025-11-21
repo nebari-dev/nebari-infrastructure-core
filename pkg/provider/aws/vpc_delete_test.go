@@ -501,3 +501,479 @@ func TestDeleteSecurityGroups(t *testing.T) {
 		})
 	}
 }
+
+// TestCleanupOrphanedEIPsWithCount tests the cleanupOrphanedEIPsWithCount function
+func TestCleanupOrphanedEIPsWithCount(t *testing.T) {
+	tests := []struct {
+		name          string
+		clusterName   string
+		mockSetup     func(*MockEC2Client)
+		expectedCount int
+		expectError   bool
+		errorMsg      string
+	}{
+		{
+			name:        "no EIPs found",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{},
+					}, nil
+				}
+			},
+			expectedCount: 0,
+			expectError:   false,
+		},
+		{
+			name:        "release unassociated EIPs",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{
+							{AllocationId: aws.String("eipalloc-1"), AssociationId: nil},
+							{AllocationId: aws.String("eipalloc-2"), AssociationId: nil},
+						},
+					}, nil
+				}
+				m.ReleaseAddressFunc = func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+					return &ec2.ReleaseAddressOutput{}, nil
+				}
+			},
+			expectedCount: 2,
+			expectError:   false,
+		},
+		{
+			name:        "skip associated EIPs",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{
+						Addresses: []types.Address{
+							{AllocationId: aws.String("eipalloc-1"), AssociationId: aws.String("eipassoc-1")},
+							{AllocationId: aws.String("eipalloc-2"), AssociationId: nil},
+						},
+					}, nil
+				}
+				m.ReleaseAddressFunc = func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+					return &ec2.ReleaseAddressOutput{}, nil
+				}
+			},
+			expectedCount: 1,
+			expectError:   false,
+		},
+		{
+			name:        "error describing EIPs",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeAddressesFunc = func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+					return nil, fmt.Errorf("AccessDenied")
+				}
+			},
+			expectedCount: 0,
+			expectError:   true,
+			errorMsg:      "failed to describe cluster EIPs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &MockEC2Client{}
+			tt.mockSetup(mockEC2)
+
+			clients := &Clients{
+				EC2Client: mockEC2,
+				Region:    "us-west-2",
+			}
+
+			p := NewProvider()
+			ctx := context.Background()
+			count, err := p.cleanupOrphanedEIPsWithCount(ctx, clients, tt.clusterName)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				if !containsSubstring([]string{err.Error()}, tt.errorMsg) {
+					t.Errorf("Error = %v, want to contain %v", err.Error(), tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if count != tt.expectedCount {
+				t.Errorf("Count = %d, want %d", count, tt.expectedCount)
+			}
+		})
+	}
+}
+
+// TestCleanupOrphanedNATGateways tests the cleanupOrphanedNATGateways function
+func TestCleanupOrphanedNATGateways(t *testing.T) {
+	tests := []struct {
+		name          string
+		clusterName   string
+		mockSetup     func(*MockEC2Client)
+		expectedCount int
+		expectError   bool
+		errorMsg      string
+	}{
+		{
+			name:        "no NAT gateways found",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return &ec2.DescribeNatGatewaysOutput{
+						NatGateways: []types.NatGateway{},
+					}, nil
+				}
+			},
+			expectedCount: 0,
+			expectError:   false,
+		},
+		{
+			name:        "NAT gateway in available state - delete initiated",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return &ec2.DescribeNatGatewaysOutput{
+						NatGateways: []types.NatGateway{
+							{NatGatewayId: aws.String("nat-123"), State: types.NatGatewayStateAvailable},
+						},
+					}, nil
+				}
+				m.DeleteNatGatewayFunc = func(ctx context.Context, params *ec2.DeleteNatGatewayInput, optFns ...func(*ec2.Options)) (*ec2.DeleteNatGatewayOutput, error) {
+					return &ec2.DeleteNatGatewayOutput{}, nil
+				}
+			},
+			expectedCount: 1,
+			expectError:   false,
+		},
+		{
+			name:        "NAT gateway already deleted - skip",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return &ec2.DescribeNatGatewaysOutput{
+						NatGateways: []types.NatGateway{
+							{NatGatewayId: aws.String("nat-123"), State: types.NatGatewayStateDeleted},
+						},
+					}, nil
+				}
+			},
+			expectedCount: 0,
+			expectError:   false,
+		},
+		{
+			name:        "NAT gateway in deleting state - counted but not re-deleted",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return &ec2.DescribeNatGatewaysOutput{
+						NatGateways: []types.NatGateway{
+							{NatGatewayId: aws.String("nat-123"), State: types.NatGatewayStateDeleting},
+						},
+					}, nil
+				}
+			},
+			expectedCount: 1,
+			expectError:   false,
+		},
+		{
+			name:        "error describing NAT gateways",
+			clusterName: "test-cluster",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeNatGatewaysFunc = func(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+					return nil, fmt.Errorf("AccessDenied")
+				}
+			},
+			expectedCount: 0,
+			expectError:   true,
+			errorMsg:      "failed to describe NAT gateways",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &MockEC2Client{}
+			tt.mockSetup(mockEC2)
+
+			clients := &Clients{
+				EC2Client: mockEC2,
+				Region:    "us-west-2",
+			}
+
+			p := NewProvider()
+			ctx := context.Background()
+			count, err := p.cleanupOrphanedNATGateways(ctx, clients, tt.clusterName)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				if !containsSubstring([]string{err.Error()}, tt.errorMsg) {
+					t.Errorf("Error = %v, want to contain %v", err.Error(), tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if count != tt.expectedCount {
+				t.Errorf("Count = %d, want %d", count, tt.expectedCount)
+			}
+		})
+	}
+}
+
+// TestDeleteRouteTables tests the deleteRouteTables function
+func TestDeleteRouteTables(t *testing.T) {
+	tests := []struct {
+		name        string
+		vpcID       string
+		mockSetup   func(*MockEC2Client)
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:  "no route tables",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeRouteTablesFunc = func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+					return &ec2.DescribeRouteTablesOutput{
+						RouteTables: []types.RouteTable{},
+					}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:  "skip main route table",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeRouteTablesFunc = func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+					return &ec2.DescribeRouteTablesOutput{
+						RouteTables: []types.RouteTable{
+							{
+								RouteTableId: aws.String("rtb-main"),
+								Associations: []types.RouteTableAssociation{
+									{Main: aws.Bool(true)},
+								},
+							},
+						},
+					}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:  "delete non-main route tables with associations",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeRouteTablesFunc = func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+					return &ec2.DescribeRouteTablesOutput{
+						RouteTables: []types.RouteTable{
+							{
+								RouteTableId: aws.String("rtb-private"),
+								Associations: []types.RouteTableAssociation{
+									{
+										RouteTableAssociationId: aws.String("rtbassoc-123"),
+										Main:                    aws.Bool(false),
+									},
+								},
+							},
+						},
+					}, nil
+				}
+				m.DisassociateRouteTableFunc = func(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error) {
+					return &ec2.DisassociateRouteTableOutput{}, nil
+				}
+				m.DeleteRouteTableFunc = func(ctx context.Context, params *ec2.DeleteRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error) {
+					return &ec2.DeleteRouteTableOutput{}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:  "error describing route tables",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeRouteTablesFunc = func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+					return nil, fmt.Errorf("AccessDenied")
+				}
+			},
+			expectError: true,
+			errorMsg:    "failed to describe route tables",
+		},
+		{
+			name:  "error deleting route table",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeRouteTablesFunc = func(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+					return &ec2.DescribeRouteTablesOutput{
+						RouteTables: []types.RouteTable{
+							{
+								RouteTableId: aws.String("rtb-private"),
+								Associations: []types.RouteTableAssociation{},
+							},
+						},
+					}, nil
+				}
+				m.DeleteRouteTableFunc = func(ctx context.Context, params *ec2.DeleteRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error) {
+					return nil, fmt.Errorf("DependencyViolation")
+				}
+			},
+			expectError: true,
+			errorMsg:    "failed to delete route table",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &MockEC2Client{}
+			tt.mockSetup(mockEC2)
+
+			clients := &Clients{
+				EC2Client: mockEC2,
+				Region:    "us-west-2",
+			}
+
+			p := NewProvider()
+			ctx := context.Background()
+			err := p.deleteRouteTables(ctx, clients, tt.vpcID)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				if !containsSubstring([]string{err.Error()}, tt.errorMsg) {
+					t.Errorf("Error = %v, want to contain %v", err.Error(), tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDeleteVPCEndpoints(t *testing.T) {
+	tests := []struct {
+		name        string
+		vpcID       string
+		mockSetup   func(*MockEC2Client)
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:  "no VPC endpoints - success",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeVpcEndpointsFunc = func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+					return &ec2.DescribeVpcEndpointsOutput{
+						VpcEndpoints: []types.VpcEndpoint{},
+					}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:  "successful deletion of VPC endpoints",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeVpcEndpointsFunc = func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+					return &ec2.DescribeVpcEndpointsOutput{
+						VpcEndpoints: []types.VpcEndpoint{
+							{
+								VpcEndpointId: aws.String("vpce-123"),
+								VpcId:         aws.String("vpc-123"),
+								ServiceName:   aws.String("com.amazonaws.us-west-2.s3"),
+							},
+							{
+								VpcEndpointId: aws.String("vpce-456"),
+								VpcId:         aws.String("vpc-123"),
+								ServiceName:   aws.String("com.amazonaws.us-west-2.ec2"),
+							},
+						},
+					}, nil
+				}
+				m.DeleteVpcEndpointsFunc = func(ctx context.Context, params *ec2.DeleteVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
+					// Verify correct endpoint IDs are passed
+					if len(params.VpcEndpointIds) != 2 {
+						return nil, fmt.Errorf("expected 2 endpoint IDs, got %d", len(params.VpcEndpointIds))
+					}
+					return &ec2.DeleteVpcEndpointsOutput{}, nil
+				}
+			},
+			expectError: false,
+		},
+		{
+			name:  "describe error",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeVpcEndpointsFunc = func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+					return nil, fmt.Errorf("DescribeVpcEndpoints failed")
+				}
+			},
+			expectError: true,
+			errorMsg:    "failed to describe VPC endpoints",
+		},
+		{
+			name:  "delete error",
+			vpcID: "vpc-123",
+			mockSetup: func(m *MockEC2Client) {
+				m.DescribeVpcEndpointsFunc = func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+					return &ec2.DescribeVpcEndpointsOutput{
+						VpcEndpoints: []types.VpcEndpoint{
+							{
+								VpcEndpointId: aws.String("vpce-123"),
+								VpcId:         aws.String("vpc-123"),
+							},
+						},
+					}, nil
+				}
+				m.DeleteVpcEndpointsFunc = func(ctx context.Context, params *ec2.DeleteVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
+					return nil, fmt.Errorf("DeleteVpcEndpoints failed")
+				}
+			},
+			expectError: true,
+			errorMsg:    "failed to delete VPC endpoints",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEC2 := &MockEC2Client{}
+			tt.mockSetup(mockEC2)
+
+			clients := &Clients{
+				EC2Client: mockEC2,
+				Region:    "us-west-2",
+			}
+
+			p := NewProvider()
+			ctx := context.Background()
+			err := p.deleteVPCEndpoints(ctx, clients, tt.vpcID)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorMsg)
+				}
+				if !containsSubstring([]string{err.Error()}, tt.errorMsg) {
+					t.Errorf("Error = %v, want to contain %v", err.Error(), tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+		})
+	}
+}

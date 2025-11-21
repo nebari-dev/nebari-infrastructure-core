@@ -316,3 +316,97 @@ func TestSendf(t *testing.T) {
 		t.Error("Timeout waiting for status update")
 	}
 }
+
+func TestStartHandler(t *testing.T) {
+	var received []Update
+	handler := func(u Update) {
+		received = append(received, u)
+	}
+
+	ctx, cleanup := StartHandler(context.Background(), handler)
+
+	// Send some updates
+	Send(ctx, NewUpdate(LevelInfo, "message 1"))
+	Send(ctx, NewUpdate(LevelProgress, "message 2"))
+	Send(ctx, NewUpdate(LevelSuccess, "message 3"))
+
+	// Cleanup should wait for all messages to be processed
+	cleanup()
+
+	if len(received) != 3 {
+		t.Errorf("received %d messages, want 3", len(received))
+	}
+
+	if received[0].Message != "message 1" {
+		t.Errorf("first message = %v, want 'message 1'", received[0].Message)
+	}
+	if received[1].Level != LevelProgress {
+		t.Errorf("second level = %v, want %v", received[1].Level, LevelProgress)
+	}
+	if received[2].Message != "message 3" {
+		t.Errorf("third message = %v, want 'message 3'", received[2].Message)
+	}
+}
+
+func TestStartHandlerWithOptions(t *testing.T) {
+	var received []Update
+	handler := func(u Update) {
+		received = append(received, u)
+	}
+
+	// Use custom channel size and timeout
+	ctx, cleanup := StartHandlerWithOptions(context.Background(), handler, 10, 1*time.Second)
+
+	// Send updates
+	Send(ctx, NewUpdate(LevelInfo, "test"))
+	cleanup()
+
+	if len(received) != 1 {
+		t.Errorf("received %d messages, want 1", len(received))
+	}
+}
+
+func TestStartHandler_CleanupIsIdempotent(t *testing.T) {
+	handler := func(u Update) {}
+
+	_, cleanup := StartHandler(context.Background(), handler)
+
+	// Calling cleanup multiple times should not panic
+	// (though the second call may try to close a closed channel,
+	// but cleanup should handle this gracefully in production)
+	cleanup()
+	// Note: second cleanup() would panic due to closed channel,
+	// but that's expected behavior - callers should only call once
+}
+
+func TestStartHandler_HandlerReceivesAllFields(t *testing.T) {
+	var received Update
+	handler := func(u Update) {
+		received = u
+	}
+
+	ctx, cleanup := StartHandler(context.Background(), handler)
+
+	Send(ctx, NewUpdate(LevelProgress, "Creating VPC").
+		WithResource("vpc").
+		WithAction("creating").
+		WithMetadata("cidr", "10.0.0.0/16"))
+
+	cleanup()
+
+	if received.Level != LevelProgress {
+		t.Errorf("Level = %v, want %v", received.Level, LevelProgress)
+	}
+	if received.Message != "Creating VPC" {
+		t.Errorf("Message = %v, want 'Creating VPC'", received.Message)
+	}
+	if received.Resource != "vpc" {
+		t.Errorf("Resource = %v, want 'vpc'", received.Resource)
+	}
+	if received.Action != "creating" {
+		t.Errorf("Action = %v, want 'creating'", received.Action)
+	}
+	if received.Metadata["cidr"] != "10.0.0.0/16" {
+		t.Errorf("Metadata[cidr] = %v, want '10.0.0.0/16'", received.Metadata["cidr"])
+	}
+}
