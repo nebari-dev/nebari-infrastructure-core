@@ -192,6 +192,123 @@ func (p *Provider) cleanupOrphanedEIPs(ctx context.Context, clients *Clients, cl
 	return nil
 }
 
+// cleanupOrphanedEIPsWithCount is like cleanupOrphanedEIPs but returns the count of EIPs released
+func (p *Provider) cleanupOrphanedEIPsWithCount(ctx context.Context, clients *Clients, clusterName string) (int, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.cleanupOrphanedEIPsWithCount")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	// Query all EIPs for this cluster
+	allClusterEIPs, err := clients.EC2Client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{
+		Filters: []types.Filter{
+			{
+				Name:   strPtr("domain"),
+				Values: []string{"vpc"},
+			},
+			{
+				Name:   strPtr("tag:nic.nebari.dev/cluster-name"),
+				Values: []string{clusterName},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to describe cluster EIPs: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("total_cluster_eips_found", len(allClusterEIPs.Addresses)))
+
+	if len(allClusterEIPs.Addresses) == 0 {
+		return 0, nil
+	}
+
+	// Release all unassociated EIPs
+	eipsReleased := 0
+
+	for _, addr := range allClusterEIPs.Addresses {
+		// Skip EIPs that are still associated with something
+		if addr.AssociationId != nil {
+			continue
+		}
+
+		// Release EIP
+		if addr.AllocationId != nil {
+			_, err := clients.EC2Client.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
+				AllocationId: addr.AllocationId,
+			})
+			if err != nil {
+				span.RecordError(err)
+				// Continue trying to release other EIPs
+			} else {
+				eipsReleased++
+			}
+		}
+	}
+
+	if eipsReleased > 0 {
+		status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
+			WithResource("eip").
+			WithAction("released").
+			WithMetadata("count", eipsReleased))
+	}
+
+	span.SetAttributes(attribute.Int("eips_released", eipsReleased))
+
+	return eipsReleased, nil
+}
+
+// cleanupOrphanedNATGateways finds NAT Gateways tagged with this cluster and ensures they are deleted
+// Returns the count of NAT Gateways that were found and needed cleanup
+func (p *Provider) cleanupOrphanedNATGateways(ctx context.Context, clients *Clients, clusterName string) (int, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.cleanupOrphanedNATGateways")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	// Query NAT Gateways by cluster tag
+	output, err := clients.EC2Client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{
+		Filter: []types.Filter{
+			{
+				Name:   strPtr("tag:nic.nebari.dev/cluster-name"),
+				Values: []string{clusterName},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to describe NAT gateways: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("nat_gateways_found", len(output.NatGateways)))
+
+	// Count NAT Gateways that aren't fully deleted yet
+	pendingCount := 0
+	for _, ng := range output.NatGateways {
+		state := string(ng.State)
+		if state != "deleted" {
+			pendingCount++
+
+			// If still in available/pending state, initiate deletion
+			if state == "available" || state == "pending" {
+				natGatewayID := *ng.NatGatewayId
+				_, err := clients.EC2Client.DeleteNatGateway(ctx, &ec2.DeleteNatGatewayInput{
+					NatGatewayId: &natGatewayID,
+				})
+				if err != nil && !strings.Contains(err.Error(), "NatGatewayNotFound") {
+					span.RecordError(err)
+				}
+			}
+		}
+	}
+
+	span.SetAttributes(attribute.Int("nat_gateways_pending", pendingCount))
+
+	return pendingCount, nil
+}
+
 // deleteNATGateways deletes all NAT gateways in the VPC and releases associated EIPs
 func (p *Provider) deleteNATGateways(ctx context.Context, clients *Clients, vpcID string, clusterName string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")

@@ -362,11 +362,71 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return fmt.Errorf("failed to delete IAM roles: %w", err)
 	}
 
+	// 5. Verification loop: keep cleaning up orphaned resources until none remain
+	// This handles resources that may have been missed or became orphaned during deletion
+	const maxVerificationPasses = 3
+	for pass := 1; pass <= maxVerificationPasses; pass++ {
+		span.SetAttributes(attribute.Int("verification_pass", pass))
+
+		orphansFound, err := p.cleanupOrphanedResources(ctx, clients, clusterName)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed during orphan cleanup pass %d: %w", pass, err)
+		}
+
+		if !orphansFound {
+			span.SetAttributes(attribute.Int("verification_passes_needed", pass))
+			break
+		}
+
+		if pass == maxVerificationPasses {
+			span.SetAttributes(attribute.Bool("max_verification_passes_reached", true))
+		}
+	}
+
 	span.SetAttributes(
 		attribute.Bool("destroy_complete", true),
 	)
 
 	return nil
+}
+
+// cleanupOrphanedResources finds and cleans up any orphaned resources for this cluster
+// Returns true if any orphans were found and cleaned up
+func (p *Provider) cleanupOrphanedResources(ctx context.Context, clients *Clients, clusterName string) (bool, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.cleanupOrphanedResources")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	orphansFound := false
+
+	// Check for orphaned EIPs
+	eipsFound, err := p.cleanupOrphanedEIPsWithCount(ctx, clients, clusterName)
+	if err != nil {
+		span.RecordError(err)
+		return false, fmt.Errorf("failed to cleanup orphaned EIPs: %w", err)
+	}
+	if eipsFound > 0 {
+		orphansFound = true
+		span.SetAttributes(attribute.Int("orphaned_eips_cleaned", eipsFound))
+	}
+
+	// Check for orphaned NAT Gateways (in deleting state that may have completed)
+	natGWsFound, err := p.cleanupOrphanedNATGateways(ctx, clients, clusterName)
+	if err != nil {
+		span.RecordError(err)
+		return false, fmt.Errorf("failed to cleanup orphaned NAT Gateways: %w", err)
+	}
+	if natGWsFound > 0 {
+		orphansFound = true
+		span.SetAttributes(attribute.Int("orphaned_nat_gateways_cleaned", natGWsFound))
+	}
+
+	span.SetAttributes(attribute.Bool("orphans_found", orphansFound))
+
+	return orphansFound, nil
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
