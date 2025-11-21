@@ -49,7 +49,7 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 		k8sVersion = DefaultKubernetesVersion
 	}
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating EKS cluster").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating EKS cluster").
 		WithResource("eks-cluster").
 		WithAction("creating").
 		WithMetadata("cluster_name", clusterName).

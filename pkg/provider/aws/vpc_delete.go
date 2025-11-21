@@ -23,7 +23,7 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 		attribute.String("cluster_name", clusterName),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking VPC").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Checking VPC").
 		WithResource("vpc").
 		WithAction("discovering"))
 
@@ -32,7 +32,7 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 	if err != nil || vpc == nil {
 		// VPC doesn't exist - but we should still clean up orphaned EIPs
 		span.SetAttributes(attribute.Bool("vpc_exists", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "VPC not found, checking for orphaned resources").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "VPC not found, checking for orphaned resources").
 			WithResource("vpc"))
 
 		// Clean up any orphaned EIPs even if VPC is gone
@@ -45,7 +45,7 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 		attribute.String("vpc_id", vpcID),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting VPC and networking resources").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting VPC and networking resources").
 		WithResource("vpc").
 		WithAction("deleting").
 		WithMetadata("vpc_id", vpcID))
@@ -101,7 +101,7 @@ func (p *Provider) deleteVPC(ctx context.Context, clients *Clients, clusterName 
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC and networking resources deleted").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC and networking resources deleted").
 		WithResource("vpc").
 		WithAction("deleted").
 		WithMetadata("vpc_id", vpcID))
@@ -139,12 +139,12 @@ func (p *Provider) cleanupOrphanedEIPs(ctx context.Context, clients *Clients, cl
 	span.SetAttributes(attribute.Int("total_cluster_eips_found", len(allClusterEIPs.Addresses)))
 
 	if len(allClusterEIPs.Addresses) == 0 {
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "No orphaned EIPs found").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No orphaned EIPs found").
 			WithResource("eip"))
 		return nil
 	}
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Releasing orphaned Elastic IPs").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Releasing orphaned Elastic IPs").
 		WithResource("eip").
 		WithAction("releasing").
 		WithMetadata("count", len(allClusterEIPs.Addresses)))
@@ -183,7 +183,7 @@ func (p *Provider) cleanupOrphanedEIPs(ctx context.Context, clients *Clients, cl
 	)
 
 	if eipsReleased > 0 {
-		status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
 			WithResource("eip").
 			WithAction("released").
 			WithMetadata("count", eipsReleased))
@@ -248,7 +248,7 @@ func (p *Provider) cleanupOrphanedEIPsWithCount(ctx context.Context, clients *Cl
 	}
 
 	if eipsReleased > 0 {
-		status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Orphaned Elastic IPs released").
 			WithResource("eip").
 			WithAction("released").
 			WithMetadata("count", eipsReleased))

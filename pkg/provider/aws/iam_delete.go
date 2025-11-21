@@ -20,7 +20,7 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 		attribute.String("cluster_name", clusterName),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking IAM roles").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Checking IAM roles").
 		WithResource("iam-role").
 		WithAction("discovering"))
 
@@ -29,7 +29,7 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 	if err != nil {
 		// Roles don't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("roles_exist", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "IAM roles not found").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "IAM roles not found").
 			WithResource("iam-role"))
 		return nil
 	}
@@ -37,14 +37,14 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 	if iamRoles == nil {
 		// Roles don't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("roles_exist", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "IAM roles not found").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "IAM roles not found").
 			WithResource("iam-role"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("roles_exist", true))
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting IAM roles").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting IAM roles").
 		WithResource("iam-role").
 		WithAction("deleting"))
 
@@ -75,7 +75,7 @@ func (p *Provider) deleteIAMRoles(ctx context.Context, clients *Clients, cluster
 		attribute.Bool("deletion_complete", true),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "IAM roles deleted").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "IAM roles deleted").
 		WithResource("iam-role").
 		WithAction("deleted").
 		WithMetadata("count", rolesDeleted))

@@ -47,7 +47,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Starting deployment", "config_file", deployConfigFile)
 
 	// Create status channel for progress updates
-	statusCh := make(chan status.StatusUpdate, 100)
+	statusCh := make(chan status.Update, 100)
 	ctx = status.WithChannel(ctx, statusCh)
 
 	// Start goroutine to log status updates
@@ -55,7 +55,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logStatusUpdates(statusCh)
+		logUpdates(statusCh)
 	}()
 
 	// Ensure status channel is closed and all messages are logged before exit
@@ -119,9 +119,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// logStatusUpdates reads status updates from the channel and logs them
+// logUpdates reads status updates from the channel and logs them
 // This function runs in a goroutine and exits when the channel is closed
-func logStatusUpdates(statusCh <-chan status.StatusUpdate) {
+func logUpdates(statusCh <-chan status.Update) {
 	for update := range statusCh {
 		// Build structured logging attributes
 		attrs := []any{

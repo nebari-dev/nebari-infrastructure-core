@@ -146,14 +146,14 @@ func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, cluster
 	)
 
 	// Try to discover existing roles
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking for existing IAM roles").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Checking for existing IAM roles").
 		WithResource("iam-role").
 		WithAction("discovering"))
 
 	iamRoles, err := p.discoverIAMRoles(ctx, clients, clusterName)
 	if err == nil && iamRoles != nil {
 		span.SetAttributes(attribute.String("action", "discovered"))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "Found existing IAM roles").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Found existing IAM roles").
 			WithResource("iam-role").
 			WithAction("discovered"))
 		return iamRoles, nil
@@ -161,7 +161,7 @@ func (p *Provider) ensureIAMRoles(ctx context.Context, clients *Clients, cluster
 
 	// Roles don't exist, create them
 	span.SetAttributes(attribute.String("action", "create"))
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating IAM roles").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating IAM roles").
 		WithResource("iam-role").
 		WithAction("creating"))
 

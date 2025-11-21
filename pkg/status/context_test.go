@@ -6,7 +6,7 @@ import (
 )
 
 func TestWithChannel(t *testing.T) {
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := WithChannel(context.Background(), ch)
 
 	if ctx == nil {
@@ -56,7 +56,7 @@ func TestHasChannel(t *testing.T) {
 	}{
 		{
 			name: "context with channel",
-			ctx:  WithChannel(context.Background(), make(chan StatusUpdate, 10)),
+			ctx:  WithChannel(context.Background(), make(chan Update, 10)),
 			want: true,
 		},
 		{
@@ -90,7 +90,7 @@ func TestContextChaining(t *testing.T) {
 	type testKey string
 	otherKey := testKey("other-key")
 
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := context.Background()
 	ctx = WithChannel(ctx, ch)
 	ctx = context.WithValue(ctx, otherKey, "other-value")
@@ -107,15 +107,15 @@ func TestContextChaining(t *testing.T) {
 
 func TestMultipleChannels(t *testing.T) {
 	// Test that replacing channel works correctly
-	ch1 := make(chan StatusUpdate, 10)
-	ch2 := make(chan StatusUpdate, 10)
+	ch1 := make(chan Update, 10)
+	ch2 := make(chan Update, 10)
 
 	ctx := context.Background()
 	ctx = WithChannel(ctx, ch1)
 	ctx = WithChannel(ctx, ch2)
 
 	// Send a message - should go to ch2
-	Send(ctx, NewStatusUpdate(LevelInfo, "test"))
+	Send(ctx, NewUpdate(LevelInfo, "test"))
 
 	select {
 	case <-ch1:

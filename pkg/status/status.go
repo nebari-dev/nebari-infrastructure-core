@@ -26,8 +26,8 @@ const (
 	LevelError Level = "error"
 )
 
-// StatusUpdate represents a status update message that can be sent through the status channel
-type StatusUpdate struct {
+// Update represents a status update message that can be sent through the status channel
+type Update struct {
 	// Level is the severity level of this status update
 	Level Level
 
@@ -47,9 +47,9 @@ type StatusUpdate struct {
 	Timestamp time.Time
 }
 
-// NewStatusUpdate creates a new StatusUpdate with the current timestamp
-func NewStatusUpdate(level Level, message string) StatusUpdate {
-	return StatusUpdate{
+// NewUpdate creates a new Update with the current timestamp
+func NewUpdate(level Level, message string) Update {
+	return Update{
 		Level:     level,
 		Message:   message,
 		Timestamp: time.Now(),
@@ -57,19 +57,19 @@ func NewStatusUpdate(level Level, message string) StatusUpdate {
 }
 
 // WithResource adds resource information to the status update
-func (s StatusUpdate) WithResource(resource string) StatusUpdate {
+func (s Update) WithResource(resource string) Update {
 	s.Resource = resource
 	return s
 }
 
 // WithAction adds action information to the status update
-func (s StatusUpdate) WithAction(action string) StatusUpdate {
+func (s Update) WithAction(action string) Update {
 	s.Action = action
 	return s
 }
 
 // WithMetadata adds metadata to the status update
-func (s StatusUpdate) WithMetadata(key string, value interface{}) StatusUpdate {
+func (s Update) WithMetadata(key string, value interface{}) Update {
 	if s.Metadata == nil {
 		s.Metadata = make(map[string]interface{})
 	}
@@ -79,7 +79,7 @@ func (s StatusUpdate) WithMetadata(key string, value interface{}) StatusUpdate {
 
 // Send sends a status update through the channel stored in the context (if present)
 // This function is non-blocking and will drop the message if the channel is full
-func Send(ctx context.Context, update StatusUpdate) {
+func Send(ctx context.Context, update Update) {
 	ch := getChannel(ctx)
 	if ch == nil {
 		// No status channel in context - silently skip
@@ -103,7 +103,7 @@ func Send(ctx context.Context, update StatusUpdate) {
 
 // Sendf sends a formatted status update message
 func Sendf(ctx context.Context, level Level, format string, args ...interface{}) {
-	Send(ctx, StatusUpdate{
+	Send(ctx, Update{
 		Level:     level,
 		Message:   fmt.Sprintf(format, args...),
 		Timestamp: time.Now(),
@@ -112,7 +112,7 @@ func Sendf(ctx context.Context, level Level, format string, args ...interface{})
 
 // Info sends an informational status update
 func Info(ctx context.Context, message string) {
-	Send(ctx, NewStatusUpdate(LevelInfo, message))
+	Send(ctx, NewUpdate(LevelInfo, message))
 }
 
 // Infof sends a formatted informational status update
@@ -122,7 +122,7 @@ func Infof(ctx context.Context, format string, args ...interface{}) {
 
 // Progress sends a progress status update
 func Progress(ctx context.Context, message string) {
-	Send(ctx, NewStatusUpdate(LevelProgress, message))
+	Send(ctx, NewUpdate(LevelProgress, message))
 }
 
 // Progressf sends a formatted progress status update
@@ -132,7 +132,7 @@ func Progressf(ctx context.Context, format string, args ...interface{}) {
 
 // Success sends a success status update
 func Success(ctx context.Context, message string) {
-	Send(ctx, NewStatusUpdate(LevelSuccess, message))
+	Send(ctx, NewUpdate(LevelSuccess, message))
 }
 
 // Successf sends a formatted success status update
@@ -142,7 +142,7 @@ func Successf(ctx context.Context, format string, args ...interface{}) {
 
 // Warning sends a warning status update
 func Warning(ctx context.Context, message string) {
-	Send(ctx, NewStatusUpdate(LevelWarning, message))
+	Send(ctx, NewUpdate(LevelWarning, message))
 }
 
 // Warningf sends a formatted warning status update
@@ -152,7 +152,7 @@ func Warningf(ctx context.Context, format string, args ...interface{}) {
 
 // Error sends an error status update
 func Error(ctx context.Context, message string) {
-	Send(ctx, NewStatusUpdate(LevelError, message))
+	Send(ctx, NewUpdate(LevelError, message))
 }
 
 // Errorf sends a formatted error status update

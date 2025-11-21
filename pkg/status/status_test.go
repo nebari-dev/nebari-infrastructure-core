@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestNewStatusUpdate(t *testing.T) {
+func TestNewUpdate(t *testing.T) {
 	tests := []struct {
 		name    string
 		level   Level
@@ -27,7 +27,7 @@ func TestNewStatusUpdate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			before := time.Now()
-			update := NewStatusUpdate(tt.level, tt.message)
+			update := NewUpdate(tt.level, tt.message)
 			after := time.Now()
 
 			if update.Level != tt.level {
@@ -43,22 +43,22 @@ func TestNewStatusUpdate(t *testing.T) {
 	}
 }
 
-func TestStatusUpdate_WithResource(t *testing.T) {
-	update := NewStatusUpdate(LevelInfo, "test").WithResource("vpc")
+func TestUpdate_WithResource(t *testing.T) {
+	update := NewUpdate(LevelInfo, "test").WithResource("vpc")
 	if update.Resource != "vpc" {
 		t.Errorf("Resource = %v, want %v", update.Resource, "vpc")
 	}
 }
 
-func TestStatusUpdate_WithAction(t *testing.T) {
-	update := NewStatusUpdate(LevelInfo, "test").WithAction("creating")
+func TestUpdate_WithAction(t *testing.T) {
+	update := NewUpdate(LevelInfo, "test").WithAction("creating")
 	if update.Action != "creating" {
 		t.Errorf("Action = %v, want %v", update.Action, "creating")
 	}
 }
 
-func TestStatusUpdate_WithMetadata(t *testing.T) {
-	update := NewStatusUpdate(LevelInfo, "test").
+func TestUpdate_WithMetadata(t *testing.T) {
+	update := NewUpdate(LevelInfo, "test").
 		WithMetadata("key1", "value1").
 		WithMetadata("key2", 42)
 
@@ -73,8 +73,8 @@ func TestStatusUpdate_WithMetadata(t *testing.T) {
 	}
 }
 
-func TestStatusUpdate_ChainedBuilders(t *testing.T) {
-	update := NewStatusUpdate(LevelProgress, "Creating VPC").
+func TestUpdate_ChainedBuilders(t *testing.T) {
+	update := NewUpdate(LevelProgress, "Creating VPC").
 		WithResource("vpc").
 		WithAction("creating").
 		WithMetadata("vpc_id", "vpc-12345").
@@ -100,15 +100,15 @@ func TestStatusUpdate_ChainedBuilders(t *testing.T) {
 func TestSend_NoChannel(t *testing.T) {
 	// Should not panic when no channel in context
 	ctx := context.Background()
-	Send(ctx, NewStatusUpdate(LevelInfo, "test"))
+	Send(ctx, NewUpdate(LevelInfo, "test"))
 	// If we get here without panic, test passes
 }
 
 func TestSend_WithChannel(t *testing.T) {
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := WithChannel(context.Background(), ch)
 
-	update := NewStatusUpdate(LevelInfo, "test message")
+	update := NewUpdate(LevelInfo, "test message")
 	Send(ctx, update)
 
 	select {
@@ -126,16 +126,16 @@ func TestSend_WithChannel(t *testing.T) {
 
 func TestSend_FullChannel(t *testing.T) {
 	// Create a channel with buffer size 1
-	ch := make(chan StatusUpdate, 1)
+	ch := make(chan Update, 1)
 	ctx := WithChannel(context.Background(), ch)
 
 	// Fill the channel
-	Send(ctx, NewStatusUpdate(LevelInfo, "message 1"))
+	Send(ctx, NewUpdate(LevelInfo, "message 1"))
 
 	// Try to send another - should not block
 	done := make(chan bool)
 	go func() {
-		Send(ctx, NewStatusUpdate(LevelInfo, "message 2"))
+		Send(ctx, NewUpdate(LevelInfo, "message 2"))
 		done <- true
 	}()
 
@@ -172,7 +172,7 @@ func TestConvenienceFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := make(chan StatusUpdate, 10)
+			ch := make(chan Update, 10)
 			ctx := WithChannel(context.Background(), ch)
 
 			tt.sendFunc(ctx, "test message")
@@ -193,11 +193,11 @@ func TestConvenienceFunctions(t *testing.T) {
 }
 
 func TestSend_SetsTimestamp(t *testing.T) {
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := WithChannel(context.Background(), ch)
 
 	// Send update without timestamp
-	update := StatusUpdate{
+	update := Update{
 		Level:   LevelInfo,
 		Message: "test",
 	}
@@ -220,12 +220,12 @@ func TestSend_SetsTimestamp(t *testing.T) {
 }
 
 func TestSend_PreservesExistingTimestamp(t *testing.T) {
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := WithChannel(context.Background(), ch)
 
 	// Send update with timestamp already set
 	timestamp := time.Now().Add(-1 * time.Hour)
-	update := StatusUpdate{
+	update := Update{
 		Level:     LevelInfo,
 		Message:   "test",
 		Timestamp: timestamp,
@@ -276,7 +276,7 @@ func TestFormattedFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := make(chan StatusUpdate, 10)
+			ch := make(chan Update, 10)
 			ctx := WithChannel(context.Background(), ch)
 
 			tt.sendFunc(ctx, "test message with %s and %d", "string", 42)
@@ -298,7 +298,7 @@ func TestFormattedFunctions(t *testing.T) {
 }
 
 func TestSendf(t *testing.T) {
-	ch := make(chan StatusUpdate, 10)
+	ch := make(chan Update, 10)
 	ctx := WithChannel(context.Background(), ch)
 
 	Sendf(ctx, LevelInfo, "VPC %s has %d subnets", "vpc-12345", 4)

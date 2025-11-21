@@ -67,7 +67,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 		attribute.StringSlice("availability_zones", azs),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating VPC").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating VPC").
 		WithResource("vpc").
 		WithAction("creating").
 		WithMetadata("cidr", vpcCIDR).
@@ -86,7 +86,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.VPCID = *vpc.VpcId
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC created").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC created").
 		WithResource("vpc").
 		WithAction("created").
 		WithMetadata("vpc_id", vpcState.VPCID))
@@ -98,7 +98,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 
 	// Step 3: Create Internet Gateway
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating internet gateway").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating internet gateway").
 		WithResource("internet-gateway").
 		WithAction("creating"))
 
@@ -110,7 +110,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	vpcState.InternetGatewayID = igwID
 
 	// Step 4: Create public and private subnets
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating subnets").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating subnets").
 		WithResource("subnet").
 		WithAction("creating").
 		WithMetadata("az_count", len(azs)))
@@ -130,7 +130,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	vpcState.PrivateSubnetIDs = privateSubnets
 
 	// Step 5: Create NAT Gateways (one per public subnet for HA)
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating NAT gateways").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating NAT gateways").
 		WithResource("nat-gateway").
 		WithAction("creating").
 		WithMetadata("count", len(publicSubnets)))
@@ -142,13 +142,13 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.NATGatewayIDs = natGatewayIDs
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "NAT gateways created").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "NAT gateways created").
 		WithResource("nat-gateway").
 		WithAction("created").
 		WithMetadata("count", len(natGatewayIDs)))
 
 	// Step 6: Create route tables and routes
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating route tables").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating route tables").
 		WithResource("route-table").
 		WithAction("creating"))
 
@@ -177,7 +177,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	// Step 8: Create VPC endpoints for private cluster access
 	// VPC endpoints are required for nodes in private subnets to communicate with AWS services
 	// This is critical when using private-only EKS endpoint access
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Creating VPC endpoints for private cluster").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating VPC endpoints for private cluster").
 		WithResource("vpc-endpoint").
 		WithAction("creating"))
 
@@ -188,7 +188,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.VPCEndpointIDs = vpcEndpointIDs
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC endpoints created").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints created").
 		WithResource("vpc-endpoint").
 		WithAction("created").
 		WithMetadata("count", len(vpcEndpointIDs)))
@@ -204,7 +204,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 		attribute.Int("nat_gateways", len(vpcState.NATGatewayIDs)),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "VPC infrastructure created").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC infrastructure created").
 		WithResource("vpc").
 		WithAction("created").
 		WithMetadata("vpc_id", vpcState.VPCID).

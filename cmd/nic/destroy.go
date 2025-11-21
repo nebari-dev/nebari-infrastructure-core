@@ -111,7 +111,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create status channel for progress updates
-	statusCh := make(chan status.StatusUpdate, 100)
+	statusCh := make(chan status.Update, 100)
 	ctx = status.WithChannel(ctx, statusCh)
 
 	// Store force flag in context for provider access
@@ -126,7 +126,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logStatusUpdates(statusCh)
+		logUpdates(statusCh)
 	}()
 
 	// Ensure status channel is closed and all messages are logged before exit

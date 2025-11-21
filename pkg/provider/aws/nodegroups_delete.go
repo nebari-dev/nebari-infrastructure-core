@@ -33,7 +33,7 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 	)
 
 	// Discover all node groups for this cluster
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Discovering node groups").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Discovering node groups").
 		WithResource("node-group").
 		WithAction("discovering"))
 
@@ -42,7 +42,7 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 		// Check if cluster doesn't exist - that's OK, nothing to delete
 		if isResourceNotFound(err) {
 			span.SetAttributes(attribute.Bool("cluster_not_found", true))
-			status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "Cluster not found, no node groups to delete").
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster not found, no node groups to delete").
 				WithResource("node-group"))
 			return nil
 		}
@@ -52,13 +52,13 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 
 	if len(nodeGroups) == 0 {
 		span.SetAttributes(attribute.Int("node_groups_deleted", 0))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "No node groups to delete").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No node groups to delete").
 			WithResource("node-group"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Int("node_groups_to_delete", len(nodeGroups)))
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting node groups").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting node groups").
 		WithResource("node-group").
 		WithAction("deleting").
 		WithMetadata("count", len(nodeGroups)))
@@ -85,7 +85,7 @@ func (p *Provider) deleteNodeGroups(ctx context.Context, clients *Clients, clust
 		attribute.Bool("parallel_deletion", true),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Node groups deleted").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Node groups deleted").
 		WithResource("node-group").
 		WithAction("deleted").
 		WithMetadata("count", len(nodeGroups)))
@@ -104,7 +104,7 @@ func (p *Provider) deleteNodeGroup(ctx context.Context, clients *Clients, cluste
 		attribute.String("node_group_name", nodeGroupName),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting node group").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting node group").
 		WithResource("node-group").
 		WithAction("deleting").
 		WithMetadata("node_group", nodeGroupName))
@@ -135,7 +135,7 @@ func (p *Provider) deleteNodeGroup(ctx context.Context, clients *Clients, cluste
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "Node group deleted").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Node group deleted").
 		WithResource("node-group").
 		WithAction("deleted").
 		WithMetadata("node_group", nodeGroupName))

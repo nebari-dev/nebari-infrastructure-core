@@ -20,7 +20,7 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 		attribute.String("cluster_name", clusterName),
 	)
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Checking EKS cluster").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Checking EKS cluster").
 		WithResource("eks-cluster").
 		WithAction("discovering"))
 
@@ -29,7 +29,7 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 	if err != nil {
 		// Cluster doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("cluster_exists", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "EKS cluster not found").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "EKS cluster not found").
 			WithResource("eks-cluster"))
 		return nil
 	}
@@ -37,14 +37,14 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 	if cluster == nil {
 		// Cluster doesn't exist - nothing to delete
 		span.SetAttributes(attribute.Bool("cluster_exists", false))
-		status.Send(ctx, status.NewStatusUpdate(status.LevelInfo, "EKS cluster not found").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "EKS cluster not found").
 			WithResource("eks-cluster"))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("cluster_exists", true))
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelProgress, "Deleting EKS cluster").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting EKS cluster").
 		WithResource("eks-cluster").
 		WithAction("deleting").
 		WithMetadata("cluster_name", clusterName))
@@ -73,7 +73,7 @@ func (p *Provider) deleteEKSCluster(ctx context.Context, clients *Clients, clust
 
 	span.SetAttributes(attribute.Bool("deletion_complete", true))
 
-	status.Send(ctx, status.NewStatusUpdate(status.LevelSuccess, "EKS cluster deleted").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "EKS cluster deleted").
 		WithResource("eks-cluster").
 		WithAction("deleted").
 		WithMetadata("cluster_name", clusterName))
