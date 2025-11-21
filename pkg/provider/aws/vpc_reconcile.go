@@ -8,10 +8,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // reconcileVPC compares desired VPC configuration against actual state and reconciles differences
-func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *config.NebariConfig, actual *VPCState) error {
+func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *config.NebariConfig, actual *VPCState) (*VPCState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.reconcileVPC")
 	defer span.End()
@@ -24,15 +25,15 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		attribute.Bool("vpc_exists", actual != nil),
 	)
 
-	// Case 1: VPC doesn't exist → Create
+	// Case 1: VPC doesn't exist → Create full VPC
 	if actual == nil {
 		span.SetAttributes(attribute.String("action", "create"))
-		_, err := p.createVPC(ctx, clients, cfg)
+		vpcState, err := p.createVPC(ctx, clients, cfg)
 		if err != nil {
 			span.RecordError(err)
-			return fmt.Errorf("failed to create VPC: %w", err)
+			return nil, fmt.Errorf("failed to create VPC: %w", err)
 		}
-		return nil
+		return vpcState, nil
 	}
 
 	// Case 2: VPC exists → Validate immutable fields
@@ -51,7 +52,7 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 			desiredCIDR,
 		)
 		span.RecordError(err)
-		return err
+		return nil, err
 	}
 
 	// Validate availability zones are immutable (if specified in config)
@@ -66,14 +67,168 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 				awsCfg.AvailabilityZones,
 			)
 			span.RecordError(err)
-			return err
+			return nil, err
 		}
 	}
 
-	// Case 3: VPC exists and immutable fields match → No action needed
-	span.SetAttributes(attribute.String("action", "none"))
+	// Case 3: VPC exists and immutable fields match → Reconcile missing networking components
+	// Only reconcile if we have actual clients (not in test mode with nil clients)
+	if clients == nil {
+		// Test mode or VPC exists with all immutable fields matching - no reconciliation needed
+		span.SetAttributes(attribute.String("action", "none"))
+		return actual, nil
+	}
 
-	return nil
+	var err error
+	updated := false
+
+	// Get availability zones for creating missing resources
+	azs := actual.AvailabilityZones
+	if len(azs) == 0 {
+		azs, err = p.getAvailabilityZones(ctx, clients, awsCfg)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to get availability zones: %w", err)
+		}
+	}
+
+	// Reconcile Internet Gateway
+	if actual.InternetGatewayID == "" {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing internet gateway").
+			WithResource("internet-gateway").
+			WithAction("creating"))
+
+		igwID, err := p.createInternetGateway(ctx, clients, clusterName, actual.VPCID, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create internet gateway: %w", err)
+		}
+		actual.InternetGatewayID = igwID
+		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Internet gateway created").
+			WithResource("internet-gateway").
+			WithAction("created"))
+	}
+
+	// Reconcile Subnets
+	if len(actual.PublicSubnetIDs) == 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing public subnets").
+			WithResource("subnet").
+			WithAction("creating"))
+
+		publicSubnets, err := p.createSubnets(ctx, clients, clusterName, actual.VPCID, actual.CIDR, azs, true, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create public subnets: %w", err)
+		}
+		actual.PublicSubnetIDs = publicSubnets
+		updated = true
+	}
+
+	if len(actual.PrivateSubnetIDs) == 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing private subnets").
+			WithResource("subnet").
+			WithAction("creating"))
+
+		privateSubnets, err := p.createSubnets(ctx, clients, clusterName, actual.VPCID, actual.CIDR, azs, false, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create private subnets: %w", err)
+		}
+		actual.PrivateSubnetIDs = privateSubnets
+		updated = true
+	}
+
+	// Reconcile NAT Gateways (require public subnets)
+	if len(actual.NATGatewayIDs) == 0 && len(actual.PublicSubnetIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing NAT gateways").
+			WithResource("nat-gateway").
+			WithAction("creating"))
+
+		natGatewayIDs, err := p.createNATGateways(ctx, clients, clusterName, actual.PublicSubnetIDs, azs, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create NAT gateways: %w", err)
+		}
+		actual.NATGatewayIDs = natGatewayIDs
+		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "NAT gateways created").
+			WithResource("nat-gateway").
+			WithAction("created"))
+	}
+
+	// Reconcile Route Tables (require IGW and NAT gateways)
+	if actual.PublicRouteTableID == "" && actual.InternetGatewayID != "" && len(actual.PublicSubnetIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing public route table").
+			WithResource("route-table").
+			WithAction("creating"))
+
+		publicRouteTableID, err := p.createPublicRouteTable(ctx, clients, clusterName, actual.VPCID, actual.InternetGatewayID, actual.PublicSubnetIDs, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create public route table: %w", err)
+		}
+		actual.PublicRouteTableID = publicRouteTableID
+		updated = true
+	}
+
+	if len(actual.PrivateRouteTableIDs) == 0 && len(actual.NATGatewayIDs) > 0 && len(actual.PrivateSubnetIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing private route tables").
+			WithResource("route-table").
+			WithAction("creating"))
+
+		privateRouteTableIDs, err := p.createPrivateRouteTables(ctx, clients, clusterName, actual.VPCID, actual.NATGatewayIDs, actual.PrivateSubnetIDs, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create private route tables: %w", err)
+		}
+		actual.PrivateRouteTableIDs = privateRouteTableIDs
+		updated = true
+	}
+
+	// Reconcile Security Groups
+	if len(actual.SecurityGroupIDs) == 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing security group").
+			WithResource("security-group").
+			WithAction("creating"))
+
+		sgID, err := p.createClusterSecurityGroup(ctx, clients, clusterName, actual.VPCID, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create security group: %w", err)
+		}
+		actual.SecurityGroupIDs = []string{sgID}
+		updated = true
+	}
+
+	// Reconcile VPC Endpoints
+	if len(actual.VPCEndpointIDs) == 0 && len(actual.PrivateSubnetIDs) > 0 && len(actual.SecurityGroupIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing VPC endpoints").
+			WithResource("vpc-endpoint").
+			WithAction("creating"))
+
+		vpcEndpointIDs, err := p.createVPCEndpoints(ctx, clients, clusterName, actual.VPCID, actual.PrivateSubnetIDs, actual.SecurityGroupIDs[0], awsCfg.Region, awsCfg.Tags)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create VPC endpoints: %w", err)
+		}
+		actual.VPCEndpointIDs = vpcEndpointIDs
+		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints created").
+			WithResource("vpc-endpoint").
+			WithAction("created"))
+	}
+
+	if updated {
+		span.SetAttributes(attribute.String("action", "reconciled"))
+	} else {
+		span.SetAttributes(attribute.String("action", "none"))
+	}
+
+	return actual, nil
 }
 
 // stringSlicesEqualVPC compares two string slices for equality (order-independent)

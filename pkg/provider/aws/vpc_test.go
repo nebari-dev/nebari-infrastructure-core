@@ -117,7 +117,7 @@ func TestReconcileVPC_CIDRMismatch(t *testing.T) {
 	}
 
 	// This should return an error about immutable CIDR
-	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	_, err := p.reconcileVPC(ctx, nil, cfg, actual)
 	if err == nil {
 		t.Error("Expected error for CIDR mismatch, got nil")
 	}
@@ -155,7 +155,7 @@ func TestReconcileVPC_CIDRMatch(t *testing.T) {
 	}
 
 	// This should succeed with no changes
-	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	_, err := p.reconcileVPC(ctx, nil, cfg, actual)
 	if err != nil {
 		t.Errorf("Expected no error when CIDR matches, got: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestReconcileVPC_AvailabilityZonesMismatch(t *testing.T) {
 	}
 
 	// This should return an error about immutable AZs
-	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	_, err := p.reconcileVPC(ctx, nil, cfg, actual)
 	if err == nil {
 		t.Error("Expected error for availability zones mismatch, got nil")
 	}
@@ -222,7 +222,7 @@ func TestReconcileVPC_AvailabilityZonesMatch(t *testing.T) {
 	}
 
 	// This should succeed with no changes
-	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	_, err := p.reconcileVPC(ctx, nil, cfg, actual)
 	if err != nil {
 		t.Errorf("Expected no error when AZs match, got: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestReconcileVPC_AvailabilityZonesNotSpecifiedInConfig(t *testing.T) {
 	}
 
 	// This should succeed - no AZs specified in config means no comparison
-	err := p.reconcileVPC(ctx, nil, cfg, actual)
+	_, err := p.reconcileVPC(ctx, nil, cfg, actual)
 	if err != nil {
 		t.Errorf("Expected no error when AZs not specified in config, got: %v", err)
 	}

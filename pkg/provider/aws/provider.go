@@ -226,18 +226,11 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		return fmt.Errorf("failed to discover VPC: %w", err)
 	}
 
-	// 2. Reconcile VPC
-	err = p.reconcileVPC(ctx, clients, cfg, actualVPC)
+	// 2. Reconcile VPC (returns updated VPC state with any newly created components)
+	actualVPC, err = p.reconcileVPC(ctx, clients, cfg, actualVPC)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to reconcile VPC: %w", err)
-	}
-
-	// Re-discover VPC after reconciliation (may have been created)
-	actualVPC, err = p.DiscoverVPC(ctx, clients, clusterName)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to re-discover VPC after reconciliation: %w", err)
 	}
 
 	if actualVPC == nil {
