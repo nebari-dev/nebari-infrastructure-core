@@ -108,7 +108,13 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Internet gateway created").
 			WithResource("internet-gateway").
-			WithAction("created"))
+			WithAction("created").
+			WithMetadata("igw_id", igwID))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet gateway already exists").
+			WithResource("internet-gateway").
+			WithAction("skipped").
+			WithMetadata("igw_id", actual.InternetGatewayID))
 	}
 
 	// Reconcile Subnets
@@ -124,6 +130,16 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		}
 		actual.PublicSubnetIDs = publicSubnets
 		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Public subnets created").
+			WithResource("subnet").
+			WithAction("created").
+			WithMetadata("count", len(publicSubnets)))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Public subnets already exist").
+			WithResource("subnet").
+			WithAction("skipped").
+			WithMetadata("count", len(actual.PublicSubnetIDs)))
 	}
 
 	if len(actual.PrivateSubnetIDs) == 0 {
@@ -138,6 +154,16 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		}
 		actual.PrivateSubnetIDs = privateSubnets
 		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Private subnets created").
+			WithResource("subnet").
+			WithAction("created").
+			WithMetadata("count", len(privateSubnets)))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Private subnets already exist").
+			WithResource("subnet").
+			WithAction("skipped").
+			WithMetadata("count", len(actual.PrivateSubnetIDs)))
 	}
 
 	// Reconcile NAT Gateways (require public subnets)
@@ -156,7 +182,13 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "NAT gateways created").
 			WithResource("nat-gateway").
-			WithAction("created"))
+			WithAction("created").
+			WithMetadata("count", len(natGatewayIDs)))
+	} else if len(actual.NATGatewayIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "NAT gateways already exist").
+			WithResource("nat-gateway").
+			WithAction("skipped").
+			WithMetadata("count", len(actual.NATGatewayIDs)))
 	}
 
 	// Reconcile Route Tables (require IGW and NAT gateways)
@@ -172,6 +204,16 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		}
 		actual.PublicRouteTableID = publicRouteTableID
 		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Public route table created with IGW route").
+			WithResource("route-table").
+			WithAction("created").
+			WithMetadata("route_table_id", publicRouteTableID))
+	} else if actual.PublicRouteTableID != "" {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Public route table already exists").
+			WithResource("route-table").
+			WithAction("skipped").
+			WithMetadata("route_table_id", actual.PublicRouteTableID))
 	}
 
 	if len(actual.PrivateRouteTableIDs) == 0 && len(actual.NATGatewayIDs) > 0 && len(actual.PrivateSubnetIDs) > 0 {
@@ -186,6 +228,16 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		}
 		actual.PrivateRouteTableIDs = privateRouteTableIDs
 		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Private route tables created with NAT routes").
+			WithResource("route-table").
+			WithAction("created").
+			WithMetadata("count", len(privateRouteTableIDs)))
+	} else if len(actual.PrivateRouteTableIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Private route tables already exist").
+			WithResource("route-table").
+			WithAction("skipped").
+			WithMetadata("count", len(actual.PrivateRouteTableIDs)))
 	}
 
 	// Reconcile Security Groups
@@ -201,6 +253,16 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		}
 		actual.SecurityGroupIDs = []string{sgID}
 		updated = true
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cluster security group created").
+			WithResource("security-group").
+			WithAction("created").
+			WithMetadata("security_group_id", sgID))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Security group already exists").
+			WithResource("security-group").
+			WithAction("skipped").
+			WithMetadata("security_group_id", actual.SecurityGroupIDs[0]))
 	}
 
 	// Reconcile VPC Endpoints
@@ -217,9 +279,15 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		actual.VPCEndpointIDs = vpcEndpointIDs
 		updated = true
 
-		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints created").
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints created and available").
 			WithResource("vpc-endpoint").
-			WithAction("created"))
+			WithAction("created").
+			WithMetadata("count", len(vpcEndpointIDs)))
+	} else if len(actual.VPCEndpointIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "VPC endpoints already exist").
+			WithResource("vpc-endpoint").
+			WithAction("skipped").
+			WithMetadata("count", len(actual.VPCEndpointIDs)))
 	}
 
 	if updated {

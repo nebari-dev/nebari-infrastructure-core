@@ -109,8 +109,13 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.InternetGatewayID = igwID
 
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Internet gateway created").
+		WithResource("internet-gateway").
+		WithAction("created").
+		WithMetadata("igw_id", igwID))
+
 	// Step 4: Create public and private subnets
-	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating subnets").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating public subnets").
 		WithResource("subnet").
 		WithAction("creating").
 		WithMetadata("az_count", len(azs)))
@@ -122,12 +127,27 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.PublicSubnetIDs = publicSubnets
 
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Public subnets created").
+		WithResource("subnet").
+		WithAction("created").
+		WithMetadata("count", len(publicSubnets)))
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating private subnets").
+		WithResource("subnet").
+		WithAction("creating").
+		WithMetadata("az_count", len(azs)))
+
 	privateSubnets, err := p.createSubnets(ctx, clients, clusterName, vpcState.VPCID, vpcCIDR, azs, false, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create private subnets: %w", err)
 	}
 	vpcState.PrivateSubnetIDs = privateSubnets
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Private subnets created").
+		WithResource("subnet").
+		WithAction("created").
+		WithMetadata("count", len(privateSubnets)))
 
 	// Step 5: Create NAT Gateways (one per public subnet for HA)
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating NAT gateways").
@@ -148,7 +168,7 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 		WithMetadata("count", len(natGatewayIDs)))
 
 	// Step 6: Create route tables and routes
-	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating route tables").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating public route table").
 		WithResource("route-table").
 		WithAction("creating"))
 
@@ -159,6 +179,16 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.PublicRouteTableID = publicRouteTableID
 
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Public route table created with IGW route").
+		WithResource("route-table").
+		WithAction("created").
+		WithMetadata("route_table_id", publicRouteTableID))
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating private route tables").
+		WithResource("route-table").
+		WithAction("creating").
+		WithMetadata("count", len(natGatewayIDs)))
+
 	privateRouteTableIDs, err := p.createPrivateRouteTables(ctx, clients, clusterName, vpcState.VPCID, natGatewayIDs, privateSubnets, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
@@ -166,13 +196,27 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	}
 	vpcState.PrivateRouteTableIDs = privateRouteTableIDs
 
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Private route tables created with NAT routes").
+		WithResource("route-table").
+		WithAction("created").
+		WithMetadata("count", len(privateRouteTableIDs)))
+
 	// Step 7: Create security group for cluster
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating cluster security group").
+		WithResource("security-group").
+		WithAction("creating"))
+
 	sgID, err := p.createClusterSecurityGroup(ctx, clients, clusterName, vpcState.VPCID, awsCfg.Tags)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create security group: %w", err)
 	}
 	vpcState.SecurityGroupIDs = []string{sgID}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cluster security group created").
+		WithResource("security-group").
+		WithAction("created").
+		WithMetadata("security_group_id", sgID))
 
 	// Step 8: Create VPC endpoints for private cluster access
 	// VPC endpoints are required for nodes in private subnets to communicate with AWS services
