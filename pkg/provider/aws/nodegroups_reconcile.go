@@ -8,12 +8,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/sync/errgroup"
 )
 
 // reconcileNodeGroups reconciles desired node group configuration with actual state
+// Node groups are created sequentially to avoid AWS rate limits and provide clear progress visibility
 // Note: Pure orchestration function - delegates to createNodeGroup() and reconcileNodeGroup().
 // Unit test coverage via helper functions.
 func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, actual []NodeGroupState) error {
@@ -38,51 +39,66 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		}
 	}
 
-	// Use errgroup for parallel node group reconciliation
-	// This improves performance when managing multiple node groups
-	g, gctx := errgroup.WithContext(ctx)
-
-	// Reconcile each desired node group in parallel
+	// Reconcile each desired node group sequentially
+	nodeGroupIndex := 0
 	for nodeGroupName, nodeGroupConfig := range cfg.AmazonWebServices.NodeGroups {
-		// Capture loop variables for goroutine
-		ngName := nodeGroupName
-		ngConfig := nodeGroupConfig
+		nodeGroupIndex++
 		actualNG, exists := actualNodeGroups[nodeGroupName]
 
-		g.Go(func() error {
-			if !exists {
-				// Node group doesn't exist - create it
-				span.SetAttributes(
-					attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "create"),
-				)
-
-				_, err := p.createNodeGroup(gctx, clients, cfg, vpc, cluster, iamRoles, ngName, ngConfig)
-				if err != nil {
-					span.RecordError(err)
-					return fmt.Errorf("failed to create node group %s: %w", ngName, err)
-				}
-				return nil
-			}
-
-			// Node group exists - check if updates are needed
+		if !exists {
+			// Node group doesn't exist - create it
 			span.SetAttributes(
-				attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "update"),
+				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "create"),
 			)
 
-			err := p.reconcileNodeGroup(gctx, clients, cfg, ngName, ngConfig, actualNG)
+			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s' (%d/%d)", nodeGroupName, nodeGroupIndex, len(cfg.AmazonWebServices.NodeGroups))).
+				WithResource("node-group").
+				WithAction("creating").
+				WithMetadata("node_group", nodeGroupName).
+				WithMetadata("instance_type", nodeGroupConfig.Instance).
+				WithMetadata("min_nodes", nodeGroupConfig.MinNodes).
+				WithMetadata("max_nodes", nodeGroupConfig.MaxNodes))
+
+			_, err := p.createNodeGroup(ctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
 			if err != nil {
 				span.RecordError(err)
-				return fmt.Errorf("failed to reconcile node group %s: %w", ngName, err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s'", nodeGroupName)).
+					WithResource("node-group").
+					WithAction("failed").
+					WithMetadata("node_group", nodeGroupName))
+				return fmt.Errorf("failed to create node group %s: %w", nodeGroupName, err)
 			}
-			return nil
-		})
-	}
 
-	// Wait for all node group operations to complete
-	// If any operation fails, all operations will be cancelled via context
-	if err := g.Wait(); err != nil {
-		span.RecordError(err)
-		return err
+			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", nodeGroupName)).
+				WithResource("node-group").
+				WithAction("created").
+				WithMetadata("node_group", nodeGroupName))
+		} else {
+			// Node group exists - check if updates are needed
+			span.SetAttributes(
+				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "update"),
+			)
+
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking node group '%s' for updates (%d/%d)", nodeGroupName, nodeGroupIndex, len(cfg.AmazonWebServices.NodeGroups))).
+				WithResource("node-group").
+				WithAction("checking").
+				WithMetadata("node_group", nodeGroupName))
+
+			err := p.reconcileNodeGroup(ctx, clients, cfg, nodeGroupName, nodeGroupConfig, actualNG)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to reconcile node group '%s'", nodeGroupName)).
+					WithResource("node-group").
+					WithAction("failed").
+					WithMetadata("node_group", nodeGroupName))
+				return fmt.Errorf("failed to reconcile node group %s: %w", nodeGroupName, err)
+			}
+
+			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' reconciled", nodeGroupName)).
+				WithResource("node-group").
+				WithAction("reconciled").
+				WithMetadata("node_group", nodeGroupName))
+		}
 	}
 
 	// Handle orphaned node groups (exist in actual but not in desired)
@@ -99,33 +115,35 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			attribute.Int("orphaned_node_groups", len(orphanedNodeGroups)),
 		)
 
-		// Delete orphaned node groups in parallel
-		g2, gctx2 := errgroup.WithContext(ctx)
+		// Delete orphaned node groups sequentially
+		for i, nodeGroupName := range orphanedNodeGroups {
+			span.SetAttributes(
+				attribute.String(fmt.Sprintf("orphaned_node_group.%s.action", nodeGroupName), "delete"),
+			)
 
-		for _, ngName := range orphanedNodeGroups {
-			nodeGroupName := ngName // Capture for goroutine
+			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Deleting orphaned node group '%s' (%d/%d)", nodeGroupName, i+1, len(orphanedNodeGroups))).
+				WithResource("node-group").
+				WithAction("deleting").
+				WithMetadata("node_group", nodeGroupName))
 
-			g2.Go(func() error {
-				span.SetAttributes(
-					attribute.String(fmt.Sprintf("orphaned_node_group.%s.action", nodeGroupName), "delete"),
-				)
+			err := p.deleteNodeGroup(ctx, clients, clusterName, nodeGroupName)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to delete orphaned node group '%s'", nodeGroupName)).
+					WithResource("node-group").
+					WithAction("failed").
+					WithMetadata("node_group", nodeGroupName))
+				return fmt.Errorf("failed to delete orphaned node group %s: %w", nodeGroupName, err)
+			}
 
-				err := p.deleteNodeGroup(gctx2, clients, clusterName, nodeGroupName)
-				if err != nil {
-					span.RecordError(err)
-					return fmt.Errorf("failed to delete orphaned node group %s: %w", nodeGroupName, err)
-				}
-				return nil
-			})
-		}
-
-		if err := g2.Wait(); err != nil {
-			span.RecordError(err)
-			return err
+			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Orphaned node group '%s' deleted", nodeGroupName)).
+				WithResource("node-group").
+				WithAction("deleted").
+				WithMetadata("node_group", nodeGroupName))
 		}
 	}
 
-	span.SetAttributes(attribute.Bool("parallel_reconciliation", true))
+	span.SetAttributes(attribute.Bool("sequential_reconciliation", true))
 	return nil
 }
 
