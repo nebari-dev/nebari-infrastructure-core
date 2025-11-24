@@ -816,6 +816,7 @@ func (p *Provider) createVPCEndpoints(ctx context.Context, clients *Clients, clu
 	var endpointIDs []string
 
 	// Create interface endpoints (one per service, accessible from all private subnets)
+	interfaceEndpointIDs := []string{}
 	for _, serviceName := range interfaceEndpoints {
 		endpointID, err := p.createInterfaceEndpoint(ctx, clients, clusterName, vpcID, privateSubnetIDs, securityGroupID, serviceName, userTags)
 		if err != nil {
@@ -825,10 +826,29 @@ func (p *Provider) createVPCEndpoints(ctx context.Context, clients *Clients, clu
 			span.SetAttributes(attribute.String(fmt.Sprintf("failed_endpoint.%s", serviceName), err.Error()))
 			continue
 		}
+		interfaceEndpointIDs = append(interfaceEndpointIDs, endpointID)
 		endpointIDs = append(endpointIDs, endpointID)
 	}
 
-	// Create gateway endpoints (S3)
+	// Wait for interface endpoints to become available
+	// This is critical: nodes cannot bootstrap until VPC endpoints are ready
+	if len(interfaceEndpointIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for VPC endpoints to become available").
+			WithResource("vpc-endpoint").
+			WithAction("waiting"))
+
+		err := p.waitForVPCEndpointsAvailable(ctx, clients, interfaceEndpointIDs)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed waiting for VPC endpoints to become available: %w", err)
+		}
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints are available").
+			WithResource("vpc-endpoint").
+			WithAction("available"))
+	}
+
+	// Create gateway endpoints (S3) - these are immediately available
 	for _, serviceName := range gatewayEndpoints {
 		endpointID, err := p.createGatewayEndpoint(ctx, clients, clusterName, vpcID, serviceName, userTags)
 		if err != nil {
@@ -842,6 +862,55 @@ func (p *Provider) createVPCEndpoints(ctx context.Context, clients *Clients, clu
 	span.SetAttributes(attribute.Int("endpoints_created", len(endpointIDs)))
 
 	return endpointIDs, nil
+}
+
+// waitForVPCEndpointsAvailable waits for VPC endpoints to become available
+func (p *Provider) waitForVPCEndpointsAvailable(ctx context.Context, clients *Clients, endpointIDs []string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.waitForVPCEndpointsAvailable")
+	defer span.End()
+
+	span.SetAttributes(attribute.Int("endpoint_count", len(endpointIDs)))
+
+	// Poll for VPC endpoint availability
+	maxWait := 10 * time.Minute
+	pollInterval := 15 * time.Second
+	deadline := time.Now().Add(maxWait)
+
+	for time.Now().Before(deadline) {
+		// Check if all endpoints are available
+		describeOutput, err := clients.EC2Client.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
+			VpcEndpointIds: endpointIDs,
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to describe VPC endpoints: %w", err)
+		}
+
+		// Check if all are available
+		allAvailable := true
+		for _, ep := range describeOutput.VpcEndpoints {
+			state := string(ep.State)
+			if state != "available" {
+				allAvailable = false
+				span.SetAttributes(attribute.String(fmt.Sprintf("endpoint.%s.state", *ep.VpcEndpointId), state))
+				break
+			}
+		}
+
+		if allAvailable {
+			span.SetAttributes(attribute.Bool("all_available", true))
+			return nil
+		}
+
+		// Wait before polling again
+		time.Sleep(pollInterval)
+	}
+
+	// Timeout reached
+	err := fmt.Errorf("timed out waiting for VPC endpoints to become available after %v", maxWait)
+	span.RecordError(err)
+	return err
 }
 
 // createInterfaceEndpoint creates an interface VPC endpoint for a specific AWS service
