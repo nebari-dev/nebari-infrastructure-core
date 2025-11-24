@@ -81,12 +81,13 @@ type ClusterState struct {
 	CertificateAuthority string
 
 	// VPC configuration
-	VPCID             string
-	SubnetIDs         []string
-	SecurityGroupIDs  []string
-	EndpointPublic    bool
-	EndpointPrivate   bool
-	PublicAccessCIDRs []string
+	VPCID                  string
+	SubnetIDs              []string
+	SecurityGroupIDs       []string
+	ClusterSecurityGroupID string // EKS-managed cluster security group
+	EndpointPublic         bool
+	EndpointPrivate        bool
+	PublicAccessCIDRs      []string
 
 	// OIDC provider ARN for IRSA (IAM Roles for Service Accounts)
 	OIDCProviderARN string

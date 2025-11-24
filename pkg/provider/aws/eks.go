@@ -177,6 +177,7 @@ func convertEKSClusterToState(cluster *ekstypes.Cluster) *ClusterState {
 		state.VPCID = aws.ToString(cluster.ResourcesVpcConfig.VpcId)
 		state.SubnetIDs = cluster.ResourcesVpcConfig.SubnetIds
 		state.SecurityGroupIDs = cluster.ResourcesVpcConfig.SecurityGroupIds
+		state.ClusterSecurityGroupID = aws.ToString(cluster.ResourcesVpcConfig.ClusterSecurityGroupId)
 		state.EndpointPublic = cluster.ResourcesVpcConfig.EndpointPublicAccess
 		state.EndpointPrivate = cluster.ResourcesVpcConfig.EndpointPrivateAccess
 		state.PublicAccessCIDRs = cluster.ResourcesVpcConfig.PublicAccessCidrs

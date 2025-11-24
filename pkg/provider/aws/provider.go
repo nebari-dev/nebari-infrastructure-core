@@ -273,6 +273,16 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		return err
 	}
 
+	// 5.5. Add EKS-managed cluster security group to VPC endpoints
+	// This is critical: nodes use the EKS-managed SG, VPC endpoints need it too
+	if actualCluster.ClusterSecurityGroupID != "" && len(actualVPC.VPCEndpointIDs) > 0 {
+		err = p.addSecurityGroupToVPCEndpoints(ctx, clients, actualVPC.VPCEndpointIDs, actualCluster.ClusterSecurityGroupID)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to add EKS security group to VPC endpoints: %w", err)
+		}
+	}
+
 	// 6. Discover node groups
 	actualNodeGroups, err := p.DiscoverNodeGroups(ctx, clients, clusterName)
 	if err != nil {

@@ -131,6 +131,7 @@ type MockEC2Client struct {
 	DisassociateRouteTableFunc        func(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error)
 	ModifySubnetAttributeFunc         func(ctx context.Context, params *ec2.ModifySubnetAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifySubnetAttributeOutput, error)
 	ModifyVpcAttributeFunc            func(ctx context.Context, params *ec2.ModifyVpcAttributeInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcAttributeOutput, error)
+	ModifyVpcEndpointFunc             func(ctx context.Context, params *ec2.ModifyVpcEndpointInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcEndpointOutput, error)
 	ReleaseAddressFunc                func(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error)
 	DescribeAddressesFunc             func(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error)
 }
@@ -365,6 +366,13 @@ func (m *MockEC2Client) ModifyVpcAttribute(ctx context.Context, params *ec2.Modi
 		return m.ModifyVpcAttributeFunc(ctx, params, optFns...)
 	}
 	return nil, fmt.Errorf("ModifyVpcAttributeFunc not implemented")
+}
+
+func (m *MockEC2Client) ModifyVpcEndpoint(ctx context.Context, params *ec2.ModifyVpcEndpointInput, optFns ...func(*ec2.Options)) (*ec2.ModifyVpcEndpointOutput, error) {
+	if m.ModifyVpcEndpointFunc != nil {
+		return m.ModifyVpcEndpointFunc(ctx, params, optFns...)
+	}
+	return &ec2.ModifyVpcEndpointOutput{Return: aws.Bool(true)}, nil
 }
 
 func (m *MockEC2Client) ReleaseAddress(ctx context.Context, params *ec2.ReleaseAddressInput, optFns ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {

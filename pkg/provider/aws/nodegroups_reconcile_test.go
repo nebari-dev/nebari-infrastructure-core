@@ -930,7 +930,7 @@ func TestReconcileNodeGroups(t *testing.T) {
 				}
 			},
 			expectError: true, // Waiter doesn't recognize mock error as success
-			errorMsg:    "failed to delete orphaned node group",
+			errorMsg:    "failed to delete 1 orphaned node group(s)",
 		},
 		{
 			name: "update existing node group",

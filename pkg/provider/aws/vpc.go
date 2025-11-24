@@ -1063,3 +1063,61 @@ func (p *Provider) createGatewayEndpoint(ctx context.Context, clients *Clients, 
 
 	return endpointID, nil
 }
+
+// addSecurityGroupToVPCEndpoints adds a security group to existing VPC endpoints
+// This is used to add the EKS-managed cluster security group after cluster creation
+func (p *Provider) addSecurityGroupToVPCEndpoints(ctx context.Context, clients *Clients, endpointIDs []string, securityGroupID string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.addSecurityGroupToVPCEndpoints")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.Int("endpoint_count", len(endpointIDs)),
+		attribute.String("security_group_id", securityGroupID),
+	)
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Adding EKS-managed security group to VPC endpoints").
+		WithResource("vpc-endpoint").
+		WithAction("updating").
+		WithMetadata("security_group_id", securityGroupID).
+		WithMetadata("endpoint_count", len(endpointIDs)))
+
+	// Filter to only interface endpoints (gateway endpoints don't use security groups)
+	interfaceEndpoints := []string{}
+	describeOutput, err := clients.EC2Client.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
+		VpcEndpointIds: endpointIDs,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to describe VPC endpoints: %w", err)
+	}
+
+	for _, ep := range describeOutput.VpcEndpoints {
+		if ep.VpcEndpointType == types.VpcEndpointTypeInterface {
+			interfaceEndpoints = append(interfaceEndpoints, aws.ToString(ep.VpcEndpointId))
+		}
+	}
+
+	// Add security group to each interface endpoint
+	for _, endpointID := range interfaceEndpoints {
+		input := &ec2.ModifyVpcEndpointInput{
+			VpcEndpointId:       aws.String(endpointID),
+			AddSecurityGroupIds: []string{securityGroupID},
+		}
+
+		_, err := clients.EC2Client.ModifyVpcEndpoint(ctx, input)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to add security group to VPC endpoint %s: %w", endpointID, err)
+		}
+
+		span.SetAttributes(attribute.String(fmt.Sprintf("endpoint.%s.updated", endpointID), "true"))
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "EKS-managed security group added to VPC endpoints").
+		WithResource("vpc-endpoint").
+		WithAction("updated").
+		WithMetadata("endpoint_count", len(interfaceEndpoints)))
+
+	return nil
+}

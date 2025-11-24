@@ -15,6 +15,7 @@ import (
 
 // reconcileNodeGroups reconciles desired node group configuration with actual state
 // Node groups are created sequentially to avoid AWS rate limits and provide clear progress visibility
+// Continues processing all node groups even if some fail, providing a summary at the end
 // Note: Pure orchestration function - delegates to createNodeGroup() and reconcileNodeGroup().
 // Unit test coverage via helper functions.
 func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, actual []NodeGroupState) error {
@@ -39,6 +40,11 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		}
 	}
 
+	// Track successes and failures
+	var successfulNodeGroups []string
+	var failedNodeGroups []string
+	nodeGroupErrors := make(map[string]error)
+
 	// Reconcile each desired node group sequentially
 	nodeGroupIndex := 0
 	for nodeGroupName, nodeGroupConfig := range cfg.AmazonWebServices.NodeGroups {
@@ -62,17 +68,21 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			_, err := p.createNodeGroup(ctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
 			if err != nil {
 				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s'", nodeGroupName)).
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s': %v", nodeGroupName, err)).
 					WithResource("node-group").
 					WithAction("failed").
 					WithMetadata("node_group", nodeGroupName))
-				return fmt.Errorf("failed to create node group %s: %w", nodeGroupName, err)
+				failedNodeGroups = append(failedNodeGroups, nodeGroupName)
+				nodeGroupErrors[nodeGroupName] = err
+				// Continue to next node group instead of returning
+				continue
 			}
 
 			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", nodeGroupName)).
 				WithResource("node-group").
 				WithAction("created").
 				WithMetadata("node_group", nodeGroupName))
+			successfulNodeGroups = append(successfulNodeGroups, nodeGroupName)
 		} else {
 			// Node group exists - check if updates are needed
 			span.SetAttributes(
@@ -87,17 +97,21 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			err := p.reconcileNodeGroup(ctx, clients, cfg, nodeGroupName, nodeGroupConfig, actualNG)
 			if err != nil {
 				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to reconcile node group '%s'", nodeGroupName)).
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to reconcile node group '%s': %v", nodeGroupName, err)).
 					WithResource("node-group").
 					WithAction("failed").
 					WithMetadata("node_group", nodeGroupName))
-				return fmt.Errorf("failed to reconcile node group %s: %w", nodeGroupName, err)
+				failedNodeGroups = append(failedNodeGroups, nodeGroupName)
+				nodeGroupErrors[nodeGroupName] = err
+				// Continue to next node group instead of returning
+				continue
 			}
 
 			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' reconciled", nodeGroupName)).
 				WithResource("node-group").
 				WithAction("reconciled").
 				WithMetadata("node_group", nodeGroupName))
+			successfulNodeGroups = append(successfulNodeGroups, nodeGroupName)
 		}
 	}
 
@@ -109,6 +123,9 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			orphanedNodeGroups = append(orphanedNodeGroups, actualNG.Name)
 		}
 	}
+
+	var deletedNodeGroups []string
+	var failedDeletions []string
 
 	if len(orphanedNodeGroups) > 0 {
 		span.SetAttributes(
@@ -129,21 +146,73 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			err := p.deleteNodeGroup(ctx, clients, clusterName, nodeGroupName)
 			if err != nil {
 				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to delete orphaned node group '%s'", nodeGroupName)).
+				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to delete orphaned node group '%s': %v", nodeGroupName, err)).
 					WithResource("node-group").
 					WithAction("failed").
 					WithMetadata("node_group", nodeGroupName))
-				return fmt.Errorf("failed to delete orphaned node group %s: %w", nodeGroupName, err)
+				failedDeletions = append(failedDeletions, nodeGroupName)
+				nodeGroupErrors[nodeGroupName] = err
+				// Continue to next orphaned node group instead of returning
+				continue
 			}
 
 			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Orphaned node group '%s' deleted", nodeGroupName)).
 				WithResource("node-group").
 				WithAction("deleted").
 				WithMetadata("node_group", nodeGroupName))
+			deletedNodeGroups = append(deletedNodeGroups, nodeGroupName)
 		}
 	}
 
-	span.SetAttributes(attribute.Bool("sequential_reconciliation", true))
+	// Record summary metrics in span
+	span.SetAttributes(
+		attribute.Bool("sequential_reconciliation", true),
+		attribute.Int("successful_node_groups", len(successfulNodeGroups)),
+		attribute.Int("failed_node_groups", len(failedNodeGroups)),
+		attribute.Int("deleted_orphaned_node_groups", len(deletedNodeGroups)),
+		attribute.Int("failed_deletions", len(failedDeletions)),
+	)
+
+	// Send summary status update
+	if len(failedNodeGroups) > 0 || len(failedDeletions) > 0 {
+		// Build error summary message
+		summary := fmt.Sprintf("Node group reconciliation completed with errors. Success: %d, Failed: %d",
+			len(successfulNodeGroups), len(failedNodeGroups)+len(failedDeletions))
+
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, summary).
+			WithResource("node-groups").
+			WithAction("summary").
+			WithMetadata("successful_count", len(successfulNodeGroups)).
+			WithMetadata("failed_count", len(failedNodeGroups)+len(failedDeletions)).
+			WithMetadata("successful_node_groups", fmt.Sprintf("%v", successfulNodeGroups)).
+			WithMetadata("failed_node_groups", fmt.Sprintf("%v", append(failedNodeGroups, failedDeletions...))))
+
+		// Return error with details about all failures
+		var errorMsg string
+		if len(failedNodeGroups) > 0 {
+			errorMsg = fmt.Sprintf("failed to reconcile %d node group(s): %v", len(failedNodeGroups), failedNodeGroups)
+		}
+		if len(failedDeletions) > 0 {
+			if errorMsg != "" {
+				errorMsg += "; "
+			}
+			errorMsg += fmt.Sprintf("failed to delete %d orphaned node group(s): %v", len(failedDeletions), failedDeletions)
+		}
+		return fmt.Errorf("%s", errorMsg)
+	}
+
+	// All node groups succeeded
+	if len(successfulNodeGroups) > 0 || len(deletedNodeGroups) > 0 {
+		summary := fmt.Sprintf("Node group reconciliation completed successfully. Reconciled: %d, Deleted: %d",
+			len(successfulNodeGroups), len(deletedNodeGroups))
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, summary).
+			WithResource("node-groups").
+			WithAction("summary").
+			WithMetadata("successful_count", len(successfulNodeGroups)).
+			WithMetadata("deleted_count", len(deletedNodeGroups)))
+	}
+
 	return nil
 }
 
