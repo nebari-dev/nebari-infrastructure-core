@@ -738,6 +738,61 @@ func (p *Provider) deleteVPCEndpoints(ctx context.Context, clients *Clients, vpc
 			span.RecordError(err)
 			return fmt.Errorf("failed to delete VPC endpoints: %w", err)
 		}
+
+		// Wait for VPC endpoints to be fully deleted
+		// VPC endpoints must be deleted before subnets can be deleted (they create ENIs)
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for VPC endpoints to be deleted").
+			WithResource("vpc-endpoint").
+			WithAction("waiting"))
+
+		// Poll for VPC endpoint deletion (AWS SDK doesn't have a built-in waiter)
+		maxWait := 5 * time.Minute
+		pollInterval := 10 * time.Second
+		deadline := time.Now().Add(maxWait)
+
+		for time.Now().Before(deadline) {
+			// Check if all endpoints are deleted
+			describeOutput, err := clients.EC2Client.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{
+				VpcEndpointIds: endpointIDs,
+			})
+			if err != nil {
+				// If we get an error saying endpoints not found, they're deleted
+				if strings.Contains(err.Error(), "InvalidVpcEndpointId.NotFound") {
+					break
+				}
+				span.RecordError(err)
+				return fmt.Errorf("failed to describe VPC endpoints: %w", err)
+			}
+
+			// Check if all are deleted
+			allDeleted := true
+			for _, ep := range describeOutput.VpcEndpoints {
+				state := string(ep.State)
+				// VPC endpoints in "deleted" state are gone
+				if state != "deleted" {
+					allDeleted = false
+					break
+				}
+			}
+
+			if allDeleted || len(describeOutput.VpcEndpoints) == 0 {
+				break
+			}
+
+			// Wait before polling again
+			time.Sleep(pollInterval)
+		}
+
+		// Check if we timed out
+		if time.Now().After(deadline) {
+			err := fmt.Errorf("timed out waiting for VPC endpoints to be deleted")
+			span.RecordError(err)
+			return err
+		}
+
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "VPC endpoints deleted").
+			WithResource("vpc-endpoint").
+			WithAction("deleted"))
 	}
 
 	span.SetAttributes(attribute.Int("vpc_endpoints_deleted", len(endpointIDs)))

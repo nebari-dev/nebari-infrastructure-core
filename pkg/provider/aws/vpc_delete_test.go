@@ -887,20 +887,31 @@ func TestDeleteVPCEndpoints(t *testing.T) {
 			name:  "successful deletion of VPC endpoints",
 			vpcID: "vpc-123",
 			mockSetup: func(m *MockEC2Client) {
+				callCount := 0
 				m.DescribeVpcEndpointsFunc = func(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+					callCount++
+					// First call: return endpoints for initial discovery
+					if callCount == 1 {
+						return &ec2.DescribeVpcEndpointsOutput{
+							VpcEndpoints: []types.VpcEndpoint{
+								{
+									VpcEndpointId: aws.String("vpce-123"),
+									VpcId:         aws.String("vpc-123"),
+									ServiceName:   aws.String("com.amazonaws.us-west-2.s3"),
+									State:         types.StateAvailable,
+								},
+								{
+									VpcEndpointId: aws.String("vpce-456"),
+									VpcId:         aws.String("vpc-123"),
+									ServiceName:   aws.String("com.amazonaws.us-west-2.ec2"),
+									State:         types.StateAvailable,
+								},
+							},
+						}, nil
+					}
+					// Second call (during wait): return deleted state or no endpoints
 					return &ec2.DescribeVpcEndpointsOutput{
-						VpcEndpoints: []types.VpcEndpoint{
-							{
-								VpcEndpointId: aws.String("vpce-123"),
-								VpcId:         aws.String("vpc-123"),
-								ServiceName:   aws.String("com.amazonaws.us-west-2.s3"),
-							},
-							{
-								VpcEndpointId: aws.String("vpce-456"),
-								VpcId:         aws.String("vpc-123"),
-								ServiceName:   aws.String("com.amazonaws.us-west-2.ec2"),
-							},
-						},
+						VpcEndpoints: []types.VpcEndpoint{},
 					}, nil
 				}
 				m.DeleteVpcEndpointsFunc = func(ctx context.Context, params *ec2.DeleteVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
