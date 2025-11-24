@@ -63,4 +63,3 @@ amazon_web_services:
   tags:
     Environment: development
     Project: nebari
-    Owner: cmcandrew
