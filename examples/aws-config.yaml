@@ -1,6 +1,6 @@
 project_name: my-nebari-aws
 provider: aws
-domain: cmcandrew-nebari.openteams.app
+domain: nic.openteams.app
 
 amazon_web_services:
   region: us-west-2
