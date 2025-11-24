@@ -620,6 +620,21 @@ func (p *Provider) deleteSubnets(ctx context.Context, clients *Clients, vpcID st
 
 	span.SetAttributes(attribute.Int("subnets_to_delete", len(output.Subnets)))
 
+	// Wait for ENIs to be cleaned up in all subnets before attempting deletion
+	// This is necessary because node groups and other resources leave ENIs that take time to delete
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for network interfaces to be cleaned up").
+		WithResource("subnet").
+		WithAction("waiting").
+		WithMetadata("subnet_count", len(output.Subnets)))
+
+	for _, subnet := range output.Subnets {
+		subnetID := *subnet.SubnetId
+		if err := p.waitForSubnetENIsCleanup(ctx, clients, subnetID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed waiting for ENIs cleanup in subnet %s: %w", subnetID, err)
+		}
+	}
+
 	// Delete each subnet
 	for _, subnet := range output.Subnets {
 		subnetID := *subnet.SubnetId
@@ -798,6 +813,76 @@ func (p *Provider) deleteVPCEndpoints(ctx context.Context, clients *Clients, vpc
 	span.SetAttributes(attribute.Int("vpc_endpoints_deleted", len(endpointIDs)))
 
 	return nil
+}
+
+// waitForSubnetENIsCleanup waits for all ENIs in a subnet to be cleaned up
+// This is necessary before deleting subnets, as node groups and other resources
+// leave ENIs that take time to be deleted by AWS
+func (p *Provider) waitForSubnetENIsCleanup(ctx context.Context, clients *Clients, subnetID string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.waitForSubnetENIsCleanup")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("subnet_id", subnetID))
+
+	maxWaitTime := 5 * time.Minute
+	checkInterval := 10 * time.Second
+	deadline := time.Now().Add(maxWaitTime)
+
+	for {
+		// Check if context is cancelled or deadline exceeded
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for ENIs cleanup in subnet %s after %v", subnetID, maxWaitTime)
+		}
+
+		// Describe network interfaces in this subnet
+		output, err := clients.EC2Client.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+			Filters: []types.Filter{
+				{
+					Name:   strPtr("subnet-id"),
+					Values: []string{subnetID},
+				},
+			},
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to describe network interfaces: %w", err)
+		}
+
+		// If no ENIs, we're done
+		if len(output.NetworkInterfaces) == 0 {
+			span.SetAttributes(attribute.Bool("enis_cleaned_up", true))
+			return nil
+		}
+
+		// Log ENI details for debugging
+		eniDescriptions := make([]string, 0, len(output.NetworkInterfaces))
+		for _, eni := range output.NetworkInterfaces {
+			description := "unknown"
+			if eni.Description != nil {
+				description = *eni.Description
+			}
+			eniDescriptions = append(eniDescriptions, description)
+		}
+
+		span.SetAttributes(
+			attribute.Int("remaining_enis", len(output.NetworkInterfaces)),
+			attribute.String("eni_descriptions", strings.Join(eniDescriptions, ", ")),
+		)
+
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Waiting for %d network interface(s) to be cleaned up in subnet", len(output.NetworkInterfaces))).
+			WithResource("subnet").
+			WithAction("waiting").
+			WithMetadata("subnet_id", subnetID).
+			WithMetadata("eni_count", len(output.NetworkInterfaces)))
+
+		// Wait before checking again
+		time.Sleep(checkInterval)
+	}
 }
 
 // strPtr returns a pointer to a string
