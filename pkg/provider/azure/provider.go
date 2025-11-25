@@ -51,7 +51,10 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	)
 
 	if cfg.Azure != nil {
-		span.SetAttributes(attribute.String("azure.region", cfg.Azure.Region))
+		var azureCfg Config
+		if err := config.UnmarshalProviderConfig(ctx, cfg.Azure, &azureCfg); err == nil {
+			span.SetAttributes(attribute.String("azure.region", azureCfg.Region))
+		}
 	}
 
 	// Marshal config to JSON for pretty printing

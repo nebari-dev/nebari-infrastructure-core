@@ -256,10 +256,10 @@ func TestIntegration_Validation(t *testing.T) {
 		cfg := &config.NebariConfig{
 			ProjectName: "test-cluster",
 			Provider:    "aws",
-			AmazonWebServices: &config.AWSConfig{
+			AmazonWebServices: &Config{
 				Region:       "us-west-2",
 				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups: map[string]config.AWSNodeGroup{
+				NodeGroups: map[string]NodeGroup{
 					"general": {
 						Instance: "t3.medium",
 						MinNodes: 1,
@@ -281,10 +281,10 @@ func TestIntegration_Validation(t *testing.T) {
 		cfg := &config.NebariConfig{
 			ProjectName: "test-cluster",
 			Provider:    "aws",
-			AmazonWebServices: &config.AWSConfig{
+			AmazonWebServices: &Config{
 				// Missing region
 				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups: map[string]config.AWSNodeGroup{
+				NodeGroups: map[string]NodeGroup{
 					"general": {
 						Instance: "t3.medium",
 					},
@@ -306,10 +306,10 @@ func TestIntegration_Validation(t *testing.T) {
 		cfg := &config.NebariConfig{
 			ProjectName: "test-cluster",
 			Provider:    "aws",
-			AmazonWebServices: &config.AWSConfig{
+			AmazonWebServices: &Config{
 				Region:       "us-west-2",
 				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups:   map[string]config.AWSNodeGroup{},
+				NodeGroups:   map[string]NodeGroup{},
 			},
 		}
 

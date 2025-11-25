@@ -154,8 +154,13 @@ func (p *Provider) reconcileEFS(ctx context.Context, clients *Clients, cfg *conf
 	ctx, span := tracer.Start(ctx, "aws.reconcileEFS")
 	defer span.End()
 
-	awsCfg := cfg.AmazonWebServices
-	if awsCfg == nil || awsCfg.EFS == nil || !awsCfg.EFS.Enabled {
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if awsCfg.EFS == nil || !awsCfg.EFS.Enabled {
 		// EFS not configured, nothing to do
 		span.SetAttributes(attribute.Bool("efs_enabled", false))
 		return nil, nil
@@ -233,7 +238,12 @@ func (p *Provider) createEFS(ctx context.Context, clients *Clients, cfg *config.
 	ctx, span := tracer.Start(ctx, "aws.createEFS")
 	defer span.End()
 
-	awsCfg := cfg.AmazonWebServices
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	efsCfg := awsCfg.EFS
 
 	// Determine performance mode
@@ -405,7 +415,7 @@ func (p *Provider) reconcileMountTargets(ctx context.Context, clients *Clients, 
 }
 
 // needsEFSThroughputUpdate checks if EFS throughput configuration needs updating
-func needsEFSThroughputUpdate(actual *StorageState, efsCfg *config.EFSConfig) bool {
+func needsEFSThroughputUpdate(actual *StorageState, efsCfg *EFSConfig) bool {
 	desiredMode := "bursting"
 	if efsCfg.ThroughputMode != "" {
 		desiredMode = efsCfg.ThroughputMode
@@ -424,7 +434,7 @@ func needsEFSThroughputUpdate(actual *StorageState, efsCfg *config.EFSConfig) bo
 
 // updateEFSThroughput updates the throughput mode of an EFS file system
 // Note: EFS UpdateFileSystem API would be needed here, not currently in interface
-func (p *Provider) updateEFSThroughput(ctx context.Context, clients *Clients, actual *StorageState, efsCfg *config.EFSConfig) error {
+func (p *Provider) updateEFSThroughput(ctx context.Context, clients *Clients, actual *StorageState, efsCfg *EFSConfig) error {
 	// EFS throughput updates require UpdateFileSystem API
 	// This is a placeholder - would need to add to interface
 	return fmt.Errorf("EFS throughput updates not yet implemented")

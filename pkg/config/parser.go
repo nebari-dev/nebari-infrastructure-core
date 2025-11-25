@@ -54,3 +54,32 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 
 	return &config, nil
 }
+
+// UnmarshalProviderConfig converts the interface{} provider config to a concrete type.
+// The target parameter should be a pointer to the provider-specific config struct.
+// This function re-marshals and unmarshals to handle the type conversion properly.
+func UnmarshalProviderConfig(ctx context.Context, providerConfig interface{}, target interface{}) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "config.UnmarshalProviderConfig")
+	defer span.End()
+
+	if providerConfig == nil {
+		err := fmt.Errorf("provider config is nil")
+		span.RecordError(err)
+		return err
+	}
+
+	// Convert to YAML and back to properly unmarshal into the target type
+	data, err := yaml.Marshal(providerConfig)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to marshal provider config: %w", err)
+	}
+
+	if err := yaml.Unmarshal(data, target); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to unmarshal provider config: %w", err)
+	}
+
+	return nil
+}

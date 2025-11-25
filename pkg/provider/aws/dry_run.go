@@ -17,8 +17,15 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	_, span := tracer.Start(ctx, "aws.dryRunDeploy")
 	defer span.End()
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	clusterName := cfg.ProjectName
-	region := cfg.AmazonWebServices.Region
+	region := awsCfg.Region
 
 	span.SetAttributes(
 		attribute.String("cluster_name", clusterName),
@@ -83,7 +90,7 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 
 	// Analyze EKS Cluster
 	fmt.Println("\n☸️  EKS Cluster:")
-	desiredVersion := cfg.AmazonWebServices.KubernetesVersion
+	desiredVersion := awsCfg.KubernetesVersion
 	if desiredVersion == "" {
 		desiredVersion = "1.34" // default
 	}
@@ -99,7 +106,7 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 
 	// Analyze Node Groups
 	fmt.Println("\n🖥️  Node Groups:")
-	desiredNodeGroups := cfg.AmazonWebServices.NodeGroups
+	desiredNodeGroups := awsCfg.NodeGroups
 	// Build map of actual node groups by node pool name (from tags), matching reconciliation logic
 	actualNodeGroupMap := make(map[string]*NodeGroupState)
 	for i := range actualNodeGroups {
@@ -260,8 +267,12 @@ func (p *Provider) dryRunDestroy(ctx context.Context, clients *Clients, clusterN
 // Helper functions
 
 func getVPCCIDR(cfg *config.NebariConfig) string {
-	if cfg.AmazonWebServices.VPCCIDRBlock != "" {
-		return cfg.AmazonWebServices.VPCCIDRBlock
+	awsCfg, err := extractAWSConfig(context.Background(), cfg)
+	if err != nil {
+		return "10.0.0.0/16" // default
+	}
+	if awsCfg.VPCCIDRBlock != "" {
+		return awsCfg.VPCCIDRBlock
 	}
 	return "10.0.0.0/16" // default
 }

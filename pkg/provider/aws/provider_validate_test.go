@@ -22,9 +22,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 1,
@@ -40,10 +40,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium", MinNodes: 1, MaxNodes: 3},
 					},
 				},
@@ -55,10 +55,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:       "us-west-2",
 					VPCCIDRBlock: "10.0.0.0/16",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -70,10 +70,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					EKSEndpointAccess: "public",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -85,12 +85,12 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"special": {
 							Instance: "m5.xlarge",
-							Taints: []config.Taint{
+							Taints: []Taint{
 								{Key: "workload", Value: "batch", Effect: "NoSchedule"},
 								{Key: "priority", Value: "low", Effect: "NoExecute"},
 								{Key: "preemptible", Value: "true", Effect: "PreferNoSchedule"},
@@ -118,8 +118,8 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
-					NodeGroups: map[string]config.AWSNodeGroup{
+				AmazonWebServices: &Config{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -132,10 +132,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -148,10 +148,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:       "us-west-2",
 					VPCCIDRBlock: "10.0.0.0", // Missing /prefix
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -164,10 +164,10 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					EKSEndpointAccess: "invalid",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium"},
 					},
 				},
@@ -180,9 +180,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:     "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{},
+					NodeGroups: map[string]NodeGroup{},
 				},
 			},
 			expectError: true,
@@ -193,9 +193,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {MinNodes: 1, MaxNodes: 3},
 					},
 				},
@@ -208,9 +208,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium", MinNodes: -1},
 					},
 				},
@@ -223,9 +223,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium", MaxNodes: -3},
 					},
 				},
@@ -238,9 +238,9 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {Instance: "t3.medium", MinNodes: 5, MaxNodes: 3},
 					},
 				},
@@ -253,12 +253,12 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"gpu": {
 							Instance: "p3.2xlarge",
-							Taints: []config.Taint{
+							Taints: []Taint{
 								{Value: "true", Effect: "NoSchedule"},
 							},
 						},
@@ -273,12 +273,12 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"gpu": {
 							Instance: "p3.2xlarge",
-							Taints: []config.Taint{
+							Taints: []Taint{
 								{Key: "nvidia.com/gpu", Value: "true", Effect: "InvalidEffect"},
 							},
 						},

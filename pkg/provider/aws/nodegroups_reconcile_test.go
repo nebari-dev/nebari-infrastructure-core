@@ -15,7 +15,7 @@ import (
 func TestOrphanDetection(t *testing.T) {
 	tests := []struct {
 		name             string
-		desiredNGs       map[string]config.AWSNodeGroup
+		desiredNGs       map[string]NodeGroup
 		actualNGs        []NodeGroupState
 		expectedOrphans  []string
 		expectedToCreate []string
@@ -23,7 +23,7 @@ func TestOrphanDetection(t *testing.T) {
 	}{
 		{
 			name: "no orphans - all match",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 				"compute": {Instance: "c5.2xlarge"},
 			},
@@ -47,7 +47,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "one orphan - node group removed from config",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 			},
 			actualNGs: []NodeGroupState{
@@ -70,7 +70,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "multiple orphans",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 			},
 			actualNGs: []NodeGroupState{
@@ -99,7 +99,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "new node group to create",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 				"compute": {Instance: "c5.2xlarge"},
 			},
@@ -117,7 +117,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "mix of create, update, and delete",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 				"gpu":     {Instance: "p3.2xlarge"},
 			},
@@ -141,7 +141,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "no actual node groups - create all",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 				"compute": {Instance: "c5.2xlarge"},
 				"gpu":     {Instance: "p3.2xlarge"},
@@ -153,7 +153,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name:       "all actual node groups are orphans",
-			desiredNGs: map[string]config.AWSNodeGroup{},
+			desiredNGs: map[string]NodeGroup{},
 			actualNGs: []NodeGroupState{
 				{
 					Name: "test-cluster-ng-general",
@@ -174,7 +174,7 @@ func TestOrphanDetection(t *testing.T) {
 		},
 		{
 			name: "node group without tag - should not crash",
-			desiredNGs: map[string]config.AWSNodeGroup{
+			desiredNGs: map[string]NodeGroup{
 				"general": {Instance: "t3.medium"},
 			},
 			actualNGs: []NodeGroupState{
@@ -271,14 +271,14 @@ func TestOrphanDetection(t *testing.T) {
 func TestReconcileNodeGroup_ScalingChanges(t *testing.T) {
 	tests := []struct {
 		name         string
-		desired      config.AWSNodeGroup
+		desired      NodeGroup
 		actual       *NodeGroupState
 		expectUpdate bool
 		description  string
 	}{
 		{
 			name: "no changes needed",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -294,7 +294,7 @@ func TestReconcileNodeGroup_ScalingChanges(t *testing.T) {
 		},
 		{
 			name: "min nodes changed",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 2,
 				MaxNodes: 3,
@@ -310,7 +310,7 @@ func TestReconcileNodeGroup_ScalingChanges(t *testing.T) {
 		},
 		{
 			name: "max nodes changed",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 5,
@@ -326,7 +326,7 @@ func TestReconcileNodeGroup_ScalingChanges(t *testing.T) {
 		},
 		{
 			name: "both min and max changed",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 2,
 				MaxNodes: 10,
@@ -342,7 +342,7 @@ func TestReconcileNodeGroup_ScalingChanges(t *testing.T) {
 		},
 		{
 			name: "zero values use defaults (1 and 3)",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 0,
 				MaxNodes: 0,
@@ -386,13 +386,13 @@ func TestCheckLabelsUpdate_Logic(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		desired      config.AWSNodeGroup
+		desired      NodeGroup
 		actual       *NodeGroupState
 		expectUpdate bool
 	}{
 		{
 			name:    "labels match",
-			desired: config.AWSNodeGroup{},
+			desired: NodeGroup{},
 			actual: &NodeGroupState{
 				Labels: map[string]string{
 					"node-group":               "general",
@@ -406,7 +406,7 @@ func TestCheckLabelsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name:    "missing node-group label",
-			desired: config.AWSNodeGroup{},
+			desired: NodeGroup{},
 			actual: &NodeGroupState{
 				Labels: map[string]string{
 					"nic.nebari.dev/node-pool": "general",
@@ -419,7 +419,7 @@ func TestCheckLabelsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name:    "incorrect node-group label value",
-			desired: config.AWSNodeGroup{},
+			desired: NodeGroup{},
 			actual: &NodeGroupState{
 				Labels: map[string]string{
 					"node-group":               "wrong-value",
@@ -433,7 +433,7 @@ func TestCheckLabelsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name:    "no labels exist",
-			desired: config.AWSNodeGroup{},
+			desired: NodeGroup{},
 			actual: &NodeGroupState{
 				Labels: map[string]string{},
 				Tags: map[string]string{
@@ -461,14 +461,14 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		desired      config.AWSNodeGroup
+		desired      NodeGroup
 		actual       *NodeGroupState
 		expectUpdate bool
 	}{
 		{
 			name: "taints match",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{
+			desired: NodeGroup{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 				},
 			},
@@ -481,8 +481,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "different taint count",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{
+			desired: NodeGroup{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 					{Key: "workload", Value: "batch", Effect: "NoExecute"},
 				},
@@ -496,8 +496,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "taint key mismatch",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{
+			desired: NodeGroup{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 				},
 			},
@@ -510,8 +510,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "taint value mismatch",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{
+			desired: NodeGroup{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 				},
 			},
@@ -524,8 +524,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "taint effect mismatch",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{
+			desired: NodeGroup{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 				},
 			},
@@ -538,8 +538,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "no taints on both sides",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{},
+			desired: NodeGroup{
+				Taints: []Taint{},
 			},
 			actual: &NodeGroupState{
 				Taints: []Taint{},
@@ -548,8 +548,8 @@ func TestCheckTaintsUpdate_Logic(t *testing.T) {
 		},
 		{
 			name: "desired has no taints, actual has taints",
-			desired: config.AWSNodeGroup{
-				Taints: []config.Taint{},
+			desired: NodeGroup{
+				Taints: []Taint{},
 			},
 			actual: &NodeGroupState{
 				Taints: []Taint{
@@ -577,7 +577,7 @@ func TestReconcileNodeGroup(t *testing.T) {
 		name        string
 		cfg         *config.NebariConfig
 		ngName      string
-		desired     config.AWSNodeGroup
+		desired     NodeGroup
 		actual      *NodeGroupState
 		mockSetup   func(*MockEKSClient)
 		expectError bool
@@ -587,12 +587,12 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "no update needed - all match",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "general",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -619,12 +619,12 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "scaling update needed",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "general",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 2,
 				MaxNodes: 5,
@@ -672,12 +672,12 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "instance type change - immutable error",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "general",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.large", // Different from actual
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -701,12 +701,12 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "capacity type change - immutable error",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "general",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -731,12 +731,12 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "AMI type change - immutable error",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "general",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -761,17 +761,17 @@ func TestReconcileNodeGroup(t *testing.T) {
 			name: "taint update needed",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
 			ngName: "gpu",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "g4dn.xlarge",
 				MinNodes: 1,
 				MaxNodes: 3,
 				GPU:      true,
-				Taints: []config.Taint{
+				Taints: []Taint{
 					{Key: "nvidia.com/gpu", Value: "true", Effect: "NoSchedule"},
 				},
 			},
@@ -858,9 +858,9 @@ func TestReconcileNodeGroups(t *testing.T) {
 			name: "create new node group when none exist",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 1,
@@ -901,9 +901,9 @@ func TestReconcileNodeGroups(t *testing.T) {
 			name: "delete orphaned node group - deletion initiated but waiter fails in test",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:     "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{}, // Empty - all node groups are orphans
+					NodeGroups: map[string]NodeGroup{}, // Empty - all node groups are orphans
 				},
 			},
 			vpc:      &VPCState{VPCID: "vpc-123"},
@@ -936,9 +936,9 @@ func TestReconcileNodeGroups(t *testing.T) {
 			name: "update existing node group",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 2, // Changed from 1
@@ -1021,14 +1021,14 @@ func TestReconcileNodeGroups(t *testing.T) {
 func TestImmutableCapacityTypeCheck(t *testing.T) {
 	tests := []struct {
 		name        string
-		desired     config.AWSNodeGroup
+		desired     NodeGroup
 		actual      *NodeGroupState
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "capacity type matches - on demand",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				Spot:     false,
 			},
@@ -1041,7 +1041,7 @@ func TestImmutableCapacityTypeCheck(t *testing.T) {
 		},
 		{
 			name: "capacity type matches - spot",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				Spot:     true,
 			},
@@ -1054,7 +1054,7 @@ func TestImmutableCapacityTypeCheck(t *testing.T) {
 		},
 		{
 			name: "capacity type changed from on demand to spot (immutable)",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				Spot:     true, // Want spot now
 			},
@@ -1068,7 +1068,7 @@ func TestImmutableCapacityTypeCheck(t *testing.T) {
 		},
 		{
 			name: "capacity type changed from spot to on demand (immutable)",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "t3.medium",
 				Spot:     false, // Want on demand now
 			},

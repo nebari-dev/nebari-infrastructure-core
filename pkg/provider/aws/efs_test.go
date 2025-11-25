@@ -189,7 +189,7 @@ func TestReconcileEFS(t *testing.T) {
 			name: "EFS not enabled - no action",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 					EFS:    nil,
 				},
@@ -203,9 +203,9 @@ func TestReconcileEFS(t *testing.T) {
 			name: "EFS enabled false - no action",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS:    &config.EFSConfig{Enabled: false},
+					EFS:    &EFSConfig{Enabled: false},
 				},
 			},
 			vpc:         &VPCState{VPCID: "vpc-123"},
@@ -217,9 +217,9 @@ func TestReconcileEFS(t *testing.T) {
 			name: "EFS exists in non-available state - error",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS:    &config.EFSConfig{Enabled: true},
+					EFS:    &EFSConfig{Enabled: true},
 				},
 			},
 			vpc: &VPCState{VPCID: "vpc-123"},
@@ -481,9 +481,9 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 			name: "performance mode change attempted (immutable)",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS: &config.EFSConfig{
+					EFS: &EFSConfig{
 						Enabled:         true,
 						PerformanceMode: "maxIO", // Different from actual
 					},
@@ -503,9 +503,9 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 			name: "encryption change attempted (immutable)",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS: &config.EFSConfig{
+					EFS: &EFSConfig{
 						Enabled:   true,
 						Encrypted: true, // Want encrypted now
 					},
@@ -525,9 +525,9 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 			name: "KMS key change attempted (immutable)",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS: &config.EFSConfig{
+					EFS: &EFSConfig{
 						Enabled:   true,
 						Encrypted: true,
 						KMSKeyID:  "arn:aws:kms:us-west-2:123:key/new-key", // Different KMS key
@@ -549,9 +549,9 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 			name: "all immutable fields match - no error",
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
-					EFS: &config.EFSConfig{
+					EFS: &EFSConfig{
 						Enabled:         true,
 						PerformanceMode: "generalPurpose",
 						Encrypted:       true,
@@ -641,7 +641,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 	tests := []struct {
 		name     string
 		actual   *StorageState
-		efsCfg   *config.EFSConfig
+		efsCfg   *EFSConfig
 		expected bool
 	}{
 		{
@@ -649,7 +649,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 			actual: &StorageState{
 				ThroughputMode: "bursting",
 			},
-			efsCfg: &config.EFSConfig{
+			efsCfg: &EFSConfig{
 				ThroughputMode: "bursting",
 			},
 			expected: false,
@@ -659,7 +659,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 			actual: &StorageState{
 				ThroughputMode: "bursting",
 			},
-			efsCfg: &config.EFSConfig{
+			efsCfg: &EFSConfig{
 				ThroughputMode: "elastic",
 			},
 			expected: true,
@@ -670,7 +670,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 				ThroughputMode:             "provisioned",
 				ProvisionedThroughputMiBps: 100,
 			},
-			efsCfg: &config.EFSConfig{
+			efsCfg: &EFSConfig{
 				ThroughputMode:  "provisioned",
 				ProvisionedMBps: 200,
 			},
@@ -682,7 +682,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 				ThroughputMode:             "provisioned",
 				ProvisionedThroughputMiBps: 100,
 			},
-			efsCfg: &config.EFSConfig{
+			efsCfg: &EFSConfig{
 				ThroughputMode:  "provisioned",
 				ProvisionedMBps: 100,
 			},
@@ -693,7 +693,7 @@ func TestNeedsEFSThroughputUpdate(t *testing.T) {
 			actual: &StorageState{
 				ThroughputMode: "bursting",
 			},
-			efsCfg: &config.EFSConfig{
+			efsCfg: &EFSConfig{
 				ThroughputMode: "", // defaults to bursting
 			},
 			expected: false,

@@ -29,7 +29,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -72,7 +72,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 				},
@@ -106,7 +106,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 				},
@@ -151,7 +151,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 					EKSEndpointAccess: "private",
@@ -195,7 +195,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 				},
@@ -232,7 +232,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -255,7 +255,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.30", // Skip 1.29
 				},
@@ -280,7 +280,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 				},
@@ -316,7 +316,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:    "us-west-2",
 					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Different KMS key
 				},
@@ -345,7 +345,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:    "us-west-2",
 					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Adding KMS key
 				},
@@ -374,7 +374,7 @@ func TestReconcileCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:               "us-west-2",
 					KubernetesVersion:    "1.34",
 					EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"}, // New CIDRs

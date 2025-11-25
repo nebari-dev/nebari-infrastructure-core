@@ -37,15 +37,22 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 	_, span := tracer.Start(ctx, "aws.createEKSCluster")
 	defer span.End()
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	clusterName := cfg.ProjectName
 
 	span.SetAttributes(
 		attribute.String("cluster_name", clusterName),
-		attribute.String("kubernetes_version", cfg.AmazonWebServices.KubernetesVersion),
+		attribute.String("kubernetes_version", awsCfg.KubernetesVersion),
 	)
 
 	// Get Kubernetes version (use default if not specified)
-	k8sVersion := cfg.AmazonWebServices.KubernetesVersion
+	k8sVersion := awsCfg.KubernetesVersion
 	if k8sVersion == "" {
 		k8sVersion = DefaultKubernetesVersion
 	}
@@ -57,14 +64,14 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 		WithMetadata("kubernetes_version", k8sVersion))
 
 	// Determine endpoint access based on EKSEndpointAccess setting
-	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)
+	endpointConfig := getEndpointAccessConfig(ctx, awsCfg.EKSEndpointAccess)
 
 	// Generate tags
 	nicTags := GenerateBaseTags(ctx, clusterName, ResourceTypeEKSCluster)
 	eksTags := convertToEKSTags(nicTags)
 
 	// Get public access CIDRs (default to all if not specified)
-	publicAccessCidrs := cfg.AmazonWebServices.EKSPublicAccessCIDRs
+	publicAccessCidrs := awsCfg.EKSPublicAccessCIDRs
 	if len(publicAccessCidrs) == 0 {
 		publicAccessCidrs = []string{"0.0.0.0/0"}
 	}
@@ -88,18 +95,18 @@ func (p *Provider) createEKSCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Enable envelope encryption with KMS if configured
-	if cfg.AmazonWebServices.EKSKMSArn != "" {
+	if awsCfg.EKSKMSArn != "" {
 		createInput.EncryptionConfig = []ekstypes.EncryptionConfig{
 			{
 				Provider: &ekstypes.Provider{
-					KeyArn: aws.String(cfg.AmazonWebServices.EKSKMSArn),
+					KeyArn: aws.String(awsCfg.EKSKMSArn),
 				},
 				Resources: []string{"secrets"},
 			},
 		}
 
 		span.SetAttributes(
-			attribute.String("kms_key_arn", cfg.AmazonWebServices.EKSKMSArn),
+			attribute.String("kms_key_arn", awsCfg.EKSKMSArn),
 		)
 	}
 

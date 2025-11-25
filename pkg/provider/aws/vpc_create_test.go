@@ -26,7 +26,7 @@ func TestCreateVPC(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -186,7 +186,7 @@ func TestCreateVPC(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:       "us-west-2",
 					VPCCIDRBlock: "172.16.0.0/16",
 				},
@@ -285,7 +285,7 @@ func TestCreateVPC(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -306,7 +306,7 @@ func TestCreateVPC(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -331,7 +331,7 @@ func TestCreateVPC(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},

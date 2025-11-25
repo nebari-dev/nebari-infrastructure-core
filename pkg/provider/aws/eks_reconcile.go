@@ -18,6 +18,13 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	_, span := tracer.Start(ctx, "aws.reconcileCluster")
 	defer span.End()
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	clusterName := cfg.ProjectName
 
 	span.SetAttributes(
@@ -48,7 +55,7 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Validate immutable field: KMS encryption configuration
-	desiredKMSArn := cfg.AmazonWebServices.EKSKMSArn
+	desiredKMSArn := awsCfg.EKSKMSArn
 	if actual.EncryptionKMSKeyARN != desiredKMSArn {
 		// Both empty is fine, but any change is an error
 		if actual.EncryptionKMSKeyARN != "" || desiredKMSArn != "" {
@@ -65,7 +72,7 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Check if Kubernetes version needs update
-	desiredVersion := cfg.AmazonWebServices.KubernetesVersion
+	desiredVersion := awsCfg.KubernetesVersion
 	if desiredVersion == "" {
 		desiredVersion = DefaultKubernetesVersion
 	}
@@ -112,10 +119,10 @@ func (p *Provider) reconcileCluster(ctx context.Context, clients *Clients, cfg *
 	}
 
 	// Check if endpoint access needs update
-	endpointConfig := getEndpointAccessConfig(ctx, cfg.AmazonWebServices.EKSEndpointAccess)
+	endpointConfig := getEndpointAccessConfig(ctx, awsCfg.EKSEndpointAccess)
 
 	// Get desired public access CIDRs (default to all if not specified)
-	desiredPublicAccessCIDRs := cfg.AmazonWebServices.EKSPublicAccessCIDRs
+	desiredPublicAccessCIDRs := awsCfg.EKSPublicAccessCIDRs
 	if len(desiredPublicAccessCIDRs) == 0 {
 		desiredPublicAccessCIDRs = []string{"0.0.0.0/0"}
 	}

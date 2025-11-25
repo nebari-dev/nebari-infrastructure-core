@@ -6,7 +6,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 func TestConvertEKSNodeGroupToState(t *testing.T) {
@@ -134,13 +133,13 @@ func TestConvertEKSNodeGroupToState_MinimalNodeGroup(t *testing.T) {
 func TestCheckLabelsUpdate(t *testing.T) {
 	tests := []struct {
 		name         string
-		desired      config.AWSNodeGroup
+		desired      NodeGroup
 		actual       *NodeGroupState
 		expectUpdate bool
 	}{
 		{
 			name: "no update when labels match",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
 			},
 			actual: &NodeGroupState{
@@ -155,7 +154,7 @@ func TestCheckLabelsUpdate(t *testing.T) {
 		},
 		{
 			name: "update needed when labels are missing",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
 			},
 			actual: &NodeGroupState{
@@ -183,15 +182,15 @@ func TestCheckLabelsUpdate(t *testing.T) {
 func TestCheckTaintsUpdate(t *testing.T) {
 	tests := []struct {
 		name         string
-		desired      config.AWSNodeGroup
+		desired      NodeGroup
 		actual       *NodeGroupState
 		expectUpdate bool
 	}{
 		{
 			name: "no update when both have no taints",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
-				Taints:   []config.Taint{},
+				Taints:   []Taint{},
 			},
 			actual: &NodeGroupState{
 				Taints: []Taint{},
@@ -200,9 +199,9 @@ func TestCheckTaintsUpdate(t *testing.T) {
 		},
 		{
 			name: "no update when taints match",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
-				Taints: []config.Taint{
+				Taints: []Taint{
 					{
 						Key:    "dedicated",
 						Value:  "worker",
@@ -223,9 +222,9 @@ func TestCheckTaintsUpdate(t *testing.T) {
 		},
 		{
 			name: "update needed when taints don't match",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
-				Taints: []config.Taint{
+				Taints: []Taint{
 					{
 						Key:    "dedicated",
 						Value:  "worker",
@@ -246,9 +245,9 @@ func TestCheckTaintsUpdate(t *testing.T) {
 		},
 		{
 			name: "update needed when taint counts differ",
-			desired: config.AWSNodeGroup{
+			desired: NodeGroup{
 				Instance: "m5.large",
-				Taints: []config.Taint{
+				Taints: []Taint{
 					{
 						Key:    "taint1",
 						Value:  "value1",

@@ -51,7 +51,10 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	)
 
 	if cfg.Local != nil {
-		span.SetAttributes(attribute.String("local.kube_context", cfg.Local.KubeContext))
+		var localCfg Config
+		if err := config.UnmarshalProviderConfig(ctx, cfg.Local, &localCfg); err == nil {
+			span.SetAttributes(attribute.String("local.kube_context", localCfg.KubeContext))
+		}
 	}
 
 	// Marshal config to JSON for pretty printing

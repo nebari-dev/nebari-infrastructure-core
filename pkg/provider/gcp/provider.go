@@ -51,10 +51,13 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	)
 
 	if cfg.GoogleCloudPlatform != nil {
-		span.SetAttributes(
-			attribute.String("gcp.project", cfg.GoogleCloudPlatform.Project),
-			attribute.String("gcp.region", cfg.GoogleCloudPlatform.Region),
-		)
+		var gcpCfg Config
+		if err := config.UnmarshalProviderConfig(ctx, cfg.GoogleCloudPlatform, &gcpCfg); err == nil {
+			span.SetAttributes(
+				attribute.String("gcp.project", gcpCfg.Project),
+				attribute.String("gcp.region", gcpCfg.Region),
+			)
+		}
 	}
 
 	// Marshal config to JSON for pretty printing

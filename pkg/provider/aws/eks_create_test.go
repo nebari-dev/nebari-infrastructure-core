@@ -28,7 +28,7 @@ func TestCreateEKSCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},
@@ -97,7 +97,7 @@ func TestCreateEKSCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.29",
 				},
@@ -141,7 +141,7 @@ func TestCreateEKSCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:    "us-west-2",
 					EKSKMSArn: "arn:aws:kms:us-west-2:123:key/12345",
 				},
@@ -189,7 +189,7 @@ func TestCreateEKSCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:               "us-west-2",
 					EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
 				},
@@ -234,7 +234,7 @@ func TestCreateEKSCluster(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region: "us-west-2",
 				},
 			},

@@ -14,6 +14,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	awsprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
+	azureprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
+	gcpprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -158,16 +161,25 @@ func confirmDestruction(cfg *config.NebariConfig) error {
 	switch cfg.Provider {
 	case "aws":
 		if cfg.AmazonWebServices != nil {
-			fmt.Printf("   Region:       %s\n", cfg.AmazonWebServices.Region)
+			var awsCfg awsprovider.Config
+			if err := config.UnmarshalProviderConfig(context.Background(), cfg.AmazonWebServices, &awsCfg); err == nil {
+				fmt.Printf("   Region:       %s\n", awsCfg.Region)
+			}
 		}
 	case "gcp":
 		if cfg.GoogleCloudPlatform != nil {
-			fmt.Printf("   Project:      %s\n", cfg.GoogleCloudPlatform.Project)
-			fmt.Printf("   Region:       %s\n", cfg.GoogleCloudPlatform.Region)
+			var gcpCfg gcpprovider.Config
+			if err := config.UnmarshalProviderConfig(context.Background(), cfg.GoogleCloudPlatform, &gcpCfg); err == nil {
+				fmt.Printf("   Project:      %s\n", gcpCfg.Project)
+				fmt.Printf("   Region:       %s\n", gcpCfg.Region)
+			}
 		}
 	case "azure":
 		if cfg.Azure != nil {
-			fmt.Printf("   Region:       %s\n", cfg.Azure.Region)
+			var azureCfg azureprovider.Config
+			if err := config.UnmarshalProviderConfig(context.Background(), cfg.Azure, &azureCfg); err == nil {
+				fmt.Printf("   Region:       %s\n", azureCfg.Region)
+			}
 		}
 	}
 

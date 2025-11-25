@@ -29,11 +29,11 @@ func TestDryRunDeploy(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				DryRun:      true,
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
 					VPCCIDRBlock:      "10.0.0.0/16",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 1,
@@ -67,11 +67,11 @@ func TestDryRunDeploy(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				DryRun:      true,
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.29",
 					VPCCIDRBlock:      "10.0.0.0/16",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 2,
@@ -185,10 +185,10 @@ func TestDryRunDeploy(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				DryRun:      true,
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"general": {
 							Instance: "t3.medium",
 							MinNodes: 1,
@@ -261,10 +261,10 @@ func TestDryRunDeploy(t *testing.T) {
 			cfg: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				DryRun:      true,
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					Region:            "us-west-2",
 					KubernetesVersion: "1.34",
-					NodeGroups: map[string]config.AWSNodeGroup{
+					NodeGroups: map[string]NodeGroup{
 						"gpu": {
 							Instance: "g4dn.xlarge",
 							MinNodes: 0,
@@ -563,7 +563,7 @@ func TestGetVPCCIDR(t *testing.T) {
 		{
 			name: "custom CIDR",
 			cfg: &config.NebariConfig{
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					VPCCIDRBlock: "192.168.0.0/16",
 				},
 			},
@@ -572,7 +572,7 @@ func TestGetVPCCIDR(t *testing.T) {
 		{
 			name: "default CIDR",
 			cfg: &config.NebariConfig{
-				AmazonWebServices: &config.AWSConfig{
+				AmazonWebServices: &Config{
 					VPCCIDRBlock: "",
 				},
 			},

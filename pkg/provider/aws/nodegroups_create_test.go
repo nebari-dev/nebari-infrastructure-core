@@ -20,7 +20,7 @@ func TestCreateNodeGroup(t *testing.T) {
 		cluster         *ClusterState
 		iamRoles        *IAMRoles
 		nodeGroupName   string
-		nodeGroupConfig config.AWSNodeGroup
+		nodeGroupConfig NodeGroup
 		mockSetup       func(*MockEKSClient)
 		expectError     bool
 		errorMsg        string
@@ -43,7 +43,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "default",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 2,
 				MaxNodes: 5,
@@ -123,7 +123,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "gpu",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "g4dn.xlarge",
 				MinNodes: 0,
 				MaxNodes: 2,
@@ -173,7 +173,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "spot",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "t3.large",
 				MinNodes: 1,
 				MaxNodes: 10,
@@ -221,11 +221,11 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "tainted",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,
-				Taints: []config.Taint{
+				Taints: []Taint{
 					{
 						Key:    "dedicated",
 						Value:  "ml",
@@ -287,7 +287,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "default",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "t3.medium",
 				// MinNodes and MaxNodes are 0 - should use defaults
 			},
@@ -344,7 +344,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "arm64",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "m7g.xlarge",
 				MinNodes: 1,
 				MaxNodes: 3,
@@ -393,7 +393,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "neuron",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "inf2.xlarge",
 				MinNodes: 0,
 				MaxNodes: 2,
@@ -442,7 +442,7 @@ func TestCreateNodeGroup(t *testing.T) {
 				NodeRoleARN: "arn:aws:iam::123:role/node-role",
 			},
 			nodeGroupName: "default",
-			nodeGroupConfig: config.AWSNodeGroup{
+			nodeGroupConfig: NodeGroup{
 				Instance: "t3.medium",
 				MinNodes: 1,
 				MaxNodes: 3,

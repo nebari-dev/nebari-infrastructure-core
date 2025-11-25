@@ -23,11 +23,18 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 	_, span := tracer.Start(ctx, "aws.reconcileNodeGroups")
 	defer span.End()
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	clusterName := cfg.ProjectName
 
 	span.SetAttributes(
 		attribute.String("cluster_name", clusterName),
-		attribute.Int("desired_node_groups", len(cfg.AmazonWebServices.NodeGroups)),
+		attribute.Int("desired_node_groups", len(awsCfg.NodeGroups)),
 		attribute.Int("actual_node_groups", len(actual)),
 	)
 
@@ -47,7 +54,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 
 	// Reconcile each desired node group sequentially
 	nodeGroupIndex := 0
-	for nodeGroupName, nodeGroupConfig := range cfg.AmazonWebServices.NodeGroups {
+	for nodeGroupName, nodeGroupConfig := range awsCfg.NodeGroups {
 		nodeGroupIndex++
 		actualNG, exists := actualNodeGroups[nodeGroupName]
 
@@ -57,7 +64,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "create"),
 			)
 
-			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s' (%d/%d)", nodeGroupName, nodeGroupIndex, len(cfg.AmazonWebServices.NodeGroups))).
+			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s' (%d/%d)", nodeGroupName, nodeGroupIndex, len(awsCfg.NodeGroups))).
 				WithResource("node-group").
 				WithAction("creating").
 				WithMetadata("node_group", nodeGroupName).
@@ -89,7 +96,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "update"),
 			)
 
-			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking node group '%s' for updates (%d/%d)", nodeGroupName, nodeGroupIndex, len(cfg.AmazonWebServices.NodeGroups))).
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking node group '%s' for updates (%d/%d)", nodeGroupName, nodeGroupIndex, len(awsCfg.NodeGroups))).
 				WithResource("node-group").
 				WithAction("checking").
 				WithMetadata("node_group", nodeGroupName))
@@ -119,7 +126,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 	// These are node groups that were previously created but removed from config
 	orphanedNodeGroups := []string{}
 	for nodePoolName, actualNG := range actualNodeGroups {
-		if _, exists := cfg.AmazonWebServices.NodeGroups[nodePoolName]; !exists {
+		if _, exists := awsCfg.NodeGroups[nodePoolName]; !exists {
 			orphanedNodeGroups = append(orphanedNodeGroups, actualNG.Name)
 		}
 	}
@@ -219,7 +226,7 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 // reconcileNodeGroup reconciles a single node group
 // Note: Pure orchestration function - delegates to update functions based on diffs.
 // Unit test coverage via helper functions (checkLabelsUpdate, checkTaintsUpdate, updateNodeGroupScaling).
-func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, nodeGroupName string, desired config.AWSNodeGroup, actual *NodeGroupState) error {
+func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, nodeGroupName string, desired NodeGroup, actual *NodeGroupState) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.reconcileNodeGroup")
 	defer span.End()
@@ -395,7 +402,7 @@ func (p *Provider) reconcileNodeGroup(ctx context.Context, clients *Clients, cfg
 }
 
 // checkLabelsUpdate checks if labels need to be updated
-func (p *Provider) checkLabelsUpdate(desired config.AWSNodeGroup, actual *NodeGroupState) bool {
+func (p *Provider) checkLabelsUpdate(desired NodeGroup, actual *NodeGroupState) bool {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(context.Background(), "aws.checkLabelsUpdate")
 	defer span.End()
@@ -419,7 +426,7 @@ func (p *Provider) checkLabelsUpdate(desired config.AWSNodeGroup, actual *NodeGr
 }
 
 // checkTaintsUpdate checks if taints need to be updated
-func (p *Provider) checkTaintsUpdate(desired config.AWSNodeGroup, actual *NodeGroupState) bool {
+func (p *Provider) checkTaintsUpdate(desired NodeGroup, actual *NodeGroupState) bool {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(context.Background(), "aws.checkTaintsUpdate")
 	defer span.End()

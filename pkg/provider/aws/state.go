@@ -171,13 +171,6 @@ type NodeGroupState struct {
 	ModifiedAt string
 }
 
-// Taint represents a Kubernetes taint on AWS node groups
-type Taint struct {
-	Key    string
-	Value  string
-	Effect string // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
-}
-
 // NodeGroupHealth represents the health status of a node group
 type NodeGroupHealth struct {
 	// Issues affecting node group

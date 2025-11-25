@@ -30,6 +30,27 @@ func (p *Provider) Name() string {
 	return "aws"
 }
 
+// extractAWSConfig converts the interface{} provider config to AWS Config type
+func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
+	defer span.End()
+
+	if cfg.AmazonWebServices == nil {
+		err := fmt.Errorf("AWS configuration is required")
+		span.RecordError(err)
+		return nil, err
+	}
+
+	var awsCfg Config
+	if err := config.UnmarshalProviderConfig(ctx, cfg.AmazonWebServices, &awsCfg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to unmarshal AWS config: %w", err)
+	}
+
+	return &awsCfg, nil
+}
+
 // Validate validates the AWS configuration with pre-flight checks
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -41,14 +62,12 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	// Check that AWS configuration exists
-	if cfg.AmazonWebServices == nil {
-		err := fmt.Errorf("AWS configuration is required")
+	// Extract and validate AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
 		span.RecordError(err)
 		return err
 	}
-
-	awsCfg := cfg.AmazonWebServices
 
 	// Validate required fields
 	if awsCfg.Region == "" {
@@ -165,14 +184,14 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.Bool("dry_run", cfg.DryRun),
 	)
 
-	if cfg.AmazonWebServices == nil {
-		err := fmt.Errorf("AWS configuration is required")
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	region := cfg.AmazonWebServices.Region
-	span.SetAttributes(attribute.String("aws.region", region))
+	span.SetAttributes(attribute.String("aws.region", awsCfg.Region))
 
 	// Handle dry-run mode
 	if cfg.DryRun {
@@ -202,8 +221,15 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 	defer cancel()
 	ctx = reconcileCtx
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	clusterName := cfg.ProjectName
-	region := cfg.AmazonWebServices.Region
+	region := awsCfg.Region
 
 	span.SetAttributes(
 		attribute.String("provider", "aws"),
@@ -298,7 +324,7 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 	}
 
 	// 8. Discover EFS storage (if configured)
-	if cfg.AmazonWebServices.EFS != nil && cfg.AmazonWebServices.EFS.Enabled {
+	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		actualEFS, err := p.DiscoverEFS(ctx, clients, clusterName)
 		if err != nil {
 			span.RecordError(err)
@@ -328,8 +354,15 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	_, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
 
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	clusterName := cfg.ProjectName
-	region := cfg.AmazonWebServices.Region
+	region := awsCfg.Region
 	forceMode := cfg.Force
 
 	span.SetAttributes(

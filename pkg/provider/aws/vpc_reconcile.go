@@ -17,8 +17,13 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 	_, span := tracer.Start(ctx, "aws.reconcileVPC")
 	defer span.End()
 
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	clusterName := cfg.ProjectName
-	awsCfg := cfg.AmazonWebServices
 
 	span.SetAttributes(
 		attribute.String("cluster_name", clusterName),
@@ -79,7 +84,6 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 		return actual, nil
 	}
 
-	var err error
 	updated := false
 
 	// Get availability zones for creating missing resources

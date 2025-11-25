@@ -34,8 +34,13 @@ func (p *Provider) createVPC(ctx context.Context, clients *Clients, cfg *config.
 	_, span := tracer.Start(ctx, "aws.createVPC")
 	defer span.End()
 
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	clusterName := cfg.ProjectName
-	awsCfg := cfg.AmazonWebServices
 
 	span.SetAttributes(
 		attribute.String("cluster_name", clusterName),
@@ -358,7 +363,7 @@ func (p *Provider) createInternetGateway(ctx context.Context, clients *Clients, 
 }
 
 // getAvailabilityZones returns the list of availability zones to use
-func (p *Provider) getAvailabilityZones(ctx context.Context, clients *Clients, awsCfg *config.AWSConfig) ([]string, error) {
+func (p *Provider) getAvailabilityZones(ctx context.Context, clients *Clients, awsCfg *Config) ([]string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.getAvailabilityZones")
 	defer span.End()

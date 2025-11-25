@@ -33,7 +33,7 @@ const (
 )
 
 // createNodeGroup creates a single EKS node group
-func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, nodeGroupName string, nodeGroupConfig config.AWSNodeGroup) (*NodeGroupState, error) {
+func (p *Provider) createNodeGroup(ctx context.Context, clients *Clients, cfg *config.NebariConfig, vpc *VPCState, cluster *ClusterState, iamRoles *IAMRoles, nodeGroupName string, nodeGroupConfig NodeGroup) (*NodeGroupState, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.createNodeGroup")
 	defer span.End()
