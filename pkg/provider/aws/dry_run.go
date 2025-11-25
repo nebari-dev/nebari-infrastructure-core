@@ -47,65 +47,132 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	actualNodeGroups, _ := p.DiscoverNodeGroups(ctx, clients, clusterName)
 	actualIAM, _ := p.discoverIAMRoles(ctx, clients, clusterName)
 
-	fmt.Println("\n🔍 DRY RUN: Analyzing deployment changes...")
-	fmt.Printf("   Provider:     aws\n")
-	fmt.Printf("   Project Name: %s\n", clusterName)
-	fmt.Printf("   Region:       %s\n", region)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "DRY RUN: Analyzing deployment changes").
+		WithResource("dry-run").
+		WithAction("analyze").
+		WithMetadata("provider", "aws").
+		WithMetadata("project_name", clusterName).
+		WithMetadata("region", region))
 
 	// Analyze VPC
-	fmt.Println("\n📦 VPC / Network:")
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "VPC / Network").
+		WithResource("vpc").
+		WithAction("analyze"))
+
 	if actualVPC == nil {
-		fmt.Printf("   • VPC: WILL CREATE (CIDR: %s)\n", getVPCCIDR(cfg))
-		fmt.Println("   • Subnets: WILL CREATE (public + private across AZs)")
-		fmt.Println("   • Internet Gateway: WILL CREATE")
-		fmt.Println("   • NAT Gateways: WILL CREATE (one per AZ)")
-		fmt.Println("   • Route Tables: WILL CREATE")
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "VPC: WILL CREATE").
+			WithResource("vpc").
+			WithAction("create").
+			WithMetadata("cidr", getVPCCIDR(cfg)))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Subnets: WILL CREATE (public + private across AZs)").
+			WithResource("subnet").
+			WithAction("create"))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet Gateway: WILL CREATE").
+			WithResource("internet-gateway").
+			WithAction("create"))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "NAT Gateways: WILL CREATE (one per AZ)").
+			WithResource("nat-gateway").
+			WithAction("create"))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Route Tables: WILL CREATE").
+			WithResource("route-table").
+			WithAction("create"))
 	} else {
-		fmt.Printf("   • VPC: EXISTS (%s, CIDR: %s)\n", actualVPC.VPCID, actualVPC.CIDR)
-		fmt.Printf("   • Subnets: EXISTS (%d public, %d private)\n",
-			len(actualVPC.PublicSubnetIDs), len(actualVPC.PrivateSubnetIDs))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "VPC: EXISTS").
+			WithResource("vpc").
+			WithAction("exists").
+			WithMetadata("vpc_id", actualVPC.VPCID).
+			WithMetadata("cidr", actualVPC.CIDR))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Subnets: EXISTS").
+			WithResource("subnet").
+			WithAction("exists").
+			WithMetadata("public_count", len(actualVPC.PublicSubnetIDs)).
+			WithMetadata("private_count", len(actualVPC.PrivateSubnetIDs)))
 		if actualVPC.InternetGatewayID != "" {
-			fmt.Printf("   • Internet Gateway: EXISTS (%s)\n", actualVPC.InternetGatewayID)
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet Gateway: EXISTS").
+				WithResource("internet-gateway").
+				WithAction("exists").
+				WithMetadata("igw_id", actualVPC.InternetGatewayID))
 		}
-		fmt.Printf("   • NAT Gateways: EXISTS (%d)\n", len(actualVPC.NATGatewayIDs))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "NAT Gateways: EXISTS").
+			WithResource("nat-gateway").
+			WithAction("exists").
+			WithMetadata("count", len(actualVPC.NATGatewayIDs)))
 	}
 
 	// Analyze IAM
-	fmt.Println("\n🔐 IAM Roles:")
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "IAM Roles").
+		WithResource("iam").
+		WithAction("analyze"))
+
 	if actualIAM == nil {
-		fmt.Println("   • Cluster Role: WILL CREATE")
-		fmt.Println("   • Node Role: WILL CREATE")
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster Role: WILL CREATE").
+			WithResource("iam-role").
+			WithAction("create").
+			WithMetadata("role_type", "cluster"))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Role: WILL CREATE").
+			WithResource("iam-role").
+			WithAction("create").
+			WithMetadata("role_type", "node"))
 	} else {
 		if actualIAM.ClusterRoleARN != "" {
-			fmt.Println("   • Cluster Role: EXISTS")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster Role: EXISTS").
+				WithResource("iam-role").
+				WithAction("exists").
+				WithMetadata("role_type", "cluster"))
 		} else {
-			fmt.Println("   • Cluster Role: WILL CREATE")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster Role: WILL CREATE").
+				WithResource("iam-role").
+				WithAction("create").
+				WithMetadata("role_type", "cluster"))
 		}
 		if actualIAM.NodeRoleARN != "" {
-			fmt.Println("   • Node Role: EXISTS")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Role: EXISTS").
+				WithResource("iam-role").
+				WithAction("exists").
+				WithMetadata("role_type", "node"))
 		} else {
-			fmt.Println("   • Node Role: WILL CREATE")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Role: WILL CREATE").
+				WithResource("iam-role").
+				WithAction("create").
+				WithMetadata("role_type", "node"))
 		}
 	}
 
 	// Analyze EKS Cluster
-	fmt.Println("\n☸️  EKS Cluster:")
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "EKS Cluster").
+		WithResource("eks-cluster").
+		WithAction("analyze"))
+
 	desiredVersion := awsCfg.KubernetesVersion
 	if desiredVersion == "" {
 		desiredVersion = "1.34" // default
 	}
 	if actualCluster == nil {
-		fmt.Printf("   • Cluster: WILL CREATE (version %s)\n", desiredVersion)
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster: WILL CREATE").
+			WithResource("eks-cluster").
+			WithAction("create").
+			WithMetadata("version", desiredVersion))
 	} else {
-		fmt.Printf("   • Cluster: EXISTS (%s, version %s, status: %s)\n",
-			actualCluster.Name, actualCluster.Version, actualCluster.Status)
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster: EXISTS").
+			WithResource("eks-cluster").
+			WithAction("exists").
+			WithMetadata("name", actualCluster.Name).
+			WithMetadata("version", actualCluster.Version).
+			WithMetadata("status", actualCluster.Status))
 		if actualCluster.Version != desiredVersion {
-			fmt.Printf("   • Version: WILL UPDATE (%s → %s)\n", actualCluster.Version, desiredVersion)
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Version: WILL UPDATE").
+				WithResource("eks-cluster").
+				WithAction("update").
+				WithMetadata("current_version", actualCluster.Version).
+				WithMetadata("desired_version", desiredVersion))
 		}
 	}
 
 	// Analyze Node Groups
-	fmt.Println("\n🖥️  Node Groups:")
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Groups").
+		WithResource("node-group").
+		WithAction("analyze"))
+
 	desiredNodeGroups := awsCfg.NodeGroups
 	// Build map of actual node groups by node pool name (from tags), matching reconciliation logic
 	actualNodeGroupMap := make(map[string]*NodeGroupState)
@@ -121,16 +188,21 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	for name, desired := range desiredNodeGroups {
 		actual, exists := actualNodeGroupMap[name]
 		if !exists {
-			spotStr := ""
+			msg := fmt.Sprintf("%s: WILL CREATE", name)
+			update := status.NewUpdate(status.LevelInfo, msg).
+				WithResource("node-group").
+				WithAction("create").
+				WithMetadata("name", name).
+				WithMetadata("instance", desired.Instance).
+				WithMetadata("min_nodes", desired.MinNodes).
+				WithMetadata("max_nodes", desired.MaxNodes)
 			if desired.Spot {
-				spotStr = " [SPOT]"
+				update = update.WithMetadata("spot", true)
 			}
-			gpuStr := ""
 			if desired.GPU {
-				gpuStr = " [GPU]"
+				update = update.WithMetadata("gpu", true)
 			}
-			fmt.Printf("   • %s: WILL CREATE (%s, min:%d/max:%d)%s%s\n",
-				name, desired.Instance, desired.MinNodes, desired.MaxNodes, spotStr, gpuStr)
+			status.Send(ctx, update)
 		} else {
 			changes := []string{}
 			if desired.MinNodes != actual.MinSize {
@@ -140,10 +212,21 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 				changes = append(changes, fmt.Sprintf("max: %d→%d", actual.MaxSize, desired.MaxNodes))
 			}
 			if len(changes) > 0 {
-				fmt.Printf("   • %s: WILL UPDATE (%s)\n", name, joinStrings(changes, ", "))
+				msg := fmt.Sprintf("%s: WILL UPDATE (%s)", name, joinStrings(changes, ", "))
+				status.Send(ctx, status.NewUpdate(status.LevelInfo, msg).
+					WithResource("node-group").
+					WithAction("update").
+					WithMetadata("name", name).
+					WithMetadata("changes", joinStrings(changes, ", ")))
 			} else {
-				fmt.Printf("   • %s: NO CHANGES (%s, min:%d/max:%d)\n",
-					name, actual.InstanceTypes[0], actual.MinSize, actual.MaxSize)
+				msg := fmt.Sprintf("%s: NO CHANGES", name)
+				status.Send(ctx, status.NewUpdate(status.LevelInfo, msg).
+					WithResource("node-group").
+					WithAction("no-change").
+					WithMetadata("name", name).
+					WithMetadata("instance", actual.InstanceTypes[0]).
+					WithMetadata("min_size", actual.MinSize).
+					WithMetadata("max_size", actual.MaxSize))
 			}
 		}
 	}
@@ -151,12 +234,19 @@ func (p *Provider) dryRunDeploy(ctx context.Context, cfg *config.NebariConfig) e
 	// Check for deletes (orphaned node groups)
 	for name := range actualNodeGroupMap {
 		if _, desired := desiredNodeGroups[name]; !desired {
-			fmt.Printf("   • %s: WILL DELETE (not in config)\n", name)
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("%s: WILL DELETE (not in config)", name)).
+				WithResource("node-group").
+				WithAction("delete").
+				WithMetadata("name", name))
 		}
 	}
 
-	fmt.Println("\n✓ Dry-run complete. No changes were made.")
-	fmt.Println("  Run without --dry-run flag to apply changes.")
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Dry-run complete. No changes were made.").
+		WithResource("dry-run").
+		WithAction("complete"))
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Run without --dry-run flag to apply changes.").
+		WithResource("dry-run").
+		WithAction("instructions"))
 
 	span.SetAttributes(attribute.Bool("dry_run_complete", true))
 	return nil
@@ -181,84 +271,111 @@ func (p *Provider) dryRunDestroy(ctx context.Context, clients *Clients, clusterN
 	nodeGroups, _ := p.DiscoverNodeGroups(ctx, clients, clusterName)
 	iamRoles, _ := p.discoverIAMRoles(ctx, clients, clusterName)
 
-	fmt.Println("\n🔍 DRY RUN: Discovering infrastructure to destroy...")
-	fmt.Printf("   Provider:     aws\n")
-	fmt.Printf("   Project Name: %s\n", clusterName)
-	fmt.Printf("   Region:       %s\n", region)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "DRY RUN: Discovering infrastructure to destroy").
+		WithResource("dry-run").
+		WithAction("discover").
+		WithMetadata("provider", "aws").
+		WithMetadata("project_name", clusterName).
+		WithMetadata("region", region))
 
 	// Check if anything exists
 	if vpc == nil && cluster == nil && len(nodeGroups) == 0 && iamRoles == nil {
-		fmt.Println("\n   ✓ No infrastructure found for this project.")
-		fmt.Println("     Nothing to destroy.")
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No infrastructure found for this project").
+			WithResource("dry-run").
+			WithAction("none"))
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Nothing to destroy").
+			WithResource("dry-run").
+			WithAction("complete"))
 		span.SetAttributes(attribute.Bool("infrastructure_exists", false))
 		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("infrastructure_exists", true))
-	fmt.Println("\n   Resources that would be deleted:")
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Resources that would be deleted").
+		WithResource("dry-run").
+		WithAction("list"))
 
 	// Show cluster information
 	if cluster != nil {
-		fmt.Println("\n   • Kubernetes Cluster")
-		fmt.Printf("     - Name:     %s\n", cluster.Name)
-		fmt.Printf("     - ID:       %s\n", cluster.ARN)
-		fmt.Printf("     - Version:  %s\n", cluster.Version)
-		fmt.Printf("     - Status:   %s\n", cluster.Status)
-		fmt.Printf("     - Endpoint: %s\n", cluster.Endpoint)
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Kubernetes Cluster").
+			WithResource("eks-cluster").
+			WithAction("destroy").
+			WithMetadata("name", cluster.Name).
+			WithMetadata("arn", cluster.ARN).
+			WithMetadata("version", cluster.Version).
+			WithMetadata("status", cluster.Status).
+			WithMetadata("endpoint", cluster.Endpoint))
 	}
 
 	// Show node pools
 	if len(nodeGroups) > 0 {
-		fmt.Println("\n   • Node Groups")
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Groups").
+			WithResource("node-group").
+			WithAction("analyze").
+			WithMetadata("count", len(nodeGroups)))
 		for _, ng := range nodeGroups {
-			spotIndicator := ""
-			if ng.CapacityType == "SPOT" {
-				spotIndicator = " [SPOT]"
-			}
-			gpuIndicator := ""
-			if ng.AMIType == "AL2_x86_64_GPU" || ng.AMIType == "AL2023_x86_64_NVIDIA" {
-				gpuIndicator = " [GPU]"
-			}
-			instanceType := ""
+			update := status.NewUpdate(status.LevelInfo, ng.Name).
+				WithResource("node-group").
+				WithAction("destroy").
+				WithMetadata("name", ng.Name).
+				WithMetadata("min_size", ng.MinSize).
+				WithMetadata("max_size", ng.MaxSize)
 			if len(ng.InstanceTypes) > 0 {
-				instanceType = ng.InstanceTypes[0]
+				update = update.WithMetadata("instance_type", ng.InstanceTypes[0])
 			}
-			fmt.Printf("     - %s (%s, min:%d/max:%d)%s%s\n",
-				ng.Name, instanceType, ng.MinSize, ng.MaxSize, spotIndicator, gpuIndicator)
+			if ng.CapacityType == "SPOT" {
+				update = update.WithMetadata("spot", true)
+			}
+			if ng.AMIType == "AL2_x86_64_GPU" || ng.AMIType == "AL2023_x86_64_NVIDIA" {
+				update = update.WithMetadata("gpu", true)
+			}
+			status.Send(ctx, update)
 		}
 	}
 
 	// Show network information
 	if vpc != nil {
-		fmt.Println("\n   • Network Infrastructure")
-		fmt.Printf("     - VPC ID:         %s\n", vpc.VPCID)
-		fmt.Printf("     - CIDR:           %s\n", vpc.CIDR)
-		fmt.Printf("     - Public Subnets: %d\n", len(vpc.PublicSubnetIDs))
-		fmt.Printf("     - Private Subnets: %d\n", len(vpc.PrivateSubnetIDs))
-		if len(vpc.NATGatewayIDs) > 0 {
-			fmt.Printf("     - NAT Gateways:   %d\n", len(vpc.NATGatewayIDs))
-		}
-		if vpc.InternetGatewayID != "" {
-			fmt.Printf("     - Internet GW:    %s\n", vpc.InternetGatewayID)
-		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Network Infrastructure").
+			WithResource("vpc").
+			WithAction("destroy").
+			WithMetadata("vpc_id", vpc.VPCID).
+			WithMetadata("cidr", vpc.CIDR).
+			WithMetadata("public_subnets", len(vpc.PublicSubnetIDs)).
+			WithMetadata("private_subnets", len(vpc.PrivateSubnetIDs)).
+			WithMetadata("nat_gateways", len(vpc.NATGatewayIDs)).
+			WithMetadata("internet_gateway", vpc.InternetGatewayID))
 	}
 
 	// Show IAM roles
 	if iamRoles != nil {
-		fmt.Println("\n   • IAM Resources")
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "IAM Resources").
+			WithResource("iam").
+			WithAction("analyze"))
 		if iamRoles.ClusterRoleARN != "" {
-			fmt.Println("     - Cluster Role")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cluster Role").
+				WithResource("iam-role").
+				WithAction("destroy").
+				WithMetadata("role_type", "cluster"))
 		}
 		if iamRoles.NodeRoleARN != "" {
-			fmt.Println("     - Node Role")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Node Role").
+				WithResource("iam-role").
+				WithAction("destroy").
+				WithMetadata("role_type", "node"))
 		}
 		if iamRoles.OIDCProviderARN != "" {
-			fmt.Println("     - OIDC Provider")
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "OIDC Provider").
+				WithResource("oidc-provider").
+				WithAction("destroy"))
 		}
 	}
 
-	fmt.Println("\n✓ Dry-run complete. No resources were deleted.")
-	fmt.Println("  Run without --dry-run flag to perform actual destruction.")
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Dry-run complete. No resources were deleted.").
+		WithResource("dry-run").
+		WithAction("complete"))
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Run without --dry-run flag to perform actual destruction.").
+		WithResource("dry-run").
+		WithAction("instructions"))
 
 	span.SetAttributes(attribute.Bool("dry_run_complete", true))
 	return nil

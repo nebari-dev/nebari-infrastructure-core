@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // Provider implements the GCP provider
@@ -35,7 +36,10 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	fmt.Printf("gcp.Validate called for cluster: %s\n", cfg.ProjectName)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Validating GCP provider configuration").
+		WithResource("provider").
+		WithAction("validate").
+		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil
 }
 
@@ -60,14 +64,18 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}
 
-	// Marshal config to JSON for pretty printing
+	// Marshal config to JSON for status message
 	configJSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	fmt.Printf("gcp.Deploy called with the following parameters:\n%s\n", string(configJSON))
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "GCP provider deployment (stub)").
+		WithResource("provider").
+		WithAction("deploy").
+		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("config", string(configJSON)))
 
 	return nil
 }
@@ -83,7 +91,10 @@ func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) erro
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	fmt.Printf("gcp.Reconcile called for cluster: %s\n", cfg.ProjectName)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Reconciling GCP provider (stub)").
+		WithResource("provider").
+		WithAction("reconcile").
+		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil
 }
 
@@ -98,7 +109,10 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	fmt.Printf("gcp.Destroy called for cluster: %s\n", cfg.ProjectName)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying GCP provider infrastructure (stub)").
+		WithResource("provider").
+		WithAction("destroy").
+		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil
 }
 
@@ -113,6 +127,9 @@ func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byt
 		attribute.String("cluster_name", clusterName),
 	)
 
-	fmt.Printf("gcp.GetKubeconfig called for cluster: %s\n", clusterName)
+	status.Send(ctx, status.NewUpdate(status.LevelWarning, "GetKubeconfig not yet implemented for GCP provider").
+		WithResource("provider").
+		WithAction("get-kubeconfig").
+		WithMetadata("cluster_name", clusterName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
