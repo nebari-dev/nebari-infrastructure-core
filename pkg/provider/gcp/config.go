@@ -2,20 +2,20 @@ package gcp
 
 // Config represents GCP-specific configuration
 type Config struct {
-	Project                        string                 `yaml:"project"`
-	Region                         string                 `yaml:"region"`
-	KubernetesVersion              string                 `yaml:"kubernetes_version"`
-	AvailabilityZones              []string               `yaml:"availability_zones,omitempty"`
-	ReleaseChannel                 string                 `yaml:"release_channel,omitempty"`
-	NodeGroups                     map[string]NodeGroup   `yaml:"node_groups,omitempty"`
-	Tags                           []string               `yaml:"tags,omitempty"`
-	NetworkingMode                 string                 `yaml:"networking_mode,omitempty"`
-	Network                        string                 `yaml:"network,omitempty"`
-	Subnetwork                     string                 `yaml:"subnetwork,omitempty"`
-	IPAllocationPolicy             map[string]string      `yaml:"ip_allocation_policy,omitempty"`
-	MasterAuthorizedNetworksConfig map[string]string      `yaml:"master_authorized_networks_config,omitempty"`
-	PrivateClusterConfig           map[string]interface{} `yaml:"private_cluster_config,omitempty"`
-	AdditionalFields               map[string]interface{} `yaml:",inline"`
+	Project                        string               `yaml:"project"`
+	Region                         string               `yaml:"region"`
+	KubernetesVersion              string               `yaml:"kubernetes_version"`
+	AvailabilityZones              []string             `yaml:"availability_zones,omitempty"`
+	ReleaseChannel                 string               `yaml:"release_channel,omitempty"`
+	NodeGroups                     map[string]NodeGroup `yaml:"node_groups,omitempty"`
+	Tags                           []string             `yaml:"tags,omitempty"`
+	NetworkingMode                 string               `yaml:"networking_mode,omitempty"`
+	Network                        string               `yaml:"network,omitempty"`
+	Subnetwork                     string               `yaml:"subnetwork,omitempty"`
+	IPAllocationPolicy             map[string]string    `yaml:"ip_allocation_policy,omitempty"`
+	MasterAuthorizedNetworksConfig map[string]string    `yaml:"master_authorized_networks_config,omitempty"`
+	PrivateClusterConfig           map[string]any       `yaml:"private_cluster_config,omitempty"`
+	AdditionalFields               map[string]any       `yaml:",inline"`
 }
 
 // NodeGroup represents GCP-specific node group configuration

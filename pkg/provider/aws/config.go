@@ -2,20 +2,20 @@ package aws
 
 // Config represents AWS-specific configuration
 type Config struct {
-	Region                  string                 `yaml:"region"`
-	KubernetesVersion       string                 `yaml:"kubernetes_version"`
-	AvailabilityZones       []string               `yaml:"availability_zones,omitempty"`
-	NodeGroups              map[string]NodeGroup   `yaml:"node_groups,omitempty"`
-	EKSEndpointAccess       string                 `yaml:"eks_endpoint_access,omitempty"`
-	EKSPublicAccessCIDRs    []string               `yaml:"eks_public_access_cidrs,omitempty"`
-	EKSKMSArn               string                 `yaml:"eks_kms_arn,omitempty"`
-	ExistingSubnetIDs       []string               `yaml:"existing_subnet_ids,omitempty"`
-	ExistingSecurityGroupID string                 `yaml:"existing_security_group_id,omitempty"`
-	VPCCIDRBlock            string                 `yaml:"vpc_cidr_block,omitempty"`
-	PermissionsBoundary     string                 `yaml:"permissions_boundary,omitempty"`
-	Tags                    map[string]string      `yaml:"tags,omitempty"`
-	EFS                     *EFSConfig             `yaml:"efs,omitempty"`
-	AdditionalFields        map[string]interface{} `yaml:",inline"`
+	Region                  string               `yaml:"region"`
+	KubernetesVersion       string               `yaml:"kubernetes_version"`
+	AvailabilityZones       []string             `yaml:"availability_zones,omitempty"`
+	NodeGroups              map[string]NodeGroup `yaml:"node_groups,omitempty"`
+	EKSEndpointAccess       string               `yaml:"eks_endpoint_access,omitempty"`
+	EKSPublicAccessCIDRs    []string             `yaml:"eks_public_access_cidrs,omitempty"`
+	EKSKMSArn               string               `yaml:"eks_kms_arn,omitempty"`
+	ExistingSubnetIDs       []string             `yaml:"existing_subnet_ids,omitempty"`
+	ExistingSecurityGroupID string               `yaml:"existing_security_group_id,omitempty"`
+	VPCCIDRBlock            string               `yaml:"vpc_cidr_block,omitempty"`
+	PermissionsBoundary     string               `yaml:"permissions_boundary,omitempty"`
+	Tags                    map[string]string    `yaml:"tags,omitempty"`
+	EFS                     *EFSConfig           `yaml:"efs,omitempty"`
+	AdditionalFields        map[string]any       `yaml:",inline"`
 }
 
 // EFSConfig represents AWS EFS configuration for shared storage

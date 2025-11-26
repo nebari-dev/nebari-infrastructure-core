@@ -8,11 +8,11 @@ type NebariConfig struct {
 	Provider    string `yaml:"provider"`
 	Domain      string `yaml:"domain,omitempty"`
 
-	// Provider-specific configurations (stored as interface{}, will be type-asserted by providers)
-	AmazonWebServices   interface{} `yaml:"amazon_web_services,omitempty"`
-	GoogleCloudPlatform interface{} `yaml:"google_cloud_platform,omitempty"`
-	Azure               interface{} `yaml:"azure,omitempty"`
-	Local               interface{} `yaml:"local,omitempty"`
+	// Provider-specific configurations (stored as any, will be type-asserted by providers)
+	AmazonWebServices   any `yaml:"amazon_web_services,omitempty"`
+	GoogleCloudPlatform any `yaml:"google_cloud_platform,omitempty"`
+	Azure               any `yaml:"azure,omitempty"`
+	Local               any `yaml:"local,omitempty"`
 
 	// DNS provider configuration (optional)
 	DNSProvider string         `yaml:"dns_provider,omitempty"`

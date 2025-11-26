@@ -50,7 +50,7 @@ type Update struct {
 	Action string
 
 	// Metadata contains optional additional structured data about the status
-	Metadata map[string]interface{}
+	Metadata map[string]any
 
 	// Timestamp is when this status update was created
 	Timestamp time.Time
@@ -78,9 +78,9 @@ func (s Update) WithAction(action string) Update {
 }
 
 // WithMetadata adds metadata to the status update
-func (s Update) WithMetadata(key string, value interface{}) Update {
+func (s Update) WithMetadata(key string, value any) Update {
 	if s.Metadata == nil {
-		s.Metadata = make(map[string]interface{})
+		s.Metadata = make(map[string]any)
 	}
 	s.Metadata[key] = value
 	return s
@@ -111,7 +111,7 @@ func Send(ctx context.Context, update Update) {
 }
 
 // Sendf sends a formatted status update message
-func Sendf(ctx context.Context, level Level, format string, args ...interface{}) {
+func Sendf(ctx context.Context, level Level, format string, args ...any) {
 	Send(ctx, Update{
 		Level:     level,
 		Message:   fmt.Sprintf(format, args...),
@@ -125,7 +125,7 @@ func Info(ctx context.Context, message string) {
 }
 
 // Infof sends a formatted informational status update
-func Infof(ctx context.Context, format string, args ...interface{}) {
+func Infof(ctx context.Context, format string, args ...any) {
 	Sendf(ctx, LevelInfo, format, args...)
 }
 
@@ -135,7 +135,7 @@ func Progress(ctx context.Context, message string) {
 }
 
 // Progressf sends a formatted progress status update
-func Progressf(ctx context.Context, format string, args ...interface{}) {
+func Progressf(ctx context.Context, format string, args ...any) {
 	Sendf(ctx, LevelProgress, format, args...)
 }
 
@@ -145,7 +145,7 @@ func Success(ctx context.Context, message string) {
 }
 
 // Successf sends a formatted success status update
-func Successf(ctx context.Context, format string, args ...interface{}) {
+func Successf(ctx context.Context, format string, args ...any) {
 	Sendf(ctx, LevelSuccess, format, args...)
 }
 
@@ -155,7 +155,7 @@ func Warning(ctx context.Context, message string) {
 }
 
 // Warningf sends a formatted warning status update
-func Warningf(ctx context.Context, format string, args ...interface{}) {
+func Warningf(ctx context.Context, format string, args ...any) {
 	Sendf(ctx, LevelWarning, format, args...)
 }
 
@@ -165,7 +165,7 @@ func Error(ctx context.Context, message string) {
 }
 
 // Errorf sends a formatted error status update
-func Errorf(ctx context.Context, format string, args ...interface{}) {
+func Errorf(ctx context.Context, format string, args ...any) {
 	Sendf(ctx, LevelError, format, args...)
 }
 

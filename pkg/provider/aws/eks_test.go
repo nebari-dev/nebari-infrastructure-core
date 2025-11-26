@@ -300,8 +300,8 @@ func TestCheckLoggingUpdate(t *testing.T) {
 func TestEKSConstants(t *testing.T) {
 	tests := []struct {
 		name     string
-		actual   interface{}
-		expected interface{}
+		actual   any
+		expected any
 	}{
 		{"ResourceTypeEKSCluster", ResourceTypeEKSCluster, "eks-cluster"},
 		{"DefaultKubernetesVersion", DefaultKubernetesVersion, "1.34"},

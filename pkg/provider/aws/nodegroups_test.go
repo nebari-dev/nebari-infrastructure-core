@@ -294,8 +294,8 @@ func TestNodeGroupResourceTypeConstant(t *testing.T) {
 func TestNodeGroupDefaultConstants(t *testing.T) {
 	tests := []struct {
 		name     string
-		actual   interface{}
-		expected interface{}
+		actual   any
+		expected any
 	}{
 		{"DefaultAMIType", DefaultAMIType, ekstypes.AMITypesAl2023X8664Standard},
 		{"DefaultCapacityType", DefaultCapacityType, ekstypes.CapacityTypesOnDemand},

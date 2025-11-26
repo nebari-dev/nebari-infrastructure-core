@@ -229,7 +229,7 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 | File | Purpose |
 |------|---------|
-| `config.go` | `NebariConfig` struct with global fields and `interface{}` provider config fields |
+| `config.go` | `NebariConfig` struct with global fields and `any` provider config fields |
 | `parser.go` | YAML parsing, validation, `UnmarshalProviderConfig()` helper for type conversion |
 
 ### Configuration Architecture
@@ -241,15 +241,15 @@ type NebariConfig struct {
     ProjectName         string      `yaml:"project_name"`          // Required: cluster name
     Domain              string      `yaml:"domain,omitempty"`      // Optional: domain for ingress
 
-    // Provider configs stored as interface{} for polymorphism
-    AmazonWebServices   interface{} `yaml:"amazon_web_services,omitempty"`
-    GoogleCloudPlatform interface{} `yaml:"google_cloud_platform,omitempty"`
-    Azure               interface{} `yaml:"azure,omitempty"`
-    Local               interface{} `yaml:"local,omitempty"`
+    // Provider configs stored as any for polymorphism
+    AmazonWebServices   any `yaml:"amazon_web_services,omitempty"`
+    GoogleCloudPlatform any `yaml:"google_cloud_platform,omitempty"`
+    Azure               any `yaml:"azure,omitempty"`
+    Local               any `yaml:"local,omitempty"`
 
     // DNS configuration
-    DNSProvider         string      `yaml:"dns_provider,omitempty"`
-    DNS                 interface{} `yaml:"dns,omitempty"`
+    DNSProvider         string `yaml:"dns_provider,omitempty"`
+    DNS                 any    `yaml:"dns,omitempty"`
 }
 ```
 
@@ -261,8 +261,8 @@ type NebariConfig struct {
 
 **Type Conversion:**
 ```go
-// Converts interface{} to concrete provider type via YAML round-trip
-func UnmarshalProviderConfig(ctx context.Context, providerConfig interface{}, target interface{}) error
+// Converts any to concrete provider type via YAML round-trip
+func UnmarshalProviderConfig(ctx context.Context, providerConfig any, target any) error
 ```
 
 ## Observability (pkg/telemetry/, pkg/status/)
@@ -390,7 +390,7 @@ defer cleanup()
 
 ### 4. Provider Configuration Isolation
 - Each provider owns its configuration types in `pkg/provider/<provider>/config.go`
-- Central config stores provider configs as `interface{}`
+- Central config stores provider configs as `any`
 - Type conversion via `config.UnmarshalProviderConfig()` helper
 - Providers extract their config at function entry with `extractConfig()` pattern
 

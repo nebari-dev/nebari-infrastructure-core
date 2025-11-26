@@ -30,7 +30,7 @@ func (p *Provider) Name() string {
 	return "aws"
 }
 
-// extractAWSConfig converts the interface{} provider config to AWS Config type
+// extractAWSConfig converts the any provider config to AWS Config type
 func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")

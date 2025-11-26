@@ -4,5 +4,5 @@ package local
 type Config struct {
 	KubeContext      string                       `yaml:"kube_context,omitempty"`
 	NodeSelectors    map[string]map[string]string `yaml:"node_selectors,omitempty"`
-	AdditionalFields map[string]interface{}       `yaml:",inline"`
+	AdditionalFields map[string]any               `yaml:",inline"`
 }

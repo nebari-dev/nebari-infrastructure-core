@@ -264,7 +264,7 @@ func TestLevelConstants(t *testing.T) {
 func TestFormattedFunctions(t *testing.T) {
 	tests := []struct {
 		name     string
-		sendFunc func(context.Context, string, ...interface{})
+		sendFunc func(context.Context, string, ...any)
 		level    Level
 	}{
 		{"Infof", Infof, LevelInfo},
