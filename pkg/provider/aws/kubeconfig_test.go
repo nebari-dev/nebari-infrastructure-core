@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // TestKubeconfigMarshaling tests YAML marshaling and unmarshaling of kubeconfig structures
