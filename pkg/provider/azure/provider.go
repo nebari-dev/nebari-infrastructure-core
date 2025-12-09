@@ -114,19 +114,19 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 }
 
 // GetKubeconfig generates a kubeconfig file (stub implementation)
-func (p *Provider) GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "azure.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", "azure"),
-		attribute.String("cluster_name", clusterName),
+		attribute.String("cluster_name", cfg.ProjectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelWarning, "GetKubeconfig not yet implemented for Azure provider").
 		WithResource("provider").
 		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", clusterName))
+		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
