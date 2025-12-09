@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -11,10 +12,11 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"golang.org/x/sync/errgroup"
 )
 
 // reconcileNodeGroups reconciles desired node group configuration with actual state
-// Node groups are created sequentially to avoid AWS rate limits and provide clear progress visibility
+// Node groups are created and updated in parallel for faster deployment
 // Continues processing all node groups even if some fail, providing a summary at the end
 // Note: Pure orchestration function - delegates to createNodeGroup() and reconcileNodeGroup().
 // Unit test coverage via helper functions.
@@ -47,78 +49,154 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		}
 	}
 
-	// Track successes and failures
+	// Track successes and failures with thread-safe access
+	var mu sync.Mutex
 	var successfulNodeGroups []string
 	var failedNodeGroups []string
 	nodeGroupErrors := make(map[string]error)
 
-	// Reconcile each desired node group sequentially
-	nodeGroupIndex := 0
+	// Separate node groups into those that need creation vs update
+	toCreate := make(map[string]NodeGroup)
+	toUpdate := make(map[string]struct {
+		config NodeGroup
+		actual *NodeGroupState
+	})
+
 	for nodeGroupName, nodeGroupConfig := range awsCfg.NodeGroups {
-		nodeGroupIndex++
-		actualNG, exists := actualNodeGroups[nodeGroupName]
-
-		if !exists {
-			// Node group doesn't exist - create it
-			span.SetAttributes(
-				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "create"),
-			)
-
-			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s' (%d/%d)", nodeGroupName, nodeGroupIndex, len(awsCfg.NodeGroups))).
-				WithResource("node-group").
-				WithAction("creating").
-				WithMetadata("node_group", nodeGroupName).
-				WithMetadata("instance_type", nodeGroupConfig.Instance).
-				WithMetadata("min_nodes", nodeGroupConfig.MinNodes).
-				WithMetadata("max_nodes", nodeGroupConfig.MaxNodes))
-
-			_, err := p.createNodeGroup(ctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s': %v", nodeGroupName, err)).
-					WithResource("node-group").
-					WithAction("failed").
-					WithMetadata("node_group", nodeGroupName))
-				failedNodeGroups = append(failedNodeGroups, nodeGroupName)
-				nodeGroupErrors[nodeGroupName] = err
-				// Continue to next node group instead of returning
-				continue
-			}
-
-			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", nodeGroupName)).
-				WithResource("node-group").
-				WithAction("created").
-				WithMetadata("node_group", nodeGroupName))
-			successfulNodeGroups = append(successfulNodeGroups, nodeGroupName)
+		if _, exists := actualNodeGroups[nodeGroupName]; !exists {
+			toCreate[nodeGroupName] = nodeGroupConfig
 		} else {
-			// Node group exists - check if updates are needed
-			span.SetAttributes(
-				attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "update"),
-			)
+			toUpdate[nodeGroupName] = struct {
+				config NodeGroup
+				actual *NodeGroupState
+			}{config: nodeGroupConfig, actual: actualNodeGroups[nodeGroupName]}
+		}
+	}
 
-			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking node group '%s' for updates (%d/%d)", nodeGroupName, nodeGroupIndex, len(awsCfg.NodeGroups))).
-				WithResource("node-group").
-				WithAction("checking").
-				WithMetadata("node_group", nodeGroupName))
+	// Create new node groups in parallel
+	if len(toCreate) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating %d node group(s) in parallel", len(toCreate))).
+			WithResource("node-groups").
+			WithAction("creating").
+			WithMetadata("count", len(toCreate)))
 
-			err := p.reconcileNodeGroup(ctx, clients, cfg, nodeGroupName, nodeGroupConfig, actualNG)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to reconcile node group '%s': %v", nodeGroupName, err)).
+		g, gctx := errgroup.WithContext(ctx)
+
+		for nodeGroupName, nodeGroupConfig := range toCreate {
+			// Capture loop variables for goroutine
+			ngName := nodeGroupName
+			ngConfig := nodeGroupConfig
+
+			g.Go(func() error {
+				span.SetAttributes(
+					attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "create"),
+				)
+
+				status.Send(gctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s'", ngName)).
 					WithResource("node-group").
-					WithAction("failed").
-					WithMetadata("node_group", nodeGroupName))
-				failedNodeGroups = append(failedNodeGroups, nodeGroupName)
-				nodeGroupErrors[nodeGroupName] = err
-				// Continue to next node group instead of returning
-				continue
-			}
+					WithAction("creating").
+					WithMetadata("node_group", ngName).
+					WithMetadata("instance_type", ngConfig.Instance).
+					WithMetadata("min_nodes", ngConfig.MinNodes).
+					WithMetadata("max_nodes", ngConfig.MaxNodes))
 
-			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' reconciled", nodeGroupName)).
-				WithResource("node-group").
-				WithAction("reconciled").
-				WithMetadata("node_group", nodeGroupName))
-			successfulNodeGroups = append(successfulNodeGroups, nodeGroupName)
+				_, err := p.createNodeGroup(gctx, clients, cfg, vpc, cluster, iamRoles, ngName, ngConfig)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(gctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s': %v", ngName, err)).
+						WithResource("node-group").
+						WithAction("failed").
+						WithMetadata("node_group", ngName))
+
+					mu.Lock()
+					failedNodeGroups = append(failedNodeGroups, ngName)
+					nodeGroupErrors[ngName] = err
+					mu.Unlock()
+
+					// Return nil to continue with other node groups (errgroup cancels on first error otherwise)
+					return nil
+				}
+
+				status.Send(gctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", ngName)).
+					WithResource("node-group").
+					WithAction("created").
+					WithMetadata("node_group", ngName))
+
+				mu.Lock()
+				successfulNodeGroups = append(successfulNodeGroups, ngName)
+				mu.Unlock()
+
+				return nil
+			})
+		}
+
+		// Wait for all creations to complete
+		if err := g.Wait(); err != nil {
+			span.RecordError(err)
+			// This shouldn't happen since we return nil from goroutines, but handle it
+			return fmt.Errorf("unexpected error during parallel node group creation: %w", err)
+		}
+	}
+
+	// Update existing node groups in parallel
+	if len(toUpdate) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Reconciling %d existing node group(s) in parallel", len(toUpdate))).
+			WithResource("node-groups").
+			WithAction("reconciling").
+			WithMetadata("count", len(toUpdate)))
+
+		g, gctx := errgroup.WithContext(ctx)
+
+		for nodeGroupName, updateInfo := range toUpdate {
+			// Capture loop variables for goroutine
+			ngName := nodeGroupName
+			ngConfig := updateInfo.config
+			ngActual := updateInfo.actual
+
+			g.Go(func() error {
+				span.SetAttributes(
+					attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "update"),
+				)
+
+				status.Send(gctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking node group '%s' for updates", ngName)).
+					WithResource("node-group").
+					WithAction("checking").
+					WithMetadata("node_group", ngName))
+
+				err := p.reconcileNodeGroup(gctx, clients, cfg, ngName, ngConfig, ngActual)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(gctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to reconcile node group '%s': %v", ngName, err)).
+						WithResource("node-group").
+						WithAction("failed").
+						WithMetadata("node_group", ngName))
+
+					mu.Lock()
+					failedNodeGroups = append(failedNodeGroups, ngName)
+					nodeGroupErrors[ngName] = err
+					mu.Unlock()
+
+					// Return nil to continue with other node groups
+					return nil
+				}
+
+				status.Send(gctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' reconciled", ngName)).
+					WithResource("node-group").
+					WithAction("reconciled").
+					WithMetadata("node_group", ngName))
+
+				mu.Lock()
+				successfulNodeGroups = append(successfulNodeGroups, ngName)
+				mu.Unlock()
+
+				return nil
+			})
+		}
+
+		// Wait for all updates to complete
+		if err := g.Wait(); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("unexpected error during parallel node group reconciliation: %w", err)
 		}
 	}
 
@@ -139,41 +217,68 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 			attribute.Int("orphaned_node_groups", len(orphanedNodeGroups)),
 		)
 
-		// Delete orphaned node groups sequentially
-		for i, nodeGroupName := range orphanedNodeGroups {
-			span.SetAttributes(
-				attribute.String(fmt.Sprintf("orphaned_node_group.%s.action", nodeGroupName), "delete"),
-			)
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Deleting %d orphaned node group(s) in parallel", len(orphanedNodeGroups))).
+			WithResource("node-groups").
+			WithAction("deleting").
+			WithMetadata("count", len(orphanedNodeGroups)))
 
-			status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Deleting orphaned node group '%s' (%d/%d)", nodeGroupName, i+1, len(orphanedNodeGroups))).
-				WithResource("node-group").
-				WithAction("deleting").
-				WithMetadata("node_group", nodeGroupName))
+		// Delete orphaned node groups in parallel
+		g, gctx := errgroup.WithContext(ctx)
 
-			err := p.deleteNodeGroup(ctx, clients, clusterName, nodeGroupName)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to delete orphaned node group '%s': %v", nodeGroupName, err)).
+		for _, nodeGroupName := range orphanedNodeGroups {
+			// Capture loop variable for goroutine
+			ngName := nodeGroupName
+
+			g.Go(func() error {
+				span.SetAttributes(
+					attribute.String(fmt.Sprintf("orphaned_node_group.%s.action", ngName), "delete"),
+				)
+
+				status.Send(gctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Deleting orphaned node group '%s'", ngName)).
 					WithResource("node-group").
-					WithAction("failed").
-					WithMetadata("node_group", nodeGroupName))
-				failedDeletions = append(failedDeletions, nodeGroupName)
-				nodeGroupErrors[nodeGroupName] = err
-				// Continue to next orphaned node group instead of returning
-				continue
-			}
+					WithAction("deleting").
+					WithMetadata("node_group", ngName))
 
-			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Orphaned node group '%s' deleted", nodeGroupName)).
-				WithResource("node-group").
-				WithAction("deleted").
-				WithMetadata("node_group", nodeGroupName))
-			deletedNodeGroups = append(deletedNodeGroups, nodeGroupName)
+				err := p.deleteNodeGroup(gctx, clients, clusterName, ngName)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(gctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to delete orphaned node group '%s': %v", ngName, err)).
+						WithResource("node-group").
+						WithAction("failed").
+						WithMetadata("node_group", ngName))
+
+					mu.Lock()
+					failedDeletions = append(failedDeletions, ngName)
+					nodeGroupErrors[ngName] = err
+					mu.Unlock()
+
+					// Return nil to continue with other deletions
+					return nil
+				}
+
+				status.Send(gctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Orphaned node group '%s' deleted", ngName)).
+					WithResource("node-group").
+					WithAction("deleted").
+					WithMetadata("node_group", ngName))
+
+				mu.Lock()
+				deletedNodeGroups = append(deletedNodeGroups, ngName)
+				mu.Unlock()
+
+				return nil
+			})
+		}
+
+		// Wait for all deletions to complete
+		if err := g.Wait(); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("unexpected error during parallel orphan deletion: %w", err)
 		}
 	}
 
 	// Record summary metrics in span
 	span.SetAttributes(
-		attribute.Bool("sequential_reconciliation", true),
+		attribute.Bool("parallel_reconciliation", true),
 		attribute.Int("successful_node_groups", len(successfulNodeGroups)),
 		attribute.Int("failed_node_groups", len(failedNodeGroups)),
 		attribute.Int("deleted_orphaned_node_groups", len(deletedNodeGroups)),
