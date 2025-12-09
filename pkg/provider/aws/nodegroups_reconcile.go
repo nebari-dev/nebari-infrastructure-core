@@ -83,47 +83,43 @@ func (p *Provider) reconcileNodeGroups(ctx context.Context, clients *Clients, cf
 		g, gctx := errgroup.WithContext(ctx)
 
 		for nodeGroupName, nodeGroupConfig := range toCreate {
-			// Capture loop variables for goroutine
-			ngName := nodeGroupName
-			ngConfig := nodeGroupConfig
-
 			g.Go(func() error {
 				span.SetAttributes(
-					attribute.String(fmt.Sprintf("node_group.%s.action", ngName), "create"),
+					attribute.String(fmt.Sprintf("node_group.%s.action", nodeGroupName), "create"),
 				)
 
-				status.Send(gctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s'", ngName)).
+				status.Send(gctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating node group '%s'", nodeGroupName)).
 					WithResource("node-group").
 					WithAction("creating").
-					WithMetadata("node_group", ngName).
-					WithMetadata("instance_type", ngConfig.Instance).
-					WithMetadata("min_nodes", ngConfig.MinNodes).
-					WithMetadata("max_nodes", ngConfig.MaxNodes))
+					WithMetadata("node_group", nodeGroupName).
+					WithMetadata("instance_type", nodeGroupConfig.Instance).
+					WithMetadata("min_nodes", nodeGroupConfig.MinNodes).
+					WithMetadata("max_nodes", nodeGroupConfig.MaxNodes))
 
-				_, err := p.createNodeGroup(gctx, clients, cfg, vpc, cluster, iamRoles, ngName, ngConfig)
+				_, err := p.createNodeGroup(gctx, clients, cfg, vpc, cluster, iamRoles, nodeGroupName, nodeGroupConfig)
 				if err != nil {
 					span.RecordError(err)
-					status.Send(gctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s': %v", ngName, err)).
+					status.Send(gctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to create node group '%s': %v", nodeGroupName, err)).
 						WithResource("node-group").
 						WithAction("failed").
-						WithMetadata("node_group", ngName))
+						WithMetadata("node_group", nodeGroupName))
 
 					mu.Lock()
-					failedNodeGroups = append(failedNodeGroups, ngName)
-					nodeGroupErrors[ngName] = err
+					failedNodeGroups = append(failedNodeGroups, nodeGroupName)
+					nodeGroupErrors[nodeGroupName] = err
 					mu.Unlock()
 
 					// Return nil to continue with other node groups (errgroup cancels on first error otherwise)
 					return nil
 				}
 
-				status.Send(gctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", ngName)).
+				status.Send(gctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Node group '%s' created and active", nodeGroupName)).
 					WithResource("node-group").
 					WithAction("created").
-					WithMetadata("node_group", ngName))
+					WithMetadata("node_group", nodeGroupName))
 
 				mu.Lock()
-				successfulNodeGroups = append(successfulNodeGroups, ngName)
+				successfulNodeGroups = append(successfulNodeGroups, nodeGroupName)
 				mu.Unlock()
 
 				return nil
