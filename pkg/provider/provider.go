@@ -26,7 +26,7 @@ type Provider interface {
 	Destroy(ctx context.Context, config *config.NebariConfig) error
 
 	// GetKubeconfig generates a kubeconfig file for accessing the Kubernetes cluster
-	GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error)
+	GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
 }
 
 // InfrastructureState represents the discovered state of infrastructure

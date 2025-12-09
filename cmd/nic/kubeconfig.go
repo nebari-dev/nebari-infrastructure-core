@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 )
 
 var (
@@ -58,15 +57,14 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
-	var awsCfg aws.Config
-    if err := config.UnmarshalProviderConfig(ctx, cfg.AmazonWebServices, &awsCfg); err != nil {
-		slog.Error("Failed to unmarshal AWS configuration", "error", err)
+	provider, err := registry.Get(ctx, cfg.Provider)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
 		return err
-    }
-	
-	awsProvider := aws.NewProvider()
+	}
 
-    kubeconfigBytes, err := awsProvider.GetKubeconfigWithRegion(ctx, cfg.ProjectName, awsCfg.Region)
+    kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
     if err != nil {
         slog.Error("Failed to generate kubeconfig", "error", err)
 		return err
