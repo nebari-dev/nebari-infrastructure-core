@@ -483,7 +483,7 @@ cmd/nic/
 - **AWS SDK**: github.com/aws/aws-sdk-go-v2
 - **CLI Framework**: github.com/spf13/cobra
 - **Telemetry**: go.opentelemetry.io/otel
-- **YAML Parsing**: gopkg.in/yaml.v3
+- **YAML Parsing**: github.com/goccy/go-yaml
 
 ---
 

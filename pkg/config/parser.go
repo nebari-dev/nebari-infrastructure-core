@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/goccy/go-yaml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"gopkg.in/yaml.v3"
 )
 
 // ParseConfig parses a nebari-config.yaml file and returns the configuration.
