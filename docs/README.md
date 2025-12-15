@@ -9,9 +9,9 @@ Nebari Infrastructure Core (NIC) is a next-generation, opinionated Kubernetes de
 
 **Key Highlights:**
 
-- **Stateless Architecture**: No state files - queries cloud APIs for actual state on every run
-- **Tag-Based Discovery**: All resources tagged for identification and ownership tracking
-- **Native Cloud SDKs**: Direct use of aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go
+- **OpenTofu/Terraform Modules**: Infrastructure provisioning via proven Terraform modules orchestrated by terraform-exec
+- **Standard State Management**: Terraform state files with remote backends (S3, GCS, Azure Blob)
+- **Go CLI Orchestration**: Go CLI wraps OpenTofu execution with OpenTelemetry instrumentation
 - **Complete Observability**: LGTM stack (Loki, Grafana, Tempo, Mimir) with OpenTelemetry
 - **Integrated Authentication**: Keycloak with OIDC/SAML support
 - **GitOps Ready**: ArgoCD for continuous deployment of applications
@@ -26,7 +26,7 @@ This documentation is organized into four main categories:
 Core architectural decisions, principles, and system design.
 
 1. **[Introduction](architecture/01-introduction.md)**
-   Project vision, core principles, and stateless operation philosophy
+   Project vision, core principles, and design philosophy
 
 2. **[System Overview](architecture/02-system-overview.md)**
    High-level architecture, component relationships, and deployment flow
@@ -37,46 +37,46 @@ Core architectural decisions, principles, and system design.
 4. **[Key Architectural Decisions](architecture/04-key-decisions.md)**
    Critical technical choices and their rationale
 
-5. **[Stateless Operation & Resource Discovery](architecture/05-stateless-operation.md)**
-   Tag-based resource discovery, drift detection, and stateless reconciliation
+5. **[State Management](architecture/05-state-management.md)**
+   Terraform state backends, locking, and drift detection
 
 ### Implementation
 
 Detailed implementation specifications and technical designs.
 
-6. **[Declarative Infrastructure with Native SDKs](implementation/06-declarative-infrastructure.md)**
-   Infrastructure as code using cloud provider SDKs
+6. **[OpenTofu Module Architecture](implementation/06-opentofu-module-architecture.md)**
+   Infrastructure as code using Terraform/OpenTofu modules
 
 7. **[Configuration Design](implementation/07-configuration-design.md)**
    config.yaml structure and validation
 
-8. **[Cloud Provider Architecture](implementation/08-cloud-provider-architecture.md)**
-   Multi-cloud provider abstraction and implementation patterns
+8. **[Terraform-Exec Integration](implementation/08-terraform-exec-integration.md)**
+   Go CLI orchestration of OpenTofu via terraform-exec library
 
-9. **[DNS Provider Architecture](implementation/08-dns-provider-architecture.md)**
-   Multi-cloud provider abstraction and implementation patterns
+9. **[DNS Provider Architecture](implementation/09-dns-provider-architecture.md)**
+   DNS provider abstraction and implementation patterns
 
-10. **[Foundational Software Stack](implementation/09-foundational-software.md)**
+10. **[Foundational Software Stack](implementation/10-foundational-software.md)**
     Keycloak, LGTM observability, cert-manager, Envoy Gateway, ArgoCD deployment
 
-11. **[Nebari Kubernetes Operator](implementation/10-nebari-operator.md)**
+11. **[Nebari Kubernetes Operator](implementation/11-nebari-operator.md)**
     Custom controller for nebari-application CRD and app lifecycle management
 
 ### Operations
 
 Testing, deployment, and operational procedures.
 
-12. **[Testing Strategy](operations/11-testing-strategy.md)**
+12. **[Testing Strategy](operations/12-testing-strategy.md)**
     Unit, integration, provider, and end-to-end testing approaches
 
-13. **[Milestones](operations/12-milestones.md)**
+13. **[Milestones](operations/13-milestones.md)**
     Development roadmap and release planning
 
 ### Appendix
 
 Additional resources and reference materials.
 
-14. **[Open Questions](appendix/13-open-questions.md)**
+14. **[Open Questions](appendix/14-open-questions.md)**
     Unresolved design decisions and areas needing further investigation
 
 15. **[Future Enhancements](appendix/15-future-enhancements.md)**
@@ -87,33 +87,6 @@ Additional resources and reference materials.
 
 17. **[Appendix](appendix/17-appendix.md)**
     Glossary, references, and supplementary information
-
-### Alternatives
-
-Alternative implementation approaches for different team needs and priorities.
-
-**[Alternatives Overview](alternatives/README.md)** - Start here to understand available alternatives and choose the right approach for your team.
-
-#### Available Implementations
-
-**Native SDK Edition (Default)** - This documentation
-
-- Direct cloud SDK usage (aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go)
-- Maximum performance and control
-- Full OpenTelemetry instrumentation
-
-**[OpenTofu Edition](alternatives/opentofu/architecture/01-introduction.md)**
-
-- OpenTofu/Terraform modules via terraform-exec
-- Faster development (reuse existing modules)
-- Standard Terraform state and tooling
-- Familiar to Terraform-experienced teams
-
-**[Comparison: Native SDK vs OpenTofu](alternatives/comparison-native-vs-opentofu.md)**
-
-- Feature-by-feature comparison
-- Decision criteria and trade-offs
-- When to choose each approach
 
 ## Quick Navigation by Topic
 
@@ -129,42 +102,41 @@ Start here to understand the project:
 
 Deep dive into cloud infrastructure:
 
-- [Declarative Infrastructure with Native SDKs](implementation/05-declarative-infrastructure.md)
-- [Provider Architecture](implementation/08-provider-architecture.md)
-- [Stateless Operation & Resource Discovery](architecture/06-stateless-operation.md)
+- [OpenTofu Module Architecture](implementation/06-opentofu-module-architecture.md)
+- [Terraform-Exec Integration](implementation/08-terraform-exec-integration.md)
+- [State Management](architecture/05-state-management.md)
 
 ### For Platform Engineers
 
 Understand the foundational software stack:
 
-- [Foundational Software Stack](implementation/09-foundational-software.md)
-- [Nebari Kubernetes Operator](implementation/10-nebari-operator.md)
+- [Foundational Software Stack](implementation/10-foundational-software.md)
+- [Nebari Kubernetes Operator](implementation/11-nebari-operator.md)
 - [Configuration Design](implementation/07-configuration-design.md)
 
 ### For Architects
 
-Review key technical decisions and implementation alternatives:
+Review key technical decisions:
 
 - [Key Architectural Decisions](architecture/04-key-decisions.md)
-- [Stateless Operation & Resource Discovery](architecture/06-stateless-operation.md)
-- [Alternatives Overview](alternatives/README.md) - Compare Native SDK vs OpenTofu approaches
-- [Comparison: Native SDK vs OpenTofu](alternatives/comparison-native-vs-opentofu.md)
-- [OpenTofu Edition Documentation](alternatives/opentofu/architecture/01-introduction.md)
+- [State Management](architecture/05-state-management.md)
+- [OpenTofu Module Architecture](implementation/06-opentofu-module-architecture.md)
 
 ### For QA Engineers
 
 Testing and validation:
 
-- [Testing Strategy](operations/11-testing-strategy.md)
-- [Timeline and Milestones](operations/12-timeline-milestones.md)
+- [Testing Strategy](operations/12-testing-strategy.md)
+- [Milestones](operations/13-milestones.md)
 
 ## Core Technologies
 
 ### Infrastructure Management
 
-- **Go**: Primary implementation language
-- **Native Cloud SDKs**: aws-sdk-go-v2, google-cloud-go, azure-sdk-for-go
-- **client-go**: Kubernetes operations
+- **Go**: CLI orchestration layer
+- **OpenTofu/Terraform**: Infrastructure provisioning via HCL modules
+- **terraform-exec**: Go library for programmatic OpenTofu execution
+- **Terraform State**: Remote state backends (S3, GCS, Azure Blob)
 - **K3s**: Local/on-premises Kubernetes
 
 ### Foundational Software Stack
@@ -189,11 +161,11 @@ Testing and validation:
 
 ## Design Principles
 
-1. **Stateless Operation**: Query cloud APIs for actual state; no state files to manage
-2. **Tag-Based Discovery**: All resources tagged with `nic.nebari.dev/*` for ownership tracking
-3. **Declarative Everything**: Specify desired state; NIC reconciles to match
-4. **Native Cloud SDKs**: Direct SDK usage for maximum control and flexibility
-5. **Automatic Drift Detection**: Compare desired vs actual state on every run
+1. **OpenTofu Modules**: Leverage battle-tested Terraform modules for infrastructure
+2. **terraform-exec Orchestration**: Go CLI orchestrates OpenTofu via terraform-exec library
+3. **Standard State Management**: Terraform state files with remote backends
+4. **Declarative Everything**: Specify desired state; OpenTofu reconciles to match
+5. **Drift Detection**: Terraform plan compares state with actual infrastructure
 6. **Cloud-Agnostic Abstractions**: Unified interface across AWS, GCP, Azure, On-Prem
 7. **Built-in Observability**: OpenTelemetry instrumentation throughout
 8. **GitOps Ready**: ArgoCD for application deployment
@@ -205,6 +177,7 @@ Testing and validation:
 ### Prerequisites
 
 - Go 1.21+
+- OpenTofu 1.6+ (or Terraform 1.6+)
 - kubectl
 - Cloud provider CLI (aws-cli, gcloud, or az)
 - Valid cloud credentials
@@ -232,7 +205,7 @@ go build -o nic cmd/nic/main.go
 # Deploy infrastructure and foundational software
 ./nic deploy -f config.yaml
 
-# Check status (queries cloud APIs for actual state)
+# Check status (runs terraform plan)
 ./nic status -f config.yaml
 
 # Destroy infrastructure
@@ -271,20 +244,20 @@ golangci-lint run
 go vet ./...
 ```
 
-See [Testing Strategy](operations/11-testing-strategy.md) for comprehensive testing guidelines.
+See [Testing Strategy](operations/12-testing-strategy.md) for comprehensive testing guidelines.
 
 ## Project Status
 
 **Current Phase**: Design and Architecture
 **Target Release**: Q2 2025
 
-See [Timeline and Milestones](operations/12-timeline-milestones.md) for detailed roadmap.
+See [Milestones](operations/13-milestones.md) for detailed roadmap.
 
 ## Contributing
 
 We welcome contributions! Key areas:
 
-- Provider implementations (AWS, GCP, Azure, Local)
+- OpenTofu module development (AWS, GCP, Azure, Local)
 - Foundational software integration
 - Kubernetes operator development
 - Documentation improvements
@@ -305,6 +278,7 @@ Apache License 2.0 - See LICENSE file for details.
 ## Related Projects
 
 - **[Nebari](https://github.com/nebari-dev/nebari)**: Original Nebari platform (Terraform-based)
+- **[OpenTofu](https://opentofu.org/)**: Open-source Terraform fork
 - **[ArgoCD](https://argo-cd.readthedocs.io/)**: GitOps continuous deployment
 - **[Keycloak](https://www.keycloak.org/)**: Identity and access management
 - **[Grafana LGTM Stack](https://grafana.com/oss/)**: Observability platform

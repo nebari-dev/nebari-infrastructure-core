@@ -1,24 +1,22 @@
 # OpenTofu Module Architecture
 
-**Note**: This document describes the alternative OpenTofu-based design approach. See [../README.md](../README.md) for comparison with the native SDK design.
+## 6.1 Overview
 
-## Overview
+NIC uses **OpenTofu/Terraform modules** for infrastructure provisioning. The Go CLI orchestrates OpenTofu execution via the terraform-exec library, while actual infrastructure provisioning is handled by HCL-based modules that leverage the Terraform provider ecosystem.
 
-This alternative design uses **OpenTofu/Terraform modules** for infrastructure provisioning instead of direct cloud SDK calls. The Go CLI orchestrates OpenTofu execution via the terraform-exec library, while actual infrastructure provisioning is delegated to HCL-based modules.
-
-## Module Structure
+## 6.2 Module Structure
 
 ### Repository Layout
 
 ```
 nebari-infrastructure-core/
-├── cmd/nic/               # Go CLI (same as main design)
+├── cmd/nic/               # Go CLI (orchestration layer)
 ├── pkg/
-│   ├── tofu/             # terraform-exec wrapper (OpenTofu-specific)
-│   ├── config/           # Parse config.yaml (same as main design)
-│   ├── kubernetes/       # K8s health checks (same as main design)
-│   └── telemetry/        # OpenTelemetry (same as main design)
-├── terraform/            # OpenTofu/Terraform modules (OpenTofu-specific)
+│   ├── tofu/             # terraform-exec wrapper with OpenTelemetry
+│   ├── config/           # Parse config.yaml
+│   ├── kubernetes/       # K8s health checks
+│   └── telemetry/        # OpenTelemetry setup
+├── terraform/            # OpenTofu/Terraform modules
 │   ├── main.tf           # Root module
 │   ├── variables.tf      # Input variables from config.yaml
 │   ├── outputs.tf        # Outputs (kubeconfig, URLs, etc.)
@@ -51,7 +49,7 @@ nebari-infrastructure-core/
 2. **Go CLI (`cmd/nic`)**:
    - Parses `config.yaml` into Go structs
    - Converts config to Terraform variables JSON
-   - Invokes terraform-exec to run `tofu apply`
+   - Invokes terraform-exec to run `tofu init`, `tofu plan`, `tofu apply`
 3. **OpenTofu**:
    - Reads variables JSON
    - Executes `terraform/main.tf` root module
@@ -62,7 +60,7 @@ nebari-infrastructure-core/
    - Waits for ArgoCD and foundational software
    - Reports deployment success
 
-## Root Module Design
+## 6.3 Root Module Design
 
 The root module (`terraform/main.tf`) contains conditional logic to provision the correct cloud resources based on the `provider` variable:
 
@@ -152,19 +150,9 @@ module "gcp_gke" {
 # (Similar pattern for other providers)
 ```
 
-### Key Differences from Native SDK Design
+## 6.4 AWS EKS Module Example
 
-| Aspect | Native SDK | OpenTofu |
-|--------|-----------|----------|
-| **Infrastructure Code** | Go code with cloud SDK calls | HCL modules in `terraform/` directory |
-| **State** | Stateless (queries cloud APIs) | Terraform state file in S3/GCS/Azure Blob |
-| **Execution** | Direct API calls from Go | Go → terraform-exec → OpenTofu → cloud APIs |
-| **Module Reuse** | Write custom provider code | Can use community Terraform modules |
-| **Debugging** | Direct SDK errors | Terraform errors + Go orchestration layer |
-
-## AWS EKS Module Example
-
-Shows how infrastructure is defined in HCL instead of Go SDK calls:
+Shows how infrastructure is defined in HCL:
 
 **terraform/modules/aws/eks/main.tf:**
 
@@ -246,13 +234,15 @@ resource "aws_eks_node_group" "node_pools" {
   }
 
   labels = each.value.labels
-  taints = [
-    for taint in each.value.taints : {
-      key    = taint.key
-      value  = taint.value
-      effect = taint.effect
+
+  dynamic "taint" {
+    for_each = each.value.taints
+    content {
+      key    = taint.value.key
+      value  = taint.value.value
+      effect = taint.value.effect
     }
-  ]
+  }
 
   tags = merge(var.tags, {
     "NodePool" = each.value.name
@@ -285,9 +275,9 @@ output "cluster_oidc_issuer_url" {
 }
 ```
 
-## Community Module Integration
+## 6.5 Community Module Integration
 
-**Major Advantage**: Can leverage battle-tested community modules instead of writing everything from scratch.
+**Major Advantage**: NIC can leverage battle-tested community modules instead of writing everything from scratch.
 
 ### Example: Using terraform-aws-modules/eks
 
@@ -341,20 +331,20 @@ module "eks" {
 
 ### Benefits of Community Modules
 
-- ✅ **Less code**: Reuse proven modules instead of writing 100s of lines of HCL
-- ✅ **Best practices**: Community modules encode AWS/GCP/Azure best practices
-- ✅ **Faster development**: Don't reinvent the wheel for common patterns
-- ✅ **Battle-tested**: Modules used by thousands of companies, bugs are found quickly
-- ✅ **Maintained**: Active community maintenance and updates
+- **Less code**: Reuse proven modules instead of writing 100s of lines of HCL
+- **Best practices**: Community modules encode AWS/GCP/Azure best practices
+- **Faster development**: Don't reinvent the wheel for common patterns
+- **Battle-tested**: Modules used by thousands of companies, bugs are found quickly
+- **Maintained**: Active community maintenance and updates
 
 ### Trade-offs of Community Modules
 
-- ⚠️ **Less control**: Module abstractions may hide details you want to configure
-- ⚠️ **Dependency**: Reliant on module maintainer to fix bugs and add features
-- ⚠️ **Version tracking**: Must monitor and update module versions
-- ⚠️ **Learning curve**: Need to understand module's abstraction layer
+- **Less control**: Module abstractions may hide details you want to configure
+- **Dependency**: Reliant on module maintainer to fix bugs and add features
+- **Version tracking**: Must monitor and update module versions
+- **Learning curve**: Need to understand module's abstraction layer
 
-## Kubernetes Bootstrap Module
+## 6.6 Kubernetes Bootstrap Module
 
 Handles post-cluster setup that's identical across providers:
 
@@ -461,46 +451,236 @@ resource "kubernetes_network_policy_v1" "allow_same_namespace" {
 }
 ```
 
-## Comparison with Native SDK Approach
+## 6.7 ArgoCD Deployment Module
 
-### Code Volume
+ArgoCD is deployed via Helm, then used to deploy all other foundational software:
 
-**OpenTofu Approach**:
-- ~200 lines HCL for AWS EKS module
-- ~100 lines HCL for GCP GKE module
-- ~100 lines HCL for Azure AKS module
-- OR ~50 lines using community modules
+**terraform/modules/argocd/main.tf:**
 
-**Native SDK Approach**:
-- ~300-400 lines Go for AWS provider
-- ~300-400 lines Go for GCP provider
-- ~300-400 lines Go for Azure provider
-- No community module reuse option
+```hcl
+terraform {
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.12"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.25"
+    }
+  }
+}
 
-### Debugging Example
+resource "kubernetes_namespace_v1" "argocd" {
+  metadata {
+    name = "argocd"
+    labels = {
+      "managed-by" = "nic"
+    }
+  }
+}
 
-**OpenTofu Error**:
+resource "helm_release" "argocd" {
+  name       = "argocd"
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argo-cd"
+  version    = var.argocd_version
+  namespace  = kubernetes_namespace_v1.argocd.metadata[0].name
+
+  values = [
+    yamlencode({
+      server = {
+        ingress = {
+          enabled = true
+          hosts   = ["argocd.${var.domain}"]
+        }
+      }
+      configs = {
+        cm = {
+          "admin.enabled" = "false"
+          "oidc.config"   = var.oidc_config
+        }
+      }
+    })
+  ]
+
+  depends_on = [kubernetes_namespace_v1.argocd]
+}
+
+# ArgoCD Applications for foundational software
+resource "kubernetes_manifest" "argocd_app_cert_manager" {
+  manifest = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name      = "cert-manager"
+      namespace = "argocd"
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.foundational_software_repo
+        targetRevision = var.foundational_software_version
+        path           = "cert-manager"
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = "cert-manager"
+      }
+      syncPolicy = {
+        automated = {
+          prune    = true
+          selfHeal = true
+        }
+      }
+    }
+  }
+
+  depends_on = [helm_release.argocd]
+}
+
+# Additional ArgoCD Applications for LGTM stack, Keycloak, Envoy Gateway, etc.
+# (Similar pattern for each foundational software component)
 ```
-Error: creating EKS Node Group: InvalidParameterException:
-The following supplied instance types do not exist: [g5.xlarge]
-```
-→ Must understand: Terraform → AWS API → error propagation
 
-**Native SDK Error**:
-```go
-err := eksClient.CreateNodeGroup(ctx, &eks.CreateNodeGroupInput{...})
-// error: InvalidParameterException: instance type does not exist
+## 6.8 Variables and Configuration
+
+**terraform/variables.tf:**
+
+```hcl
+variable "provider" {
+  description = "Cloud provider: aws, gcp, azure, or local"
+  type        = string
+
+  validation {
+    condition     = contains(["aws", "gcp", "azure", "local"], var.provider)
+    error_message = "Provider must be one of: aws, gcp, azure, local"
+  }
+}
+
+variable "cluster_name" {
+  description = "Name of the Kubernetes cluster"
+  type        = string
+}
+
+variable "region" {
+  description = "Cloud provider region"
+  type        = string
+}
+
+variable "kubernetes_version" {
+  description = "Kubernetes version"
+  type        = string
+  default     = "1.29"
+}
+
+variable "node_pools" {
+  description = "Node pool configurations"
+  type = list(object({
+    name          = string
+    instance_type = string
+    min_size      = number
+    max_size      = number
+    labels        = optional(map(string), {})
+    taints = optional(list(object({
+      key    = string
+      value  = string
+      effect = string
+    })), [])
+  }))
+}
+
+variable "domain" {
+  description = "Base domain for the cluster"
+  type        = string
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+# AWS-specific variables
+variable "aws_vpc_cidr" {
+  description = "CIDR block for AWS VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "aws_availability_zones" {
+  description = "Availability zones for AWS"
+  type        = list(string)
+  default     = []
+}
+
+# GCP-specific variables
+variable "gcp_project_id" {
+  description = "GCP project ID"
+  type        = string
+  default     = ""
+}
+
+# Azure-specific variables
+variable "azure_resource_group" {
+  description = "Azure resource group name"
+  type        = string
+  default     = ""
+}
 ```
-→ Direct error from AWS SDK
+
+## 6.9 Outputs
+
+**terraform/outputs.tf:**
+
+```hcl
+output "kubeconfig" {
+  description = "Kubeconfig for cluster access"
+  value = coalesce(
+    try(module.aws_eks[0].kubeconfig, null),
+    try(module.gcp_gke[0].kubeconfig, null),
+    try(module.azure_aks[0].kubeconfig, null),
+    try(module.local_k3s[0].kubeconfig, null)
+  )
+  sensitive = true
+}
+
+output "cluster_endpoint" {
+  description = "Kubernetes API server endpoint"
+  value = coalesce(
+    try(module.aws_eks[0].cluster_endpoint, null),
+    try(module.gcp_gke[0].cluster_endpoint, null),
+    try(module.azure_aks[0].cluster_endpoint, null),
+    try(module.local_k3s[0].cluster_endpoint, null)
+  )
+}
+
+output "argocd_url" {
+  description = "ArgoCD dashboard URL"
+  value       = "https://argocd.${var.domain}"
+}
+
+output "grafana_url" {
+  description = "Grafana dashboard URL"
+  value       = "https://grafana.${var.domain}"
+}
+
+output "keycloak_url" {
+  description = "Keycloak admin console URL"
+  value       = "https://keycloak.${var.domain}"
+}
+```
+
+---
 
 ## Summary
 
-The OpenTofu approach trades some performance and complexity for:
-- Access to battle-tested Terraform modules
-- Faster initial development (reuse existing modules)
-- Familiar patterns for teams with Terraform experience
-- Standard state format and tooling
+The OpenTofu module architecture provides:
 
-See [../README.md](../README.md) for full comparison and decision guidance.
+- **Modular design**: Separate modules for each cloud provider and component
+- **Community leverage**: Ability to use battle-tested Terraform modules
+- **Standard tooling**: Compatible with terraform-docs, tfsec, Atlantis, etc.
+- **Familiar patterns**: HCL syntax known to most infrastructure engineers
+- **Declarative infrastructure**: Terraform's plan/apply workflow for safe changes
 
----
+See [Terraform-Exec Integration](08-terraform-exec-integration.md) for how the Go CLI orchestrates these modules.

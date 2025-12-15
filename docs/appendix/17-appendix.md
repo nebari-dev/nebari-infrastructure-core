@@ -20,7 +20,7 @@
 | Date       | Decision                                  | Rationale                                    |
 | ---------- | ----------------------------------------- | -------------------------------------------- |
 | 2025-01-30 | Clean break from old Nebari               | 7 years of lessons, avoid legacy complexity  |
-| 2025-01-30 | Use native SDKs instead of Terraform      | Better control, errors, performance          |
+| 2025-01-30 | Use OpenTofu with terraform-exec          | Battle-tested modules, community ecosystem   |
 | 2025-01-30 | Deploy foundational software via ArgoCD   | GitOps best practices, dependency management |
 | 2025-01-30 | Build Nebari Operator for app integration | Automate repetitive auth/o11y/routing tasks  |
 | 2025-01-30 | Use LGTM stack for observability          | Industry standard, proven at scale           |

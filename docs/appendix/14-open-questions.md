@@ -2,7 +2,7 @@
 
 ### 13.1 Technical Questions
 
-1. Should we use a stateless SDK driven architecture, maintain state files or use OpenTofu? (Recommendation: No state files for v1)
+1. **Resolved:** Using OpenTofu with terraform-exec orchestration and standard Terraform state management
 2. **Multi-Cluster:** How to manage multiple clusters in one state file? (Options: separate states, or cluster array in state)
 3. **Custom Kubernetes Distributions:** Support for k0s, k3d, RKE2? (v1: No, v2: Maybe)
 4. **Helm Chart Storage:** Where to store foundational software Helm charts? (OCI registry? Git?)

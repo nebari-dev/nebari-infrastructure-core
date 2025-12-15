@@ -23,7 +23,7 @@ DNS providers follow the same explicit registration pattern as cloud providers:
 Unlike traditional declarative DNS management, the DNS provider interface is **operational**:
 - Methods like `GetRecord()`, `AddRecord()`, `UpdateRecord()`, `DeleteRecord()`
 - `EnsureRecord()` as the primary reconciliation method
-- Query actual state from DNS provider APIs (stateless operation)
+- Query actual state from DNS provider APIs
 - No static list of records in configuration
 
 ### 3. Secrets Management
@@ -290,12 +290,12 @@ cloudflare.EnsureRecord called:
 
 ## Future Enhancements (Post-v0.1.0)
 
-### Phase 2: Native SDK Integration
+### Phase 2: SDK Integration
 
 1. **Cloudflare SDK** - `github.com/cloudflare/cloudflare-go`
-2. **AWS Route53** - `github.com/aws/aws-sdk-go-v2/service/route53`
-3. **Azure DNS** - `github.com/Azure/azure-sdk-for-go/services/dns`
-4. **Google Cloud DNS** - `cloud.google.com/go/dns`
+2. **AWS Route53** - Via OpenTofu aws provider
+3. **Azure DNS** - Via OpenTofu azurerm provider
+4. **Google Cloud DNS** - Via OpenTofu google provider
 
 ### Phase 3: Advanced Features
 
@@ -374,19 +374,18 @@ require (
 )
 ```
 
-### Future (Native SDKs)
+### Future (SDK Integration)
 
 ```go
 require (
-    github.com/cloudflare/cloudflare-go v0.x.x
-    github.com/aws/aws-sdk-go-v2/service/route53 v1.x.x
-    github.com/Azure/azure-sdk-for-go/services/dns v1.x.x
-    cloud.google.com/go/dns v1.x.x
+    github.com/cloudflare/cloudflare-go v0.x.x  // Direct API calls for DNS operations
 )
 ```
 
+Note: AWS Route53, Azure DNS, and Google Cloud DNS may be managed via OpenTofu modules rather than direct SDK calls.
+
 ## Related Documentation
 
-- [Provider Architecture](./08-provider-architecture.md) - Cloud provider design
+- [OpenTofu Module Architecture](./06-opentofu-module-architecture.md) - Infrastructure module design
 - [Configuration Design](./07-configuration-design.md) - Config parsing
-- [Stateless Operation](../architecture/06-stateless-operation.md) - Query-based design
+- [State Management](../architecture/05-state-management.md) - Terraform state backends

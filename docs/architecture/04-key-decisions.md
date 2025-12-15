@@ -22,91 +22,121 @@
 | Makefile-based orchestration | Not portable, hard to debug, limited error handling |
 | Ansible playbooks | YAML hell, imperative, no true state management |
 
-### 4.2 Decision: Stateless Operation (No State Files)
+### 4.2 Decision: OpenTofu/Terraform Modules for Infrastructure
 
-**Context:** Need to track infrastructure state across deployments.
+**Context:** Need to provision cloud infrastructure (VPC, EKS/GKE/AKS, storage) reliably.
 
-**Decision:** No state files. Query cloud provider APIs and Kubernetes APIs for actual state on every run.
+**Decision:** Use OpenTofu/Terraform modules orchestrated via the terraform-exec Go library.
 
 **Rationale:**
 
-- **No state drift**: Cloud APIs are always the source of truth
-- **No state corruption**: Can't corrupt what doesn't exist
-- **No state backends**: No S3 buckets, DynamoDB tables, or locking complexity
-- **No state migration**: Version upgrades don't require state format changes
-- **Automatic drift detection**: Every run compares desired vs actual state
-- **Simpler mental model**: Query → Compare → Reconcile
-- **Easier debugging**: `nic status` just queries cloud APIs
+- **Battle-tested modules**: Leverage existing, proven Terraform modules
+- **Community ecosystem**: Access to thousands of maintained modules
+- **Familiar to teams**: Most infrastructure engineers know Terraform/HCL
+- **Standard tooling**: Works with terraform-docs, tfsec, Atlantis, etc.
+- **Faster development**: Reuse modules instead of writing SDK code from scratch
+- **Standard state format**: Terraform state is well-understood and tooling-rich
 
 **How It Works:**
 
 ```
 Every `nic deploy` run:
 1. Parse config.yaml (desired state)
-2. Query cloud APIs for resources with NIC tags (actual state)
-3. Compare desired vs actual (automatic drift detection)
-4. Apply changes to reconcile differences
-5. Done (no state file written)
-```
-
-**Resource Discovery via Tags:**
-All NIC-managed resources are tagged for discovery:
-
-```go
-tags := map[string]string{
-    "nic.nebari.dev/managed-by":    "nic",
-    "nic.nebari.dev/cluster-name":  "nebari-prod",
-    "nic.nebari.dev/resource-type": "vpc|cluster|node-pool|...",
-    "nic.nebari.dev/version":       "1.0.0",
-}
+2. Convert config to Terraform variables
+3. Run terraform-exec: init, plan, apply
+4. OpenTofu provisions infrastructure via provider plugins
+5. State file updated in remote backend
+6. Go CLI waits for cluster readiness
+7. Deploy foundational software via ArgoCD
 ```
 
 **Trade-offs:**
 
-- ✅ Advantages: No state management complexity, automatic drift detection
-- ⚠️ Slower: +30-60 seconds for cloud API queries per run
-- ⚠️ Requires cloud access: Can't plan changes offline
+- **External dependency**: Requires OpenTofu/Terraform binary installed
+- **State management**: Must configure and manage state backends
+- **Debugging layers**: Errors pass through Go → terraform-exec → OpenTofu → Cloud API
 
-See [Stateless Operation & Resource Discovery](06-stateless-operation.md) for complete details.
+See [State Management](05-state-management.md) for state backend configuration.
 
-### 4.3 Decision: Declarative Semantics with Native SDKs
+### 4.3 Decision: terraform-exec for Go Orchestration
 
-**Context:** How to provision infrastructure without Terraform?
+**Context:** How to invoke OpenTofu from the Go CLI?
 
-**Decision:** Implement declarative reconciliation using cloud provider SDKs directly.
+**Decision:** Use HashiCorp's terraform-exec library for programmatic OpenTofu control.
 
 **Rationale:**
 
-- Full control over API calls
-- Better error messages (no Terraform layer)
-- Faster execution (no plan/apply overhead)
-- Easier debugging (stack traces in Go)
-- Idempotent by design
-- Can implement advanced retry logic
+- Official Go library for Terraform/OpenTofu execution
+- Type-safe interface for init, plan, apply, destroy
+- Structured output parsing (JSON plan output)
+- Well-maintained and documented
+- Supports both Terraform and OpenTofu binaries
 
 **Implementation Pattern:**
 
 ```go
-// Declarative reconciliation loop
-func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error {
-    actual, err := p.Query(ctx)
-    if err != nil {
-        return fmt.Errorf("querying actual state: %w", err)
+// terraform-exec wrapper with OpenTelemetry instrumentation
+func (e *Executor) Apply(ctx context.Context, varFiles []string) error {
+    ctx, span := tracer.Start(ctx, "Executor.Apply")
+    defer span.End()
+
+    slog.InfoContext(ctx, "applying infrastructure changes")
+
+    var opts []tfexec.ApplyOption
+    for _, vf := range varFiles {
+        opts = append(opts, tfexec.VarFile(vf))
     }
 
-    diff := calculateDiff(desired, actual)
-
-    for _, change := range diff.Changes {
-        if err := p.applyChange(ctx, change); err != nil {
-            return fmt.Errorf("applying change %s: %w", change.ID, err)
-        }
+    if err := e.tf.Apply(ctx, opts...); err != nil {
+        span.RecordError(err)
+        return fmt.Errorf("terraform apply: %w", err)
     }
 
     return nil
 }
 ```
 
-### 4.4 Decision: ArgoCD for Foundational Software
+See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md) for complete implementation.
+
+### 4.4 Decision: Terraform State with Remote Backends
+
+**Context:** Need to track infrastructure state across deployments.
+
+**Decision:** Use standard Terraform state files stored in remote backends (S3, GCS, Azure Blob).
+
+**Rationale:**
+
+- **Standard format**: Terraform state is industry-standard
+- **Team collaboration**: Remote backends support concurrent access with locking
+- **State versioning**: Backends like S3 support versioning for recovery
+- **Drift detection**: `terraform plan` compares state with actual infrastructure
+- **Ecosystem integration**: Works with Atlantis, Terraform Cloud, etc.
+
+**State Backend Configuration:**
+
+```hcl
+# AWS Backend (S3 + DynamoDB for locking)
+terraform {
+  backend "s3" {
+    bucket         = "nebari-prod-terraform-state"
+    key            = "nic/terraform.tfstate"
+    region         = "us-west-2"
+    encrypt        = true
+    dynamodb_table = "nebari-prod-terraform-locks"
+  }
+}
+```
+
+**Trade-offs:**
+
+- **Setup required**: Must create and configure state backend resources
+- **State drift risk**: State file can diverge from actual infrastructure
+- **Sensitive data**: State files contain credentials and must be secured
+- **Locking complexity**: Lock conflicts require manual resolution
+
+See [State Management](05-state-management.md) for complete backend configuration.
+
+### 4.5 Decision: ArgoCD for Foundational Software
 
 **Context:** How to deploy and manage foundational software (Keycloak, LGTM, etc.)?
 
@@ -124,9 +154,9 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
 **Deployment Order:**
 
 ```
-1. ArgoCD (Helm chart via NIC)
+1. ArgoCD (Helm chart via Terraform helm provider)
    ↓
-2. ArgoCD Applications (via NIC)
+2. ArgoCD Applications (via Terraform kubernetes provider)
    ├── cert-manager (first, for TLS)
    ├── Envoy Gateway (depends on cert-manager)
    ├── OpenTelemetry Collector
@@ -136,7 +166,7 @@ func (p *AWSProvider) Reconcile(ctx context.Context, desired DesiredState) error
    └── Nebari Operator (last, depends on all)
 ```
 
-### 4.5 Decision: Nebari Kubernetes Operator
+### 4.6 Decision: Nebari Kubernetes Operator
 
 **Context:** Applications need to integrate with auth, o11y, and routing.
 
@@ -195,7 +225,7 @@ spec:
 5. Configures OpenTelemetry ServiceMonitor
 6. Updates status with URLs and credentials
 
-### 4.6 Decision: OpenTelemetry Throughout
+### 4.7 Decision: OpenTelemetry Throughout
 
 **Context:** Need comprehensive observability for NIC itself.
 
@@ -211,25 +241,28 @@ spec:
 
 **Implementation:**
 
-- Every provider function wrapped in trace span
+- Every Go function wrapped in trace span
 - Structured logging via slog with trace context
 - Custom metrics for resource counts, deployment time, errors
 - Export to deployed LGTM stack
 
-### 4.7 Decision: Compiled Providers with Explicit Registration
+### 4.8 Decision: Go CLI with Embedded Modules
 
-**Context:** How to structure provider plugins?
+**Context:** How to package and distribute NIC?
 
-**Decision:** All providers compiled into single binary, registered explicitly in `main()`.
+**Decision:** Single Go binary with OpenTofu modules embedded or cloned from git.
 
 **Rationale:**
 
-- No blank imports (`import _ "..."`) anti-pattern
-- Easy to test and debug
-- Fast startup (no plugin RPC overhead)
-- Simple deployment (single binary)
-- Clear dependency graph
+- Easy installation (go install or download binary)
+- Modules version-locked with NIC release
+- Predictable behavior across environments
+- No separate module download step
 
-**Future:** May add RPC plugins (go-plugin) in v2.0+ for community providers.
+**Module Delivery Options:**
+
+1. **Embedded** (default): Modules embedded in binary via Go embed
+2. **Git clone**: Modules cloned from versioned git tag
+3. **Local path**: Modules from local filesystem (development)
 
 ---

@@ -1,14 +1,25 @@
 # Terraform-Exec Integration
 
-**Note**: This document describes how Go code orchestrates OpenTofu execution in the alternative OpenTofu-based design. See [../README.md](../README.md) for comparison with the native SDK design.
+## 8.1 Overview
 
-## Overview
+NIC uses the `hashicorp/terraform-exec` library to orchestrate OpenTofu execution from Go. The Go CLI doesn't make direct cloud API calls; instead, it manages the OpenTofu lifecycle (init, plan, apply, destroy) and processes outputs.
 
-In the OpenTofu alternative design, the Go CLI doesn't make direct cloud API calls. Instead, it orchestrates OpenTofu execution using the `hashicorp/terraform-exec` library. This library provides a programmatic interface to run OpenTofu commands (init, plan, apply, destroy) from Go code.
+## 8.2 Execution Flow
 
-## Wrapper Package Design
+```
+User → NIC CLI → terraform-exec → OpenTofu Binary → Terraform Provider → Cloud API → Infrastructure
+```
 
-The `pkg/tofu` package wraps terraform-exec with OpenTelemetry instrumentation and structured logging:
+1. User runs `nic deploy -f config.yaml`
+2. Go CLI parses config and generates Terraform variables
+3. terraform-exec invokes OpenTofu init, plan, apply
+4. OpenTofu uses provider plugins to call cloud APIs
+5. State file updated in remote backend
+6. Go CLI retrieves outputs and waits for readiness
+
+## 8.3 Wrapper Package Design
+
+The `pkg/tofu` package wraps terraform-exec with OpenTelemetry instrumentation:
 
 **pkg/tofu/executor.go:**
 
@@ -171,7 +182,7 @@ func (e *Executor) Output(ctx context.Context) (map[string]tfexec.OutputMeta, er
 }
 
 // Show retrieves the current state
-func (e *Executor) Show(ctx context.Context) (*tfexec.State, error) {
+func (e *Executor) Show(ctx context.Context) (*tfjson.State, error) {
     ctx, span := tracer.Start(ctx, "Executor.Show")
     defer span.End()
 
@@ -187,9 +198,7 @@ func (e *Executor) Show(ctx context.Context) (*tfexec.State, error) {
 }
 ```
 
-## Deploy Command Integration
-
-How the deploy command uses the tofu executor:
+## 8.4 Deploy Command Integration
 
 **cmd/nic/deploy.go:**
 
@@ -201,6 +210,7 @@ import (
     "encoding/json"
     "fmt"
     "os"
+    "os/exec"
     "path/filepath"
 
     "github.com/spf13/cobra"
@@ -278,12 +288,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
     }
 
     if !hasChanges {
-        fmt.Println("✅ No infrastructure changes needed")
+        fmt.Println("No infrastructure changes needed")
         return nil
     }
 
     // Step 7: Apply infrastructure changes
-    if err := executor.Apply(ctx, []string{varsFile})if err != nil {
+    if err := executor.Apply(ctx, []string{varsFile}); err != nil {
         span.RecordError(err)
         return fmt.Errorf("terraform apply: %w", err)
     }
@@ -308,7 +318,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
         return fmt.Errorf("waiting for foundational software: %w", err)
     }
 
-    fmt.Println("✅ Nebari deployed successfully")
+    fmt.Println("Nebari deployed successfully")
     fmt.Printf("   Domain: %s\n", cfg.Domain)
     fmt.Printf("   ArgoCD: https://argocd.%s\n", cfg.Domain)
     fmt.Printf("   Grafana: https://grafana.%s\n", cfg.Domain)
@@ -324,12 +334,24 @@ func generateTerraformVars(ctx context.Context, cfg *config.NebariConfig) (strin
 
     // Convert Go config struct to Terraform variables map
     vars := map[string]any{
-        "provider":      cfg.Provider,
-        "cluster_name":  cfg.ProjectName,
-        "domain":        cfg.Domain,
-        "region":        getRegion(cfg),
-        "node_pools":    convertNodePools(cfg),
-        "tags":          getTags(cfg),
+        "provider":           cfg.Provider,
+        "cluster_name":       cfg.ProjectName,
+        "domain":             cfg.Domain,
+        "region":             getRegion(cfg),
+        "kubernetes_version": cfg.KubernetesVersion,
+        "node_pools":         convertNodePools(cfg),
+        "tags":               getTags(cfg),
+    }
+
+    // Add provider-specific variables
+    switch cfg.Provider {
+    case "aws":
+        vars["aws_vpc_cidr"] = cfg.AmazonWebServices.VPC.CIDR
+        vars["aws_availability_zones"] = cfg.AmazonWebServices.AvailabilityZones
+    case "gcp":
+        vars["gcp_project_id"] = cfg.GoogleCloudPlatform.ProjectID
+    case "azure":
+        vars["azure_resource_group"] = cfg.Azure.ResourceGroup
     }
 
     // Write to temporary file
@@ -350,7 +372,7 @@ func generateTerraformVars(ctx context.Context, cfg *config.NebariConfig) (strin
 
 // findOpenTofuBinary locates the tofu or terraform binary
 func findOpenTofuBinary() (string, error) {
-    // Try tofu first
+    // Try tofu first (OpenTofu)
     if path, err := exec.LookPath("tofu"); err == nil {
         return path, nil
     }
@@ -364,87 +386,253 @@ func findOpenTofuBinary() (string, error) {
 }
 ```
 
-## Key Differences from Native SDK Design
+## 8.5 Error Handling
 
-### Execution Flow
+**Terraform errors are wrapped with context:**
 
-**Native SDK Design**:
-```
-User → NIC CLI → Cloud SDK → Cloud API → Infrastructure
-```
-
-**OpenTofu Design**:
-```
-User → NIC CLI → terraform-exec → OpenTofu Binary → Terraform Provider → Cloud API → Infrastructure
-```
-
-### Error Handling
-
-**Native SDK**:
 ```go
-// Direct error from AWS SDK
-err := eksClient.CreateCluster(ctx, &eks.CreateClusterInput{...})
-// Error: ValidationException: Invalid instance type
-```
-
-**OpenTofu**:
-```go
-// Terraform error wrapping cloud API error
+// Direct error from terraform-exec
 err := executor.Apply(ctx, varFiles)
 // Error: terraform apply: creating EKS Cluster: ValidationException: Invalid instance type
+
+// The Go CLI can provide additional context
+if err != nil {
+    slog.ErrorContext(ctx, "deployment failed",
+        "error", err,
+        "provider", cfg.Provider,
+        "cluster", cfg.ProjectName,
+    )
+    return fmt.Errorf("deploying %s: %w", cfg.ProjectName, err)
+}
 ```
 
-### State Management
+**Error types and handling:**
 
-**Native SDK**: Stateless - queries cloud APIs for actual state
+```go
+// Check for specific Terraform error types
+import "github.com/hashicorp/terraform-exec/tfexec"
 
-**OpenTofu**: Terraform state file tracks expected state
-- Requires backend configuration (S3, GCS, Azure Blob)
-- State locking to prevent concurrent modifications
-- State drift can occur if resources modified outside Terraform
+if exitErr, ok := err.(*tfexec.ErrTerraformNotFound); ok {
+    return fmt.Errorf("OpenTofu/Terraform not installed: %w", exitErr)
+}
 
-## Benefits vs. Trade-offs
-
-### Benefits
-
-- ✅ Leverage existing Terraform modules (no need to write cloud SDK code)
-- ✅ Terraform ecosystem tools work (terraform-docs, tfsec, etc.)
-- ✅ Standard state format understood by teams
-- ✅ Less Go code to write and maintain
-
-### Trade-offs
-
-- ⚠️ External dependency (requires OpenTofu/Terraform binary installed)
-- ⚠️ Additional execution layer (slower than direct SDK calls)
-- ⚠️ State management complexity (state files, locking, drift)
-- ⚠️ Debugging requires understanding Go → Terraform → Cloud API flow
-- ⚠️ Error messages less direct than native SDK errors
-
-## Working Directory Management
-
-OpenTofu requires a working directory with Terraform modules:
-
-```
-.nic/
-├── terraform/          # Working directory
-│   ├── .terraform/    # Terraform plugins and modules
-│   ├── terraform.tfstate  # State file (if using local backend)
-│   ├── vars.json      # Generated from config.yaml
-│   └── backend.tf     # Generated backend configuration
+if lockErr, ok := err.(*tfexec.ErrStateLocked); ok {
+    return fmt.Errorf("state locked by another process: %w", lockErr)
+}
 ```
 
-The Go code manages this working directory lifecycle:
-1. Create working directory if not exists
-2. Copy Terraform modules from embedded FS or git clone
-3. Generate `vars.json` from `config.yaml`
-4. Generate `backend.tf` from config
-5. Run `tofu init`, `tofu plan`, `tofu apply`
-6. Cleanup temporary files
+## 8.6 Working Directory Management
+
+The Go CLI manages the Terraform working directory:
+
+```go
+// pkg/tofu/workspace.go
+package tofu
+
+import (
+    "embed"
+    "io/fs"
+    "os"
+    "path/filepath"
+)
+
+//go:embed modules/*
+var embeddedModules embed.FS
+
+type Workspace struct {
+    baseDir string
+}
+
+// NewWorkspace creates or opens a workspace
+func NewWorkspace(baseDir string) (*Workspace, error) {
+    ws := &Workspace{baseDir: baseDir}
+
+    // Create .nic/terraform directory
+    tfDir := filepath.Join(baseDir, ".nic", "terraform")
+    if err := os.MkdirAll(tfDir, 0755); err != nil {
+        return nil, fmt.Errorf("creating workspace: %w", err)
+    }
+
+    // Extract embedded modules if not present
+    if err := ws.extractModules(tfDir); err != nil {
+        return nil, fmt.Errorf("extracting modules: %w", err)
+    }
+
+    return ws, nil
+}
+
+// extractModules copies embedded Terraform modules to workspace
+func (ws *Workspace) extractModules(destDir string) error {
+    return fs.WalkDir(embeddedModules, "modules", func(path string, d fs.DirEntry, err error) error {
+        if err != nil {
+            return err
+        }
+
+        destPath := filepath.Join(destDir, path)
+
+        if d.IsDir() {
+            return os.MkdirAll(destPath, 0755)
+        }
+
+        content, err := embeddedModules.ReadFile(path)
+        if err != nil {
+            return err
+        }
+
+        return os.WriteFile(destPath, content, 0644)
+    })
+}
+
+// GenerateBackendConfig creates backend.tf from config
+func (ws *Workspace) GenerateBackendConfig(cfg *config.NebariConfig) error {
+    tmpl := `
+terraform {
+  backend "{{.Type}}" {
+    {{- if eq .Type "s3" }}
+    bucket         = "{{.Bucket}}"
+    key            = "{{.Key}}"
+    region         = "{{.Region}}"
+    encrypt        = true
+    dynamodb_table = "{{.DynamoDBTable}}"
+    {{- end }}
+    {{- if eq .Type "gcs" }}
+    bucket = "{{.Bucket}}"
+    prefix = "{{.Prefix}}"
+    {{- end }}
+    {{- if eq .Type "azurerm" }}
+    storage_account_name = "{{.StorageAccount}}"
+    container_name       = "{{.Container}}"
+    key                  = "{{.Key}}"
+    {{- end }}
+  }
+}
+`
+    // ... template execution
+    return nil
+}
+```
+
+## 8.7 Output Processing
+
+**Retrieving and using Terraform outputs:**
+
+```go
+// pkg/tofu/outputs.go
+package tofu
+
+import (
+    "encoding/json"
+    "fmt"
+)
+
+type DeploymentOutputs struct {
+    Kubeconfig      string `json:"kubeconfig"`
+    ClusterEndpoint string `json:"cluster_endpoint"`
+    ArgocdURL       string `json:"argocd_url"`
+    GrafanaURL      string `json:"grafana_url"`
+    KeycloakURL     string `json:"keycloak_url"`
+}
+
+func (e *Executor) GetDeploymentOutputs(ctx context.Context) (*DeploymentOutputs, error) {
+    ctx, span := tracer.Start(ctx, "GetDeploymentOutputs")
+    defer span.End()
+
+    rawOutputs, err := e.Output(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("getting outputs: %w", err)
+    }
+
+    outputs := &DeploymentOutputs{}
+
+    if kc, ok := rawOutputs["kubeconfig"]; ok {
+        outputs.Kubeconfig = string(kc.Value)
+    }
+
+    if ep, ok := rawOutputs["cluster_endpoint"]; ok {
+        outputs.ClusterEndpoint = string(ep.Value)
+    }
+
+    if argocd, ok := rawOutputs["argocd_url"]; ok {
+        outputs.ArgocdURL = string(argocd.Value)
+    }
+
+    if grafana, ok := rawOutputs["grafana_url"]; ok {
+        outputs.GrafanaURL = string(grafana.Value)
+    }
+
+    if keycloak, ok := rawOutputs["keycloak_url"]; ok {
+        outputs.KeycloakURL = string(keycloak.Value)
+    }
+
+    return outputs, nil
+}
+```
+
+## 8.8 State Operations
+
+**Exposing state commands via CLI:**
+
+```go
+// cmd/nic/state.go
+var stateCmd = &cobra.Command{
+    Use:   "state",
+    Short: "Terraform state operations",
+}
+
+var stateListCmd = &cobra.Command{
+    Use:   "list",
+    Short: "List resources in state",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        executor, err := getExecutor(cmd)
+        if err != nil {
+            return err
+        }
+
+        state, err := executor.Show(cmd.Context())
+        if err != nil {
+            return err
+        }
+
+        for _, resource := range state.Values.RootModule.Resources {
+            fmt.Printf("%s.%s\n", resource.Type, resource.Name)
+        }
+
+        return nil
+    },
+}
+
+var stateShowCmd = &cobra.Command{
+    Use:   "show [address]",
+    Short: "Show a resource in state",
+    Args:  cobra.ExactArgs(1),
+    RunE: func(cmd *cobra.Command, args []string) error {
+        executor, err := getExecutor(cmd)
+        if err != nil {
+            return err
+        }
+
+        // Use terraform state show command
+        output, err := executor.StateShow(cmd.Context(), args[0])
+        if err != nil {
+            return err
+        }
+
+        fmt.Println(output)
+        return nil
+    },
+}
+```
+
+---
 
 ## Summary
 
-The terraform-exec integration provides programmatic control over OpenTofu while delegating infrastructure provisioning to proven Terraform modules. This trades some performance and adds state management complexity in exchange for module reuse and faster development.
+The terraform-exec integration provides:
 
-See [../README.md](../README.md) for full comparison and [07-state-management.md](07-state-management.md) for state handling details.
+- **Programmatic control**: Go CLI orchestrates OpenTofu without shell scripts
+- **OpenTelemetry instrumentation**: Full tracing of Terraform operations
+- **Error handling**: Structured error types for better debugging
+- **Output processing**: Type-safe access to Terraform outputs
+- **State management**: CLI commands for state operations
 
----
+See [State Management](../architecture/05-state-management.md) for backend configuration and [OpenTofu Module Architecture](06-opentofu-module-architecture.md) for module design.

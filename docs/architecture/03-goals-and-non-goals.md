@@ -7,7 +7,7 @@
 2. ✅ Deploy all foundational software via ArgoCD
 3. ✅ Nebari Operator with basic nebari-application CRD support
 4. ✅ Working auth (Keycloak), o11y (LGTM), routing (Envoy)
-5. ✅ Stateless operation with tag-based resource discovery
+5. ✅ OpenTofu-based infrastructure provisioning with standard state management
 6. ✅ OpenTelemetry instrumentation throughout NIC
 7. ✅ Comprehensive documentation and examples
 

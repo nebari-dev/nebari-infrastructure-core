@@ -8,10 +8,10 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 1. **Opinionated by Default**: Best practices from 7 years of production Nebari deployments
 2. **Complete Platform**: Kubernetes + foundational software (auth, o11y, routing, GitOps)
-3. **Declarative Infrastructure**: Declare desired state, NIC reconciles to match
-4. **Native SDKs**: Use cloud provider SDKs directly, not Terraform
-5. **Stateless Operation**: No state files - query cloud APIs for actual state every run
-6. **Tag-Based Discovery**: All resources tagged for identification and ownership
+3. **Declarative Infrastructure**: Declare desired state, OpenTofu reconciles to match
+4. **OpenTofu Modules**: Leverage battle-tested Terraform/OpenTofu modules for infrastructure
+5. **terraform-exec Orchestration**: Go CLI controls OpenTofu via terraform-exec library
+6. **Standard State Management**: Terraform state files with remote backends (S3, GCS, Azure Blob)
 7. **Multi-Cloud Consistency**: Common platform experience across all providers
 8. **Observability-First**: OpenTelemetry instrumentation and LGTM stack built-in
 9. **Application-Centric**: Nebari Operator automates app registration with auth, o11y, routing
@@ -46,7 +46,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Cloud Infrastructure (Provisioned by NIC)                  │
+│ Cloud Infrastructure (Provisioned by NIC via OpenTofu)     │
 │ - VPC/Networking                                           │
 │ - Managed Kubernetes (EKS/GKE/AKS/K3s)                    │
 │ - Node pools & auto-scaling                               │
@@ -58,14 +58,13 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 **In Scope:**
 
-- Cloud infrastructure provisioning (VPC, managed K8s, node pools, storage, IAM)
+- Cloud infrastructure provisioning via OpenTofu modules (VPC, managed K8s, node pools, storage, IAM)
 - Kubernetes cluster deployment (production-ready configuration)
 - Foundational software deployment (Keycloak, LGTM, cert-manager, Envoy, ArgoCD)
 - Nebari Kubernetes Operator (nebari-application CRD)
 - Supported platforms: AWS (EKS), GCP (GKE), Azure (AKS), On-Prem (K3s)
 - Configuration via declarative YAML
-- Stateless operation via cloud API queries
-- Resource tagging for discovery and ownership tracking
+- Terraform state management with remote backends
 - OpenTelemetry instrumentation throughout
 - Structured logging via slog
 
@@ -73,7 +72,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 - Application deployment (handled by users via ArgoCD or kubectl)
 - Legacy Nebari compatibility (clean break)
-- Terraform integration (native SDKs only)
+- Custom cloud SDK implementations (using OpenTofu/Terraform ecosystem)
 - Managed database services (users provision separately)
 - CI/CD pipelines (beyond ArgoCD for foundational software)
 
@@ -89,7 +88,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 **What We're Changing:**
 
-- ❌ **Terraform complexity** → ✅ Native SDKs with Go
+- ❌ **Custom Terraform wrappers** → ✅ terraform-exec orchestration with Go CLI
 - ❌ **Staged deployment fragmentation** → ✅ Unified deployment
 - ❌ **Manual app integration** → ✅ Operator-automated registration
 - ❌ **Scattered observability** → ✅ Unified LGTM stack + OpenTelemetry
@@ -104,7 +103,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 | **Auth integration is tedious**          | Operator automates OAuth client creation              |
 | **Observability is an afterthought**     | LGTM stack + OpenTelemetry built-in                   |
 | **Certificate management is painful**    | cert-manager + automated ingress TLS                  |
-| **Terraform state issues cause outages** | Stateless design uses actual infra as source of truth |
+| **Terraform modules are battle-tested**  | Leverage community OpenTofu/Terraform modules         |
 | **Multi-cloud drift is real**            | Provider abstraction enforces consistency             |
 | **GitOps reduces deployment errors**     | ArgoCD for all foundational components                |
 

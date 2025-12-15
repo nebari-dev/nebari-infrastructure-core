@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. User defines config.yaml                         │
+│ 1. User defines config.yaml                                 │
 │    - Cloud provider (aws/gcp/azure/local)                  │
 │    - Cluster size and node pools                           │
 │    - Foundational software configuration                   │
@@ -15,11 +15,13 @@
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. NIC CLI parses config and plans deployment              │
-│    $ nic deploy -f config.yaml                      │
+│    $ nic deploy -f config.yaml                             │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Cloud Infrastructure Provisioning (Native SDKs)         │
+│ 3. Cloud Infrastructure Provisioning (OpenTofu)            │
+│    - Go CLI invokes terraform-exec                         │
+│    - OpenTofu executes HCL modules                         │
 │    ├── VPC/Network (subnets, security groups, NAT)        │
 │    ├── Managed Kubernetes (EKS/GKE/AKS/K3s)               │
 │    ├── Node Pools (general, compute, gpu)                 │
@@ -28,7 +30,7 @@
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. Kubernetes Bootstrap                                    │
+│ 4. Kubernetes Bootstrap (via OpenTofu kubernetes provider) │
 │    ├── Namespaces (nebari-system, monitoring, ingress)    │
 │    ├── Storage Classes (persistent volumes)               │
 │    ├── RBAC (cluster roles, service accounts)             │
@@ -37,7 +39,7 @@
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. ArgoCD Deployment (Helm)                                │
+│ 5. ArgoCD Deployment (Helm via OpenTofu)                   │
 │    - Installed in nebari-system namespace                  │
 │    - Configured with foundational-software repo            │
 │    - Sets up app-of-apps pattern                          │
@@ -76,26 +78,34 @@
 **NIC CLI (`cmd/nic`):**
 
 - Command-line interface for platform management
-- Commands: `deploy`, `destroy`, `status`, `validate`, `plan`, `upgrade`
-- Explicit provider registration (no blank imports)
+- Commands: `deploy`, `destroy`, `status`, `validate`, `plan`
+- Orchestrates OpenTofu via terraform-exec library
 - OpenTelemetry tracing for all operations
 - Structured logging via slog
 
-**Provider Implementations (`pkg/provider`):**
+**terraform-exec Wrapper (`pkg/tofu`):**
 
-- `aws/` - EKS, VPC, EC2, EFS via aws-sdk-go-v2
-- `gcp/` - GKE, VPC, Filestore via google-cloud-go
-- `azure/` - AKS, VNet, Azure Files via azure-sdk-for-go
-- `local/` - K3s, local storage via k3s API
+- Programmatic control of OpenTofu execution
+- Init, Plan, Apply, Destroy, Output methods
+- Working directory and state management
+- OpenTelemetry instrumented
 
-**Kubernetes Management (`pkg/kubernetes`):**
+**OpenTofu Modules (`terraform/modules`):**
+
+- `aws/` - VPC, EKS, EFS modules
+- `gcp/` - VPC, GKE, Filestore modules
+- `azure/` - VNet, AKS, Azure Files modules
+- `local/` - K3s module
+- `kubernetes/` - Bootstrap resources
+- `argocd/` - ArgoCD and foundational apps
+
+**Kubernetes Management (via OpenTofu kubernetes provider):**
 
 - Bootstrap resources (namespaces, RBAC, storage classes)
-- ArgoCD installation via Helm
+- ArgoCD installation via Helm provider
 - Foundational software ArgoCD applications
-- Uses client-go for all Kubernetes operations
 
-**Foundational Software (`pkg/foundational`):**
+**Foundational Software (deployed by ArgoCD):**
 
 - ArgoCD application definitions
 - Configuration templates for each component
@@ -113,8 +123,9 @@
 
 | Design Choice                        | Rationale                                                               |
 | ------------------------------------ | ----------------------------------------------------------------------- |
-| **Native SDKs vs Terraform**         | Direct control, better error messages, faster execution, no HCL layer   |
-| **Stateless vs Terraform State**     | Actual Infrastruture is source of truth                                 |
+| **OpenTofu vs Custom SDKs**          | Battle-tested modules, community ecosystem, familiar to teams           |
+| **terraform-exec Orchestration**     | Programmatic control, OpenTelemetry instrumentation, Go integration     |
+| **Terraform State vs Stateless**     | Standard tooling, team collaboration, ecosystem compatibility           |
 | **ArgoCD for Foundational Software** | GitOps best practices, dependency management, declarative updates       |
 | **Operator for App Registration**    | Automates repetitive tasks, reduces human error, consistent integration |
 | **LGTM Stack vs Custom**             | Industry-standard, proven at scale, unified Grafana Labs ecosystem      |

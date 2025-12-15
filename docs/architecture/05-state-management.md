@@ -1,26 +1,12 @@
 # State Management with Terraform State
 
-**Note**: This document describes state management in the OpenTofu alternative design. See [../README.md](../README.md) for comparison with the stateless native SDK design.
+## 5.1 Overview
 
-## Overview
+NIC uses **Terraform state files** to track infrastructure. The state file records what resources Terraform has created and their current configuration, enabling drift detection and safe updates.
 
-The OpenTofu alternative design uses **Terraform state files** to track infrastructure, unlike the main design which is stateless and queries cloud APIs directly.
+## 5.2 Terraform State Backends
 
-### Key Difference
-
-**Native SDK Design (Main)**:
-- Stateless: No state files
-- Queries cloud APIs for actual state on every run
-- Uses tag-based discovery to find NIC-managed resources
-
-**OpenTofu Design (Alternative)**:
-- Stateful: Terraform state file tracks expected state
-- Compares state file with cloud APIs to detect drift
-- Requires state backend configuration and locking
-
-## Terraform State Backends
-
-NIC generates backend configuration based on provider and user preferences.
+NIC generates backend configuration based on the cloud provider and user preferences.
 
 ### AWS (S3 + DynamoDB for Locking)
 
@@ -92,9 +78,9 @@ terraform {
 - No state locking across multiple users
 - State file lost if local machine fails
 
-## State Locking
+## 5.3 State Locking
 
-Terraform handles locking automatically:
+Terraform handles locking automatically to prevent concurrent modifications:
 
 | Backend | Locking Mechanism | Configuration Required |
 |---------|------------------|----------------------|
@@ -132,9 +118,9 @@ If you're sure no other operation is running, you can force unlock:
   nic unlock -f config.yaml
 ```
 
-## Drift Detection
+## 5.4 Drift Detection
 
-Drift detection compares state file with actual cloud infrastructure:
+Drift detection compares state file with actual cloud infrastructure via `terraform plan`:
 
 ```go
 func (p *TofuProvider) DetectDrift(ctx context.Context) (*DriftReport, error) {
@@ -211,9 +197,9 @@ Plan: 0 to add, 1 to change, 0 to destroy
 No changes. Your infrastructure matches the configuration.
 ```
 
-## State Operations
+## 5.5 State Operations
 
-Terraform provides built-in state commands that NIC can expose:
+NIC exposes Terraform state commands:
 
 ```bash
 # List resources in state
@@ -229,7 +215,7 @@ nic state rm aws_eks_node_group.old_pool
 nic state mv aws_eks_node_group.workers aws_eks_node_group.renamed
 ```
 
-## State Migration
+## 5.6 State Migration
 
 When changing backend configuration:
 
@@ -265,7 +251,7 @@ Do you want to copy existing state to the new backend?
 Successfully migrated state to new backend.
 ```
 
-## State File Security
+## 5.7 State File Security
 
 ### Encryption at Rest
 
@@ -294,41 +280,66 @@ Terraform state files contain **sensitive data**:
 4. Enable state file versioning for recovery
 5. Regularly rotate credentials stored in state
 
-## Comparison with Native SDK Stateless Approach
+## 5.8 State Backend Setup
 
-| Aspect | OpenTofu (Stateful) | Native SDK (Stateless) |
-|--------|---------------------|----------------------|
-| **State Storage** | Terraform state file in S3/GCS/Azure Blob | No state file |
-| **State Queries** | Read from state file | Query cloud APIs directly |
-| **Drift Detection** | Compare state file with cloud APIs | Compare config with cloud APIs |
-| **Locking** | Terraform backend locking | No locking needed (stateless) |
-| **Setup** | Create state backend resources | No setup needed |
-| **Collaboration** | State backend shared across team | Tag-based discovery shared across team |
-| **State Drift Risk** | State can diverge from reality | Always queries actual state |
-| **Performance** | Faster (reads from state file) | Slower (queries cloud APIs) |
+NIC can automatically create state backend resources:
 
-## Trade-offs
+```bash
+# Initialize state backend (creates S3 bucket, DynamoDB table, etc.)
+nic init-backend -f config.yaml
 
-### Advantages of Terraform State
+Creating state backend resources...
+  - S3 Bucket: nebari-prod-terraform-state
+  - DynamoDB Table: nebari-prod-terraform-locks
 
-- ✅ Standard format understood by Terraform ecosystem
-- ✅ Built-in locking prevents concurrent modifications
-- ✅ State history/versioning for rollback
-- ✅ Terraform tooling works (atlantis, terraform-docs, etc.)
-- ✅ Faster operations (reads from state vs. cloud API queries)
+State backend initialized successfully.
+```
 
-### Disadvantages of Terraform State
+Or users can create resources manually and configure in config.yaml:
 
-- ⚠️ State drift: state file can diverge from actual infrastructure
-- ⚠️ Additional setup: must create and manage state backend
-- ⚠️ Security: state file contains sensitive data
-- ⚠️ Complexity: state locking, migration, corruption recovery
-- ⚠️ Single point of failure: corrupted state file breaks deployments
+```yaml
+# config.yaml
+project_name: nebari-prod
+provider: aws
+
+state_backend:
+  type: s3
+  bucket: my-existing-state-bucket
+  key: nebari/terraform.tfstate
+  region: us-west-2
+  dynamodb_table: my-existing-lock-table
+```
+
+## 5.9 Working Directory Management
+
+OpenTofu requires a working directory with state and modules:
+
+```
+.nic/
+├── terraform/          # Working directory
+│   ├── .terraform/    # Terraform plugins and modules
+│   ├── terraform.tfstate  # State file (if using local backend)
+│   ├── vars.json      # Generated from config.yaml
+│   └── backend.tf     # Generated backend configuration
+```
+
+The Go CLI manages this working directory lifecycle:
+1. Create working directory if not exists
+2. Copy Terraform modules from embedded FS or git clone
+3. Generate `vars.json` from `config.yaml`
+4. Generate `backend.tf` from config
+5. Run `tofu init`, `tofu plan`, `tofu apply`
+6. Cleanup temporary files
+
+---
 
 ## Summary
 
-The OpenTofu alternative uses standard Terraform state management, which provides familiarity for teams with Terraform experience but adds stateful complexity compared to the main design's stateless approach.
+NIC uses standard Terraform state management with remote backends, providing:
 
-For a stateless alternative that avoids these trade-offs, see the main native SDK design documentation.
+- **Team collaboration**: State locking prevents concurrent modifications
+- **Drift detection**: `terraform plan` compares state with actual infrastructure
+- **State versioning**: Remote backends support versioning for recovery
+- **Ecosystem compatibility**: Works with Atlantis, Terraform Cloud, and other tools
 
----
+See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md) for how the Go CLI manages state operations.
