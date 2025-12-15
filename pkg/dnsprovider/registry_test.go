@@ -108,8 +108,12 @@ func TestListProviders(t *testing.T) {
 	}
 
 	// Register providers
-	registry.Register(ctx, "test1", &mockDNSProvider{name: "test1"})
-	registry.Register(ctx, "test2", &mockDNSProvider{name: "test2"})
+	if err := registry.Register(ctx, "test1", &mockDNSProvider{name: "test1"}); err != nil {
+		t.Fatalf("Register() failed: %v", err)
+	}
+	if err := registry.Register(ctx, "test2", &mockDNSProvider{name: "test2"}); err != nil {
+		t.Fatalf("Register() failed: %v", err)
+	}
 
 	// Test list
 	providers = registry.List(ctx)

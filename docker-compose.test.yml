@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:4.0
+    container_name: nebari-nic-localstack
+    ports:
+      - "4566:4566"            # LocalStack Gateway
+      - "4510-4559:4510-4559"  # External services port range
+    environment:
+      # Services to enable (Community Edition)
+      SERVICES: ec2,iam,sts,s3,dynamodb
+
+      # Debug settings
+      DEBUG: ${DEBUG:-0}
+
+      # Persistence (optional - comment out for ephemeral testing)
+      # PERSISTENCE: 1
+
+      # Docker configuration
+      DOCKER_HOST: unix:///var/run/docker.sock
+
+      # Edge port
+      EDGE_PORT: 4566
+
+      # Hostname
+      HOSTNAME: localstack
+      HOSTNAME_EXTERNAL: localstack
+
+    volumes:
+      # Mount Docker socket for Lambda/ECS support
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Optional: Persist data between runs
+      # - ./localstack-data:/var/lib/localstack
+
+      # Optional: Init scripts
+      # - ./localstack-init:/etc/localstack/init/ready.d
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - nic-test-network
+
+networks:
+  nic-test-network:
+    driver: bridge

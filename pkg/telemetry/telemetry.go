@@ -20,12 +20,12 @@ const (
 )
 
 // Setup initializes OpenTelemetry based on environment configuration.
-// OTEL_EXPORTER: "console" (default), "otlp", or "both"
+// OTEL_EXPORTER: "none" (default), "console", "otlp", or "both"
 // OTEL_ENDPOINT: OTLP endpoint (default: "localhost:4317")
 func Setup(ctx context.Context) (trace.Tracer, func(context.Context) error, error) {
 	exporterType := os.Getenv("OTEL_EXPORTER")
 	if exporterType == "" {
-		exporterType = "console"
+		exporterType = "none"
 	}
 
 	// Create resource with service information
@@ -41,8 +41,12 @@ func Setup(ctx context.Context) (trace.Tracer, func(context.Context) error, erro
 
 	var exporters []sdktrace.SpanExporter
 
-	// Setup console exporter if requested
-	if exporterType == "console" || exporterType == "both" {
+	// Setup exporters based on configuration
+	switch exporterType {
+	case "none":
+		// No exporters - traces are still collected but not exported
+		// This is the default for production use
+	case "console":
 		consoleExporter, err := stdouttrace.New(
 			stdouttrace.WithPrettyPrint(),
 		)
@@ -50,10 +54,31 @@ func Setup(ctx context.Context) (trace.Tracer, func(context.Context) error, erro
 			return nil, nil, fmt.Errorf("failed to create console exporter: %w", err)
 		}
 		exporters = append(exporters, consoleExporter)
-	}
+	case "otlp":
+		endpoint := os.Getenv("OTEL_ENDPOINT")
+		if endpoint == "" {
+			endpoint = "localhost:4317"
+		}
 
-	// Setup OTLP exporter if requested
-	if exporterType == "otlp" || exporterType == "both" {
+		otlpExporter, err := otlptracegrpc.New(ctx,
+			otlptracegrpc.WithEndpoint(endpoint),
+			otlptracegrpc.WithInsecure(), // TODO: make configurable for production
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		}
+		exporters = append(exporters, otlpExporter)
+	case "both":
+		// Console exporter
+		consoleExporter, err := stdouttrace.New(
+			stdouttrace.WithPrettyPrint(),
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create console exporter: %w", err)
+		}
+		exporters = append(exporters, consoleExporter)
+
+		// OTLP exporter
 		endpoint := os.Getenv("OTEL_ENDPOINT")
 		if endpoint == "" {
 			endpoint = "localhost:4317"

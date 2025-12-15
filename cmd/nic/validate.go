@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -27,11 +26,15 @@ all required fields.`,
 
 func init() {
 	validateCmd.Flags().StringVarP(&validateConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
-	validateCmd.MarkFlagRequired("file")
+	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
+	if err := validateCmd.MarkFlagRequired("file"); err != nil {
+		panic(err)
+	}
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	// Get cancellable context from cobra (for signal handling)
+	ctx := cmd.Context()
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()

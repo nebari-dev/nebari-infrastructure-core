@@ -29,6 +29,9 @@ go build -o nic ./cmd/nic
 
 # Deploy infrastructure
 ./nic deploy -f config.yaml
+
+# Destroy infrastructure
+./nic destroy -f config.yaml
 ```
 
 ## Commands
@@ -42,6 +45,7 @@ Deploy infrastructure based on configuration file.
 ```
 
 Options:
+
 - `-f, --file`: Path to config.yaml file (required)
 
 ### `nic validate`
@@ -53,7 +57,39 @@ Validate configuration file without deploying.
 ```
 
 Options:
+
 - `-f, --file`: Path to config.yaml file (required)
+
+### `nic destroy`
+
+Destroy all infrastructure resources in reverse order of creation.
+
+```bash
+./nic destroy -f <config-file>
+```
+
+Options:
+
+- `-f, --file`: Path to config.yaml file (required)
+- `--auto-approve`: Skip confirmation prompt and destroy immediately
+- `--dry-run`: Show what would be destroyed without actually deleting
+- `--force`: Continue destruction even if some resources fail to delete
+- `--timeout`: Override default timeout (e.g., '45m', '1h')
+
+**WARNING**: This operation is destructive and cannot be undone. By default, you will be prompted to confirm before destruction begins.
+
+Example with dry-run:
+
+```bash
+# Preview what would be destroyed
+./nic destroy -f config.yaml --dry-run
+
+# Destroy with confirmation prompt
+./nic destroy -f config.yaml
+
+# Destroy without confirmation
+./nic destroy -f config.yaml --auto-approve
+```
 
 ### `nic version`
 
@@ -78,19 +114,23 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 
 ### Environment Variables
 
-- `OTEL_EXPORTER`: Exporter type (default: "console")
-  - `console` - Export traces to stdout (development)
+- `OTEL_EXPORTER`: Exporter type (default: "none")
+
+  - `none` - Disable trace export (traces still collected, default)
+  - `console` - Export traces to stdout (development/debugging)
   - `otlp` - Export to OTLP endpoint
   - `both` - Export to both console and OTLP
-  - `none` - Disable trace export (traces still collected)
 
 - `OTEL_ENDPOINT`: OTLP endpoint (default: "localhost:4317")
 
 ### Examples
 
 ```bash
-# Console traces (default)
+# No trace export (default)
 ./nic deploy -f config.yaml
+
+# Console traces (debugging)
+OTEL_EXPORTER=console ./nic deploy -f config.yaml
 
 # OTLP traces
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
@@ -128,6 +168,41 @@ go vet ./...
 golangci-lint run
 ```
 
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to ensure code quality before commits. The hooks automatically run formatting, linting, and tests.
+
+#### Installation
+
+```bash
+# Install pre-commit hooks (one-time setup)
+pre-commit install
+```
+
+#### Usage
+
+Pre-commit hooks will automatically run on `git commit`. To manually run all hooks:
+
+```bash
+# Run all pre-commit hooks on all files
+pre-commit run --all-files
+
+# Run specific hook
+pre-commit run golangci-lint --all-files
+```
+
+#### Configured Hooks
+
+- **trailing-whitespace**: Remove trailing whitespace
+- **end-of-file-fixer**: Ensure files end with newline
+- **check-yaml**: Validate YAML files
+- **check-added-large-files**: Prevent large files from being committed
+- **check-merge-conflict**: Detect merge conflict markers
+- **go-fmt**: Format Go code with `gofmt -s -w`
+- **go-vet**: Run `go vet` for static analysis
+- **golangci-lint**: Run comprehensive linting with auto-fix
+- **go-test**: Run all tests with `go test -v ./...`
+
 ## Architecture
 
 ### Project Structure
@@ -158,25 +233,35 @@ registry.Register(ctx, "local", local.NewProvider())
 
 ## Current Status
 
-**v0.1.0 - Initial Implementation**
+### AWS Provider (Fully Implemented)
 
-This is the initial implementation with stub providers. Each provider currently prints the configuration it receives and returns successfully. Full implementation will follow in subsequent releases.
+The AWS provider has complete native SDK implementation with stateless reconciliation:
 
-### Stub Provider Behavior
+- **VPC**: Creates/manages VPC, subnets, internet gateway, NAT gateways, route tables, security groups
+- **EKS**: Creates/manages EKS cluster with version upgrades, logging, endpoint access configuration
+- **Node Groups**: Parallel creation/update/deletion with scaling, labels, and taints
+- **EFS**: Optional shared storage with mount targets
+- **IAM**: Service roles and node instance profiles
 
-All providers currently:
-1. Accept configuration via the `Deploy()` method
-2. Print provider name and full configuration as JSON
-3. Return success
-4. Are fully instrumented with OpenTelemetry spans
+**Reconciliation behavior:**
+- Discovers actual state by querying AWS APIs with NIC tags (`nic.nebari.dev/*`)
+- Compares all config attributes against actual state
+- Creates missing resources, updates mutable fields, deletes orphaned resources
+- Errors on immutable field changes requiring manual intervention:
+  - VPC: CIDR, availability zones
+  - EKS: KMS encryption key
+  - Node Groups: instance type, AMI type, capacity type (Spot)
+  - EFS: performance mode, encryption, KMS key
+
+### GCP, Azure, Local Providers (Stubs)
+
+These providers are stub implementations that print config as JSON and return success. Native SDK implementation pending.
 
 ### Next Steps
 
-- Implement actual AWS provider with native AWS SDK v2
 - Implement GCP provider with Google Cloud Client Libraries
 - Implement Azure provider with Azure SDK for Go
 - Implement local K3s provider
-- Add state management
 - Add import from Terraform functionality
 
 ## License

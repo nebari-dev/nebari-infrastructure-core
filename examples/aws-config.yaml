@@ -1,31 +1,64 @@
 project_name: my-nebari-aws
 provider: aws
-domain: nebari.example.com
+domain: nic.openteams.app
 
 amazon_web_services:
   region: us-west-2
-  kubernetes_version: "1.28"
+  kubernetes_version: "1.34"
   availability_zones:
     - us-west-2a
     - us-west-2b
   vpc_cidr_block: "10.10.0.0/16"
-  eks_endpoint_access: "public"
+  eks_endpoint_access: "private"
 
   node_groups:
-    general:
-      instance: m5.2xlarge
-      min_nodes: 1
-      max_nodes: 1
+    # general:
+    #   instance: m7i.2xlarge
+    #   min_nodes: 1
+    #   max_nodes: 1
+    #   # AL2023 is now the default AMI type (AL2023_x86_64_STANDARD)
 
     user:
-      instance: m5.xlarge
+      instance: m7i.xlarge
       min_nodes: 0
       max_nodes: 5
 
-    worker:
-      instance: m5.xlarge
-      min_nodes: 0
-      max_nodes: 5
+    # worker:
+    #   instance: m7i.xlarge
+    #   min_nodes: 0
+    #   max_nodes: 5
+    #
+    # # Example: GPU node group with AL2023 NVIDIA AMI
+    # gpu:
+    #   instance: g5.xlarge
+    #   min_nodes: 0
+    #   max_nodes: 3
+    #   gpu: true # Uses AL2023_x86_64_NVIDIA AMI
+    #
+    # # Example: ARM64 Graviton node group
+    # graviton:
+    #   instance: m7g.xlarge
+    #   min_nodes: 0
+    #   max_nodes: 5
+    #   ami_type: AL2023_ARM_64_STANDARD
+    #
+    # # Example: AWS Neuron (Inferentia/Trainium) node group
+    # neuron:
+    #   instance: inf2.xlarge
+    #   min_nodes: 0
+    #   max_nodes: 2
+    #   ami_type: AL2023_x86_64_NEURON
+
+  # EFS configuration for shared storage (optional)
+  # Creates an EFS file system with mount targets in each private subnet
+  efs:
+    enabled: true
+    performance_mode: generalPurpose # generalPurpose or maxIO
+    throughput_mode: bursting # bursting, provisioned, or elastic
+    encrypted: true
+    # storage_class_name: efs-sc      # Name for the K8s StorageClass (default: efs-sc)
+    # kms_key_id: ""                  # Optional: KMS key ARN for encryption
+    # provisioned_mbps: 100           # Required if throughput_mode is provisioned
 
   tags:
     Environment: development

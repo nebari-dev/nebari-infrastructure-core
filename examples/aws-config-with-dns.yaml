@@ -4,7 +4,7 @@ domain: nebari.example.com
 
 amazon_web_services:
   region: us-west-2
-  kubernetes_version: "1.28"
+  kubernetes_version: "1.34"
   availability_zones:
     - us-west-2a
     - us-west-2b
@@ -35,5 +35,5 @@ amazon_web_services:
 # Secrets like API tokens are read from environment variables (see .env.example)
 dns_provider: cloudflare
 dns:
-  zone_name: example.com              # Your Cloudflare zone/domain
-  email: admin@example.com            # Email for Let's Encrypt cert-manager notifications
+  zone_name: example.com # Your Cloudflare zone/domain
+  email: admin@example.com # Email for Let's Encrypt cert-manager notifications
