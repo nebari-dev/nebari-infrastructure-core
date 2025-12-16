@@ -81,6 +81,7 @@ func TestCreateNodeGroup(t *testing.T) {
 			validateResult: func(t *testing.T, state *NodeGroupState) {
 				if state == nil {
 					t.Fatal("Expected NodeGroupState, got nil")
+					return
 				}
 				if state.Status != string(ekstypes.NodegroupStatusActive) {
 					t.Errorf("Status = %v, want %v", state.Status, ekstypes.NodegroupStatusActive)

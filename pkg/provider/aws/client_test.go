@@ -32,6 +32,7 @@ func TestNewClients(t *testing.T) {
 			validateFunc: func(t *testing.T, clients *Clients) {
 				if clients == nil {
 					t.Fatal("Expected clients to be non-nil")
+					return
 				}
 				if clients.EC2Client == nil {
 					t.Error("EC2Client should not be nil")

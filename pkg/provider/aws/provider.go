@@ -552,11 +552,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		attribute.String("region", region),
 	)
 
-    kubeconfigBytes, err := p.GetKubeconfigWithRegion(ctx, clusterName, region)
-    if err != nil {
-        span.RecordError(err)
-		return nil, fmt.Errorf("Failed to get kubeconfig for cluster %s in region %s: %w", clusterName, region, err)
-    }
+	kubeconfigBytes, err := p.GetKubeconfigWithRegion(ctx, clusterName, region)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get kubeconfig for cluster %s in region %s: %w", clusterName, region, err)
+	}
 
 	return kubeconfigBytes, nil
 }

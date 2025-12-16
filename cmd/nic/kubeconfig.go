@@ -64,11 +64,12 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-    kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
-    if err != nil {
-        slog.Error("Failed to generate kubeconfig", "error", err)
+	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to generate kubeconfig", "error", err)
 		return err
-    }
+	}
 
 	if kubeconfigOutputFile != "" {
 		if err := os.WriteFile(kubeconfigOutputFile, kubeconfigBytes, 0600); err != nil {
@@ -78,8 +79,11 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		}
 		slog.Info("Kubeconfig written successfully", "file", kubeconfigOutputFile)
 	} else {
-		slog.Info("Kubeconfig written successfully to stdout")
-    	os.Stdout.Write(kubeconfigBytes)
+		if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
+			span.RecordError(err)
+			slog.Error("Failed to write kubeconfig to stdout", "error", err)
+			return err
+		}
 	}
 
 	return nil

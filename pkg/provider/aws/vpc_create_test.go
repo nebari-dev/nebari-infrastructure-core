@@ -154,6 +154,7 @@ func TestCreateVPC(t *testing.T) {
 			validateResult: func(t *testing.T, state *VPCState) {
 				if state == nil {
 					t.Fatal("Expected VPC state, got nil")
+					return
 				}
 				if state.VPCID != "vpc-12345" {
 					t.Errorf("VPCID = %v, want vpc-12345", state.VPCID)

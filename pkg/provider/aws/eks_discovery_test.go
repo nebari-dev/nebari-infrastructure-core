@@ -51,6 +51,7 @@ func TestDiscoverCluster(t *testing.T) {
 			validateResult: func(t *testing.T, state *ClusterState) {
 				if state == nil {
 					t.Fatal("Expected cluster state, got nil")
+					return
 				}
 				if state.Name != "test-cluster" {
 					t.Errorf("Name = %v, want test-cluster", state.Name)
@@ -140,6 +141,7 @@ func TestDiscoverCluster(t *testing.T) {
 			validateResult: func(t *testing.T, state *ClusterState) {
 				if state == nil {
 					t.Fatal("Expected cluster state, got nil")
+					return
 				}
 				if state.Status != string(ekstypes.ClusterStatusCreating) {
 					t.Errorf("Status = %v, want %v", state.Status, ekstypes.ClusterStatusCreating)
