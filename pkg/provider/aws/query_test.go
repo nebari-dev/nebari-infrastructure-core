@@ -32,6 +32,7 @@ func TestConvertToProviderState(t *testing.T) {
 			validateFunc: func(t *testing.T, state *provider.InfrastructureState) {
 				if state == nil {
 					t.Fatal("convertToProviderState returned nil")
+					return
 				}
 				if state.ClusterName != "test-cluster" {
 					t.Errorf("Expected cluster name test-cluster, got %s", state.ClusterName)
@@ -188,6 +189,7 @@ func TestConvertToProviderState(t *testing.T) {
 			validateFunc: func(t *testing.T, state *provider.InfrastructureState) {
 				if state == nil {
 					t.Fatal("convertToProviderState returned nil")
+					return
 				}
 				if state.ClusterName != "test" {
 					t.Errorf("Expected cluster name 'test', got %s", state.ClusterName)

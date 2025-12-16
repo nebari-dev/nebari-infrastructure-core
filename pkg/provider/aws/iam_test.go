@@ -302,6 +302,7 @@ func TestDiscoverIAMRoles(t *testing.T) {
 			validateResult: func(t *testing.T, roles *IAMRoles) {
 				if roles == nil {
 					t.Fatal("Expected IAMRoles, got nil")
+					return
 				}
 				if roles.ClusterRoleARN != "arn:aws:iam::123456789012:role/test-cluster-cluster-role" {
 					t.Errorf("ClusterRoleARN = %v, want arn:aws:iam::123456789012:role/test-cluster-cluster-role", roles.ClusterRoleARN)
@@ -432,6 +433,7 @@ func TestCreateIAMRoles(t *testing.T) {
 			validateResult: func(t *testing.T, roles *IAMRoles) {
 				if roles == nil {
 					t.Fatal("Expected IAMRoles, got nil")
+					return
 				}
 				if roles.ClusterRoleARN != "arn:aws:iam::123456789012:role/test-cluster-cluster-role" {
 					t.Errorf("ClusterRoleARN = %v, want test-cluster-cluster-role", roles.ClusterRoleARN)

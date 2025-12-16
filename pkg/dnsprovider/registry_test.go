@@ -46,11 +46,8 @@ func (m *mockDNSProvider) GetCertManagerConfig(ctx context.Context) (map[string]
 
 func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
-	if registry == nil {
-		t.Fatal("NewRegistry() returned nil")
-	}
-	if registry.providers == nil {
-		t.Fatal("Registry providers map is nil")
+	if registry == nil || registry.providers == nil {
+		t.Fatal("NewRegistry() returned nil or has nil providers map")
 	}
 }
 
