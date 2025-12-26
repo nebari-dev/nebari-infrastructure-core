@@ -55,8 +55,8 @@ func Download(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to download tofu binary: %w", err)
 	}
 
+	// Write binary to cache directory
 	execPath := filepath.Join(nicCacheDir, "tofu")
-	// Windows executable case
 	if runtime.GOOS == "windows" {
 		execPath += ".exe"
 	}
