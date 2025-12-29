@@ -29,6 +29,8 @@ var (
 	// Global DNS provider registry
 	dnsRegistry *dnsprovider.Registry
 
+	tofuExecPath string
+
 	// Root command
 	rootCmd = &cobra.Command{
 		Use:   "nic",
@@ -81,7 +83,8 @@ func init() {
 	}
 
 	// Get tofu binary path (downloads the binary if no cached version is available)
-	tofuExecPath, err := tofu.Download(ctx)
+	var err error
+	tofuExecPath, err = tofu.Download(ctx)
 	if err != nil {
 		log.Fatalf("Failed to download tofu binary: %v", err)
 	}
