@@ -10,7 +10,7 @@ import (
 	"github.com/opentofu/tofudl"
 )
 
-// Download downloads the OpenTofu binary for the specified version using a caching 
+// Download downloads the OpenTofu binary for the specified version using a caching
 // strategy and returns the path to the cached binary.
 func Download(ctx context.Context) (string, error) {
 
