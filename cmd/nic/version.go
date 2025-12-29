@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
 const (
@@ -32,6 +34,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Nebari Infrastructure Core (NIC)\n")
 	fmt.Printf("Version: %s\n", version)
 	fmt.Printf("Commit: %s\n", commit)
+	fmt.Printf("OpenTofu version: %s\n", tofu.DefaultVersion)
 
 	// Show registered providers
 	providers := registry.List(ctx)
