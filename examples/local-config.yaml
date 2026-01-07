@@ -3,7 +3,7 @@ provider: local
 domain: nebari.local
 
 local:
-  kube_context: "default"
+  kube_context: "kind-nebari-local"
   node_selectors:
     general:
       kubernetes.io/os: linux
