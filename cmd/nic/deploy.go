@@ -16,6 +16,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubernetes"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -135,6 +136,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
+
+	// Install Argo CD (skip in dry-run mode)
+	if !cfg.DryRun {
+		slog.Info("Installing Argo CD on cluster")
+		if err := kubernetes.InstallArgoCD(ctx, cfg, provider); err != nil {
+			// Log error but don't fail deployment
+			slog.Warn("Failed to install Argo CD", "error", err)
+			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
+		} else {
+			slog.Info("Argo CD installed successfully")
+			printArgoCDInstructions(cfg)
+		}
+	} else {
+		slog.Info("Would install Argo CD (dry-run mode)")
+	}
 
 	// Print DNS guidance if no DNS provider is configured
 	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
@@ -266,6 +282,39 @@ func printDNSGuidance(cfg *config.NebariConfig) {
 	fmt.Println("    dns_provider: cloudflare")
 	fmt.Println("    dns:")
 	fmt.Println("      zone_name: example.com")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// printArgoCDInstructions prints instructions for accessing Argo CD
+func printArgoCDInstructions(cfg *config.NebariConfig) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  ARGO CD INSTALLED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  Argo CD has been successfully installed on your cluster.")
+	fmt.Println()
+	fmt.Println("  To access Argo CD:")
+	fmt.Println()
+	if cfg.Domain != "" {
+		fmt.Printf("    UI: https://argocd.%s (after DNS configuration)\n", cfg.Domain)
+		fmt.Println()
+		fmt.Println("  Or use port-forwarding:")
+		fmt.Println()
+	}
+	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
+	fmt.Println("    Then visit: https://localhost:8080")
+	fmt.Println()
+	fmt.Println("  Get the admin password:")
+	fmt.Println()
+	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
+	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
+	fmt.Println()
+	fmt.Println("  Login credentials:")
+	fmt.Println("    Username: admin")
+	fmt.Println("    Password: <from command above>")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
