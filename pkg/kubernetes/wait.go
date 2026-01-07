@@ -102,6 +102,10 @@ func WaitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	requiredDeployments := []string{
 		"argocd-server",
 		"argocd-repo-server",
+	}
+
+	// Core Argo CD statefulsets that must be ready
+	requiredStatefulSets := []string{
 		"argocd-application-controller",
 	}
 
@@ -113,6 +117,8 @@ func WaitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 			return err
 		case <-ticker.C:
 			allReady := true
+
+			// Check deployments
 			for _, name := range requiredDeployments {
 				deployment, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 				if err != nil {
@@ -122,6 +128,21 @@ func WaitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 				if deployment.Status.ReadyReplicas < 1 {
 					allReady = false
 					break
+				}
+			}
+
+			// Check statefulsets
+			if allReady {
+				for _, name := range requiredStatefulSets {
+					statefulset, err := client.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+					if err != nil {
+						allReady = false
+						break
+					}
+					if statefulset.Status.ReadyReplicas < 1 {
+						allReady = false
+						break
+					}
 				}
 			}
 
