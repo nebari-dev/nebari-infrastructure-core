@@ -1,0 +1,110 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    chart: keycloak
+    repoURL: https://codecentric.github.io/helm-charts
+    targetRevision: 18.5.0  # Keycloakx chart (Keycloak 22.0+)
+    helm:
+      releaseName: keycloak
+      values: |
+        args:
+          - start
+        # Replica count
+        replicas: 1
+
+        # Keycloak image
+        image:
+          tag: "22.0.5"
+
+        # Environment variables for Keycloak configuration
+        extraEnv: |
+          - name: KEYCLOAK_ADMIN
+            value: admin
+          - name: KEYCLOAK_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin-credentials
+                key: admin-password
+          - name: KC_DB
+            value: postgres
+          - name: KC_DB_URL_HOST
+            value: postgresql.keycloak.svc.cluster.local
+          - name: KC_DB_URL_DATABASE
+            value: keycloak
+          - name: KC_DB_USERNAME
+            value: keycloak
+          - name: KC_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-postgresql-credentials
+                key: password
+          - name: KC_HOSTNAME_STRICT
+            value: "false"
+          - name: KC_PROXY
+            value: "edge"
+          - name: KC_HTTP_ENABLED
+            value: "true"
+
+        # Service
+        service:
+          type: ClusterIP
+          httpPort: 8080
+
+        # Ingress
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          rules:
+            - host: keycloak.nebari.local
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - hosts:
+                - keycloak.nebari.local
+
+        # Disable PostgreSQL subchart - using external PostgreSQL
+        postgresql:
+          enabled: false
+
+        # Resources
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates

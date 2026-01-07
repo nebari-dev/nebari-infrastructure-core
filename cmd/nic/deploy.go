@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -147,9 +149,29 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		} else {
 			slog.Info("Argo CD installed successfully")
 			printArgoCDInstructions(cfg)
+
+			// Install foundational services via Argo CD
+			slog.Info("Installing foundational services")
+			foundationalCfg := kubernetes.FoundationalConfig{
+				Keycloak: kubernetes.KeycloakConfig{
+					Enabled:       true,
+					AdminPassword: generateSecurePassword(),
+					DBPassword:    generateSecurePassword(),
+					Hostname:      "", // Will be auto-generated from domain
+				},
+			}
+
+			if err := kubernetes.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
+				// Log warning but don't fail deployment
+				slog.Warn("Failed to install foundational services", "error", err)
+				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
+			} else {
+				slog.Info("Foundational services installed successfully")
+				printKeycloakInstructions(cfg, foundationalCfg.Keycloak.AdminPassword)
+			}
 		}
 	} else {
-		slog.Info("Would install Argo CD (dry-run mode)")
+		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
 	}
 
 	// Print DNS guidance if no DNS provider is configured
@@ -318,4 +340,54 @@ func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
+}
+
+// printKeycloakInstructions prints instructions for accessing Keycloak
+func printKeycloakInstructions(cfg *config.NebariConfig, adminPassword string) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  KEYCLOAK INSTALLED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  Keycloak has been successfully installed via Argo CD.")
+	fmt.Println()
+	fmt.Println("  To access Keycloak:")
+	fmt.Println()
+	if cfg.Domain != "" {
+		fmt.Printf("    UI: https://keycloak.%s (after DNS configuration)\n", cfg.Domain)
+		fmt.Println()
+		fmt.Println("  Or use port-forwarding:")
+		fmt.Println()
+	}
+	fmt.Println("    kubectl port-forward svc/keycloak -n keycloak 8080:80")
+	fmt.Println("    Then visit: http://localhost:8080")
+	fmt.Println()
+	fmt.Println("  Admin credentials:")
+	fmt.Println("    Username: admin")
+	fmt.Printf("    Password: %s\n", adminPassword)
+	fmt.Println()
+	fmt.Println("  IMPORTANT: Save this password securely! It will not be displayed again.")
+	fmt.Println()
+	fmt.Println("  To retrieve the password later:")
+	fmt.Println("    kubectl get secret keycloak-admin-credentials -n keycloak \\")
+	fmt.Println("      -o jsonpath=\"{.data.admin-password}\" | base64 -d")
+	fmt.Println()
+	fmt.Println("  Check deployment status:")
+	fmt.Println("    kubectl get application keycloak -n argocd")
+	fmt.Println("    kubectl get pods -n keycloak")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// generateSecurePassword generates a cryptographically secure random password
+func generateSecurePassword() string {
+	// Generate 32 bytes of random data
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based generation (not ideal but better than nothing)
+		return fmt.Sprintf("nebari-%d", time.Now().UnixNano())
+	}
+	// Encode to base64 and take first 43 characters (removes padding)
+	return base64.URLEncoding.EncodeToString(b)[:43]
 }
