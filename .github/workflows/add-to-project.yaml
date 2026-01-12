@@ -1,0 +1,17 @@
+# .github/workflows/add-to-project.yml
+name: Add to project
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1
+        with:
+          project-url: https://github.com/orgs/nebari-dev/projects/12
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
