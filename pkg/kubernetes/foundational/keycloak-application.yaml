@@ -9,9 +9,9 @@ spec:
   project: default
 
   source:
-    chart: keycloak
+    chart: keycloakx
     repoURL: https://codecentric.github.io/helm-charts
-    targetRevision: 18.5.0  # Keycloakx chart (Keycloak 22.0+)
+    targetRevision: 7.1.6  # Keycloakx chart (Keycloak 22.0+)
     helm:
       releaseName: keycloak
       values: |
@@ -19,10 +19,6 @@ spec:
           - start
         # Replica count
         replicas: 1
-
-        # Keycloak image
-        image:
-          tag: "22.0.5"
 
         # Environment variables for Keycloak configuration
         extraEnv: |
@@ -50,8 +46,35 @@ spec:
             value: "false"
           - name: KC_PROXY
             value: "edge"
-          - name: KC_HTTP_ENABLED
-            value: "true"
+
+
+        # Health checks for Keycloak (on management port 9000, under /auth path)
+        livenessProbe: |
+          httpGet:
+            path: /auth/health/live
+            port: 9000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe: |
+          httpGet:
+            path: /auth/health/ready
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        startupProbe: |
+          httpGet:
+            path: /auth/health
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
 
         # Service
         service:
