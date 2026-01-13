@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-oci-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  name: docker-oci
+  type: helm
+  url: oci://docker.io
+  enableOCI: "true"

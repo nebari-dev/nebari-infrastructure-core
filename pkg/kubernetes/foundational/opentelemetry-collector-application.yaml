@@ -73,9 +73,9 @@ spec:
               limit_mib: 512
 
           exporters:
-            # Log exporter for debugging
-            logging:
-              loglevel: info
+            # Debug exporter for debugging
+            debug:
+              verbosity: detailed
 
             # OTLP exporter (can be configured to send to observability backend)
             otlp:
@@ -88,17 +88,17 @@ spec:
               metrics:
                 receivers: [otlp, prometheus]
                 processors: [memory_limiter, batch]
-                exporters: [logging]
+                exporters: [debug]
 
               logs:
                 receivers: [otlp]
                 processors: [memory_limiter, batch]
-                exporters: [logging]
+                exporters: [debug]
 
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, batch]
-                exporters: [logging]
+                exporters: [debug]
 
         # Service ports
         ports:
