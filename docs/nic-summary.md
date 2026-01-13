@@ -1,0 +1,13 @@
+# Nebari Infrastructure Core (NIC) Summary
+
+## What is Nebari Infrastructure Core?
+
+Nebari Infrastructure Core (NIC) is a next-generation platform that rethinks how organizations deploy and manage data science infrastructure. Unlike Nebari Classic, which delivers a monolithic, opinionated data science stack (JupyterHub, Dask, conda-store, etc.) as a single deployable unit, NIC takes a fundamentally different approach: it provides a **stable, composable foundation** upon which various workloads can be built and deployed independently. NIC uses a Go CLI powered by OpenTofu/Terraform modules to provision Kubernetes clusters across AWS, GCP, Azure, or bare metal, ensuring consistent infrastructure regardless of hosting environment. The result is a platform that separates infrastructure concerns from application concerns, enabling teams to evolve each layer independently.
+
+## Advantages Over Nebari Classic
+
+The key advantage of NIC is its **composable architecture through Software Packs**. Where Nebari Classic bundles everything together—meaning you get the full data science stack whether you need it all or not—NIC lets you choose exactly what you need. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NicApp` Custom Resource that enables automatic registration with the platform. Want just JupyterHub and conda-store? Install the Data Science Pack. Need model serving capabilities? Add the Model Serving Pack (MLflow, KServe, Envoy AI Gateway). This modular approach means faster deployments, smaller attack surfaces, easier upgrades, and the flexibility to mix-and-match capabilities. Additionally, all services automatically integrate with centralized authentication (Keycloak), routing (Envoy Gateway), and TLS certificates (cert-manager) through the Nebari Operator.
+
+## Architecture Philosophy
+
+NIC embraces a **layered, GitOps-native architecture** where each layer has clear responsibilities and can evolve independently. At the foundation, NIC deploys an opinionated Kubernetes cluster with consistent networking, storage, and security policies. The foundational software layer provides essential platform services. The Nebari Operator watches for `NicApp` resources and automatically handles routing, authentication, and service registration. A dynamic React landing page (backed by a Go API) provides users with a single entry point to discover and access all deployed services. Software Packs sit at the top, registering themselves dynamically when installed—no manual configuration required. This separation of concerns means platform teams can upgrade infrastructure without affecting applications, and application teams can deploy new services without understanding infrastructure details.
