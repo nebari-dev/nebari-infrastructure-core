@@ -29,6 +29,15 @@ var keycloakNamespaceManifest string
 //go:embed foundational/postgresql-application.yaml
 var postgresqlApplicationManifest string
 
+//go:embed foundational/cert-manager-application.yaml
+var certManagerApplicationManifest string
+
+//go:embed foundational/envoy-gateway-application.yaml
+var envoyGatewayApplicationManifest string
+
+//go:embed foundational/opentelemetry-collector-application.yaml
+var opentelemetryCollectorApplicationManifest string
+
 // FoundationalConfig holds configuration for foundational services
 type FoundationalConfig struct {
 	// Keycloak configuration
@@ -73,11 +82,40 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	// Install Keycloak if enabled
+	// 1. Install Cert Manager (Priority: 1)
+	if err := installCertManager(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Cert Manager").
+			WithResource("cert-manager").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("failed to install Cert Manager: %w", err)
+	}
+
+	// 2. Install Envoy Gateway (Priority: 2, depends on cert-manager)
+	if err := installEnvoyGateway(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Envoy Gateway").
+			WithResource("envoy-gateway").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("failed to install Envoy Gateway: %w", err)
+	}
+
+	// 3. Install OpenTelemetry Collector (Priority: 3)
+	if err := installOpenTelemetryCollector(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install OpenTelemetry Collector").
+			WithResource("opentelemetry-collector").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("failed to install OpenTelemetry Collector: %w", err)
+	}
+
+	// 4. Install Keycloak if enabled (Priority: 4, depends on envoy-gateway)
 	if foundationalCfg.Keycloak.Enabled {
 		if err := installKeycloak(ctx, k8sClient, kubeconfigBytes, cfg, foundationalCfg.Keycloak); err != nil {
 			span.RecordError(err)
-			// Don't fail the entire deployment if Keycloak installation fails
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Keycloak").
 				WithResource("keycloak").
 				WithAction("install-failed").
@@ -339,4 +377,148 @@ func parseKeycloakApplicationManifest(keycloakCfg KeycloakConfig, domain string)
 	}
 
 	return obj, nil
+}
+
+// installCertManager installs Cert Manager via Argo CD
+func installCertManager(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installCertManager")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Cert Manager").
+		WithResource("cert-manager").
+		WithAction("installing"))
+
+	// Parse Cert Manager Application manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(certManagerApplicationManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode Cert Manager application manifest: %w", err)
+	}
+
+	// Apply Cert Manager Argo CD Application
+	if err := ApplyArgoCDApplication(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply Cert Manager Argo CD Application: %w", err)
+	}
+
+	// Wait for Cert Manager to be ready
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for Cert Manager to be ready").
+		WithResource("cert-manager").
+		WithAction("waiting"))
+
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	if err := WaitForArgoCDApplication(waitCtx, kubeconfigBytes, "cert-manager", "argocd", 3*time.Minute); err != nil {
+		// Don't fail, just warn
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Cert Manager may not be fully ready yet").
+			WithResource("cert-manager").
+			WithAction("waiting").
+			WithMetadata("info", "Argo CD will continue syncing in the background"))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cert Manager deployed successfully").
+			WithResource("cert-manager").
+			WithAction("deployed"))
+	}
+
+	return nil
+}
+
+// installEnvoyGateway installs Envoy Gateway via Argo CD
+func installEnvoyGateway(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installEnvoyGateway")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Envoy Gateway").
+		WithResource("envoy-gateway").
+		WithAction("installing"))
+
+	// Parse Envoy Gateway Application manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(envoyGatewayApplicationManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode Envoy Gateway application manifest: %w", err)
+	}
+
+	// Apply Envoy Gateway Argo CD Application
+	if err := ApplyArgoCDApplication(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply Envoy Gateway Argo CD Application: %w", err)
+	}
+
+	// Wait for Envoy Gateway to be ready
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for Envoy Gateway to be ready").
+		WithResource("envoy-gateway").
+		WithAction("waiting"))
+
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	if err := WaitForArgoCDApplication(waitCtx, kubeconfigBytes, "envoy-gateway", "argocd", 3*time.Minute); err != nil {
+		// Don't fail, just warn
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Envoy Gateway may not be fully ready yet").
+			WithResource("envoy-gateway").
+			WithAction("waiting").
+			WithMetadata("info", "Argo CD will continue syncing in the background"))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Envoy Gateway deployed successfully").
+			WithResource("envoy-gateway").
+			WithAction("deployed"))
+	}
+
+	return nil
+}
+
+// installOpenTelemetryCollector installs OpenTelemetry Collector via Argo CD
+func installOpenTelemetryCollector(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installOpenTelemetryCollector")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing OpenTelemetry Collector").
+		WithResource("opentelemetry-collector").
+		WithAction("installing"))
+
+	// Parse OpenTelemetry Collector Application manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(opentelemetryCollectorApplicationManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode OpenTelemetry Collector application manifest: %w", err)
+	}
+
+	// Apply OpenTelemetry Collector Argo CD Application
+	if err := ApplyArgoCDApplication(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply OpenTelemetry Collector Argo CD Application: %w", err)
+	}
+
+	// Wait for OpenTelemetry Collector to be ready
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for OpenTelemetry Collector to be ready").
+		WithResource("opentelemetry-collector").
+		WithAction("waiting"))
+
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	if err := WaitForArgoCDApplication(waitCtx, kubeconfigBytes, "opentelemetry-collector", "argocd", 3*time.Minute); err != nil {
+		// Don't fail, just warn
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "OpenTelemetry Collector may not be fully ready yet").
+			WithResource("opentelemetry-collector").
+			WithAction("waiting").
+			WithMetadata("info", "Argo CD will continue syncing in the background"))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "OpenTelemetry Collector deployed successfully").
+			WithResource("opentelemetry-collector").
+			WithAction("deployed"))
+	}
+
+	return nil
 }

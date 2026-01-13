@@ -1,0 +1,138 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opentelemetry-collector
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    chart: opentelemetry-collector
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    targetRevision: 0.143.0
+    helm:
+      releaseName: opentelemetry-collector
+      values: |
+        # Use Kubernetes optimized image
+        image:
+          repository: otel/opentelemetry-collector-k8s
+          tag: ""
+
+        # Run as DaemonSet to collect from all nodes
+        mode: daemonset
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        # OpenTelemetry Collector configuration
+        config:
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 0.0.0.0:4317
+                http:
+                  endpoint: 0.0.0.0:4318
+
+            # Prometheus receiver for scraping metrics
+            prometheus:
+              config:
+                scrape_configs:
+                  - job_name: 'kubernetes-pods'
+                    kubernetes_sd_configs:
+                      - role: pod
+                    relabel_configs:
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                        action: keep
+                        regex: true
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                        action: replace
+                        target_label: __metrics_path__
+                        regex: (.+)
+                      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                        action: replace
+                        regex: ([^:]+)(?::\d+)?;(\d+)
+                        replacement: $1:$2
+                        target_label: __address__
+
+          processors:
+            batch:
+              timeout: 10s
+              send_batch_size: 1024
+
+            memory_limiter:
+              check_interval: 1s
+              limit_mib: 512
+
+          exporters:
+            # Log exporter for debugging
+            logging:
+              loglevel: info
+
+            # OTLP exporter (can be configured to send to observability backend)
+            otlp:
+              endpoint: "localhost:4317"
+              tls:
+                insecure: true
+
+          service:
+            pipelines:
+              metrics:
+                receivers: [otlp, prometheus]
+                processors: [memory_limiter, batch]
+                exporters: [logging]
+
+              logs:
+                receivers: [otlp]
+                processors: [memory_limiter, batch]
+                exporters: [logging]
+
+              traces:
+                receivers: [otlp]
+                processors: [memory_limiter, batch]
+                exporters: [logging]
+
+        # Service ports
+        ports:
+          otlp:
+            enabled: true
+            containerPort: 4317
+            servicePort: 4317
+            protocol: TCP
+          otlp-http:
+            enabled: true
+            containerPort: 4318
+            servicePort: 4318
+            protocol: TCP
+          metrics:
+            enabled: true
+            containerPort: 8888
+            servicePort: 8888
+            protocol: TCP
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
