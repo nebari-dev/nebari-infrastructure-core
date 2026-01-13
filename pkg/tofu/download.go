@@ -10,7 +10,7 @@ import (
 	"github.com/opentofu/tofudl"
 )
 
-// Download downloads the OpenTofu binary for the specified version using a caching
+// Download downloads the OpenTofu binary for the default version using a caching
 // strategy and returns the path to the cached binary.
 func Download(ctx context.Context) (string, error) {
 
@@ -38,9 +38,8 @@ func Download(ctx context.Context) (string, error) {
 	}
 	mirror, err := tofudl.NewMirror(
 		tofudl.MirrorConfig{
-			AllowStale:           true, // Use cached binary if download fails
-			APICacheTimeout:      -1,   // Cache API responses indefinitely
-			ArtifactCacheTimeout: -1,   // Cache binaries indefinitely
+			APICacheTimeout:      -1, // Cache API responses indefinitely
+			ArtifactCacheTimeout: -1, // Cache binaries indefinitely
 		},
 		storage,
 		dl,
