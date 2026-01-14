@@ -88,7 +88,7 @@ func init() {
 	if err != nil {
 		log.Fatalf("Failed to download tofu binary: %v", err)
 	}
-	slog.Info("Tofu binary ready", "path", tofuExecPath)
+	log.Printf("Tofu binary ready at %s", tofuExecPath)
 
 	// Add subcommands
 	rootCmd.AddCommand(deployCmd)
