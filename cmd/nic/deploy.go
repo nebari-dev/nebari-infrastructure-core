@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
 var (
@@ -108,6 +110,27 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	slog.Info("Provider selected", "provider", provider.Name())
+
+	workingDir, err := tofu.ExtractTemplates(provider.Name())
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to extract OpenTofu templates", "error", err, "provider", provider.Name())
+		return err
+	}
+
+	tofu, err := tfexec.NewTerraform(workingDir, tofuExecPath)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to create OpenTofu instance", "error", err)
+		return err
+	}
+
+	err = tofu.Init(ctx, tfexec.Upgrade(true))
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to initialize OpenTofu", "error", err)
+		return err
+	}
 
 	// Deploy infrastructure
 	if err := provider.Deploy(ctx, cfg); err != nil {
