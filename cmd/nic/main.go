@@ -19,7 +19,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/telemetry"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
 var (
@@ -28,8 +27,6 @@ var (
 
 	// Global DNS provider registry
 	dnsRegistry *dnsprovider.Registry
-
-	tofuExecPath string
 
 	// Root command
 	rootCmd = &cobra.Command{
@@ -81,14 +78,6 @@ func init() {
 	if err := dnsRegistry.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
 	}
-
-	// Get tofu binary path (downloads the binary if no cached version is available)
-	var err error
-	tofuExecPath, err = tofu.Download(ctx)
-	if err != nil {
-		log.Fatalf("Failed to download tofu binary: %v", err)
-	}
-	log.Printf("Tofu binary ready at %s", tofuExecPath)
 
 	// Add subcommands
 	rootCmd.AddCommand(deployCmd)
