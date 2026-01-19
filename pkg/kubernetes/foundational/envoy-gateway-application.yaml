@@ -36,7 +36,7 @@ spec:
 
         # Service configuration
         service:
-          type: LoadBalancer
+          type: ClusterIP
           annotations: {}
 
   destination:

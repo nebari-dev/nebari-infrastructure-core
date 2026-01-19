@@ -83,7 +83,7 @@ spec:
 
         # Ingress
         ingress:
-          enabled: true
+          enabled: false
           ingressClassName: nginx
           rules:
             - host: keycloak.nebari.local
