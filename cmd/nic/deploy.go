@@ -159,6 +159,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					DBPassword:    generateSecurePassword(),
 					Hostname:      "", // Will be auto-generated from domain
 				},
+				// Enable MetalLB only for local deployments
+				MetalLB: kubernetes.MetalLBConfig{
+					Enabled:     cfg.Provider == "local",
+					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
+				},
 			}
 
 			if err := kubernetes.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {

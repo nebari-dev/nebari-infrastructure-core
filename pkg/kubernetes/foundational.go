@@ -38,10 +38,31 @@ var envoyGatewayApplicationManifest string
 //go:embed foundational/opentelemetry-collector-application.yaml
 var opentelemetryCollectorApplicationManifest string
 
+//go:embed foundational/gatewayclass.yaml
+var gatewayClassManifest string
+
+//go:embed foundational/gateway.yaml
+var gatewayManifest string
+
+//go:embed foundational/keycloak-httproute.yaml
+var keycloakHTTPRouteManifest string
+
+//go:embed foundational/metallb-application.yaml
+var metallbApplicationManifest string
+
+//go:embed foundational/metallb-ipaddresspool.yaml
+var metallbIPAddressPoolManifest string
+
+//go:embed foundational/metallb-l2advertisement.yaml
+var metallbL2AdvertisementManifest string
+
 // FoundationalConfig holds configuration for foundational services
 type FoundationalConfig struct {
 	// Keycloak configuration
 	Keycloak KeycloakConfig
+
+	// MetalLB configuration (local deployments only)
+	MetalLB MetalLBConfig
 }
 
 // KeycloakConfig holds Keycloak-specific configuration
@@ -50,6 +71,12 @@ type KeycloakConfig struct {
 	AdminPassword string
 	DBPassword    string
 	Hostname      string
+}
+
+// MetalLBConfig holds MetalLB-specific configuration
+type MetalLBConfig struct {
+	Enabled     bool
+	AddressPool string // e.g., "192.168.1.100-192.168.1.110"
 }
 
 // InstallFoundationalServices installs foundational services (Keycloak, etc.) via Argo CD
@@ -92,6 +119,18 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to install Cert Manager: %w", err)
 	}
 
+	// 1.5. Install MetalLB if enabled (Priority: 1.5, local deployments only)
+	if foundationalCfg.MetalLB.Enabled {
+		if err := installMetalLB(ctx, kubeconfigBytes, foundationalCfg.MetalLB); err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install MetalLB").
+				WithResource("metallb").
+				WithAction("install-failed").
+				WithMetadata("error", err.Error()))
+			// Don't fail - MetalLB is optional for local deployments
+		}
+	}
+
 	// 2. Install Envoy Gateway (Priority: 2, depends on cert-manager)
 	if err := installEnvoyGateway(ctx, kubeconfigBytes); err != nil {
 		span.RecordError(err)
@@ -100,6 +139,26 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			WithAction("install-failed").
 			WithMetadata("error", err.Error()))
 		return fmt.Errorf("failed to install Envoy Gateway: %w", err)
+	}
+
+	// 2a. Install GatewayClass (Priority: 2.3, depends on envoy-gateway)
+	if err := installGatewayClass(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install GatewayClass").
+			WithResource("gatewayclass").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - GatewayClass is optional
+	}
+
+	// 2b. Install Gateway resource (Priority: 2.5, depends on gatewayclass)
+	if err := installGateway(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Gateway").
+			WithResource("gateway").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - Gateway is optional
 	}
 
 	// 3. Install OpenTelemetry Collector (Priority: 3)
@@ -190,6 +249,15 @@ func installKeycloak(ctx context.Context, client *kubernetes.Clientset, kubeconf
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Keycloak deployed successfully").
 			WithResource("keycloak").
 			WithAction("deployed"))
+	}
+
+	// 6. Install HTTPRoute for Keycloak
+	if err := installKeycloakHTTPRoute(ctx, kubeconfigBytes, cfg); err != nil {
+		// Don't fail if HTTPRoute fails - just warn
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Keycloak HTTPRoute").
+			WithResource("keycloak-httproute").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
 	}
 
 	return nil
@@ -427,6 +495,137 @@ func installCertManager(ctx context.Context, kubeconfigBytes []byte) error {
 	return nil
 }
 
+// installMetalLB installs MetalLB via Argo CD for local deployments
+func installMetalLB(ctx context.Context, kubeconfigBytes []byte, metallbCfg MetalLBConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installMetalLB")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing MetalLB").
+		WithResource("metallb").
+		WithAction("installing"))
+
+	// 1. Parse and apply MetalLB Argo CD Application manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(metallbApplicationManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode MetalLB application manifest: %w", err)
+	}
+
+	if err := ApplyArgoCDApplication(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply MetalLB Argo CD Application: %w", err)
+	}
+
+	// 2. Wait for MetalLB to be deployed (with timeout)
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for MetalLB to be ready").
+		WithResource("metallb").
+		WithAction("waiting"))
+
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	if err := WaitForArgoCDApplication(waitCtx, kubeconfigBytes, "metallb", "argocd", 2*time.Minute); err != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "MetalLB may not be fully ready yet").
+			WithResource("metallb").
+			WithAction("waiting").
+			WithMetadata("info", "Argo CD will continue syncing in the background"))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "MetalLB deployed successfully").
+			WithResource("metallb").
+			WithAction("deployed"))
+	}
+
+	// 3. Apply IPAddressPool configuration
+	if err := installMetalLBIPAddressPool(ctx, kubeconfigBytes, metallbCfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to install MetalLB IPAddressPool: %w", err)
+	}
+
+	// 4. Apply L2Advertisement configuration
+	if err := installMetalLBL2Advertisement(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to install MetalLB L2Advertisement: %w", err)
+	}
+
+	return nil
+}
+
+// installMetalLBIPAddressPool installs the IPAddressPool resource
+func installMetalLBIPAddressPool(ctx context.Context, kubeconfigBytes []byte, metallbCfg MetalLBConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installMetalLBIPAddressPool")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating MetalLB IP address pool").
+		WithResource("metallb-ipaddresspool").
+		WithAction("installing"))
+
+	// Parse IPAddressPool manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(metallbIPAddressPoolManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode IPAddressPool manifest: %w", err)
+	}
+
+	// Customize address pool if configured
+	if metallbCfg.AddressPool != "" {
+		addresses := []interface{}{metallbCfg.AddressPool}
+		if err := unstructured.SetNestedSlice(obj.Object, addresses, "spec", "addresses"); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to set address pool: %w", err)
+		}
+	}
+
+	// Apply IPAddressPool resource using dynamic client
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply IPAddressPool: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "MetalLB IP address pool created").
+		WithResource("metallb-ipaddresspool").
+		WithAction("created"))
+
+	return nil
+}
+
+// installMetalLBL2Advertisement installs the L2Advertisement resource
+func installMetalLBL2Advertisement(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installMetalLBL2Advertisement")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating MetalLB L2 advertisement").
+		WithResource("metallb-l2advertisement").
+		WithAction("installing"))
+
+	// Parse L2Advertisement manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(metallbL2AdvertisementManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode L2Advertisement manifest: %w", err)
+	}
+
+	// Apply L2Advertisement resource using dynamic client
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply L2Advertisement: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "MetalLB L2 advertisement created").
+		WithResource("metallb-l2advertisement").
+		WithAction("created"))
+
+	return nil
+}
+
 // installEnvoyGateway installs Envoy Gateway via Argo CD
 func installEnvoyGateway(ctx context.Context, kubeconfigBytes []byte) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -518,6 +717,198 @@ func installOpenTelemetryCollector(ctx context.Context, kubeconfigBytes []byte) 
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "OpenTelemetry Collector deployed successfully").
 			WithResource("opentelemetry-collector").
 			WithAction("deployed"))
+	}
+
+	return nil
+}
+
+// installGatewayClass installs the GatewayClass resource for Envoy Gateway
+func installGatewayClass(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installGatewayClass")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing GatewayClass resource").
+		WithResource("gatewayclass").
+		WithAction("installing"))
+
+	// Parse GatewayClass manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(gatewayClassManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode GatewayClass manifest: %w", err)
+	}
+
+	// Apply GatewayClass resource using dynamic client
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply GatewayClass: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "GatewayClass resource created").
+		WithResource("gatewayclass").
+		WithAction("created"))
+
+	return nil
+}
+
+// installGateway installs the Gateway API Gateway resource
+func installGateway(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installGateway")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Gateway resource").
+		WithResource("gateway").
+		WithAction("installing"))
+
+	// Parse Gateway manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(gatewayManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode Gateway manifest: %w", err)
+	}
+
+	// Apply Gateway resource using dynamic client
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply Gateway: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Gateway resource created").
+		WithResource("gateway").
+		WithAction("created"))
+
+	return nil
+}
+
+// installKeycloakHTTPRoute installs HTTPRoute for Keycloak
+func installKeycloakHTTPRoute(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installKeycloakHTTPRoute")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Keycloak HTTPRoute").
+		WithResource("keycloak-httproute").
+		WithAction("installing"))
+
+	// Parse HTTPRoute manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(keycloakHTTPRouteManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode Keycloak HTTPRoute manifest: %w", err)
+	}
+
+	// Customize hostname if domain is provided
+	if cfg.Domain != "" {
+		hostname := fmt.Sprintf("keycloak.%s", cfg.Domain)
+		// Update the hostnames in the HTTPRoute spec
+		hostnames := []interface{}{hostname}
+		if err := unstructured.SetNestedSlice(obj.Object, hostnames, "spec", "hostnames"); err == nil {
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Configured Keycloak hostname: %s", hostname)).
+				WithResource("keycloak-httproute").
+				WithAction("configuring"))
+		}
+	}
+
+	// Apply HTTPRoute resource
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply Keycloak HTTPRoute: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Keycloak HTTPRoute created").
+		WithResource("keycloak-httproute").
+		WithAction("created"))
+
+	return nil
+}
+
+// pluralizeKind converts a Kubernetes Kind to its plural resource name
+// Handles special cases like GatewayClass -> gatewayclasses
+func pluralizeKind(kind string) string {
+	lower := strings.ToLower(kind)
+
+	// Special cases for common Kubernetes resources
+	switch lower {
+	case "gatewayclass":
+		return "gatewayclasses"
+	case "ingressclass":
+		return "ingressclasses"
+	case "storageclass":
+		return "storageclasses"
+	case "priorityclass":
+		return "priorityclasses"
+	}
+
+	// Handle words ending in 's', 'x', 'z', 'ch', 'sh' -> add 'es'
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") ||
+	   strings.HasSuffix(lower, "z") || strings.HasSuffix(lower, "ch") ||
+	   strings.HasSuffix(lower, "sh") {
+		return lower + "es"
+	}
+
+	// Handle words ending in 'y' preceded by consonant -> 'ies'
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		beforeY := lower[len(lower)-2]
+		if beforeY != 'a' && beforeY != 'e' && beforeY != 'i' && beforeY != 'o' && beforeY != 'u' {
+			return lower[:len(lower)-1] + "ies"
+		}
+	}
+
+	// Default: just add 's'
+	return lower + "s"
+}
+
+// applyResource applies a Kubernetes resource using the dynamic client
+func applyResource(ctx context.Context, kubeconfigBytes []byte, obj *unstructured.Unstructured) error {
+	// Create dynamic client
+	dynamicClient, err := NewDynamicClientFromKubeconfig(ctx, kubeconfigBytes)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	gvk := obj.GroupVersionKind()
+	// Pluralize the kind properly (e.g., Gateway -> gateways, GatewayClass -> gatewayclasses)
+	resourceName := pluralizeKind(gvk.Kind)
+	gvr := gvk.GroupVersion().WithResource(resourceName)
+	namespace := obj.GetNamespace()
+
+	// Try to get existing resource
+	var existingObj *unstructured.Unstructured
+	if namespace != "" {
+		existingObj, err = dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, obj.GetName(), metav1.GetOptions{})
+	} else {
+		existingObj, err = dynamicClient.Resource(gvr).Get(ctx, obj.GetName(), metav1.GetOptions{})
+	}
+
+	if err == nil {
+		// Resource exists, update it
+		obj.SetResourceVersion(existingObj.GetResourceVersion())
+		if namespace != "" {
+			_, err = dynamicClient.Resource(gvr).Namespace(namespace).Update(ctx, obj, metav1.UpdateOptions{})
+		} else {
+			_, err = dynamicClient.Resource(gvr).Update(ctx, obj, metav1.UpdateOptions{})
+		}
+		if err != nil {
+			return fmt.Errorf("failed to update resource: %w", err)
+		}
+	} else {
+		// Resource doesn't exist, create it
+		if namespace != "" {
+			_, err = dynamicClient.Resource(gvr).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+		} else {
+			_, err = dynamicClient.Resource(gvr).Create(ctx, obj, metav1.CreateOptions{})
+		}
+		if err != nil {
+			return fmt.Errorf("failed to create resource: %w", err)
+		}
 	}
 
 	return nil
