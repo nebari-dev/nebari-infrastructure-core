@@ -41,11 +41,23 @@ var opentelemetryCollectorApplicationManifest string
 //go:embed foundational/gatewayclass.yaml
 var gatewayClassManifest string
 
+//go:embed foundational/selfsigned-clusterissuer.yaml
+var selfsignedClusterIssuerManifest string
+
+//go:embed foundational/letsencrypt-clusterissuer.yaml
+var letsencryptClusterIssuerManifest string
+
+//go:embed foundational/gateway-certificate.yaml
+var gatewayCertificateManifest string
+
 //go:embed foundational/gateway.yaml
 var gatewayManifest string
 
 //go:embed foundational/keycloak-httproute.yaml
 var keycloakHTTPRouteManifest string
+
+//go:embed foundational/argocd-httproute.yaml
+var argocdHTTPRouteManifest string
 
 //go:embed foundational/metallb-application.yaml
 var metallbApplicationManifest string
@@ -119,6 +131,16 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to install Cert Manager: %w", err)
 	}
 
+	// 1.2. Install ClusterIssuer (Priority: 1.2, depends on cert-manager)
+	if err := installClusterIssuer(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install ClusterIssuer").
+			WithResource("clusterissuer").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - ClusterIssuer is optional for non-TLS setups
+	}
+
 	// 1.5. Install MetalLB if enabled (Priority: 1.5, local deployments only)
 	if foundationalCfg.MetalLB.Enabled {
 		if err := installMetalLB(ctx, kubeconfigBytes, foundationalCfg.MetalLB); err != nil {
@@ -141,6 +163,16 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to install Envoy Gateway: %w", err)
 	}
 
+	// 2.1. Install Gateway TLS certificate (Priority: 2.1, depends on envoy-gateway namespace)
+	if err := installGatewayCertificate(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Gateway certificate").
+			WithResource("gateway-certificate").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - Certificate is optional for non-TLS setups
+	}
+
 	// 2a. Install GatewayClass (Priority: 2.3, depends on envoy-gateway)
 	if err := installGatewayClass(ctx, kubeconfigBytes); err != nil {
 		span.RecordError(err)
@@ -159,6 +191,16 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			WithAction("install-failed").
 			WithMetadata("error", err.Error()))
 		// Don't fail - Gateway is optional
+	}
+
+	// 2c. Install ArgoCD HTTPRoute (Priority: 2.6, depends on gateway)
+	if err := installArgoCDHTTPRoute(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install ArgoCD HTTPRoute").
+			WithResource("argocd-httproute").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - HTTPRoute is optional
 	}
 
 	// 3. Install OpenTelemetry Collector (Priority: 3)
@@ -722,6 +764,136 @@ func installOpenTelemetryCollector(ctx context.Context, kubeconfigBytes []byte) 
 	return nil
 }
 
+// installClusterIssuer installs the appropriate ClusterIssuer based on config
+func installClusterIssuer(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installClusterIssuer")
+	defer span.End()
+
+	// Determine issuer type from config
+	issuerType := "selfsigned"
+	if cfg.Certificate != nil && cfg.Certificate.Type != "" {
+		issuerType = cfg.Certificate.Type
+	}
+
+	var manifest string
+	var issuerName string
+
+	switch issuerType {
+	case "letsencrypt":
+		if cfg.Certificate == nil || cfg.Certificate.ACME == nil || cfg.Certificate.ACME.Email == "" {
+			return fmt.Errorf("Let's Encrypt requires certificate.acme.email to be configured")
+		}
+
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Let's Encrypt ClusterIssuer").
+			WithResource("letsencrypt-clusterissuer").
+			WithAction("installing"))
+
+		// Set default ACME server if not specified
+		acmeServer := cfg.Certificate.ACME.Server
+		if acmeServer == "" {
+			acmeServer = "https://acme-v02.api.letsencrypt.org/directory"
+		}
+
+		// Replace placeholders in manifest
+		manifest = strings.ReplaceAll(letsencryptClusterIssuerManifest, "ACME_EMAIL_PLACEHOLDER", cfg.Certificate.ACME.Email)
+		manifest = strings.ReplaceAll(manifest, "ACME_SERVER_PLACEHOLDER", acmeServer)
+		issuerName = "letsencrypt-clusterissuer"
+
+	default: // selfsigned
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing self-signed ClusterIssuer").
+			WithResource("selfsigned-clusterissuer").
+			WithAction("installing"))
+		manifest = selfsignedClusterIssuerManifest
+		issuerName = "selfsigned-clusterissuer"
+	}
+
+	// Parse ClusterIssuer manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(manifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode ClusterIssuer manifest: %w", err)
+	}
+
+	// Apply ClusterIssuer resource
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply ClusterIssuer: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("%s ClusterIssuer created", issuerType)).
+		WithResource(issuerName).
+		WithAction("created"))
+
+	return nil
+}
+
+// installGatewayCertificate installs the TLS certificate for the gateway
+func installGatewayCertificate(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installGatewayCertificate")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Gateway TLS certificate").
+		WithResource("gateway-certificate").
+		WithAction("installing"))
+
+	// Parse Certificate manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(gatewayCertificateManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode Certificate manifest: %w", err)
+	}
+
+	// Determine issuer name based on config
+	issuerName := "selfsigned-issuer"
+	if cfg.Certificate != nil && cfg.Certificate.Type == "letsencrypt" {
+		issuerName = "letsencrypt-issuer"
+	}
+
+	// Update the issuerRef in the certificate spec
+	if err := unstructured.SetNestedField(obj.Object, issuerName, "spec", "issuerRef", "name"); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to set issuer reference: %w", err)
+	}
+
+	// Update DNS names if domain is configured
+	if cfg.Domain != "" {
+		dnsNames := []any{
+			"*." + cfg.Domain,
+			cfg.Domain,
+			"keycloak." + cfg.Domain,
+			"argocd." + cfg.Domain,
+		}
+		if err := unstructured.SetNestedSlice(obj.Object, dnsNames, "spec", "dnsNames"); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to set DNS names: %w", err)
+		}
+		// Also update commonName
+		if err := unstructured.SetNestedField(obj.Object, "*."+cfg.Domain, "spec", "commonName"); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to set common name: %w", err)
+		}
+	}
+
+	// Apply Certificate resource
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply Certificate: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Gateway TLS certificate created").
+		WithResource("gateway-certificate").
+		WithAction("created").
+		WithMetadata("issuer", issuerName))
+
+	return nil
+}
+
 // installGatewayClass installs the GatewayClass resource for Envoy Gateway
 func installGatewayClass(ctx context.Context, kubeconfigBytes []byte) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -781,6 +953,50 @@ func installGateway(ctx context.Context, kubeconfigBytes []byte) error {
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Gateway resource created").
 		WithResource("gateway").
+		WithAction("created"))
+
+	return nil
+}
+
+// installArgoCDHTTPRoute installs HTTPRoute for ArgoCD
+func installArgoCDHTTPRoute(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installArgoCDHTTPRoute")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing ArgoCD HTTPRoute").
+		WithResource("argocd-httproute").
+		WithAction("installing"))
+
+	// Parse HTTPRoute manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(argocdHTTPRouteManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode ArgoCD HTTPRoute manifest: %w", err)
+	}
+
+	// Customize hostname if domain is provided
+	if cfg.Domain != "" {
+		hostname := fmt.Sprintf("argocd.%s", cfg.Domain)
+		// Update the hostnames in the HTTPRoute spec
+		hostnames := []interface{}{hostname}
+		if err := unstructured.SetNestedSlice(obj.Object, hostnames, "spec", "hostnames"); err == nil {
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Configured ArgoCD hostname: %s", hostname)).
+				WithResource("argocd-httproute").
+				WithAction("configuring"))
+		}
+	}
+
+	// Apply HTTPRoute resource
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply ArgoCD HTTPRoute: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "ArgoCD HTTPRoute created").
+		WithResource("argocd-httproute").
 		WithAction("created"))
 
 	return nil
