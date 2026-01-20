@@ -26,11 +26,36 @@ type NebariConfig struct {
 	// Reading from a nil map is safe in Go (returns nil), so no getter needed.
 	// Extra YAML fields are captured here and safely ignored (forward compatibility).
 	ProviderConfig map[string]any `yaml:",inline"`
+	// Certificate configuration (optional)
+	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
+
+	// Additional fields can be added as needed
+	// Using map to capture additional fields for lenient parsing
+	AdditionalFields map[string]any `yaml:",inline"`
 
 	// Runtime options (set by CLI, not from YAML file)
 	DryRun  bool          `yaml:"-"` // Preview changes without applying them
 	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
 	Timeout time.Duration `yaml:"-"` // Override default operation timeout
+}
+
+// CertificateConfig holds TLS certificate configuration
+type CertificateConfig struct {
+	// Type is the certificate type: "selfsigned" or "letsencrypt"
+	Type string `yaml:"type,omitempty"`
+
+	// ACME configuration for Let's Encrypt
+	ACME *ACMEConfig `yaml:"acme,omitempty"`
+}
+
+// ACMEConfig holds ACME (Let's Encrypt) configuration
+type ACMEConfig struct {
+	// Email is the email address for Let's Encrypt registration
+	Email string `yaml:"email"`
+
+	// Server is the ACME server URL (defaults to Let's Encrypt production)
+	// Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing
+	Server string `yaml:"server,omitempty"`
 }
 
 // ValidProviders lists the supported providers

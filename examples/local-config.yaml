@@ -1,7 +1,8 @@
 project_name: my-nebari-local
 provider: local
 domain: nebari.local
-
+certificate:
+  type: selfsigned
 local:
   kube_context: "kind-nebari-local"
   node_selectors:

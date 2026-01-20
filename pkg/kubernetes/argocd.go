@@ -27,9 +27,13 @@ func defaultArgoCDConfig() argoCDConfig {
 		Namespace:   "argocd",
 		ReleaseName: "argocd",
 		Timeout:     5 * time.Minute,
-		Values:      map[string]any{
-			// Minimal default configuration
-			// Users can customize Argo CD after installation
+		Values: map[string]any{
+			// Run in insecure mode since TLS is terminated at the gateway
+			"configs": map[string]any{
+				"params": map[string]any{
+					"server.insecure": true,
+				},
+			},
 		},
 	}
 }
