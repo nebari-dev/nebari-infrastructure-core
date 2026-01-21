@@ -97,10 +97,6 @@ func InstallArgoCD(ctx context.Context, cfg *config.NebariConfig, prov provider.
 	}
 
 	// Wait for Argo CD to be ready
-	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for Argo CD to be ready").
-		WithResource("argocd").
-		WithAction("waiting"))
-
 	if err := WaitForArgoCDReady(ctx, k8sClient, argoCDCfg.Namespace, 5*time.Minute); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Argo CD may not be fully ready yet").
