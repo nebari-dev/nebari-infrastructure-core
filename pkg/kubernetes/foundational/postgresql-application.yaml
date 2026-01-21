@@ -3,10 +3,13 @@ kind: Application
 metadata:
   name: postgresql
   namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  project: foundational
 
   source:
     chart: postgresql

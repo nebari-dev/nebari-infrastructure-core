@@ -62,6 +62,9 @@ var argocdHTTPRouteManifest string
 //go:embed foundational/metallb-application.yaml
 var metallbApplicationManifest string
 
+//go:embed foundational/argocd-project.yaml
+var argoCDProjectManifest string
+
 //go:embed foundational/metallb-ipaddresspool.yaml
 var metallbIPAddressPoolManifest string
 
@@ -112,6 +115,16 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
+	}
+
+	// 0. Install ArgoCD Project for foundational services (Priority: 0)
+	if err := installArgoCDProject(ctx, kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install ArgoCD Project").
+			WithResource("argocd-project").
+			WithAction("install-failed").
+			WithMetadata("error", err.Error()))
+		// Don't fail - project is optional, apps will fall back to default project
 	}
 
 	// Create Kubernetes client
@@ -1126,6 +1139,38 @@ func applyResource(ctx context.Context, kubeconfigBytes []byte, obj *unstructure
 			return fmt.Errorf("failed to create resource: %w", err)
 		}
 	}
+
+	return nil
+}
+
+// installArgoCDProject installs the ArgoCD AppProject for foundational services
+func installArgoCDProject(ctx context.Context, kubeconfigBytes []byte) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "kubernetes.installArgoCDProject")
+	defer span.End()
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing ArgoCD Project for foundational services").
+		WithResource("argocd-project").
+		WithAction("installing"))
+
+	// Parse ArgoCD Project manifest
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	obj := &unstructured.Unstructured{}
+	_, _, err := decoder.Decode([]byte(argoCDProjectManifest), nil, obj)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to decode ArgoCD Project manifest: %w", err)
+	}
+
+	// Apply ArgoCD Project resource
+	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to apply ArgoCD Project: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "ArgoCD Project created").
+		WithResource("argocd-project").
+		WithAction("created"))
 
 	return nil
 }
