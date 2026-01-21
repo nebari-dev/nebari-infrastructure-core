@@ -1065,8 +1065,8 @@ func pluralizeKind(kind string) string {
 
 	// Handle words ending in 's', 'x', 'z', 'ch', 'sh' -> add 'es'
 	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") ||
-	   strings.HasSuffix(lower, "z") || strings.HasSuffix(lower, "ch") ||
-	   strings.HasSuffix(lower, "sh") {
+		strings.HasSuffix(lower, "z") || strings.HasSuffix(lower, "ch") ||
+		strings.HasSuffix(lower, "sh") {
 		return lower + "es"
 	}
 
