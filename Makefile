@@ -118,17 +118,16 @@ localkind-up: build ## Create local kind cluster and deploy Nebari
 	@echo "Setting up local kind cluster..."
 	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
-	-kind delete cluster -n nebari-local
-	-docker network rm kind 2>/dev/null
-	docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
-	kind create cluster --name nebari-local
+	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
+	-kind create cluster --name nebari-local
 	@echo "Deploying Nebari to local cluster..."
 	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml
 	@echo "Local kind cluster is ready!"
 	@echo "Add to /etc/hosts: 192.168.1.100 keycloak.nebari.local argocd.nebari.local"
 
+localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster
+
 localkind-down: ## Delete local kind cluster
-	@echo "Deleting local kind cluster..."
 	-kind delete cluster -n nebari-local
 	-docker network rm kind 2>/dev/null
 	@echo "Local kind cluster deleted"
