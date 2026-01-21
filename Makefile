@@ -123,7 +123,6 @@ localkind-up: build ## Create local kind cluster and deploy Nebari
 	@echo "Deploying Nebari to local cluster..."
 	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml
 	@echo "Local kind cluster is ready!"
-	@echo "Add to /etc/hosts: 192.168.1.100 keycloak.nebari.local argocd.nebari.local"
 
 localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster
 
