@@ -23,6 +23,11 @@ import (
 const (
 	bootstrapMarkerFile = ".bootstrapped"
 	tracerName          = "nebari-infrastructure-core"
+	tempDirPrefix       = "nic-gitops-*"
+	gitUser             = "git"
+	remoteName          = "origin"
+	commitAuthorName    = "Nebari Infrastructure Core"
+	commitAuthorEmail   = "nic[bot]@users.noreply.github.com"
 )
 
 // ClientImpl implements Client using go-git.
@@ -37,19 +42,25 @@ type ClientImpl struct {
 
 // NewClient creates a new git client from the provided configuration.
 // The client must be cleaned up with Cleanup() when done.
+//
+// Note: ClientImpl is NOT safe for concurrent use. Each goroutine should
+// create its own client instance.
 func NewClient(cfg *Config) (*ClientImpl, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	auth, err := buildAuth(&cfg.Auth)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build auth: %w", err)
-	}
-
-	tempDir, err := os.MkdirTemp("", "nic-gitops-*")
+	tempDir, err := os.MkdirTemp("", tempDirPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Build auth after creating tempDir so we can clean up on failure
+	auth, err := buildAuth(&cfg.Auth)
+	if err != nil {
+		// Clean up tempDir on auth failure to prevent resource leak
+		_ = os.RemoveAll(tempDir)
+		return nil, fmt.Errorf("failed to build auth: %w", err)
 	}
 
 	repoPath := tempDir
@@ -82,8 +93,13 @@ func buildAuth(authCfg *AuthConfig) (transport.AuthMethod, error) {
 		}
 
 		return &ssh.PublicKeys{
-			User:   "git",
+			User:   gitUser,
 			Signer: signer,
+			// Accept any host key - appropriate for automated systems
+			// where we trust the configured repository URL
+			HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
+				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+			},
 		}, nil
 
 	case "token":
@@ -93,7 +109,7 @@ func buildAuth(authCfg *AuthConfig) (transport.AuthMethod, error) {
 		}
 
 		return &http.BasicAuth{
-			Username: "git",
+			Username: gitUser,
 			Password: token,
 		}, nil
 
@@ -115,7 +131,7 @@ func (c *ClientImpl) ValidateAuth(ctx context.Context) error {
 
 	// Create a remote to test access without cloning
 	remote := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
-		Name: "origin",
+		Name: remoteName,
 		URLs: []string{c.cfg.URL},
 	})
 
@@ -149,13 +165,13 @@ func (c *ClientImpl) Init(ctx context.Context) error {
 		return c.pull(ctx)
 	}
 
-	// Clone the repository
+	// Clone the repository (shallow clone - we only need latest for push)
 	repo, err := git.PlainCloneContext(ctx, c.repoPath, false, &git.CloneOptions{
 		URL:           c.cfg.URL,
 		Auth:          c.auth,
 		ReferenceName: plumbing.NewBranchReferenceName(c.cfg.GetBranch()),
 		SingleBranch:  true,
-		Depth:         0, // Full clone for push support
+		Depth:         1,
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -246,8 +262,8 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	// Commit
 	_, err = worktree.Commit(message, &git.CommitOptions{
 		Author: &object.Signature{
-			Name:  "NIC",
-			Email: "nic@nebari.dev",
+			Name:  commitAuthorName,
+			Email: commitAuthorEmail,
 			When:  time.Now(),
 		},
 	})

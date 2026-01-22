@@ -4,12 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestNewClient(t *testing.T) {
-	// Generate a valid SSH key for testing
-	validSSHKey := `-----BEGIN OPENSSH PRIVATE KEY-----
+// testSSHKey is a valid Ed25519 SSH key for testing (not used in production).
+const testSSHKey = `-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
 QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
 KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
@@ -17,6 +17,7 @@ AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
 fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 -----END OPENSSH PRIVATE KEY-----`
 
+func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name        string
 		config      Config
@@ -34,7 +35,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 				},
 			},
 			envSetup: map[string]string{
-				"TEST_SSH_KEY": validSSHKey,
+				"TEST_SSH_KEY": testSSHKey,
 			},
 			wantErr: false,
 		},
@@ -115,7 +116,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 					}
 					return
 				}
-				if tt.errContains != "" && !containsString(err.Error(), tt.errContains) {
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("NewClient() error = %v, want error containing %q", err, tt.errContains)
 				}
 			} else {
@@ -151,14 +152,6 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 }
 
 func TestClientWorkDir(t *testing.T) {
-	validSSHKey := `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
-KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
-AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
-fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
------END OPENSSH PRIVATE KEY-----`
-
 	tests := []struct {
 		name         string
 		config       Config
@@ -185,7 +178,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 		},
 	}
 
-	if err := os.Setenv("TEST_SSH_KEY", validSSHKey); err != nil {
+	if err := os.Setenv("TEST_SSH_KEY", testSSHKey); err != nil {
 		t.Fatalf("failed to set env var: %v", err)
 	}
 	defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
@@ -199,7 +192,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 			defer func() { _ = client.Cleanup() }()
 
 			workDir := client.WorkDir()
-			if !containsString(workDir, tt.wantContains) {
+			if !strings.Contains(workDir, tt.wantContains) {
 				t.Errorf("WorkDir() = %v, want to contain %v", workDir, tt.wantContains)
 			}
 		})
@@ -207,15 +200,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 }
 
 func TestClientIsBootstrapped(t *testing.T) {
-	validSSHKey := `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
-KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
-AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
-fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
------END OPENSSH PRIVATE KEY-----`
-
-	if err := os.Setenv("TEST_SSH_KEY", validSSHKey); err != nil {
+	if err := os.Setenv("TEST_SSH_KEY", testSSHKey); err != nil {
 		t.Fatalf("failed to set env var: %v", err)
 	}
 	defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
@@ -279,15 +264,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 }
 
 func TestClientWriteBootstrapMarker(t *testing.T) {
-	validSSHKey := `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
-KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
-AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
-fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
------END OPENSSH PRIVATE KEY-----`
-
-	if err := os.Setenv("TEST_SSH_KEY", validSSHKey); err != nil {
+	if err := os.Setenv("TEST_SSH_KEY", testSSHKey); err != nil {
 		t.Fatalf("failed to set env var: %v", err)
 	}
 	defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
@@ -315,7 +292,7 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 		t.Fatalf("failed to read marker file: %v", err)
 	}
 
-	if !containsString(string(content), "bootstrapped_at") {
+	if !strings.Contains(string(content), "bootstrapped_at") {
 		t.Errorf("marker file content = %q, want to contain 'bootstrapped_at'", content)
 	}
 
@@ -329,16 +306,56 @@ fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
 	}
 }
 
-func TestClientCleanup(t *testing.T) {
-	validSSHKey := `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
-KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
-AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
-fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
------END OPENSSH PRIVATE KEY-----`
+func TestNewClientCleansUpOnAuthError(t *testing.T) {
+	// Count temp directories before
+	tmpDir := os.TempDir()
+	entriesBefore, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	countBefore := countNicGitopsDirs(entriesBefore)
 
-	if err := os.Setenv("TEST_SSH_KEY", validSSHKey); err != nil {
+	// Set an invalid SSH key that will fail parsing
+	if err := os.Setenv("TEST_SSH_KEY", "invalid-key"); err != nil {
+		t.Fatalf("failed to set env var: %v", err)
+	}
+	defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
+
+	// This should fail in buildAuth after tempDir is created
+	_, err = NewClient(&Config{
+		URL:    "git@github.com:org/repo.git",
+		Branch: "main",
+		Auth:   AuthConfig{SSHKeyEnv: "TEST_SSH_KEY"},
+	})
+	if err == nil {
+		t.Fatal("NewClient() expected error for invalid SSH key, got nil")
+	}
+
+	// Count temp directories after - should be the same (no leak)
+	entriesAfter, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	countAfter := countNicGitopsDirs(entriesAfter)
+
+	if countAfter > countBefore {
+		t.Errorf("temp directory leak detected: had %d nic-gitops dirs before, %d after",
+			countBefore, countAfter)
+	}
+}
+
+func countNicGitopsDirs(entries []os.DirEntry) int {
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "nic-gitops-") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestClientCleanup(t *testing.T) {
+	if err := os.Setenv("TEST_SSH_KEY", testSSHKey); err != nil {
 		t.Fatalf("failed to set env var: %v", err)
 	}
 	defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()

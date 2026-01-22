@@ -4,6 +4,9 @@ import "context"
 
 // Client defines operations for interacting with a Git repository.
 // This interface is used to bootstrap GitOps repositories for ArgoCD.
+//
+// Implementations of this interface are NOT safe for concurrent use.
+// Each goroutine should create its own Client instance.
 type Client interface {
 	// ValidateAuth checks that credentials are configured and can access the repository.
 	// - SSH key configured: validates key format and tests access via remote.List()
