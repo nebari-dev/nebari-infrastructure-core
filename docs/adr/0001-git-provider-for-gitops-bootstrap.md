@@ -31,9 +31,9 @@ Key considerations:
 
 ## Considered Options
 
-1. **Generic Git Operator only** - Use git CLI for all operations, require existing repo
+1. **Generic GitClient only** - Use go-git library for all operations, require existing repo
 2. **Provider-specific implementations** - Build API integrations for each Git provider
-3. **Layered approach** - Generic Git Operator as base, optional provider extensions
+3. **Layered approach** - Generic GitClient as base, optional provider extensions
 
 ## Decision Outcome
 
@@ -41,9 +41,9 @@ Chosen option: **Layered approach with MVP focusing on Generic Git Operator**
 
 The implementation will be split into two phases:
 
-**MVP (Phase 1)**: Implement `GitOperator` interface that uses git CLI operations. Users must provide an existing repository URL and authentication credentials via environment variables.
+**MVP (Phase 1)**: Implement `GitClient` interface using the [go-git](https://github.com/go-git/go-git) library (pure Go git implementation). Users must provide an existing repository URL and authentication credentials via environment variables.
 
-**Future (Phase 2)**: Add provider-specific implementations (GitHub, GitLab, etc.) that can create repositories via API, then delegate to `GitOperator` for actual git operations.
+**Future (Phase 2)**: Add provider-specific implementations (GitHub, GitLab, etc.) that can create repositories via API, then delegate to `GitClient` for actual git operations.
 
 ### Consequences
 
@@ -60,13 +60,19 @@ The implementation will be split into two phases:
 
 ## Detailed Design
 
-### GitOperator Interface (MVP)
+### GitClient Interface (MVP)
 
 ```go
 // NOTE: Illustrative code - not production ready
 package git
 
-type GitOperator interface {
+type Client interface {
+    // ValidateAuth checks credentials and repo accessibility
+    // - SSH key provided: test SSH auth via go-git remote.List()
+    // - Token provided: test HTTPS auth via go-git remote.List()
+    // - No auth configured: fail immediately (pushing requires auth)
+    ValidateAuth(ctx context.Context) error
+
     // Init clones the repo if not present, or opens and pulls if it exists
     Init(ctx context.Context) error
 
@@ -74,10 +80,14 @@ type GitOperator interface {
     WorkDir() string
 
     // CommitAndPush stages all changes, commits, and pushes to remote
+    // Internally checks for changes - no-op if nothing changed
     CommitAndPush(ctx context.Context, message string) error
 
-    // HasChanges returns true if there are uncommitted changes
-    HasChanges(ctx context.Context) (bool, error)
+    // IsBootstrapped checks if the .bootstrapped marker file exists
+    IsBootstrapped(ctx context.Context) (bool, error)
+
+    // WriteBootstrapMarker writes the .bootstrapped marker file
+    WriteBootstrapMarker(ctx context.Context) error
 }
 ```
 
@@ -97,27 +107,30 @@ git_repository:
 
 ```
 First `nic deploy`:
-  1. Clone repository
-  2. Check for .bootstrapped marker file
-  3. If not found:
+  1. ValidateAuth (fail fast if credentials missing or invalid)
+  2. Clone repository
+  3. Check for .bootstrapped marker file
+  4. If not found:
      a. Generate ArgoCD Application manifests
      b. Write .bootstrapped marker
      c. Commit and push
-  4. Create Kubernetes Secret for ArgoCD repo access
-  5. Continue with OpenTofu (infra + ArgoCD pointing at repo)
+  5. Create Kubernetes Secret for ArgoCD repo access
+  6. Continue with OpenTofu (infra + ArgoCD pointing at repo)
 
 Subsequent `nic deploy`:
-  1. Clone/pull repository
-  2. Find .bootstrapped marker
-  3. Skip manifest generation (log: "GitOps repo already initialized")
-  4. Continue with OpenTofu
+  1. ValidateAuth
+  2. Clone/pull repository
+  3. Find .bootstrapped marker
+  4. Skip manifest generation (log: "GitOps repo already initialized")
+  5. Continue with OpenTofu
 
 `nic deploy --regen-apps`:
-  1. Clone/pull repository
-  2. Ignore .bootstrapped marker
-  3. Regenerate all manifests
-  4. Commit and push
-  5. Continue with OpenTofu
+  1. ValidateAuth
+  2. Clone/pull repository
+  3. Ignore .bootstrapped marker
+  4. Regenerate all manifests
+  5. Commit and push
+  6. Continue with OpenTofu
 ```
 
 ### ArgoCD Repository Access
@@ -149,7 +162,7 @@ The same credentials provided by the user (via environment variable) are used fo
 ```go
 // NOTE: Illustrative code - not production ready
 type GitProvider interface {
-    GitOperator  // embeds base operations
+    GitClient  // embeds base operations
 
     // CreateRepository creates a new repository
     CreateRepository(ctx context.Context, org, name string, private bool) (url string, err error)
@@ -162,13 +175,13 @@ type GitProvider interface {
 Providers (GitHub, GitLab, etc.) would:
 1. Create repository via API if needed
 2. Optionally create deploy keys
-3. Delegate all git operations to the embedded `GitOperator`
+3. Delegate all git operations to the embedded `GitClient`
 
 ## Options Detail
 
-### Option 1: Generic Git Operator Only
+### Option 1: Generic GitClient Only
 
-Use git CLI for clone, commit, push operations. User must provide existing repository.
+Use go-git library for clone, commit, push operations. User must provide existing repository.
 
 **Pros:**
 - Simple implementation
@@ -210,5 +223,6 @@ Generic Git Operator as foundation, optional provider APIs for enhanced automati
 
 ## Links
 
+- [go-git](https://github.com/go-git/go-git) - Pure Go git implementation
 - [ArgoCD Private Repositories](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/)
 - [MADR Format](https://adr.github.io/madr/)
