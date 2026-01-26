@@ -3,6 +3,11 @@ package git
 import (
 	"fmt"
 	"os"
+
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // Config represents git repository configuration for GitOps bootstrap.
@@ -27,8 +32,17 @@ type Config struct {
 	ArgoCDAuth *AuthConfig `yaml:"argocd_auth,omitempty" json:"argocd_auth,omitempty"`
 }
 
+// CredentialProvider abstracts credential retrieval for git authentication.
+// This interface enables dependency injection for testing.
+type CredentialProvider interface {
+	// GetAuth returns the configured transport.AuthMethod for git operations.
+	// Returns an error if credentials are missing or invalid.
+	GetAuth() (transport.AuthMethod, error)
+}
+
 // AuthConfig specifies authentication credentials for git operations.
 // Only one of SSHKeyEnv or TokenEnv should be set.
+// AuthConfig implements CredentialProvider.
 type AuthConfig struct {
 	// SSHKeyEnv is the name of the environment variable containing the SSH private key
 	// The key should be in PEM format (e.g., contents of ~/.ssh/id_ed25519)
@@ -125,4 +139,45 @@ func (a *AuthConfig) GetToken() (string, error) {
 	}
 
 	return token, nil
+}
+
+// GetAuth returns the configured transport.AuthMethod for git operations.
+// Implements CredentialProvider interface.
+func (a *AuthConfig) GetAuth() (transport.AuthMethod, error) {
+	switch a.AuthType() {
+	case "ssh":
+		sshKey, err := a.GetSSHKey()
+		if err != nil {
+			return nil, err
+		}
+
+		signer, err := cryptossh.ParsePrivateKey([]byte(sshKey))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
+		}
+
+		return &ssh.PublicKeys{
+			User:   "git",
+			Signer: signer,
+			// Accept any host key - appropriate for automated systems
+			// where we trust the configured repository URL
+			HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
+				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+			},
+		}, nil
+
+	case "token":
+		token, err := a.GetToken()
+		if err != nil {
+			return nil, err
+		}
+
+		return &http.BasicAuth{
+			Username: "git",
+			Password: token,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("no authentication configured")
+	}
 }

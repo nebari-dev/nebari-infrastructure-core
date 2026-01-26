@@ -12,19 +12,15 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
-	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	cryptossh "golang.org/x/crypto/ssh"
 )
 
 const (
 	bootstrapMarkerFile = ".bootstrapped"
 	tracerName          = "nebari-infrastructure-core"
 	tempDirPrefix       = "nic-gitops-*"
-	gitUser             = "git"
 	remoteName          = "origin"
 	commitAuthorName    = "Nebari Infrastructure Core"
 	commitAuthorEmail   = "nic[bot]@users.noreply.github.com"
@@ -56,7 +52,7 @@ func NewClient(cfg *Config) (*ClientImpl, error) {
 	}
 
 	// Build auth after creating tempDir so we can clean up on failure
-	auth, err := buildAuth(&cfg.Auth)
+	auth, err := cfg.Auth.GetAuth()
 	if err != nil {
 		// Clean up tempDir on auth failure to prevent resource leak
 		_ = os.RemoveAll(tempDir)
@@ -76,46 +72,6 @@ func NewClient(cfg *Config) (*ClientImpl, error) {
 		workDir:  workDir,
 		repoPath: repoPath,
 	}, nil
-}
-
-// buildAuth creates the appropriate transport.AuthMethod based on config.
-func buildAuth(authCfg *AuthConfig) (transport.AuthMethod, error) {
-	switch authCfg.AuthType() {
-	case "ssh":
-		sshKey, err := authCfg.GetSSHKey()
-		if err != nil {
-			return nil, err
-		}
-
-		signer, err := cryptossh.ParsePrivateKey([]byte(sshKey))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
-		}
-
-		return &ssh.PublicKeys{
-			User:   gitUser,
-			Signer: signer,
-			// Accept any host key - appropriate for automated systems
-			// where we trust the configured repository URL
-			HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
-				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
-			},
-		}, nil
-
-	case "token":
-		token, err := authCfg.GetToken()
-		if err != nil {
-			return nil, err
-		}
-
-		return &http.BasicAuth{
-			Username: gitUser,
-			Password: token,
-		}, nil
-
-	default:
-		return nil, fmt.Errorf("no authentication configured")
-	}
 }
 
 // ValidateAuth checks that credentials can access the repository.

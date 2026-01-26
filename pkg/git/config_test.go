@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing/transport"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -358,5 +360,123 @@ func TestAuthConfigGetToken(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// testSSHKeyForConfig is a valid Ed25519 SSH key for testing GetAuth.
+const testSSHKeyForConfig = `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVwAAAJDxAYQo8QGE
+KAAAAAtzc2gtZWQyNTUxOQAAACBHK2Ow5CDgDQ8L4K2lR8/RZn0J7X9Y5Z5sxQnl5lMaVw
+AAAEBB6qz6RjmJ3M8pLqLyS7X8EXC+xf9lxhJwJzPlJ5OiCUcrY7DkIOANDwvgraVHz9Fm
+fQntf1jlnmzFCeXmUxpXAAAADHRlc3RAZXhhbXBsZQE=
+-----END OPENSSH PRIVATE KEY-----`
+
+func TestAuthConfigGetAuth(t *testing.T) {
+	tests := []struct {
+		name        string
+		auth        AuthConfig
+		envKey      string
+		envValue    string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "SSH auth returns PublicKeys",
+			auth:     AuthConfig{SSHKeyEnv: "TEST_SSH_KEY"},
+			envKey:   "TEST_SSH_KEY",
+			envValue: testSSHKeyForConfig,
+			wantErr:  false,
+		},
+		{
+			name:     "token auth returns BasicAuth",
+			auth:     AuthConfig{TokenEnv: "TEST_TOKEN"},
+			envKey:   "TEST_TOKEN",
+			envValue: "ghp_testtoken123",
+			wantErr:  false,
+		},
+		{
+			name:        "no auth configured returns error",
+			auth:        AuthConfig{},
+			wantErr:     true,
+			errContains: "no authentication configured",
+		},
+		{
+			name:        "missing SSH key env returns error",
+			auth:        AuthConfig{SSHKeyEnv: "MISSING_KEY"},
+			wantErr:     true,
+			errContains: "not set or empty",
+		},
+		{
+			name:        "invalid SSH key returns error",
+			auth:        AuthConfig{SSHKeyEnv: "TEST_SSH_KEY"},
+			envKey:      "TEST_SSH_KEY",
+			envValue:    "not-a-valid-key",
+			wantErr:     true,
+			errContains: "failed to parse SSH private key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup env
+			if tt.envKey != "" {
+				if err := os.Setenv(tt.envKey, tt.envValue); err != nil {
+					t.Fatalf("failed to set env var: %v", err)
+				}
+				defer func() { _ = os.Unsetenv(tt.envKey) }()
+			}
+
+			auth, err := tt.auth.GetAuth()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("GetAuth() expected error, got nil")
+					return
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("GetAuth() error = %v, want error containing %q", err, tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("GetAuth() unexpected error: %v", err)
+					return
+				}
+				if auth == nil {
+					t.Errorf("GetAuth() returned nil auth")
+				}
+			}
+		})
+	}
+}
+
+// mockCredentialProvider demonstrates how to mock CredentialProvider for testing.
+type mockCredentialProvider struct {
+	auth transport.AuthMethod
+	err  error
+}
+
+func (m *mockCredentialProvider) GetAuth() (transport.AuthMethod, error) {
+	return m.auth, m.err
+}
+
+// TestCredentialProviderInterface verifies that AuthConfig implements CredentialProvider
+// and demonstrates how the interface enables dependency injection for testing.
+func TestCredentialProviderInterface(t *testing.T) {
+	// Verify AuthConfig implements CredentialProvider
+	var _ CredentialProvider = &AuthConfig{}
+
+	// Demonstrate mock usage - no env vars needed
+	mock := &mockCredentialProvider{
+		auth: nil, // or a fake transport.AuthMethod
+		err:  nil,
+	}
+
+	auth, err := mock.GetAuth()
+	if err != nil {
+		t.Errorf("mock.GetAuth() unexpected error: %v", err)
+	}
+	if auth != nil {
+		t.Errorf("mock.GetAuth() expected nil auth from mock")
 	}
 }
