@@ -1,6 +1,11 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+)
 
 // NebariConfig represents the parsed nebari-config.yaml structure
 type NebariConfig struct {
@@ -11,6 +16,9 @@ type NebariConfig struct {
 	// DNS provider configuration (optional)
 	DNSProvider string         `yaml:"dns_provider,omitempty"`
 	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
+
+	// GitRepository configures the GitOps repository for ArgoCD bootstrap (optional)
+	GitRepository *git.Config `yaml:"git_repository,omitempty"`
 
 	// ProviderConfig captures provider-specific configuration via inline YAML.
 	// Each provider extracts its config using its config key, e.g.:
@@ -36,4 +44,24 @@ func IsValidProvider(provider string) bool {
 		}
 	}
 	return false
+}
+
+// Validate checks that the configuration is valid.
+// Returns an error describing the first validation failure encountered.
+func (c *NebariConfig) Validate() error {
+	if c.Provider == "" {
+		return fmt.Errorf("provider field is required")
+	}
+
+	if !IsValidProvider(c.Provider) {
+		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
+	}
+
+	if c.GitRepository != nil {
+		if err := c.GitRepository.Validate(); err != nil {
+			return fmt.Errorf("invalid git_repository: %w", err)
+		}
+	}
+
+	return nil
 }
