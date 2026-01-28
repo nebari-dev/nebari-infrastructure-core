@@ -1,253 +1,203 @@
 package aws
 
-// InfrastructureState represents AWS infrastructure state with AWS-specific details.
-// This is an in-memory representation populated by querying AWS APIs.
-// It is NEVER persisted to disk (stateless architecture).
-type InfrastructureState struct {
-	ClusterName string
-	Region      string
+import (
+	"context"
+	"errors"
+	"fmt"
 
-	// VPC and networking
-	VPC *VPCState
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+)
 
-	// EKS cluster
-	Cluster *ClusterState
-
-	// EKS node groups
-	NodeGroups []NodeGroupState
-
-	// EFS storage
-	Storage *StorageState
-
-	// IAM roles
-	IAMRoles *IAMRoles
+func stateBucketName(projectName string) string {
+	return fmt.Sprintf("nic-tf-state-%s", projectName)
 }
 
-// VPCState represents AWS VPC state discovered from EC2 APIs
-type VPCState struct {
-	// VPC ID
-	VPCID string
-
-	// VPC CIDR block
-	CIDR string
-
-	// Public subnet IDs (across availability zones)
-	PublicSubnetIDs []string
-
-	// Private subnet IDs (across availability zones)
-	PrivateSubnetIDs []string
-
-	// Availability zones
-	AvailabilityZones []string
-
-	// Internet Gateway ID
-	InternetGatewayID string
-
-	// NAT Gateway IDs (one per AZ)
-	NATGatewayIDs []string
-
-	// Route table IDs
-	PublicRouteTableID   string
-	PrivateRouteTableIDs []string
-
-	// Security group IDs
-	SecurityGroupIDs []string
-
-	// VPC Endpoint IDs (for private clusters)
-	VPCEndpointIDs []string
-
-	// VPC tags
-	Tags map[string]string
+func stateKey(projectName string) string {
+	return fmt.Sprintf("%s/terraform.tfstate", projectName)
 }
 
-// ClusterState represents EKS cluster state discovered from EKS APIs
-type ClusterState struct {
-	// Cluster name
-	Name string
+func ensureStateBucket(ctx context.Context, bucketName, region string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.EnsureStateBucket")
+	defer span.End()
 
-	// Cluster ARN
-	ARN string
+	span.SetAttributes(
+		attribute.String("bucket_name", bucketName),
+		attribute.String("region", region),
+	)
 
-	// Kubernetes API endpoint
-	Endpoint string
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
 
-	// Kubernetes version
-	Version string
+	client := s3.NewFromConfig(cfg)
 
-	// Cluster status (CREATING, ACTIVE, UPDATING, DELETING, FAILED)
-	Status string
+	// Check if bucket exists
+	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil {
+		// Bucket exists, nothing to do
+		span.SetAttributes(attribute.Bool("bucket_created", false))
+		return nil
+	}
 
-	// Certificate authority data (base64 encoded)
-	CertificateAuthority string
+	// If error is NotFound or NoSuchBucket, the bucket needs to be created. Other errors are returned.
+	var notFound *types.NotFound
+	var noSuchBucket *types.NoSuchBucket
+	if !errors.As(err, &notFound) && !errors.As(err, &noSuchBucket) {
+		span.RecordError(err)
+		return fmt.Errorf("failed to check if bucket exists: %w", err)
+	}
 
-	// VPC configuration
-	VPCID                  string
-	SubnetIDs              []string
-	SecurityGroupIDs       []string
-	ClusterSecurityGroupID string // EKS-managed cluster security group
-	EndpointPublic         bool
-	EndpointPrivate        bool
-	PublicAccessCIDRs      []string
+	createInput := &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	}
 
-	// OIDC provider ARN for IRSA (IAM Roles for Service Accounts)
-	OIDCProviderARN string
+	// For regions other than us-east-1, we need to specify LocationConstraint
+	if region != "us-east-1" {
+		createInput.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(region),
+		}
+	}
 
-	// Encryption config
-	EncryptionKMSKeyARN string
+	_, err = client.CreateBucket(ctx, createInput)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create state bucket: %w", err)
+	}
 
-	// Control plane logging
-	EnabledLogTypes []string
+	// Enable versioning for state recovery
+	_, err = client.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucketName),
+		VersioningConfiguration: &types.VersioningConfiguration{
+			Status: types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to enable bucket versioning: %w", err)
+	}
 
-	// Cluster tags
-	Tags map[string]string
+	// Block public access
+	_, err = client.PutPublicAccessBlock(ctx, &s3.PutPublicAccessBlockInput{
+		Bucket: aws.String(bucketName),
+		PublicAccessBlockConfiguration: &types.PublicAccessBlockConfiguration{
+			BlockPublicAcls:       aws.Bool(true),
+			BlockPublicPolicy:     aws.Bool(true),
+			IgnorePublicAcls:      aws.Bool(true),
+			RestrictPublicBuckets: aws.Bool(true),
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to block public access: %w", err)
+	}
 
-	// Platform version
-	PlatformVersion string
-
-	// Created timestamp
-	CreatedAt string
+	span.SetAttributes(attribute.Bool("bucket_created", true))
+	return nil
 }
 
-// NodeGroupState represents EKS node group state discovered from EKS APIs
-type NodeGroupState struct {
-	// Node group name
-	Name string
+func destroyStateBucket(ctx context.Context, bucketName, region string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.DestroyStateBucket")
+	defer span.End()
 
-	// Node group ARN
-	ARN string
+	span.SetAttributes(
+		attribute.String("bucket_name", bucketName),
+		attribute.String("region", region),
+	)
 
-	// Cluster name this node group belongs to
-	ClusterName string
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
 
-	// Instance types
-	InstanceTypes []string
+	client := s3.NewFromConfig(cfg)
 
-	// Autoscaling configuration
-	MinSize     int
-	MaxSize     int
-	DesiredSize int
+	// Check if bucket exists first
+	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		var notFound *types.NotFound
+		var noSuchBucket *types.NoSuchBucket
+		if errors.As(err, &notFound) || errors.As(err, &noSuchBucket) {
+			// Bucket doesn't exist, nothing to do
+			span.SetAttributes(attribute.Bool("bucket_existed", false))
+			return nil
+		}
+		span.RecordError(err)
+		return fmt.Errorf("failed to check if bucket exists: %w", err)
+	}
 
-	// Current size
-	CurrentSize int
+	span.SetAttributes(attribute.Bool("bucket_existed", true))
 
-	// Subnet IDs where nodes are placed
-	SubnetIDs []string
+	// Delete all object versions (required for versioned buckets)
+	var objectVersions []types.ObjectIdentifier
+	listVersionsPaginator := s3.NewListObjectVersionsPaginator(client, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucketName),
+	})
 
-	// Node IAM role ARN
-	NodeRoleARN string
+	for listVersionsPaginator.HasMorePages() {
+		page, err := listVersionsPaginator.NextPage(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to list object versions: %w", err)
+		}
 
-	// AMI type (AL2_x86_64, AL2_x86_64_GPU, AL2_ARM_64, etc.)
-	AMIType string
+		for _, version := range page.Versions {
+			objectVersions = append(objectVersions, types.ObjectIdentifier{
+				Key:       version.Key,
+				VersionId: version.VersionId,
+			})
+		}
 
-	// Disk size in GB
-	DiskSize int
+		for _, deleteMarker := range page.DeleteMarkers {
+			objectVersions = append(objectVersions, types.ObjectIdentifier{
+				Key:       deleteMarker.Key,
+				VersionId: deleteMarker.VersionId,
+			})
+		}
+	}
 
-	// Status (CREATING, ACTIVE, UPDATING, DELETING, etc.)
-	Status string
+	// Delete objects in batches (max 1000 per request)
+	for i := 0; i < len(objectVersions); i += 1000 {
+		end := i + 1000
+		if end > len(objectVersions) {
+			end = len(objectVersions)
+		}
 
-	// Kubernetes labels
-	Labels map[string]string
+		batch := objectVersions[i:end]
+		_, err = client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: batch,
+				Quiet:   aws.Bool(true),
+			},
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to delete objects: %w", err)
+		}
+	}
 
-	// Kubernetes taints
-	Taints []Taint
+	_, err = client.DeleteBucket(ctx, &s3.DeleteBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete state bucket: %w", err)
+	}
 
-	// Launch template info
-	LaunchTemplateID      string
-	LaunchTemplateVersion string
-
-	// Capacity type (ON_DEMAND or SPOT)
-	CapacityType string
-
-	// Node group tags
-	Tags map[string]string
-
-	// Health status
-	Health NodeGroupHealth
-
-	// Created timestamp
-	CreatedAt string
-
-	// Modified timestamp
-	ModifiedAt string
-}
-
-// NodeGroupHealth represents the health status of a node group
-type NodeGroupHealth struct {
-	// Issues affecting node group
-	Issues []string
-}
-
-// StorageState represents EFS state discovered from EFS APIs
-type StorageState struct {
-	// File system ID
-	FileSystemID string
-
-	// File system ARN
-	ARN string
-
-	// Lifecycle state (creating, available, updating, deleting, deleted)
-	LifeCycleState string
-
-	// Performance mode (generalPurpose, maxIO)
-	PerformanceMode string
-
-	// Throughput mode (bursting, provisioned, elastic)
-	ThroughputMode string
-
-	// Provisioned throughput in MiB/s (if throughput mode is provisioned)
-	ProvisionedThroughputMiBps float64
-
-	// Mount target IDs and subnets
-	MountTargets []MountTarget
-
-	// Security group IDs for mount targets
-	SecurityGroupIDs []string
-
-	// Size in bytes
-	SizeInBytes int64
-
-	// Encrypted
-	Encrypted bool
-
-	// KMS key ID (if encrypted)
-	KMSKeyID string
-
-	// Tags
-	Tags map[string]string
-
-	// Created timestamp
-	CreatedAt string
-}
-
-// MountTarget represents an EFS mount target
-type MountTarget struct {
-	// Mount target ID
-	MountTargetID string
-
-	// Subnet ID where mount target is placed
-	SubnetID string
-
-	// IP address
-	IPAddress string
-
-	// Availability zone
-	AvailabilityZone string
-
-	// Life cycle state
-	LifeCycleState string
-}
-
-// IAMRoles represents IAM roles created for the cluster
-type IAMRoles struct {
-	// EKS cluster service role
-	ClusterRoleARN string
-
-	// EKS node instance role
-	NodeRoleARN string
-
-	// OIDC provider ARN for IRSA
-	OIDCProviderARN string
-
-	// Additional service account roles (for IRSA)
-	ServiceAccountRoles map[string]string
+	span.SetAttributes(attribute.Bool("bucket_deleted", true))
+	return nil
 }
