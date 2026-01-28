@@ -135,3 +135,23 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["local"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var localCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &localCfg); err != nil {
+		return result
+	}
+
+	if localCfg.KubeContext != "" {
+		result["Kube Context"] = localCfg.KubeContext
+	}
+	return result
+}

@@ -31,6 +31,10 @@ type Provider interface {
 
 	// GetKubeconfig generates a kubeconfig file for accessing the Kubernetes cluster
 	GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
+
+	// Summary returns key-value pairs describing the configuration for display purposes.
+	// Used by CLI commands to show provider-specific details without knowing provider internals.
+	Summary(config *config.NebariConfig) map[string]string
 }
 
 // InfrastructureState represents the discovered state of infrastructure

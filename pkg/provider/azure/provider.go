@@ -135,3 +135,21 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["azure"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var azureCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &azureCfg); err != nil {
+		return result
+	}
+
+	result["Region"] = azureCfg.Region
+	return result
+}

@@ -566,3 +566,21 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 	return kubeconfigBytes, nil
 }
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var awsCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err != nil {
+		return result
+	}
+
+	result["Region"] = awsCfg.Region
+	return result
+}

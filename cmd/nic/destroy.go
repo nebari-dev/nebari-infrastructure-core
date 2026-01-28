@@ -14,9 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	awsprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
-	azureprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
-	gcpprovider "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -100,9 +98,19 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		slog.Info("Using custom timeout", "timeout", duration)
 	}
 
+	// Get the appropriate provider
+	prov, err := registry.Get(ctx, cfg.Provider)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		return err
+	}
+
+	slog.Info("Provider selected", "provider", prov.Name())
+
 	// Show what will be destroyed and get confirmation (skip for dry-run)
 	if !destroyAutoApprove && !destroyDryRun {
-		if err := confirmDestruction(cfg); err != nil {
+		if err := confirmDestruction(cfg, prov); err != nil {
 			span.RecordError(err)
 			slog.Info("Destruction cancelled by user")
 			return err
@@ -120,20 +128,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Get the appropriate provider
-	provider, err := registry.Get(ctx, cfg.Provider)
-	if err != nil {
-		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
-		return err
-	}
-
-	slog.Info("Provider selected", "provider", provider.Name())
-
 	// Destroy infrastructure
-	if err := provider.Destroy(ctx, cfg); err != nil {
+	if err := prov.Destroy(ctx, cfg); err != nil {
 		span.RecordError(err)
-		slog.Error("Destruction failed", "error", err, "provider", provider.Name())
+		slog.Error("Destruction failed", "error", err, "provider", prov.Name())
 		if destroyForce {
 			slog.Warn("Continuing despite errors due to --force flag")
 		} else {
@@ -141,13 +139,13 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	slog.Info("Destruction completed successfully", "provider", provider.Name())
+	slog.Info("Destruction completed successfully", "provider", prov.Name())
 
 	return nil
 }
 
 // confirmDestruction prompts the user to confirm before destroying infrastructure
-func confirmDestruction(cfg *config.NebariConfig) error {
+func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(context.Background(), "cmd.confirmDestruction")
 	defer span.End()
@@ -158,29 +156,8 @@ func confirmDestruction(cfg *config.NebariConfig) error {
 	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
 
 	// Show provider-specific details
-	switch cfg.Provider {
-	case "aws":
-		if rawCfg := cfg.ProviderConfig["amazon_web_services"]; rawCfg != nil {
-			var awsCfg awsprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
-				fmt.Printf("   Region:       %s\n", awsCfg.Region)
-			}
-		}
-	case "gcp":
-		if rawCfg := cfg.ProviderConfig["google_cloud_platform"]; rawCfg != nil {
-			var gcpCfg gcpprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &gcpCfg); err == nil {
-				fmt.Printf("   Project:      %s\n", gcpCfg.Project)
-				fmt.Printf("   Region:       %s\n", gcpCfg.Region)
-			}
-		}
-	case "azure":
-		if rawCfg := cfg.ProviderConfig["azure"]; rawCfg != nil {
-			var azureCfg azureprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &azureCfg); err == nil {
-				fmt.Printf("   Region:       %s\n", azureCfg.Region)
-			}
-		}
+	for key, value := range prov.Summary(cfg) {
+		fmt.Printf("   %s:%s%s\n", key, strings.Repeat(" ", 13-len(key)), value)
 	}
 
 	fmt.Println("\n❌ This will permanently delete all resources and data.")

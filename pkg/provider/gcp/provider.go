@@ -138,3 +138,22 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["google_cloud_platform"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var gcpCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &gcpCfg); err != nil {
+		return result
+	}
+
+	result["Project"] = gcpCfg.Project
+	result["Region"] = gcpCfg.Region
+	return result
+}
