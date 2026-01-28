@@ -77,24 +77,6 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	return nil
 }
 
-// Reconcile reconciles local infrastructure state (stub implementation)
-func (p *Provider) Reconcile(ctx context.Context, cfg *config.NebariConfig) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Reconcile")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "local"),
-		attribute.String("project_name", cfg.ProjectName),
-	)
-
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Reconciling local provider (stub)").
-		WithResource("provider").
-		WithAction("reconcile").
-		WithMetadata("cluster_name", cfg.ProjectName))
-	return nil
-}
-
 // Destroy tears down local infrastructure (stub implementation)
 func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
