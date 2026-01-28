@@ -1,14 +1,27 @@
 package tofu
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/spf13/afero"
 )
+
+// mockDownloader implements BinaryDownloader for testing.
+type mockDownloader struct {
+	binary []byte
+	err    error
+}
+
+func (m *mockDownloader) Download(ctx context.Context) ([]byte, error) {
+	return m.binary, m.err
+}
 
 func TestGetCacheDir(t *testing.T) {
 	t.Run("creates directory if not exists", func(t *testing.T) {
@@ -210,6 +223,60 @@ func TestExtractTemplates(t *testing.T) {
 
 		if string(content) != "# lock file" {
 			t.Errorf("dotfile content = %q, want %q", string(content), "# lock file")
+		}
+	})
+}
+
+func TestDownloadExecutable(t *testing.T) {
+	t.Run("writes binary to cache directory", func(t *testing.T) {
+		memFs := afero.NewMemMapFs()
+		cacheDir, err := afero.TempDir(memFs, "", "tofu-cache")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+
+		fakeBinary := []byte("fake tofu binary content")
+		downloader := &mockDownloader{binary: fakeBinary}
+
+		execPath, err := downloadExecutable(context.Background(), memFs, cacheDir, downloader)
+		if err != nil {
+			t.Fatalf("downloadExecutable() error = %v", err)
+		}
+
+		// Verify the path is correct
+		expectedName := "tofu"
+		if runtime.GOOS == "windows" {
+			expectedName = "tofu.exe"
+		}
+		if filepath.Base(execPath) != expectedName {
+			t.Errorf("execPath = %v, want filename %v", execPath, expectedName)
+		}
+
+		// Verify binary was written
+		content, err := afero.ReadFile(memFs, execPath)
+		if err != nil {
+			t.Fatalf("Failed to read binary: %v", err)
+		}
+		if string(content) != string(fakeBinary) {
+			t.Errorf("binary content mismatch")
+		}
+	})
+
+	t.Run("returns error when download fails", func(t *testing.T) {
+		memFs := afero.NewMemMapFs()
+		cacheDir, err := afero.TempDir(memFs, "", "tofu-cache")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+
+		downloader := &mockDownloader{err: errors.New("network error")}
+
+		_, err = downloadExecutable(context.Background(), memFs, cacheDir, downloader)
+		if err == nil {
+			t.Fatal("downloadExecutable() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "network error") {
+			t.Errorf("error = %v, want error containing 'network error'", err)
 		}
 	})
 }
