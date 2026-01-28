@@ -12,6 +12,7 @@
 
 # Output of the go coverage tool
 *.out
+*.cov
 coverage.out
 
 # Dependency directories

@@ -253,21 +253,17 @@ func TestIntegration_Validation(t *testing.T) {
 	provider := NewProvider()
 
 	t.Run("ValidConfiguration", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			ProjectName: "test-cluster",
-			Provider:    "aws",
-			AmazonWebServices: &Config{
-				Region:       "us-west-2",
-				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups: map[string]NodeGroup{
-					"general": {
-						Instance: "t3.medium",
-						MinNodes: 1,
-						MaxNodes: 3,
-					},
+		cfg := newTestConfig("test-cluster", &Config{
+			Region:       "us-west-2",
+			VPCCIDRBlock: "10.0.0.0/16",
+			NodeGroups: map[string]NodeGroup{
+				"general": {
+					Instance: "t3.medium",
+					MinNodes: 1,
+					MaxNodes: 3,
 				},
 			},
-		}
+		})
 
 		// Validate will fail on client creation without AWS credentials,
 		// but validation logic before that should pass
@@ -278,19 +274,15 @@ func TestIntegration_Validation(t *testing.T) {
 	})
 
 	t.Run("InvalidConfiguration_MissingRegion", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			ProjectName: "test-cluster",
-			Provider:    "aws",
-			AmazonWebServices: &Config{
-				// Missing region
-				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups: map[string]NodeGroup{
-					"general": {
-						Instance: "t3.medium",
-					},
+		cfg := newTestConfig("test-cluster", &Config{
+			// Missing region
+			VPCCIDRBlock: "10.0.0.0/16",
+			NodeGroups: map[string]NodeGroup{
+				"general": {
+					Instance: "t3.medium",
 				},
 			},
-		}
+		})
 
 		err := provider.Validate(ctx, cfg)
 		if err == nil {
@@ -303,15 +295,11 @@ func TestIntegration_Validation(t *testing.T) {
 	})
 
 	t.Run("InvalidConfiguration_NoNodeGroups", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			ProjectName: "test-cluster",
-			Provider:    "aws",
-			AmazonWebServices: &Config{
-				Region:       "us-west-2",
-				VPCCIDRBlock: "10.0.0.0/16",
-				NodeGroups:   map[string]NodeGroup{},
-			},
-		}
+		cfg := newTestConfig("test-cluster", &Config{
+			Region:       "us-west-2",
+			VPCCIDRBlock: "10.0.0.0/16",
+			NodeGroups:   map[string]NodeGroup{},
+		})
 
 		err := provider.Validate(ctx, cfg)
 		if err == nil {

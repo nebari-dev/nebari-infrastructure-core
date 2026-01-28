@@ -11,6 +11,10 @@ type Provider interface {
 	// Name returns the provider name (aws, gcp, azure, local)
 	Name() string
 
+	// ConfigKey returns the YAML key for this provider's configuration
+	// e.g., "amazon_web_services", "google_cloud_platform", "azure", "local"
+	ConfigKey() string
+
 	// Validate validates the configuration before deployment
 	Validate(ctx context.Context, config *config.NebariConfig) error
 

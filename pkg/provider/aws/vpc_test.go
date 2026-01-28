@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 func TestCalculateSubnetCIDR(t *testing.T) {
@@ -79,15 +78,11 @@ func TestReconcileVPC_NoExistingVPC(t *testing.T) {
 	// This test validates that reconcileVPC with nil actual state
 	// would trigger VPC creation (though we can't test the actual creation without AWS)
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.10.0.0/16",
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.10.0.0/16",
+	})
 
 	// actual is nil (no VPC exists)
 	// In a real scenario, this would trigger VPC creation
@@ -101,15 +96,11 @@ func TestReconcileVPC_CIDRMismatch(t *testing.T) {
 	p := &Provider{}
 	ctx := context.Background()
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.20.0.0/16", // Different from actual
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.20.0.0/16", // Different from actual
+	})
 
 	actual := &VPCState{
 		VPCID: "vpc-123456",
@@ -139,15 +130,11 @@ func TestReconcileVPC_CIDRMatch(t *testing.T) {
 	p := &Provider{}
 	ctx := context.Background()
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.10.0.0/16",
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.10.0.0/16",
+	})
 
 	actual := &VPCState{
 		VPCID: "vpc-123456",
@@ -165,16 +152,12 @@ func TestReconcileVPC_AvailabilityZonesMismatch(t *testing.T) {
 	p := &Provider{}
 	ctx := context.Background()
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.10.0.0/16",
-			AvailabilityZones: []string{"us-west-2a", "us-west-2b", "us-west-2c"}, // Different AZs
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.10.0.0/16",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b", "us-west-2c"}, // Different AZs
+	})
 
 	actual := &VPCState{
 		VPCID:             "vpc-123456",
@@ -204,16 +187,12 @@ func TestReconcileVPC_AvailabilityZonesMatch(t *testing.T) {
 	p := &Provider{}
 	ctx := context.Background()
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.10.0.0/16",
-			AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Same AZs
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.10.0.0/16",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b"}, // Same AZs
+	})
 
 	actual := &VPCState{
 		VPCID:             "vpc-123456",
@@ -232,16 +211,12 @@ func TestReconcileVPC_AvailabilityZonesNotSpecifiedInConfig(t *testing.T) {
 	p := &Provider{}
 	ctx := context.Background()
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test-cluster",
-		Provider:    "aws",
-		AmazonWebServices: &Config{
-			Region:            "us-west-2",
-			KubernetesVersion: "1.34",
-			VPCCIDRBlock:      "10.10.0.0/16",
-			// No AvailabilityZones specified - should not error
-		},
-	}
+	cfg := newTestConfig("test-cluster", &Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		VPCCIDRBlock:      "10.10.0.0/16",
+		// No AvailabilityZones specified - should not error
+	})
 
 	actual := &VPCState{
 		VPCID:             "vpc-123456",

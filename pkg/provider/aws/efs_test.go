@@ -186,28 +186,16 @@ func TestReconcileEFS(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "EFS not enabled - no action",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS:    nil,
-				},
-			},
+			name:        "EFS not enabled - no action",
+			cfg:         newTestConfig("test-cluster", &Config{Region: "us-west-2", EFS: nil}),
 			vpc:         &VPCState{VPCID: "vpc-123"},
 			actual:      nil,
 			mockSetup:   func(m *MockEFSClient) {},
 			expectError: false,
 		},
 		{
-			name: "EFS enabled false - no action",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS:    &EFSConfig{Enabled: false},
-				},
-			},
+			name:        "EFS enabled false - no action",
+			cfg:         newTestConfig("test-cluster", &Config{Region: "us-west-2", EFS: &EFSConfig{Enabled: false}}),
 			vpc:         &VPCState{VPCID: "vpc-123"},
 			actual:      nil,
 			mockSetup:   func(m *MockEFSClient) {},
@@ -215,14 +203,8 @@ func TestReconcileEFS(t *testing.T) {
 		},
 		{
 			name: "EFS exists in non-available state - error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS:    &EFSConfig{Enabled: true},
-				},
-			},
-			vpc: &VPCState{VPCID: "vpc-123"},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", EFS: &EFSConfig{Enabled: true}}),
+			vpc:  &VPCState{VPCID: "vpc-123"},
 			actual: &StorageState{
 				FileSystemID:   "fs-123",
 				LifeCycleState: "creating",
@@ -479,16 +461,13 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 	}{
 		{
 			name: "performance mode change attempted (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS: &EFSConfig{
-						Enabled:         true,
-						PerformanceMode: "maxIO", // Different from actual
-					},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				EFS: &EFSConfig{
+					Enabled:         true,
+					PerformanceMode: "maxIO", // Different from actual
 				},
-			},
+			}),
 			vpc: &VPCState{VPCID: "vpc-123"},
 			actual: &StorageState{
 				FileSystemID:    "fs-123",
@@ -501,16 +480,13 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 		},
 		{
 			name: "encryption change attempted (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS: &EFSConfig{
-						Enabled:   true,
-						Encrypted: true, // Want encrypted now
-					},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				EFS: &EFSConfig{
+					Enabled:   true,
+					Encrypted: true, // Want encrypted now
 				},
-			},
+			}),
 			vpc: &VPCState{VPCID: "vpc-123"},
 			actual: &StorageState{
 				FileSystemID:    "fs-123",
@@ -523,17 +499,14 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 		},
 		{
 			name: "KMS key change attempted (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS: &EFSConfig{
-						Enabled:   true,
-						Encrypted: true,
-						KMSKeyID:  "arn:aws:kms:us-west-2:123:key/new-key", // Different KMS key
-					},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				EFS: &EFSConfig{
+					Enabled:   true,
+					Encrypted: true,
+					KMSKeyID:  "arn:aws:kms:us-west-2:123:key/new-key", // Different KMS key
 				},
-			},
+			}),
 			vpc: &VPCState{VPCID: "vpc-123"},
 			actual: &StorageState{
 				FileSystemID:    "fs-123",
@@ -547,19 +520,16 @@ func TestEFSImmutableFieldChecks(t *testing.T) {
 		},
 		{
 			name: "all immutable fields match - no error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					EFS: &EFSConfig{
-						Enabled:         true,
-						PerformanceMode: "generalPurpose",
-						Encrypted:       true,
-						KMSKeyID:        "arn:aws:kms:us-west-2:123:key/same-key",
-						ThroughputMode:  "bursting",
-					},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				EFS: &EFSConfig{
+					Enabled:         true,
+					PerformanceMode: "generalPurpose",
+					Encrypted:       true,
+					KMSKeyID:        "arn:aws:kms:us-west-2:123:key/same-key",
+					ThroughputMode:  "bursting",
 				},
-			},
+			}),
 			vpc: &VPCState{
 				VPCID:            "vpc-123",
 				PrivateSubnetIDs: []string{"subnet-1"},

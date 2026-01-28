@@ -160,24 +160,24 @@ func confirmDestruction(cfg *config.NebariConfig) error {
 	// Show provider-specific details
 	switch cfg.Provider {
 	case "aws":
-		if cfg.AmazonWebServices != nil {
+		if rawCfg := cfg.ProviderConfig["amazon_web_services"]; rawCfg != nil {
 			var awsCfg awsprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), cfg.AmazonWebServices, &awsCfg); err == nil {
+			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 				fmt.Printf("   Region:       %s\n", awsCfg.Region)
 			}
 		}
 	case "gcp":
-		if cfg.GoogleCloudPlatform != nil {
+		if rawCfg := cfg.ProviderConfig["google_cloud_platform"]; rawCfg != nil {
 			var gcpCfg gcpprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), cfg.GoogleCloudPlatform, &gcpCfg); err == nil {
+			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &gcpCfg); err == nil {
 				fmt.Printf("   Project:      %s\n", gcpCfg.Project)
 				fmt.Printf("   Region:       %s\n", gcpCfg.Region)
 			}
 		}
 	case "azure":
-		if cfg.Azure != nil {
+		if rawCfg := cfg.ProviderConfig["azure"]; rawCfg != nil {
 			var azureCfg azureprovider.Config
-			if err := config.UnmarshalProviderConfig(context.Background(), cfg.Azure, &azureCfg); err == nil {
+			if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &azureCfg); err == nil {
 				fmt.Printf("   Region:       %s\n", azureCfg.Region)
 			}
 		}

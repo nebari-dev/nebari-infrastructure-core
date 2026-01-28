@@ -584,13 +584,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "no update needed - all match",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "no update needed - all match",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "general",
 			desired: NodeGroup{
 				Instance: "t3.medium",
@@ -616,13 +611,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "scaling update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "scaling update needed",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "general",
 			desired: NodeGroup{
 				Instance: "t3.medium",
@@ -669,13 +659,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "instance type change - immutable error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "instance type change - immutable error",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "general",
 			desired: NodeGroup{
 				Instance: "t3.large", // Different from actual
@@ -698,13 +683,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 			errorMsg:    "instance type is immutable",
 		},
 		{
-			name: "capacity type change - immutable error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "capacity type change - immutable error",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "general",
 			desired: NodeGroup{
 				Instance: "t3.medium",
@@ -728,13 +708,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 			errorMsg:    "capacity type (Spot) is immutable",
 		},
 		{
-			name: "AMI type change - immutable error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "AMI type change - immutable error",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "general",
 			desired: NodeGroup{
 				Instance: "t3.medium",
@@ -758,13 +733,8 @@ func TestReconcileNodeGroup(t *testing.T) {
 			errorMsg:    "AMI type is immutable",
 		},
 		{
-			name: "taint update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			name:   "taint update needed",
+			cfg:    newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			ngName: "gpu",
 			desired: NodeGroup{
 				Instance: "g4dn.xlarge",
@@ -856,19 +826,16 @@ func TestReconcileNodeGroups(t *testing.T) {
 	}{
 		{
 			name: "create new node group when none exist",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 1,
-							MaxNodes: 3,
-						},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 1,
+						MaxNodes: 3,
 					},
 				},
-			},
+			}),
 			vpc:      &VPCState{VPCID: "vpc-123", PrivateSubnetIDs: []string{"subnet-1", "subnet-2"}},
 			cluster:  &ClusterState{Name: "test-cluster"},
 			iamRoles: &IAMRoles{NodeRoleARN: "arn:aws:iam::123:role/node-role"},
@@ -898,14 +865,8 @@ func TestReconcileNodeGroups(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "delete orphaned node group - deletion initiated but waiter fails in test",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region:     "us-west-2",
-					NodeGroups: map[string]NodeGroup{}, // Empty - all node groups are orphans
-				},
-			},
+			name:     "delete orphaned node group - deletion initiated but waiter fails in test",
+			cfg:      newTestConfig("test-cluster", &Config{Region: "us-west-2", NodeGroups: map[string]NodeGroup{}}),
 			vpc:      &VPCState{VPCID: "vpc-123"},
 			cluster:  &ClusterState{Name: "test-cluster"},
 			iamRoles: &IAMRoles{},
@@ -934,19 +895,16 @@ func TestReconcileNodeGroups(t *testing.T) {
 		},
 		{
 			name: "update existing node group",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 2, // Changed from 1
-							MaxNodes: 5, // Changed from 3
-						},
+			cfg: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 2, // Changed from 1
+						MaxNodes: 5, // Changed from 3
 					},
 				},
-			},
+			}),
 			vpc:      &VPCState{VPCID: "vpc-123"},
 			cluster:  &ClusterState{Name: "test-cluster"},
 			iamRoles: &IAMRoles{},

@@ -26,13 +26,7 @@ func TestReconcileCluster(t *testing.T) {
 	}{
 		{
 			name: "cluster doesn't exist - create",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1"},
@@ -69,14 +63,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - no update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -103,14 +90,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - version update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -148,15 +128,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - endpoint access update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-					EKSEndpointAccess: "private",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34", EKSEndpointAccess: "private"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -192,14 +164,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - logging update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -229,13 +194,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - VPC change attempted (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			vpc: &VPCState{
 				VPCID: "vpc-67890", // Different VPC
 			},
@@ -252,14 +211,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - invalid version upgrade",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.30", // Skip 1.29
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.30"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -277,14 +229,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "UpdateClusterVersion API error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -313,14 +258,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - KMS key change attempted (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:    "us-west-2",
-					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Different KMS key
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -342,14 +280,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - KMS key added when none existed (immutable)",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:    "us-west-2",
-					EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key", // Adding KMS key
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", EKSKMSArn: "arn:aws:kms:us-west-2:123456789:key/new-key"}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},
@@ -371,15 +302,7 @@ func TestReconcileCluster(t *testing.T) {
 		},
 		{
 			name: "cluster exists - public access CIDRs update needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:               "us-west-2",
-					KubernetesVersion:    "1.34",
-					EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"}, // New CIDRs
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.34", EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"}}),
 			vpc: &VPCState{
 				VPCID: "vpc-12345",
 			},

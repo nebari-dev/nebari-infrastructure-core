@@ -26,22 +26,18 @@ func TestDryRunDeploy(t *testing.T) {
 	}{
 		{
 			name: "no existing infrastructure",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				DryRun:      true,
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-					VPCCIDRBlock:      "10.0.0.0/16",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 1,
-							MaxNodes: 3,
-						},
+			cfg: newDryRunTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.34",
+				VPCCIDRBlock:      "10.0.0.0/16",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 1,
+						MaxNodes: 3,
 					},
 				},
-			},
+			}),
 			mockSetup: func(ec2Mock *MockEC2Client, eksMock *MockEKSClient, iamMock *MockIAMClient) {
 				// VPC not found
 				ec2Mock.DescribeVpcsFunc = func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
@@ -64,28 +60,24 @@ func TestDryRunDeploy(t *testing.T) {
 		},
 		{
 			name: "existing infrastructure with updates needed",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				DryRun:      true,
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.29",
-					VPCCIDRBlock:      "10.0.0.0/16",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 2,
-							MaxNodes: 5,
-						},
-						"new-group": {
-							Instance: "t3.large",
-							MinNodes: 1,
-							MaxNodes: 3,
-							Spot:     true,
-						},
+			cfg: newDryRunTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.29",
+				VPCCIDRBlock:      "10.0.0.0/16",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 2,
+						MaxNodes: 5,
+					},
+					"new-group": {
+						Instance: "t3.large",
+						MinNodes: 1,
+						MaxNodes: 3,
+						Spot:     true,
 					},
 				},
-			},
+			}),
 			mockSetup: func(ec2Mock *MockEC2Client, eksMock *MockEKSClient, iamMock *MockIAMClient) {
 				// VPC exists
 				ec2Mock.DescribeVpcsFunc = func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
@@ -182,21 +174,17 @@ func TestDryRunDeploy(t *testing.T) {
 		},
 		{
 			name: "orphaned node group to delete",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				DryRun:      true,
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 1,
-							MaxNodes: 3,
-						},
+			cfg: newDryRunTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.34",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 1,
+						MaxNodes: 3,
 					},
 				},
-			},
+			}),
 			mockSetup: func(ec2Mock *MockEC2Client, eksMock *MockEKSClient, iamMock *MockIAMClient) {
 				// VPC not found
 				ec2Mock.DescribeVpcsFunc = func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
@@ -258,28 +246,24 @@ func TestDryRunDeploy(t *testing.T) {
 		},
 		{
 			name: "GPU and spot node groups",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				DryRun:      true,
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-					NodeGroups: map[string]NodeGroup{
-						"gpu": {
-							Instance: "g4dn.xlarge",
-							MinNodes: 0,
-							MaxNodes: 2,
-							GPU:      true,
-						},
-						"spot": {
-							Instance: "t3.large",
-							MinNodes: 1,
-							MaxNodes: 5,
-							Spot:     true,
-						},
+			cfg: newDryRunTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.34",
+				NodeGroups: map[string]NodeGroup{
+					"gpu": {
+						Instance: "g4dn.xlarge",
+						MinNodes: 0,
+						MaxNodes: 2,
+						GPU:      true,
+					},
+					"spot": {
+						Instance: "t3.large",
+						MinNodes: 1,
+						MaxNodes: 5,
+						Spot:     true,
 					},
 				},
-			},
+			}),
 			mockSetup: func(ec2Mock *MockEC2Client, eksMock *MockEKSClient, iamMock *MockIAMClient) {
 				ec2Mock.DescribeVpcsFunc = func(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
 					return &ec2.DescribeVpcsOutput{Vpcs: []ec2types.Vpc{}}, nil
@@ -561,21 +545,13 @@ func TestGetVPCCIDR(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "custom CIDR",
-			cfg: &config.NebariConfig{
-				AmazonWebServices: &Config{
-					VPCCIDRBlock: "192.168.0.0/16",
-				},
-			},
+			name:     "custom CIDR",
+			cfg:      newTestConfig("test", &Config{VPCCIDRBlock: "192.168.0.0/16"}),
 			expected: "192.168.0.0/16",
 		},
 		{
-			name: "default CIDR",
-			cfg: &config.NebariConfig{
-				AmazonWebServices: &Config{
-					VPCCIDRBlock: "",
-				},
-			},
+			name:     "default CIDR",
+			cfg:      newTestConfig("test", &Config{VPCCIDRBlock: ""}),
 			expected: "10.0.0.0/16",
 		},
 	}
