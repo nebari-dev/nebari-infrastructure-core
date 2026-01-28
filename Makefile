@@ -54,10 +54,10 @@ vet: ## Run go vet
 	go vet $(PKG_DIRS)
 	@echo "Vet passed successfully"
 
-lint: ## Run golint
-	@echo "Running golint..."
-	@which golint > /dev/null || (echo "Installing golint..." && go install golang.org/x/lint/golint@latest)
-	golint -set_exit_status $(PKG_DIRS)
+lint: ## Run golangci-lint
+	@echo "Running golangci-lint..."
+	@which golangci-lint > /dev/null || (echo "Error: golangci-lint is not installed. See https://golangci-lint.run/welcome/install/" && exit 1)
+	golangci-lint run
 	@echo "Lint passed successfully"
 
 test: test-unit ## Run unit tests (default)
