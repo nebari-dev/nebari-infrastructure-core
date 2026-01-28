@@ -343,15 +343,21 @@ func generateTerraformVars(ctx context.Context, cfg *config.NebariConfig) (strin
         "tags":               getTags(cfg),
     }
 
-    // Add provider-specific variables
+    // Add provider-specific variables (extracted from cfg.ProviderConfig map)
     switch cfg.Provider {
     case "aws":
-        vars["aws_vpc_cidr"] = cfg.AmazonWebServices.VPC.CIDR
-        vars["aws_availability_zones"] = cfg.AmazonWebServices.AvailabilityZones
+        if awsCfg := cfg.ProviderConfig["amazon_web_services"]; awsCfg != nil {
+            vars["aws_vpc_cidr"] = awsCfg.(map[string]any)["vpc_cidr"]
+            vars["aws_availability_zones"] = awsCfg.(map[string]any)["availability_zones"]
+        }
     case "gcp":
-        vars["gcp_project_id"] = cfg.GoogleCloudPlatform.ProjectID
+        if gcpCfg := cfg.ProviderConfig["google_cloud_platform"]; gcpCfg != nil {
+            vars["gcp_project_id"] = gcpCfg.(map[string]any)["project_id"]
+        }
     case "azure":
-        vars["azure_resource_group"] = cfg.Azure.ResourceGroup
+        if azureCfg := cfg.ProviderConfig["azure"]; azureCfg != nil {
+            vars["azure_resource_group"] = azureCfg.(map[string]any)["resource_group"]
+        }
     }
 
     // Write to temporary file
