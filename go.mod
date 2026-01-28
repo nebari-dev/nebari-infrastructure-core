@@ -10,6 +10,7 @@ require (
 	github.com/hashicorp/terraform-exec v0.24.0
 	github.com/joho/godotenv v1.5.1
 	github.com/opentofu/tofudl v0.0.1
+	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.5.0
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0
