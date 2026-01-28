@@ -14,13 +14,57 @@ import (
 	"github.com/spf13/afero"
 )
 
+// binaryDownloader downloads the OpenTofu binary.
+type binaryDownloader interface {
+	Download(ctx context.Context) ([]byte, error)
+}
+
+// tofuDownloader implements binaryDownloader using tofudl with caching.
+type tofuDownloader struct {
+	cacheDir string
+	version  string
+}
+
+// Download fetches the OpenTofu binary for the current platform.
+func (d *tofuDownloader) Download(ctx context.Context) ([]byte, error) {
+	dl, err := tofudl.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tofu downloader: %w", err)
+	}
+
+	storage, err := tofudl.NewFilesystemStorage(d.cacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tofu filesystem storage: %w", err)
+	}
+
+	mirror, err := tofudl.NewMirror(
+		tofudl.MirrorConfig{
+			APICacheTimeout:      -1, // Cache API responses indefinitely
+			ArtifactCacheTimeout: -1, // Cache binaries indefinitely
+		},
+		storage,
+		dl,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tofu mirror: %w", err)
+	}
+
+	ver := tofudl.Version(d.version)
+	opts := tofudl.DownloadOptVersion(ver)
+	binary, err := mirror.Download(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download tofu binary: %w", err)
+	}
+
+	return binary, nil
+}
+
 func getCacheDir(appFs afero.Fs) (string, error) {
 	userCacheDir, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user cache directory: %w", err)
 	}
 
-	// Create nic/tofu cache directory if it doesn't exist
 	tofuCacheDir := filepath.Join(userCacheDir, "nic", "tofu")
 	if err := appFs.MkdirAll(tofuCacheDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create nic/tofu cache directory: %w", err)
@@ -38,39 +82,12 @@ func getPluginCacheDir(appFs afero.Fs, cacheDir string) (string, error) {
 	return pluginCacheDir, nil
 }
 
-func downloadExecutable(ctx context.Context, appFs afero.Fs, cacheDir string) (string, error) {
-	// Initialize tofu downloader
-	dl, err := tofudl.New()
+func downloadExecutable(ctx context.Context, appFs afero.Fs, cacheDir string, downloader binaryDownloader) (string, error) {
+	binary, err := downloader.Download(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to initialize tofu downloader: %w", err)
+		return "", err
 	}
 
-	// Setup caching layer for tofu binaries
-	storage, err := tofudl.NewFilesystemStorage(cacheDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize tofu filesystem storage: %w", err)
-	}
-	mirror, err := tofudl.NewMirror(
-		tofudl.MirrorConfig{
-			APICacheTimeout:      -1, // Cache API responses indefinitely
-			ArtifactCacheTimeout: -1, // Cache binaries indefinitely
-		},
-		storage,
-		dl,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize tofu mirror: %w", err)
-	}
-
-	// Download specific version for the current architecture and platform
-	ver := tofudl.Version(DefaultVersion)
-	opts := tofudl.DownloadOptVersion(ver)
-	binary, err := mirror.Download(ctx, opts)
-	if err != nil {
-		return "", fmt.Errorf("failed to download tofu binary: %w", err)
-	}
-
-	// Write binary to cache directory
 	execPath := filepath.Join(cacheDir, "tofu")
 	if runtime.GOOS == "windows" {
 		execPath += ".exe"
@@ -95,12 +112,10 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 			return err
 		}
 
-		// Skip the root directory itself
 		if path == templatesDir {
 			return nil
 		}
 
-		// Calculate relative path (remove "templates/" prefix)
 		relPath, err := filepath.Rel(templatesDir, path)
 		if err != nil {
 			return err
@@ -108,12 +123,10 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 
 		targetPath := filepath.Join(dir, relPath)
 
-		// Create directories as needed
 		if d.IsDir() {
 			return appFs.MkdirAll(targetPath, 0755)
 		}
 
-		// Read file from embedded FS
 		data, err := fs.ReadFile(templates, path)
 		if err != nil {
 			return err
@@ -137,7 +150,6 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform, error) {
 	appFs := afero.NewOsFs()
 
-	// Compute cache directories once
 	cacheDir, err := getCacheDir(appFs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cache directory: %w", err)
@@ -148,7 +160,8 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform,
 		return nil, fmt.Errorf("failed to get plugin cache directory: %w", err)
 	}
 
-	execPath, err := downloadExecutable(ctx, appFs, cacheDir)
+	downloader := &tofuDownloader{cacheDir: cacheDir, version: DefaultVersion}
+	execPath, err := downloadExecutable(ctx, appFs, cacheDir, downloader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable: %w", err)
 	}
@@ -158,12 +171,10 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform,
 		return nil, err
 	}
 
-	// Set plugin cache environment variable for Terraform
 	if err := os.Setenv("TF_PLUGIN_CACHE_DIR", pluginCacheDir); err != nil {
 		return nil, fmt.Errorf("failed to set TF_PLUGIN_CACHE_DIR: %w", err)
 	}
 
-	// Write tfvars to working directory
 	tfvarsJSON, err := json.Marshal(tfvars)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal tfvars: %w", err)
