@@ -11,7 +11,7 @@ spec:
     - name: nebari-gateway
       namespace: envoy-gateway-system
   hostnames:
-    - "keycloak.nebari.local"
+    - "keycloak.{{ .Domain }}"
   rules:
     - matches:
         - path:

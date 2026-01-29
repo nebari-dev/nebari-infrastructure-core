@@ -6,6 +6,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -14,16 +16,13 @@ spec:
   source:
     chart: keycloakx
     repoURL: https://codecentric.github.io/helm-charts
-    targetRevision: 7.1.6  # Keycloakx chart (Keycloak 22.0+)
+    targetRevision: 7.1.6
     helm:
       releaseName: keycloak
       values: |
         args:
           - start
-        # Replica count
         replicas: 1
-
-        # Environment variables for Keycloak configuration
         extraEnv: |
           - name: KEYCLOAK_ADMIN
             value: admin
@@ -49,9 +48,6 @@ spec:
             value: "false"
           - name: KC_PROXY
             value: "edge"
-
-
-        # Health checks for Keycloak (on management port 9000, under /auth path)
         livenessProbe: |
           httpGet:
             path: /auth/health/live
@@ -60,7 +56,6 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-
         readinessProbe: |
           httpGet:
             path: /auth/health/ready
@@ -69,7 +64,6 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-
         startupProbe: |
           httpGet:
             path: /auth/health
@@ -78,30 +72,13 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 30
-
-        # Service
         service:
           type: ClusterIP
           httpPort: 8080
-
-        # Ingress
         ingress:
           enabled: false
-          ingressClassName: nginx
-          rules:
-            - host: keycloak.nebari.local
-              paths:
-                - path: /
-                  pathType: Prefix
-          tls:
-            - hosts:
-                - keycloak.nebari.local
-
-        # Disable PostgreSQL subchart - using external PostgreSQL
         postgresql:
           enabled: false
-
-        # Resources
         resources:
           requests:
             cpu: 500m

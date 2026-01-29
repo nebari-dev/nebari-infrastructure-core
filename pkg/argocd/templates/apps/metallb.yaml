@@ -6,6 +6,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -27,7 +29,6 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
-
         speaker:
           enabled: true
           resources:

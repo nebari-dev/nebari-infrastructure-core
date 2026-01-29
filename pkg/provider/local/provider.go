@@ -29,6 +29,11 @@ func (p *Provider) Name() string {
 	return "local"
 }
 
+// ConfigKey returns the YAML key for this provider's configuration
+func (p *Provider) ConfigKey() string {
+	return "local"
+}
+
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -47,8 +52,8 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 
 	// Parse local provider config
 	var localCfg Config
-	if cfg.Local != nil {
-		if err := config.UnmarshalProviderConfig(ctx, cfg.Local, &localCfg); err != nil {
+	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to unmarshal local config: %w", err)
 		}
@@ -191,8 +196,8 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 	// Parse local provider config to get the kube context
 	var localCfg Config
-	if cfg.Local != nil {
-		if err := config.UnmarshalProviderConfig(ctx, cfg.Local, &localCfg); err != nil {
+	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to unmarshal local config: %w", err)
 		}

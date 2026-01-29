@@ -6,6 +6,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -18,13 +20,10 @@ spec:
     helm:
       releaseName: envoy-gateway
       values: |
-        # Create GatewayClass
         config:
           envoyGateway:
             gateway:
               controllerName: gateway.envoyproxy.io/gatewayclass-controller
-
-        # Deployment configuration
         deployment:
           envoyGateway:
             resources:
@@ -34,10 +33,7 @@ spec:
               limits:
                 cpu: 500m
                 memory: 512Mi
-
           replicas: 1
-
-        # Service configuration
         service:
           type: ClusterIP
           annotations: {}
@@ -60,7 +56,3 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
-
-  # Sync waves - install after cert-manager
-  syncOptions:
-    - CreateNamespace=true
