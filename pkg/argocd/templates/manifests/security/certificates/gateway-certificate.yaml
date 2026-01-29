@@ -11,11 +11,11 @@ spec:
   duration: 8760h # 1 year
   renewBefore: 720h # 30 days
   issuerRef:
-    name: selfsigned-issuer
+    name: {{ .CertificateIssuer }}
     kind: ClusterIssuer
-  commonName: "*.nebari.local"
+  commonName: "*.{{ .Domain }}"
   dnsNames:
-    - "*.nebari.local"
-    - "nebari.local"
-    - "keycloak.nebari.local"
-    - "argocd.nebari.local"
+    - "*.{{ .Domain }}"
+    - "{{ .Domain }}"
+    - "keycloak.{{ .Domain }}"
+    - "argocd.{{ .Domain }}"

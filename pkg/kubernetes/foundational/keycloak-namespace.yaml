@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: keycloak
-  labels:
-    name: keycloak
-    app.kubernetes.io/name: keycloak
-    app.kubernetes.io/component: authentication

@@ -7,8 +7,8 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   acme:
-    email: ACME_EMAIL_PLACEHOLDER
-    server: ACME_SERVER_PLACEHOLDER
+    email: {{ .ACMEEmail }}
+    server: {{ .ACMEServer }}
     privateKeySecretRef:
       name: letsencrypt-account-key
     solvers:

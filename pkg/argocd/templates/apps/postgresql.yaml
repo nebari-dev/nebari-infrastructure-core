@@ -6,6 +6,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -18,12 +20,6 @@ spec:
     helm:
       releaseName: postgresql
       values: |
-        # TODO get a working tag instead of pulling latest by default
-        # # Use current PostgreSQL version
-        # image:
-        #   tag: "17.2.0" # This tag not working
-
-        # Authentication
         auth:
           username: postgres
           database: postgres
@@ -31,14 +27,11 @@ spec:
           secretKeys:
             adminPasswordKey: postgres-password
             userPasswordKey: user-password
-
-        # Primary configuration
         primary:
           persistence:
             enabled: true
             size: 10Gi
-            storageClass: ""  # Use default storage class
-
+            storageClass: ""
           resources:
             requests:
               cpu: 250m
@@ -46,15 +39,11 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
-
-          # Init script to create keycloak database and user
           initdb:
             scripts:
               init-keycloak-db.sh: |
                 #!/bin/bash
                 set -e
-
-                # Create keycloak database if it doesn't exist
                 PGPASSWORD=$POSTGRES_PASSWORD psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
                   SELECT 'CREATE DATABASE keycloak'
                   WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\gexec
@@ -70,9 +59,7 @@ spec:
                   GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak;
                   ALTER DATABASE keycloak OWNER TO keycloak;
                 EOSQL
-
                 echo "Keycloak database and user created successfully"
-
           extraEnvVars:
             - name: POSTGRES_USER
               value: postgres
@@ -88,8 +75,6 @@ spec:
                 secretKeyRef:
                   name: keycloak-postgresql-credentials
                   key: password
-
-        # Metrics (optional)
         metrics:
           enabled: false
 

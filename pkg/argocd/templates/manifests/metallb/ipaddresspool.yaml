@@ -8,4 +8,4 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   addresses:
-    - 192.168.1.100-192.168.1.110
+    - {{ .MetalLBAddressRange }}

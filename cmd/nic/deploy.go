@@ -5,10 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -240,15 +237,9 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	// Write all ArgoCD application manifests
-	// This is the only place where filesystem I/O happens
-	workDir := gitClient.WorkDir()
-	err = argocd.WriteAll(ctx, func(appName string) (io.WriteCloser, error) {
-		path := filepath.Join(workDir, appName+".yaml")
-		slog.Debug("Writing application manifest", "app", appName, "path", path)
-		return os.Create(path)
-	})
-	if err != nil {
+	// Write all ArgoCD application manifests and raw K8s manifests to git
+	slog.Info("Writing ArgoCD application manifests to git repository")
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}

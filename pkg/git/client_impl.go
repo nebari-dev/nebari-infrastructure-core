@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -96,6 +97,12 @@ func (c *ClientImpl) ValidateAuth(ctx context.Context) error {
 		Auth: c.auth,
 	})
 	if err != nil {
+		// Empty repositories return an error but authentication still works
+		// Check if it's an "empty repository" error which is OK
+		if isEmptyRepoError(err) {
+			span.SetAttributes(attribute.Bool("git.empty_repo", true))
+			return nil
+		}
 		span.RecordError(err)
 		return fmt.Errorf("failed to authenticate with repository %s: %w", c.cfg.URL, err)
 	}
@@ -103,15 +110,28 @@ func (c *ClientImpl) ValidateAuth(ctx context.Context) error {
 	return nil
 }
 
+// isEmptyRepoError checks if the error indicates an empty repository
+func isEmptyRepoError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "remote repository is empty") ||
+		strings.Contains(errStr, "couldn't find remote ref") ||
+		strings.Contains(errStr, "reference not found")
+}
+
 // Init clones the repository or pulls latest if already cloned.
+// For empty repositories, it initializes a new local repo with the remote configured.
 func (c *ClientImpl) Init(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "git.Init")
 	defer span.End()
 
+	branchName := c.cfg.GetBranch()
 	span.SetAttributes(
 		attribute.String("git.url", c.cfg.URL),
-		attribute.String("git.branch", c.cfg.GetBranch()),
+		attribute.String("git.branch", branchName),
 		attribute.String("git.repo_path", c.repoPath),
 	)
 
@@ -125,13 +145,106 @@ func (c *ClientImpl) Init(ctx context.Context) error {
 	repo, err := git.PlainCloneContext(ctx, c.repoPath, false, &git.CloneOptions{
 		URL:           c.cfg.URL,
 		Auth:          c.auth,
-		ReferenceName: plumbing.NewBranchReferenceName(c.cfg.GetBranch()),
+		ReferenceName: plumbing.NewBranchReferenceName(branchName),
 		SingleBranch:  true,
 		Depth:         1,
 	})
 	if err != nil {
+		// Handle empty repository
+		if isEmptyRepoError(err) {
+			span.SetAttributes(attribute.Bool("git.empty_repo", true))
+			return c.initEmptyRepo(ctx)
+		}
+
+		// If the configured branch doesn't exist, try cloning without branch specification
+		// This handles the case where the remote has content on a different default branch
+		span.SetAttributes(attribute.Bool("git.branch_not_found", true))
+		repo, err = git.PlainCloneContext(ctx, c.repoPath, false, &git.CloneOptions{
+			URL:   c.cfg.URL,
+			Auth:  c.auth,
+			Depth: 1,
+		})
+		if err != nil {
+			if isEmptyRepoError(err) {
+				span.SetAttributes(attribute.Bool("git.empty_repo", true))
+				return c.initEmptyRepo(ctx)
+			}
+			span.RecordError(err)
+			return fmt.Errorf("failed to clone repository: %w", err)
+		}
+	}
+
+	c.repo = repo
+
+	// Ensure we're on the correct branch
+	worktree, err := repo.Worktree()
+	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to clone repository: %w", err)
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Check if we need to create or checkout the branch
+	headRef, err := repo.Head()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get HEAD: %w", err)
+	}
+
+	currentBranch := headRef.Name().Short()
+	if currentBranch != branchName {
+		// Try to checkout the configured branch
+		err = worktree.Checkout(&git.CheckoutOptions{
+			Branch: plumbing.NewBranchReferenceName(branchName),
+			Create: true,
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to checkout branch %s: %w", branchName, err)
+		}
+	}
+
+	// Create subdirectory if Path is specified
+	if c.cfg.Path != "" {
+		if err := os.MkdirAll(c.workDir, 0755); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
+		}
+	}
+
+	return nil
+}
+
+// initEmptyRepo initializes a new local repository for an empty remote.
+func (c *ClientImpl) initEmptyRepo(ctx context.Context) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.initEmptyRepo")
+	defer span.End()
+
+	branchName := c.cfg.GetBranch()
+	span.SetAttributes(attribute.String("git.branch", branchName))
+
+	// Initialize a new repository
+	repo, err := git.PlainInit(c.repoPath, false)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to initialize repository: %w", err)
+	}
+
+	// Set HEAD to point to the configured branch (instead of default "master")
+	headRef := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName(branchName))
+	if err := repo.Storer.SetReference(headRef); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to set HEAD to branch %s: %w", branchName, err)
+	}
+
+	// Create the remote
+	_, err = repo.CreateRemote(&config.RemoteConfig{
+		Name: remoteName,
+		URLs: []string{c.cfg.URL},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create remote: %w", err)
 	}
 
 	c.repo = repo
@@ -228,9 +341,12 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 		return fmt.Errorf("failed to commit: %w", err)
 	}
 
-	// Push
+	// Push to the configured branch
+	branchName := c.cfg.GetBranch()
+	refSpec := config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branchName, branchName))
 	err = c.repo.PushContext(ctx, &git.PushOptions{
-		Auth: c.auth,
+		Auth:     c.auth,
+		RefSpecs: []config.RefSpec{refSpec},
 	})
 	if err != nil {
 		span.RecordError(err)
