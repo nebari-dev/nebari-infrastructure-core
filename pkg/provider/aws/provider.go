@@ -206,11 +206,31 @@ func (p *Provider) Deploy(ctx context.Context, cfg *nebariconfig.NebariConfig) e
 		return err
 	}
 
-	span.SetAttributes(attribute.String("aws.region", awsCfg.Region))
+	region := awsCfg.Region
+	span.SetAttributes(attribute.String("aws.region", region))
 
-	// Ensure state bucket exists before initializing Terraform
-	bucketName := stateBucketName(cfg.ProjectName)
-	if err := ensureStateBucket(ctx, bucketName, awsCfg.Region); err != nil {
+	// Get bucket name from config or generate one
+	bucketName := awsCfg.StateBucket
+	if bucketName == "" {
+		stsClient, err := newSTSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create STS client: %w", err)
+		}
+		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get state bucket name: %w", err)
+		}
+	}
+
+	// Ensure state bucket exists
+	s3Client, err := newS3Client(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+	if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to ensure state bucket: %w", err)
 	}
@@ -263,7 +283,21 @@ func (p *Provider) Destroy(ctx context.Context, cfg *nebariconfig.NebariConfig) 
 	}
 
 	region := awsCfg.Region
-	bucketName := stateBucketName(cfg.ProjectName)
+
+	// Get bucket name from config or generate one
+	bucketName := awsCfg.StateBucket
+	if bucketName == "" {
+		stsClient, err := newSTSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create STS client: %w", err)
+		}
+		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get state bucket name: %w", err)
+		}
+	}
 
 	span.SetAttributes(
 		attribute.String("provider", "aws"),
@@ -304,7 +338,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *nebariconfig.NebariConfig) 
 		return err
 	}
 
-	if err := destroyStateBucket(ctx, bucketName, region); err != nil {
+	s3Client, err := newS3Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to destroy state bucket: %w", err)
 	}
@@ -327,7 +366,21 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *nebariconfig.NebariCo
 
 	clusterName := cfg.ProjectName
 	region := awsCfg.Region
-	bucketName := stateBucketName(cfg.ProjectName)
+
+	// Get bucket name from config or generate one
+	bucketName := awsCfg.StateBucket
+	if bucketName == "" {
+		stsClient, err := newSTSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to create STS client: %w", err)
+		}
+		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to get state bucket name: %w", err)
+		}
+	}
 
 	span.SetAttributes(
 		attribute.String("provider", "aws"),

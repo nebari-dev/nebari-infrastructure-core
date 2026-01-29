@@ -2,6 +2,7 @@ package aws
 
 type Config struct {
 	Region                   string               `yaml:"region"`
+	StateBucket              string               `yaml:"state_bucket,omitempty"`
 	AvailabilityZones        []string             `yaml:"availability_zones,omitempty"`
 	VPCCIDRBlock             string               `yaml:"vpc_cidr_block,omitempty"`
 	ExistingVPCID            string               `yaml:"existing_vpc_id,omitempty"`
