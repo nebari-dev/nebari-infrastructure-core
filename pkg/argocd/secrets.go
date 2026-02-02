@@ -14,7 +14,7 @@ import (
 )
 
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
-func ConfigureGitRepoAccess(ctx context.Context, client *kubernetes.Clientset, cfg *config.NebariConfig, namespace string) error {
+func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cfg *config.NebariConfig, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ConfigureGitRepoAccess")
 	defer span.End()
@@ -87,7 +87,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client *kubernetes.Clientset, c
 }
 
 // ConfigureOCIAccess configures Argo CD to allow unauthenticated access to OCI registries
-func ConfigureOCIAccess(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+func ConfigureOCIAccess(ctx context.Context, client kubernetes.Interface, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ConfigureOCIAccess")
 	defer span.End()

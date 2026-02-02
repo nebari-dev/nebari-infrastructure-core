@@ -127,7 +127,7 @@ func newK8sClient(kubeconfigBytes []byte) (*kubernetes.Clientset, error) {
 }
 
 // createNamespace creates a namespace if it doesn't exist
-func createNamespace(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+func createNamespace(ctx context.Context, client kubernetes.Interface, namespace string) error {
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating namespace: %s", namespace)).
 		WithResource("namespace").
 		WithAction("creating").
@@ -163,7 +163,7 @@ func createNamespace(ctx context.Context, client *kubernetes.Clientset, namespac
 }
 
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
-func createKeycloakSecrets(ctx context.Context, client *kubernetes.Clientset, keycloakCfg KeycloakConfig) error {
+func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig) error {
 	namespace := "keycloak"
 
 	// 1. Create admin credentials secret

@@ -3,7 +3,7 @@ package argocd
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	_ "embed" // Required for go:embed directive
 	"fmt"
 	"strings"
 	"text/template"
