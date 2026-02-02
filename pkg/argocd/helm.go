@@ -1,4 +1,4 @@
-package kubernetes
+package argocd
 
 import (
 	"context"
@@ -23,15 +23,15 @@ import (
 )
 
 const (
-	argoCDRepoName  = "argo"
-	argoCDRepoURL   = "https://argoproj.github.io/argo-helm"
-	argoCDChartName = "argo/argo-cd"
+	repoName  = "argo"
+	repoURL   = "https://argoproj.github.io/argo-helm"
+	chartName = "argo/argo-cd"
 )
 
-// installArgoCDHelm installs Argo CD using the Helm Go SDK
-func installArgoCDHelm(ctx context.Context, kubeconfigBytes []byte, config argoCDConfig) error {
+// InstallHelm installs Argo CD using the Helm Go SDK
+func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "kubernetes.installArgoCDHelm")
+	_, span := tracer.Start(ctx, "argocd.InstallHelm")
 	defer span.End()
 
 	span.SetAttributes(
@@ -69,7 +69,7 @@ func installArgoCDHelm(ctx context.Context, kubeconfigBytes []byte, config argoC
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already installed, upgrading").
 			WithResource("argocd").
 			WithAction("upgrading"))
-		return upgradeArgoCDHelm(ctx, actionConfig, config)
+		return upgradeHelm(ctx, actionConfig, config)
 	}
 
 	// Add Argo CD Helm repository
@@ -92,7 +92,7 @@ func installArgoCDHelm(ctx context.Context, kubeconfigBytes []byte, config argoC
 		WithMetadata("chart_version", config.Version))
 
 	// Locate and load the chart
-	chartPath, err := client.ChartPathOptions.LocateChart(argoCDChartName, cli.New())
+	chartPath, err := client.ChartPathOptions.LocateChart(chartName, cli.New())
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to locate Argo CD chart: %w", err)
@@ -125,10 +125,10 @@ func installArgoCDHelm(ctx context.Context, kubeconfigBytes []byte, config argoC
 	return nil
 }
 
-// upgradeArgoCDHelm upgrades an existing Argo CD installation
-func upgradeArgoCDHelm(ctx context.Context, actionConfig *action.Configuration, config argoCDConfig) error {
+// upgradeHelm upgrades an existing Argo CD installation
+func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "kubernetes.upgradeArgoCDHelm")
+	_, span := tracer.Start(ctx, "argocd.upgradeHelm")
 	defer span.End()
 
 	client := action.NewUpgrade(actionConfig)
@@ -137,7 +137,7 @@ func upgradeArgoCDHelm(ctx context.Context, actionConfig *action.Configuration, 
 	client.Timeout = config.Timeout
 
 	// Locate and load the chart
-	chartPath, err := client.ChartPathOptions.LocateChart(argoCDChartName, cli.New())
+	chartPath, err := client.ChartPathOptions.LocateChart(chartName, cli.New())
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to locate Argo CD chart: %w", err)
@@ -229,15 +229,15 @@ func (k *kubeconfigGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 // addHelmRepo adds the Argo CD Helm repository
 func addHelmRepo(ctx context.Context) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "kubernetes.addHelmRepo")
+	_, span := tracer.Start(ctx, "argocd.addHelmRepo")
 	defer span.End()
 
 	settings := cli.New()
 
 	// Create repo entry
 	entry := &repo.Entry{
-		Name: argoCDRepoName,
-		URL:  argoCDRepoURL,
+		Name: repoName,
+		URL:  repoURL,
 	}
 
 	// Get repo file
@@ -278,8 +278,8 @@ func addHelmRepo(ctx context.Context) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Added Argo CD Helm repository").
 		WithResource("helm-repo").
 		WithAction("added").
-		WithMetadata("repo_name", argoCDRepoName).
-		WithMetadata("repo_url", argoCDRepoURL))
+		WithMetadata("repo_name", repoName).
+		WithMetadata("repo_url", repoURL))
 
 	return nil
 }
