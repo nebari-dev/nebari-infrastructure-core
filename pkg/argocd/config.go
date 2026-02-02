@@ -1,9 +1,9 @@
-package kubernetes
+package argocd
 
 import "time"
 
-// argoCDConfig holds configuration for Argo CD installation
-type argoCDConfig struct {
+// Config holds configuration for Argo CD installation
+type Config struct {
 	// Version is the Argo CD chart version to install
 	Version string
 
@@ -20,9 +20,9 @@ type argoCDConfig struct {
 	Values map[string]any
 }
 
-// defaultArgoCDConfig returns the default Argo CD configuration
-func defaultArgoCDConfig() argoCDConfig {
-	return argoCDConfig{
+// DefaultConfig returns the default Argo CD configuration
+func DefaultConfig() Config {
+	return Config{
 		Version:     "7.7.9", // Chart version that installs Argo CD v2.11.0
 		Namespace:   "argocd",
 		ReleaseName: "argocd",

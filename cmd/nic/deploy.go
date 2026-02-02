@@ -15,7 +15,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubernetes"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -139,7 +138,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !cfg.DryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := kubernetes.InstallArgoCD(ctx, cfg, provider); err != nil {
+		if err := argocd.Install(ctx, cfg, provider); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -149,21 +148,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 			// Install foundational services via Argo CD
 			slog.Info("Installing foundational services")
-			foundationalCfg := kubernetes.FoundationalConfig{
-				Keycloak: kubernetes.KeycloakConfig{
+			foundationalCfg := argocd.FoundationalConfig{
+				Keycloak: argocd.KeycloakConfig{
 					Enabled:       true,
 					AdminPassword: generateSecurePassword(),
 					DBPassword:    generateSecurePassword(),
 					Hostname:      "", // Will be auto-generated from domain
 				},
 				// Enable MetalLB only for local deployments
-				MetalLB: kubernetes.MetalLBConfig{
+				MetalLB: argocd.MetalLBConfig{
 					Enabled:     cfg.Provider == "local",
 					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
 				},
 			}
 
-			if err := kubernetes.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
+			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				slog.Warn("Failed to install foundational services", "error", err)
 				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
