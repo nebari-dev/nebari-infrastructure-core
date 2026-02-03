@@ -14,6 +14,18 @@ import (
 	"github.com/spf13/afero"
 )
 
+// TerraformExecutor wraps a Terraform executor with its working directory for cleanup.
+type TerraformExecutor struct {
+	*tfexec.Terraform
+	workingDir string
+	appFs      afero.Fs
+}
+
+// Cleanup removes the temporary working directory.
+func (te *TerraformExecutor) Cleanup() error {
+	return te.appFs.RemoveAll(te.workingDir)
+}
+
 // binaryDownloader downloads the OpenTofu binary.
 type binaryDownloader interface {
 	Download(ctx context.Context) ([]byte, error)
@@ -144,10 +156,11 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 
 // Setup prepares the OpenTofu environment by downloading the binary (if not cached),
 // configuring provider plugin caching, extracting provider-specific templates,
-// and writing tfvars. Returns a Terraform executor configured with stdout/stderr.
-// The caller is responsible for calling Init() with appropriate options.
+// and writing tfvars. Returns a TerraformExecutor configured with stdout/stderr.
+// The caller is responsible for calling Init() and Apply() with appropriate options and
+// deferring Cleanup() to remove the temporary working directory.
 // The binary and providers are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
-func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform, error) {
+func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
 	appFs := afero.NewOsFs()
 
 	cacheDir, err := getCacheDir(appFs)
@@ -171,7 +184,14 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform,
 		return nil, err
 	}
 
-	if err := os.Setenv("TF_PLUGIN_CACHE_DIR", pluginCacheDir); err != nil {
+	// Remove workingDir and its contents if we return an error after this point
+	defer func() {
+		if err != nil {
+			_ = appFs.RemoveAll(workingDir)
+		}
+	}()
+
+	if err = os.Setenv("TF_PLUGIN_CACHE_DIR", pluginCacheDir); err != nil {
 		return nil, fmt.Errorf("failed to set TF_PLUGIN_CACHE_DIR: %w", err)
 	}
 
@@ -179,7 +199,7 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform,
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal tfvars: %w", err)
 	}
-	if err := afero.WriteFile(appFs, filepath.Join(workingDir, "terraform.tfvars.json"), tfvarsJSON, 0644); err != nil {
+	if err = afero.WriteFile(appFs, filepath.Join(workingDir, "terraform.tfvars.json"), tfvarsJSON, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write tfvars: %w", err)
 	}
 
@@ -191,5 +211,9 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (*tfexec.Terraform,
 	tf.SetStdout(os.Stdout)
 	tf.SetStderr(os.Stderr)
 
-	return tf, nil
+	return &TerraformExecutor{
+		Terraform:  tf,
+		workingDir: workingDir,
+		appFs:      appFs,
+	}, nil
 }
