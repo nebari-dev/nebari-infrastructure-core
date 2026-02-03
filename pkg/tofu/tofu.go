@@ -30,9 +30,11 @@ func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
 }
 
-// binaryDownloader downloads the OpenTofu binary.
+// binaryDownloader abstracts binary fetching to enable testing.
+// Tests can provide a mock implementation that returns fake binary data,
+// allowing downloadExecutable to be tested without network access.
 type binaryDownloader interface {
-	Download(ctx context.Context) ([]byte, error)
+	download(ctx context.Context) ([]byte, error)
 }
 
 // tofuDownloader implements binaryDownloader using tofudl with caching.
@@ -41,8 +43,8 @@ type tofuDownloader struct {
 	version  string
 }
 
-// Download fetches the OpenTofu binary for the current platform.
-func (d *tofuDownloader) Download(ctx context.Context) ([]byte, error) {
+// download fetches the OpenTofu binary for the current platform.
+func (d *tofuDownloader) download(ctx context.Context) ([]byte, error) {
 	// Make sure to have a context with timeout so downloads don't hang indefinitely.
 	// If caller sets a shorter timeout, theirs takes precedence.
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
@@ -103,8 +105,11 @@ func getPluginCacheDir(appFs afero.Fs, cacheDir string) (string, error) {
 	return pluginCacheDir, nil
 }
 
+// downloadExecutable writes the binary from downloader to the cache directory.
+// It's separate from download to allow testing the file-writing logic independently
+// by injecting a mock binaryDownloader that doesn't require network access.
 func downloadExecutable(ctx context.Context, appFs afero.Fs, cacheDir string, downloader binaryDownloader) (string, error) {
-	binary, err := downloader.Download(ctx)
+	binary, err := downloader.download(ctx)
 	if err != nil {
 		return "", err
 	}

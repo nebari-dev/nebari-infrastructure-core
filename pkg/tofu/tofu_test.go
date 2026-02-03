@@ -13,13 +13,13 @@ import (
 	"github.com/spf13/afero"
 )
 
-// mockDownloader implements BinaryDownloader for testing.
+// mockDownloader implements binaryDownloader for testing.
 type mockDownloader struct {
 	binary []byte
 	err    error
 }
 
-func (m *mockDownloader) Download(ctx context.Context) ([]byte, error) {
+func (m *mockDownloader) download(ctx context.Context) ([]byte, error) {
 	return m.binary, m.err
 }
 
