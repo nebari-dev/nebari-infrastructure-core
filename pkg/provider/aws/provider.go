@@ -240,7 +240,12 @@ func (p *Provider) Deploy(ctx context.Context, cfg *nebariconfig.NebariConfig) e
 		span.RecordError(err)
 		return err
 	}
-	defer func() { _ = tf.Cleanup() }()
+	defer func() {
+		err := tf.Cleanup()
+		if err != nil {
+			span.RecordError(err)
+		}
+	}()
 
 	err = tf.Init(ctx,
 		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
@@ -313,7 +318,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *nebariconfig.NebariConfig) 
 		span.RecordError(err)
 		return err
 	}
-	defer func() { _ = tf.Cleanup() }()
+	defer func() {
+		err := tf.Cleanup()
+		if err != nil {
+			span.RecordError(err)
+		}
+	}()
 
 	err = tf.Init(ctx,
 		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
@@ -396,7 +406,12 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *nebariconfig.NebariCo
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to setup terraform: %w", err)
 	}
-	defer func() { _ = tf.Cleanup() }()
+	defer func() {
+		err := tf.Cleanup()
+		if err != nil {
+			span.RecordError(err)
+		}
+	}()
 
 	err = tf.Init(ctx,
 		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
