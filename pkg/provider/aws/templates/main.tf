@@ -7,31 +7,32 @@ terraform {
 }
 
 module "eks_cluster" {
-  source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=3071b1419efc126744e223ae5b59072a60bef263"
+  source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=032d522d8c359fedb1bfaa6714b560c61a38e782"
 
-  project_name                        = var.project_name
-  tags                                = var.tags
-  availability_zones                  = var.availability_zones
-  create_vpc                          = var.create_vpc
-  vpc_cidr_block                      = var.vpc_cidr_block
-  existing_vpc_id                     = var.existing_vpc_id
-  existing_private_subnet_ids         = var.existing_private_subnet_ids
-  create_security_group               = var.create_security_group
-  existing_security_group_id          = var.existing_security_group_id
-  kubernetes_version                  = var.kubernetes_version
-  endpoint_private_access             = var.endpoint_private_access
-  endpoint_public_access              = var.endpoint_public_access
-  eks_kms_arn                         = var.eks_kms_arn
-  cluster_enabled_log_types           = var.cluster_enabled_log_types
-  create_iam_roles                    = var.create_iam_roles
-  existing_cluster_iam_role_arn       = var.existing_cluster_iam_role_arn
-  existing_node_iam_role_arn          = var.existing_node_iam_role_arn
-  iam_role_permissions_boundary       = var.iam_role_permissions_boundary
-  node_groups                         = var.node_groups
-  efs_enabled                         = var.efs_enabled
-  efs_performance_mode                = var.efs_performance_mode
-  efs_throughput_mode                 = var.efs_throughput_mode
-  efs_provisioned_throughput_in_mibps = var.efs_provisioned_throughput_in_mibps
-  efs_encrypted                       = var.efs_encrypted
-  efs_kms_key_arn                     = var.efs_kms_key_arn
+  project_name                             = var.project_name
+  tags                                     = var.tags
+  availability_zones                       = var.availability_zones
+  create_vpc                               = var.create_vpc
+  vpc_cidr_block                           = var.vpc_cidr_block
+  existing_vpc_id                          = var.existing_vpc_id
+  existing_private_subnet_ids              = var.existing_private_subnet_ids
+  create_security_group                    = var.create_security_group
+  existing_security_group_id               = var.existing_security_group_id
+  kubernetes_version                       = var.kubernetes_version
+  endpoint_private_access                  = var.endpoint_private_access
+  endpoint_public_access                   = var.endpoint_public_access
+  eks_kms_arn                              = var.eks_kms_arn
+  cluster_enabled_log_types                = var.cluster_enabled_log_types
+  create_iam_roles                         = var.create_iam_roles
+  existing_cluster_iam_role_arn            = var.existing_cluster_iam_role_arn
+  existing_node_iam_role_arn               = var.existing_node_iam_role_arn
+  iam_role_permissions_boundary            = var.iam_role_permissions_boundary
+  enable_cluster_creator_admin_permissions = false
+  node_groups                              = var.node_groups
+  efs_enabled                              = var.efs_enabled
+  efs_performance_mode                     = var.efs_performance_mode
+  efs_throughput_mode                      = var.efs_throughput_mode
+  efs_provisioned_throughput_in_mibps      = var.efs_provisioned_throughput_in_mibps
+  efs_encrypted                            = var.efs_encrypted
+  efs_kms_key_arn                          = var.efs_kms_key_arn
 }
