@@ -19,86 +19,66 @@ func TestValidate_TableDriven(t *testing.T) {
 		// Success cases
 		{
 			name: "minimal valid config",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {
-							Instance: "t3.medium",
-							MinNodes: 1,
-							MaxNodes: 3,
-						},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {
+						Instance: "t3.medium",
+						MinNodes: 1,
+						MaxNodes: 3,
 					},
 				},
-			},
+			}),
 			expectError: false, // Will fail on credentials, but that's after validation logic
 		},
 		{
 			name: "with kubernetes version",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.34",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium", MinNodes: 1, MaxNodes: 3},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.34",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium", MinNodes: 1, MaxNodes: 3},
 				},
-			},
+			}),
 			expectError: false,
 		},
 		{
 			name: "with VPC CIDR",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:       "us-west-2",
-					VPCCIDRBlock: "10.0.0.0/16",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:       "us-west-2",
+				VPCCIDRBlock: "10.0.0.0/16",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: false,
 		},
 		{
 			name: "with endpoint access public",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					EKSEndpointAccess: "public",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				EKSEndpointAccess: "public",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: false,
 		},
 		{
 			name: "with all taint effects",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"special": {
-							Instance: "m5.xlarge",
-							Taints: []Taint{
-								{Key: "workload", Value: "batch", Effect: "NoSchedule"},
-								{Key: "priority", Value: "low", Effect: "NoExecute"},
-								{Key: "preemptible", Value: "true", Effect: "PreferNoSchedule"},
-							},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"special": {
+						Instance: "m5.xlarge",
+						Taints: []Taint{
+							{Key: "workload", Value: "batch", Effect: "NoSchedule"},
+							{Key: "priority", Value: "low", Effect: "NoExecute"},
+							{Key: "preemptible", Value: "true", Effect: "PreferNoSchedule"},
 						},
 					},
 				},
-			},
+			}),
 			expectError: false,
 		},
 
@@ -108,183 +88,136 @@ func TestValidate_TableDriven(t *testing.T) {
 			config: &config.NebariConfig{
 				ProjectName: "test-cluster",
 				Provider:    "aws",
-				// AmazonWebServices is nil
+				// No provider config set
 			},
 			expectError: true,
 			errorMsg:    "AWS configuration is required",
 		},
 		{
 			name: "missing region",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "AWS region is required",
 		},
 		{
 			name: "invalid kubernetes version",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "invalid Kubernetes version format: 1",
 		},
 		{
 			name: "invalid VPC CIDR",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:       "us-west-2",
-					VPCCIDRBlock: "10.0.0.0", // Missing /prefix
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:       "us-west-2",
+				VPCCIDRBlock: "10.0.0.0", // Missing /prefix
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "invalid VPC CIDR block format: 10.0.0.0 (must include /prefix)",
 		},
 		{
 			name: "invalid endpoint access",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					EKSEndpointAccess: "invalid",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium"},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region:            "us-west-2",
+				EKSEndpointAccess: "invalid",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium"},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "invalid EKS endpoint access: invalid",
 		},
 		{
-			name: "no node groups",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:     "us-west-2",
-					NodeGroups: map[string]NodeGroup{},
-				},
-			},
+			name:        "no node groups",
+			config:      newTestConfig("test-cluster", &Config{Region: "us-west-2", NodeGroups: map[string]NodeGroup{}}),
 			expectError: true,
 			errorMsg:    "at least one node group is required",
 		},
 		{
 			name: "node group missing instance",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {MinNodes: 1, MaxNodes: 3},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {MinNodes: 1, MaxNodes: 3},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group general: instance type is required",
 		},
 		{
 			name: "negative min nodes",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium", MinNodes: -1},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium", MinNodes: -1},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group general: min_nodes cannot be negative",
 		},
 		{
 			name: "negative max nodes",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium", MaxNodes: -3},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium", MaxNodes: -3},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group general: max_nodes cannot be negative",
 		},
 		{
 			name: "min greater than max",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"general": {Instance: "t3.medium", MinNodes: 5, MaxNodes: 3},
-					},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"general": {Instance: "t3.medium", MinNodes: 5, MaxNodes: 3},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group general: min_nodes (5) cannot be greater than max_nodes (3)",
 		},
 		{
 			name: "taint missing key",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"gpu": {
-							Instance: "p3.2xlarge",
-							Taints: []Taint{
-								{Value: "true", Effect: "NoSchedule"},
-							},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"gpu": {
+						Instance: "p3.2xlarge",
+						Taints: []Taint{
+							{Value: "true", Effect: "NoSchedule"},
 						},
 					},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group gpu: taint 0 is missing key",
 		},
 		{
 			name: "taint invalid effect",
-			config: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-					NodeGroups: map[string]NodeGroup{
-						"gpu": {
-							Instance: "p3.2xlarge",
-							Taints: []Taint{
-								{Key: "nvidia.com/gpu", Value: "true", Effect: "InvalidEffect"},
-							},
+			config: newTestConfig("test-cluster", &Config{
+				Region: "us-west-2",
+				NodeGroups: map[string]NodeGroup{
+					"gpu": {
+						Instance: "p3.2xlarge",
+						Taints: []Taint{
+							{Key: "nvidia.com/gpu", Value: "true", Effect: "InvalidEffect"},
 						},
 					},
 				},
-			},
+			}),
 			expectError: true,
 			errorMsg:    "node group gpu: taint 0 has invalid effect InvalidEffect",
 		},

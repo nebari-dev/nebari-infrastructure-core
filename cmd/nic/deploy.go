@@ -3,14 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -18,6 +23,7 @@ var (
 	deployConfigFile string
 	deployDryRun     bool
 	deployTimeout    string
+	deployRegenApps  bool
 
 	deployCmd = &cobra.Command{
 		Use:   "deploy",
@@ -35,6 +41,7 @@ func init() {
 	deployCmd.Flags().StringVarP(&deployConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
 	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
+	deployCmd.Flags().BoolVar(&deployRegenApps, "regen-apps", false, "Regenerate ArgoCD application manifests even if already bootstrapped")
 	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
 	if err := deployCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
@@ -116,6 +123,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
+
+	// Bootstrap GitOps repository if configured
+	if cfg.GitRepository != nil && !deployDryRun {
+		if err := bootstrapGitOps(ctx, cfg, deployRegenApps); err != nil {
+			span.RecordError(err)
+			slog.Error("GitOps bootstrap failed", "error", err)
+			return err
+		}
+	}
+
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
 	// Print DNS guidance if no DNS provider is configured
@@ -123,6 +141,92 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		printDNSGuidance(cfg)
 	}
 
+	return nil
+}
+
+// bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
+// This is the orchestrator function that handles all I/O operations.
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("git.url", cfg.GitRepository.URL),
+		attribute.Bool("regen_apps", regenApps),
+	)
+
+	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
+
+	// Create git client
+	gitClient, err := git.NewClient(cfg.GitRepository)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create git client: %w", err)
+	}
+	defer func() { _ = gitClient.Cleanup() }()
+
+	// Validate authentication before proceeding
+	if err := gitClient.ValidateAuth(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("git authentication failed: %w", err)
+	}
+
+	// Clone/pull the repository
+	if err := gitClient.Init(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to initialize git repository: %w", err)
+	}
+
+	// Check if already bootstrapped
+	bootstrapped, err := gitClient.IsBootstrapped(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to check bootstrap status: %w", err)
+	}
+
+	if bootstrapped && !regenApps {
+		slog.Info("GitOps repository already bootstrapped, skipping manifest generation")
+		span.SetAttributes(attribute.Bool("skipped", true))
+		return nil
+	}
+
+	if regenApps {
+		slog.Info("Regenerating ArgoCD application manifests (--regen-apps)")
+	} else {
+		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
+	}
+
+	// Write all ArgoCD application manifests
+	// This is the only place where filesystem I/O happens
+	workDir := gitClient.WorkDir()
+	err = argocd.WriteAll(ctx, func(appName string) (io.WriteCloser, error) {
+		path := filepath.Join(workDir, appName+".yaml")
+		slog.Debug("Writing application manifest", "app", appName, "path", path)
+		return os.Create(path)
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to write application manifests: %w", err)
+	}
+
+	// Write bootstrap marker
+	if err := gitClient.WriteBootstrapMarker(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to write bootstrap marker: %w", err)
+	}
+
+	// Commit and push
+	commitMsg := "Bootstrap foundational ArgoCD applications"
+	if regenApps {
+		commitMsg = "Regenerate foundational ArgoCD applications"
+	}
+	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to commit and push: %w", err)
+	}
+
+	slog.Info("GitOps repository bootstrapped successfully")
 	return nil
 }
 

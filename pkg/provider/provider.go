@@ -11,6 +11,10 @@ type Provider interface {
 	// Name returns the provider name (aws, gcp, azure, local)
 	Name() string
 
+	// ConfigKey returns the YAML key for this provider's configuration
+	// e.g., "amazon_web_services", "google_cloud_platform", "azure", "local"
+	ConfigKey() string
+
 	// Validate validates the configuration before deployment
 	Validate(ctx context.Context, config *config.NebariConfig) error
 
@@ -27,6 +31,10 @@ type Provider interface {
 
 	// GetKubeconfig generates a kubeconfig file for accessing the Kubernetes cluster
 	GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
+
+	// Summary returns key-value pairs describing the configuration for display purposes.
+	// Used by CLI commands to show provider-specific details without knowing provider internals.
+	Summary(config *config.NebariConfig) map[string]string
 }
 
 // InfrastructureState represents the discovered state of infrastructure

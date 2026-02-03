@@ -23,13 +23,7 @@ func TestCreateVPC(t *testing.T) {
 	}{
 		{
 			name: "successful VPC creation with defaults",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			mockSetup: func(m *MockEC2Client) {
 				// Mock availability zones
 				m.DescribeAvailabilityZonesFunc = func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
@@ -184,14 +178,7 @@ func TestCreateVPC(t *testing.T) {
 		},
 		{
 			name: "VPC creation with custom CIDR",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:       "us-west-2",
-					VPCCIDRBlock: "172.16.0.0/16",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", VPCCIDRBlock: "172.16.0.0/16"}),
 			mockSetup: func(m *MockEC2Client) {
 				// Setup similar to above but simplified
 				m.DescribeAvailabilityZonesFunc = func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
@@ -283,13 +270,7 @@ func TestCreateVPC(t *testing.T) {
 		},
 		{
 			name: "insufficient availability zones",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			mockSetup: func(m *MockEC2Client) {
 				m.DescribeAvailabilityZonesFunc = func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
 					return &ec2.DescribeAvailabilityZonesOutput{
@@ -304,13 +285,7 @@ func TestCreateVPC(t *testing.T) {
 		},
 		{
 			name: "VPC creation API error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			mockSetup: func(m *MockEC2Client) {
 				m.DescribeAvailabilityZonesFunc = func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
 					return &ec2.DescribeAvailabilityZonesOutput{
@@ -329,13 +304,7 @@ func TestCreateVPC(t *testing.T) {
 		},
 		{
 			name: "Internet Gateway creation error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			mockSetup: func(m *MockEC2Client) {
 				m.DescribeAvailabilityZonesFunc = func(ctx context.Context, params *ec2.DescribeAvailabilityZonesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAvailabilityZonesOutput, error) {
 					return &ec2.DescribeAvailabilityZonesOutput{

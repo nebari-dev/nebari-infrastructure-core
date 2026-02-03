@@ -25,13 +25,7 @@ func TestCreateEKSCluster(t *testing.T) {
 	}{
 		{
 			name: "minimal configuration",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1", "subnet-2"},
@@ -94,14 +88,7 @@ func TestCreateEKSCluster(t *testing.T) {
 		},
 		{
 			name: "with custom kubernetes version",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:            "us-west-2",
-					KubernetesVersion: "1.29",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", KubernetesVersion: "1.29"}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1"},
@@ -138,14 +125,7 @@ func TestCreateEKSCluster(t *testing.T) {
 		},
 		{
 			name: "with KMS encryption",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:    "us-west-2",
-					EKSKMSArn: "arn:aws:kms:us-west-2:123:key/12345",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", EKSKMSArn: "arn:aws:kms:us-west-2:123:key/12345"}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1"},
@@ -186,14 +166,7 @@ func TestCreateEKSCluster(t *testing.T) {
 		},
 		{
 			name: "with custom public access CIDRs",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region:               "us-west-2",
-					EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2", EKSPublicAccessCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"}}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1"},
@@ -231,13 +204,7 @@ func TestCreateEKSCluster(t *testing.T) {
 		},
 		{
 			name: "CreateCluster API error",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-cluster",
-				Provider:    "aws",
-				AmazonWebServices: &Config{
-					Region: "us-west-2",
-				},
-			},
+			cfg:  newTestConfig("test-cluster", &Config{Region: "us-west-2"}),
 			vpc: &VPCState{
 				VPCID:            "vpc-12345",
 				PrivateSubnetIDs: []string{"subnet-1"},

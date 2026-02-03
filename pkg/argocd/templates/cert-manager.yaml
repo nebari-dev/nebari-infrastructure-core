@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: foundational
+
+  source:
+    chart: cert-manager
+    repoURL: https://charts.jetstack.io
+    targetRevision: v1.17.2
+    helm:
+      releaseName: cert-manager
+      values: |
+        installCRDs: true
+        prometheus:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

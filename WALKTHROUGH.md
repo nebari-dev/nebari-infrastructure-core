@@ -140,11 +140,12 @@ Provider-specific configs stored as `any` in `NebariConfig`, concrete types in p
 ```go
 // pkg/config/config.go
 type NebariConfig struct {
-    ProjectName       string      `yaml:"project_name"`
-    Provider          string      `yaml:"provider"`
-    AmazonWebServices interface{} `yaml:"amazon_web_services,omitempty"`
+    ProjectName    string         `yaml:"project_name"`
+    Provider       string         `yaml:"provider"`
+    ProviderConfig map[string]any `yaml:",inline"` // Captures provider-specific config
     // ...
 }
+// Access provider config: cfg.ProviderConfig["amazon_web_services"]
 
 // pkg/provider/aws/config.go
 type Config struct {
