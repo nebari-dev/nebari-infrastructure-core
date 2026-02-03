@@ -149,7 +149,11 @@ Due to difficulties with how networking works with Docker Desktop, using OrbStac
 
 See these docs for installing OrbStack: https://docs.orbstack.dev/quick-start
 
-To deploy a kind cluster and the foundational software, run the following command:
+A github repo needs to be created and the URL added to `local-config.yaml` file. 
+
+A valid private SSH key needs to be set as an environment variable `GIT_SSH_PRIVATE_KEY`
+
+With these configured, to deploy a kind cluster and the foundational software with the `local-config.yaml` file, run the following command:
 
 ```bash
 make localkind-up
