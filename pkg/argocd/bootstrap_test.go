@@ -39,8 +39,8 @@ func TestPluralizeKind(t *testing.T) {
 		{"AppProject", "appprojects"},
 
 		// Edge cases
-		{"Batch", "batches"},   // ends in ch
-		{"Mesh", "meshes"},     // ends in sh
+		{"Batch", "batches"}, // ends in ch
+		{"Mesh", "meshes"},   // ends in sh
 		{"VirtualService", "virtualservices"},
 	}
 
@@ -83,8 +83,8 @@ func TestRootAppOfAppsTemplate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		data     struct {
+		name string
+		data struct {
 			GitRepoURL string
 			GitBranch  string
 			GitPath    string
