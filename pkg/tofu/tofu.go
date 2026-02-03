@@ -8,11 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/opentofu/tofudl"
 	"github.com/spf13/afero"
 )
+
+// Conservative timeout for network download
+const downloadTimeout = 10 * time.Minute
 
 // TerraformExecutor wraps a Terraform executor with its working directory for cleanup.
 type TerraformExecutor struct {
@@ -39,6 +43,11 @@ type tofuDownloader struct {
 
 // Download fetches the OpenTofu binary for the current platform.
 func (d *tofuDownloader) Download(ctx context.Context) ([]byte, error) {
+	// Make sure to have a context with timeout so downloads don't hang indefinitely.
+	// If caller sets a shorter timeout, theirs takes precedence.
+	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+
 	dl, err := tofudl.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tofu downloader: %w", err)
