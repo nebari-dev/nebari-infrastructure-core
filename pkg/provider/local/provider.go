@@ -59,8 +59,11 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		}
 	}
 
-	// Get the context name from config, default to "default" if not specified
-	contextName := localCfg.KubeContext
+	// Get the context name: top-level kube_context takes precedence, then provider-specific
+	contextName := cfg.GetKubeContext()
+	if contextName == "" {
+		contextName = localCfg.KubeContext
+	}
 	if contextName == "" {
 		contextName = "default"
 	}
@@ -203,8 +206,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		}
 	}
 
-	// Get the context name from config, default to "default" if not specified
-	contextName := localCfg.KubeContext
+	// Get the context name: top-level kube_context takes precedence, then provider-specific
+	contextName := cfg.GetKubeContext()
+	if contextName == "" {
+		contextName = localCfg.KubeContext
+	}
 	if contextName == "" {
 		contextName = "default"
 	}
@@ -314,6 +320,13 @@ func filterKubeconfigByContext(config *clientcmdapi.Config, contextName string) 
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
 
+	// Check top-level kube_context first
+	if cfg.GetKubeContext() != "" {
+		result["Kube Context"] = cfg.GetKubeContext()
+		return result
+	}
+
+	// Fall back to provider-specific config
 	rawCfg := cfg.ProviderConfig["local"]
 	if rawCfg == nil {
 		return result

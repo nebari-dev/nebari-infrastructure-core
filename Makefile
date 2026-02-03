@@ -121,7 +121,7 @@ localkind-up: build ## Create local kind cluster and deploy Nebari
 	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
 	-kind create cluster --name nebari-local
 	@echo "Deploying Nebari to local cluster..."
-	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml
+	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml --regen-apps
 	@echo "Local kind cluster is ready!"
 
 localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster

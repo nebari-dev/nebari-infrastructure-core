@@ -36,6 +36,10 @@ type TemplateData struct {
 	// Domain configuration
 	Domain string
 
+	// Provider configuration
+	Provider     string // "aws", "gcp", "azure", "local"
+	StorageClass string // Provider-appropriate storage class for persistent volumes
+
 	// Certificate configuration
 	CertificateIssuer string // "selfsigned-issuer" or "letsencrypt-issuer"
 	ACMEEmail         string
@@ -49,6 +53,8 @@ type TemplateData struct {
 func NewTemplateData(cfg *config.NebariConfig) TemplateData {
 	data := TemplateData{
 		Domain:              cfg.Domain,
+		Provider:            cfg.Provider,
+		StorageClass:        storageClassForProvider(cfg.Provider),
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
 	}
 
@@ -256,6 +262,22 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	}
 
 	return nil
+}
+
+// storageClassForProvider returns the appropriate storage class for the given provider.
+func storageClassForProvider(provider string) string {
+	switch provider {
+	case "aws":
+		return "gp2"
+	case "gcp":
+		return "standard-rwo"
+	case "azure":
+		return "managed-csi"
+	case "local":
+		return "standard"
+	default:
+		return "standard"
+	}
 }
 
 // processTemplate processes a template file with the given data.

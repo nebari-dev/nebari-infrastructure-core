@@ -1,17 +1,18 @@
-project_name: my-nebari-local
-provider: local
+# Example: Deploying to an existing AWS EKS cluster
+#
+# This configuration uses "bring your own cluster" mode:
+# - provider: aws          -> Uses AWS-specific settings (gp2 storage class, etc.)
+# - kube_context: <arn>    -> Skips infrastructure provisioning, uses existing cluster
+#
+# The amazon_web_services section is NOT required when using an existing cluster.
+
+project_name: my-nebari-aws
+provider: aws
 domain: nebari.local
+kube_context: "arn:aws:eks:us-west-2:390259467264:cluster/my-nebari-aws"
+
 certificate:
   type: selfsigned
-kube_context: "kind-nebari-local"
-local:
-  node_selectors:
-    general:
-      kubernetes.io/os: linux
-    user:
-      kubernetes.io/os: linux
-    worker:
-      kubernetes.io/os: linux
 
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources

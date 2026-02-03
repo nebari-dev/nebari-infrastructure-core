@@ -109,6 +109,70 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		}
 	})
 
+	t.Run("creates realm admin secret when password provided", func(t *testing.T) {
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "keycloak",
+			},
+		}
+		client := fake.NewSimpleClientset(ns)
+
+		cfg := KeycloakConfig{
+			Enabled:            true,
+			AdminPassword:      "admin-pass",
+			DBPassword:         "db-pass",
+			RealmAdminPassword: "realm-admin-pass",
+		}
+
+		err := createKeycloakSecrets(ctx, client, cfg)
+		if err != nil {
+			t.Fatalf("createKeycloakSecrets() error = %v", err)
+		}
+
+		// Verify realm admin credentials secret was created
+		realmAdminSecret, err := client.CoreV1().Secrets("keycloak").Get(ctx, "nebari-realm-admin-credentials", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get realm admin secret: %v", err)
+		}
+		if got := getSecretValue(realmAdminSecret, "username"); got != "admin" {
+			t.Errorf("realm admin username = %q, want %q", got, "admin")
+		}
+		if got := getSecretValue(realmAdminSecret, "password"); got != "realm-admin-pass" {
+			t.Errorf("realm admin password = %q, want %q", got, "realm-admin-pass")
+		}
+		// Verify labels
+		if realmAdminSecret.Labels["app.kubernetes.io/part-of"] != "nebari-foundational" {
+			t.Errorf("missing or incorrect part-of label")
+		}
+	})
+
+	t.Run("skips realm admin secret when password empty", func(t *testing.T) {
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "keycloak",
+			},
+		}
+		client := fake.NewSimpleClientset(ns)
+
+		cfg := KeycloakConfig{
+			Enabled:            true,
+			AdminPassword:      "admin-pass",
+			DBPassword:         "db-pass",
+			RealmAdminPassword: "", // Empty - should not create secret
+		}
+
+		err := createKeycloakSecrets(ctx, client, cfg)
+		if err != nil {
+			t.Fatalf("createKeycloakSecrets() error = %v", err)
+		}
+
+		// Verify realm admin secret was NOT created
+		_, err = client.CoreV1().Secrets("keycloak").Get(ctx, "nebari-realm-admin-credentials", metav1.GetOptions{})
+		if err == nil {
+			t.Error("realm admin secret should not be created when password is empty")
+		}
+	})
+
 	t.Run("does not overwrite existing secrets", func(t *testing.T) {
 		// Pre-create namespace and secrets
 		ns := &corev1.Namespace{
@@ -158,6 +222,9 @@ func TestFoundationalConfig(t *testing.T) {
 		if cfg.AdminPassword != "" {
 			t.Error("KeycloakConfig.AdminPassword should default to empty")
 		}
+		if cfg.RealmAdminPassword != "" {
+			t.Error("KeycloakConfig.RealmAdminPassword should default to empty")
+		}
 	})
 
 	t.Run("MetalLBConfig defaults", func(t *testing.T) {
@@ -173,10 +240,11 @@ func TestFoundationalConfig(t *testing.T) {
 	t.Run("FoundationalConfig with values", func(t *testing.T) {
 		cfg := FoundationalConfig{
 			Keycloak: KeycloakConfig{
-				Enabled:       true,
-				AdminPassword: "admin123",
-				DBPassword:    "db123",
-				Hostname:      "keycloak.example.com",
+				Enabled:            true,
+				AdminPassword:      "admin123",
+				DBPassword:         "db123",
+				Hostname:           "keycloak.example.com",
+				RealmAdminPassword: "realm-admin123",
 			},
 			MetalLB: MetalLBConfig{
 				Enabled:     true,
@@ -192,6 +260,9 @@ func TestFoundationalConfig(t *testing.T) {
 		}
 		if cfg.Keycloak.Hostname != "keycloak.example.com" {
 			t.Errorf("Keycloak.Hostname = %q, want %q", cfg.Keycloak.Hostname, "keycloak.example.com")
+		}
+		if cfg.Keycloak.RealmAdminPassword != "realm-admin123" {
+			t.Errorf("Keycloak.RealmAdminPassword = %q, want %q", cfg.Keycloak.RealmAdminPassword, "realm-admin123")
 		}
 		if !cfg.MetalLB.Enabled {
 			t.Error("MetalLB.Enabled should be true")

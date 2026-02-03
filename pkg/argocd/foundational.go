@@ -27,10 +27,11 @@ type FoundationalConfig struct {
 
 // KeycloakConfig holds Keycloak-specific configuration
 type KeycloakConfig struct {
-	Enabled       bool
-	AdminPassword string
-	DBPassword    string
-	Hostname      string
+	Enabled            bool
+	AdminPassword      string
+	DBPassword         string
+	Hostname           string
+	RealmAdminPassword string // Password for the admin user in the nebari realm
 }
 
 // MetalLBConfig holds MetalLB-specific configuration
@@ -240,6 +241,38 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			WithResource("secret").
 			WithAction("created").
 			WithMetadata("secret_name", postgresSecret.Name))
+	}
+
+	// 4. Create Nebari realm admin credentials secret
+	if keycloakCfg.RealmAdminPassword != "" {
+		realmAdminSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "nebari-realm-admin-credentials",
+				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of":    "nebari-foundational",
+					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"username": "admin",
+				"password": keycloakCfg.RealmAdminPassword,
+			},
+		}
+
+		_, err = client.CoreV1().Secrets(namespace).Get(ctx, realmAdminSecret.Name, metav1.GetOptions{})
+		if err != nil {
+			// Secret doesn't exist, create it
+			_, err = client.CoreV1().Secrets(namespace).Create(ctx, realmAdminSecret, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create Nebari realm admin credentials secret: %w", err)
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Created Nebari realm admin credentials secret").
+				WithResource("secret").
+				WithAction("created").
+				WithMetadata("secret_name", realmAdminSecret.Name))
+		}
 	}
 
 	return nil

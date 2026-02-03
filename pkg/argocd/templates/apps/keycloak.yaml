@@ -13,79 +13,84 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    chart: keycloakx
-    repoURL: https://codecentric.github.io/helm-charts
-    targetRevision: 7.1.6
-    helm:
-      releaseName: keycloak
-      values: |
-        args:
-          - start
-        replicas: 1
-        extraEnv: |
-          - name: KEYCLOAK_ADMIN
-            value: admin
-          - name: KEYCLOAK_ADMIN_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: keycloak-admin-credentials
-                key: admin-password
-          - name: KC_DB
-            value: postgres
-          - name: KC_DB_URL_HOST
-            value: postgresql.keycloak.svc.cluster.local
-          - name: KC_DB_URL_DATABASE
-            value: keycloak
-          - name: KC_DB_USERNAME
-            value: keycloak
-          - name: KC_DB_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: keycloak-postgresql-credentials
-                key: password
-          - name: KC_HOSTNAME_STRICT
-            value: "false"
-          - name: KC_PROXY
-            value: "edge"
-        livenessProbe: |
-          httpGet:
-            path: /auth/health/live
-            port: 9000
-          initialDelaySeconds: 60
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe: |
-          httpGet:
-            path: /auth/health/ready
-            port: 9000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        startupProbe: |
-          httpGet:
-            path: /auth/health
-            port: 9000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 30
-        service:
-          type: ClusterIP
-          httpPort: 8080
-        ingress:
-          enabled: false
-        postgresql:
-          enabled: false
-        resources:
-          requests:
-            cpu: 500m
-            memory: 1Gi
-          limits:
-            cpu: 2000m
-            memory: 2Gi
+  sources:
+    # Source 1: Keycloak Helm chart
+    - chart: keycloakx
+      repoURL: https://codecentric.github.io/helm-charts
+      targetRevision: 7.1.6
+      helm:
+        releaseName: keycloak
+        values: |
+          args:
+            - start
+          replicas: 1
+          extraEnv: |
+            - name: KEYCLOAK_ADMIN
+              value: admin
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-credentials
+                  key: admin-password
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: postgresql.keycloak.svc.cluster.local
+            - name: KC_DB_URL_DATABASE
+              value: keycloak
+            - name: KC_DB_USERNAME
+              value: keycloak
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-postgresql-credentials
+                  key: password
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_PROXY
+              value: "edge"
+          livenessProbe: |
+            httpGet:
+              path: /auth/health/live
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe: |
+            httpGet:
+              path: /auth/health/ready
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe: |
+            httpGet:
+              path: /auth/health
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          service:
+            type: ClusterIP
+            httpPort: 8080
+          ingress:
+            enabled: false
+          postgresql:
+            enabled: false
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+    # Source 2: Realm setup job (PostSync hook)
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/keycloak
 
   destination:
     server: https://kubernetes.default.svc
