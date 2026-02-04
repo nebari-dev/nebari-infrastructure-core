@@ -36,10 +36,6 @@ type NebariConfig struct {
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
 
-	// Additional fields can be added as needed
-	// Using map to capture additional fields for lenient parsing
-	AdditionalFields map[string]any `yaml:",inline"`
-
 	// Runtime options (set by CLI, not from YAML file)
 	DryRun  bool          `yaml:"-"` // Preview changes without applying them
 	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
