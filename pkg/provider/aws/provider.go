@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	nebariconfig "github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -51,20 +51,26 @@ func containsSubstring(slice []string, substr string) bool {
 	return false
 }
 
+// ConfigKey returns the YAML configuration key for AWS
+func (p *Provider) ConfigKey() string {
+	return "amazon_web_services"
+}
+
 // extractAWSConfig converts the any provider config to AWS Config type
-func extractAWSConfig(ctx context.Context, cfg *nebariconfig.NebariConfig) (*Config, error) {
+func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
-	if cfg.AmazonWebServices == nil {
+	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	if rawCfg == nil {
 		err := fmt.Errorf("AWS configuration is required")
 		span.RecordError(err)
 		return nil, err
 	}
 
 	var awsCfg Config
-	if err := nebariconfig.UnmarshalProviderConfig(ctx, cfg.AmazonWebServices, &awsCfg); err != nil {
+	if err := config.UnmarshalProviderConfig(ctx, rawCfg, &awsCfg); err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to unmarshal AWS config: %w", err)
 	}
@@ -73,7 +79,7 @@ func extractAWSConfig(ctx context.Context, cfg *nebariconfig.NebariConfig) (*Con
 }
 
 // Validate validates the AWS configuration with pre-flight checks
-func (p *Provider) Validate(ctx context.Context, cfg *nebariconfig.NebariConfig) error {
+func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Validate")
 	defer span.End()
@@ -169,7 +175,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *nebariconfig.NebariConfig)
 	}
 
 	// Validate AWS credentials
-	sdkCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(awsCfg.Region))
+	sdkCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(awsCfg.Region))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to load AWS config: %w", err)
@@ -188,7 +194,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *nebariconfig.NebariConfig)
 }
 
 // Deploy deploys AWS infrastructure using stateless reconciliation
-func (p *Provider) Deploy(ctx context.Context, cfg *nebariconfig.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
@@ -276,7 +282,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *nebariconfig.NebariConfig) e
 }
 
 // Destroy tears down AWS infrastructure in reverse order
-func (p *Provider) Destroy(ctx context.Context, cfg *nebariconfig.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
@@ -364,7 +370,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *nebariconfig.NebariConfig) 
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
-func (p *Provider) GetKubeconfig(ctx context.Context, cfg *nebariconfig.NebariConfig) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
@@ -462,4 +468,22 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *nebariconfig.NebariCo
 	}
 
 	return kubeconfigBytes, nil
+}
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var awsCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err != nil {
+		return result
+	}
+
+	result["Region"] = awsCfg.Region
+	return result
 }

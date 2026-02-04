@@ -1,0 +1,52 @@
+# Example ArgoCD Application manifest
+# Copy this file and rename it to add a new foundational application.
+# The filename (without .yaml) becomes the application name.
+#
+# For example: cert-manager.yaml -> application name "cert-manager"
+#
+# Delete this file once real applications are added.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: example-app
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: foundational
+
+  source:
+    # For Helm charts:
+    chart: example-chart
+    repoURL: https://charts.example.com
+    targetRevision: v1.0.0
+    helm:
+      releaseName: example
+      values: |
+        replicaCount: 1
+
+    # Or for Git repositories:
+    # repoURL: https://github.com/example/repo.git
+    # targetRevision: HEAD
+    # path: manifests/
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: example-namespace
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

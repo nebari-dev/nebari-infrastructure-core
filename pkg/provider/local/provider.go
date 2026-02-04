@@ -25,6 +25,11 @@ func (p *Provider) Name() string {
 	return "local"
 }
 
+// ConfigKey returns the YAML configuration key for local
+func (p *Provider) ConfigKey() string {
+	return "local"
+}
+
 // Validate validates the local configuration (stub implementation)
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -54,9 +59,9 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	if cfg.Local != nil {
+	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
 		var localCfg Config
-		if err := config.UnmarshalProviderConfig(ctx, cfg.Local, &localCfg); err == nil {
+		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err == nil {
 			span.SetAttributes(attribute.String("local.kube_context", localCfg.KubeContext))
 		}
 	}
@@ -111,4 +116,24 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithAction("get-kubeconfig").
 		WithMetadata("cluster_name", cfg.ProjectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
+}
+
+// Summary returns key configuration details for display purposes
+func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+	result := make(map[string]string)
+
+	rawCfg := cfg.ProviderConfig["local"]
+	if rawCfg == nil {
+		return result
+	}
+
+	var localCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &localCfg); err != nil {
+		return result
+	}
+
+	if localCfg.KubeContext != "" {
+		result["Kube Context"] = localCfg.KubeContext
+	}
+	return result
 }

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nebari Infrastructure Core - Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #8892b0;
+            margin-bottom: 50px;
+            font-size: 1.1rem;
+        }
+
+        .architecture-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .layer {
+            position: relative;
+            padding: 25px 30px;
+            border-radius: 8px;
+            margin: -5px 0;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .layer:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+        }
+
+        .layer-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 12px;
+        }
+
+        .layer-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .layer-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .layer-description {
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .layer-components {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .component {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Layer specific colors */
+        .layer-6 {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border: 2px solid #818cf8;
+        }
+
+        .layer-5 {
+            background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+            border: 2px solid #60a5fa;
+        }
+
+        .layer-4 {
+            background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
+            border: 2px solid #38bdf8;
+        }
+
+        .layer-3 {
+            background: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
+            border: 2px solid #2dd4bf;
+        }
+
+        .layer-2 {
+            background: linear-gradient(135deg, #22c55e 0%, #14b8a6 100%);
+            border: 2px solid #4ade80;
+        }
+
+        .layer-1 {
+            background: linear-gradient(135deg, #475569 0%, #334155 100%);
+            border: 2px solid #64748b;
+        }
+
+        /* Software Pack Boxes */
+        .software-packs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .pack {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .pack-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pack-icon {
+            font-size: 1.2rem;
+        }
+
+        .pack-components {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .pack-component {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+        }
+
+        /* Connector arrows */
+        .connector {
+            text-align: center;
+            padding: 5px 0;
+            color: #4ade80;
+            font-size: 1.5rem;
+        }
+
+        /* Key concepts */
+        .key-concepts {
+            margin-top: 50px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .concept {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .concept-title {
+            font-weight: 600;
+            color: #60a5fa;
+            margin-bottom: 10px;
+        }
+
+        .concept-text {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8rem;
+            }
+
+            .layer {
+                padding: 20px;
+            }
+
+            .layer-title {
+                font-size: 1.1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Nebari Infrastructure Core</h1>
+        <p class="subtitle">A composable, cloud-agnostic platform for data science and ML workloads</p>
+
+        <div class="architecture-stack">
+            <!-- Layer 6: Software Packs -->
+            <div class="layer layer-6">
+                <div class="layer-header">
+                    <div class="layer-number">6</div>
+                    <div class="layer-title">Software Packs</div>
+                </div>
+                <p class="layer-description">
+                    Curated collections of open-source tools packaged as ArgoCD applications. Each pack includes a
+                    <code>NicApp</code> CRD that automatically registers with the platform for routing, auth, and discovery.
+                    Packs can be developed independently and composed together.
+                </p>
+                <div class="software-packs">
+                    <div class="pack">
+                        <div class="pack-title">
+                            <span class="pack-icon">📊</span> Data Science Pack
+                        </div>
+                        <div class="pack-components">
+                            <span class="pack-component">JupyterHub</span>
+                            <span class="pack-component">JupyterLab</span>
+                            <span class="pack-component">conda-store</span>
+                            <span class="pack-component">Dask Gateway</span>
+                            <span class="pack-component">VSCode Server</span>
+                        </div>
+                    </div>
+                    <div class="pack">
+                        <div class="pack-title">
+                            <span class="pack-icon">🤖</span> Model Serving Pack
+                        </div>
+                        <div class="pack-components">
+                            <span class="pack-component">MLflow</span>
+                            <span class="pack-component">KServe</span>
+                            <span class="pack-component">KNative</span>
+                            <span class="pack-component">Envoy AI Gateway</span>
+                        </div>
+                    </div>
+                    <div class="pack">
+                        <div class="pack-title">
+                            <span class="pack-icon">📈</span> Observability Pack
+                        </div>
+                        <div class="pack-components">
+                            <span class="pack-component">Grafana</span>
+                            <span class="pack-component">Prometheus</span>
+                            <span class="pack-component">Loki</span>
+                            <span class="pack-component">Tempo</span>
+                        </div>
+                    </div>
+                    <div class="pack">
+                        <div class="pack-title">
+                            <span class="pack-icon">🔧</span> Custom Packs</span>
+                        </div>
+                        <div class="pack-components">
+                            <span class="pack-component">Your tools here...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Layer 5: Landing Page -->
+            <div class="layer layer-5">
+                <div class="layer-header">
+                    <div class="layer-number">5</div>
+                    <div class="layer-title">Dynamic Landing Page</div>
+                </div>
+                <p class="layer-description">
+                    A React SPA backed by a API server. Automatically discovers all registered services via
+                    <code>NicApp</code> resources and displays them in a unified portal. Real-time updates via WebSocket,
+                    health status monitoring, and category-based filtering.
+                </p>
+                <div class="layer-components">
+                    <span class="component">React + TypeScript</span>
+                    <span class="component">API Server</span>
+                    <span class="component">WebSocket Updates</span>
+                    <span class="component">Health Monitoring</span>
+                </div>
+            </div>
+
+            <!-- Layer 4: Nebari Operator -->
+            <div class="layer layer-4">
+                <div class="layer-header">
+                    <div class="layer-number">4</div>
+                    <div class="layer-title">Nebari Operator</div>
+                </div>
+                <p class="layer-description">
+                    Kubernetes operator that watches <code>NicApp</code> Custom Resources. Automatically configures routing
+                    (HTTPRoute), TLS certificates (cert-manager), and SSO integration (Keycloak) for registered applications.
+                    Enables self-service app onboarding via GitOps.
+                </p>
+                <div class="layer-components">
+                    <span class="component">NicApp CRD</span>
+                    <span class="component">HTTPRoute Generation</span>
+                    <span class="component">Keycloak Integration</span>
+                    <span class="component">Certificate Management</span>
+                </div>
+            </div>
+
+            <!-- Layer 3: Foundational Software -->
+            <div class="layer layer-3">
+                <div class="layer-header">
+                    <div class="layer-number">3</div>
+                    <div class="layer-title">Foundational Software</div>
+                </div>
+                <p class="layer-description">
+                    Essential platform services deployed via ArgoCD. Provides identity management, ingress routing,
+                    service mesh capabilities, certificate automation, and GitOps-based deployment infrastructure.
+                </p>
+                <div class="layer-components">
+                    <span class="component">Keycloak</span>
+                    <span class="component">ArgoCD</span>
+                    <span class="component">cert-manager</span>
+                    <span class="component">Envoy Gateway</span>
+                    <span class="component">Istio</span>
+                    <span class="component">External DNS</span>
+                    <span class="component">External Secrets</span>
+                </div>
+            </div>
+
+            <!-- Layer 2: NIC (Kubernetes) -->
+            <div class="layer layer-2">
+                <div class="layer-header">
+                    <div class="layer-number">2</div>
+                    <div class="layer-title">Nebari Infrastructure Core (NIC)</div>
+                </div>
+                <p class="layer-description">
+                    CLI that deploys opinionated Kubernetes clusters via OpenTofu/Terraform modules. Provides consistent
+                    networking, storage, and security policies across all cloud providers. Manages state in remote backends
+                    and includes OpenTelemetry instrumentation for observability.
+                </p>
+                <div class="layer-components">
+                    <span class="component">EKS / GKE / AKS / K3s</span>
+                    <span class="component">VPC / Networking</span>
+                    <span class="component">Storage Classes</span>
+                    <span class="component">Node Pools</span>
+                    <span class="component">RBAC Policies</span>
+                </div>
+            </div>
+
+            <!-- Layer 1: Infrastructure -->
+            <div class="layer layer-1">
+                <div class="layer-header">
+                    <div class="layer-number">1</div>
+                    <div class="layer-title">Cloud Providers / Bare Metal</div>
+                </div>
+                <p class="layer-description">
+                    The underlying compute, storage, and networking infrastructure. NIC abstracts provider-specific
+                    details while leveraging native managed services where appropriate.
+                </p>
+                <div class="layer-components">
+                    <span class="component">AWS</span>
+                    <span class="component">Google Cloud</span>
+                    <span class="component">Azure</span>
+                    <span class="component">Bare Metal</span>
+                    <span class="component">On-Premises</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Concepts -->
+        <div class="key-concepts">
+            <div class="concept">
+                <div class="concept-title">Composable Architecture</div>
+                <p class="concept-text">
+                    Install only what you need. Software Packs can be added, removed, or upgraded independently
+                    without affecting other platform components.
+                </p>
+            </div>
+            <div class="concept">
+                <div class="concept-title">Self-Registering Services</div>
+                <p class="concept-text">
+                    Deploy a <code>NicApp</code> CR and the platform automatically handles routing, authentication,
+                    TLS, and landing page registration. No manual configuration required.
+                </p>
+            </div>
+            <div class="concept">
+                <div class="concept-title">GitOps Native</div>
+                <p class="concept-text">
+                    All configuration is declarative and version-controlled. ArgoCD ensures the cluster state
+                    matches the desired state defined in Git repositories.
+                </p>
+            </div>
+            <div class="concept">
+                <div class="concept-title">Cloud Agnostic</div>
+                <p class="concept-text">
+                    The same configuration deploys to AWS, GCP, Azure, or bare metal. Switch providers without
+                    rewriting your application deployments.
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
