@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -161,11 +162,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
-					AdminPassword:         generateSecurePassword(),
-					DBPassword:            generateSecurePassword(),
-					PostgresAdminPassword: generateSecurePassword(),
-					PostgresUserPassword:  generateSecurePassword(),
-					RealmAdminPassword:    generateSecurePassword(),
+					AdminPassword:         generateSecurePassword(rand.Reader),
+					DBPassword:            generateSecurePassword(rand.Reader),
+					PostgresAdminPassword: generateSecurePassword(rand.Reader),
+					PostgresUserPassword:  generateSecurePassword(rand.Reader),
+					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
 				// Enable MetalLB only for local deployments
@@ -400,11 +401,12 @@ func printKeycloakInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
 }
 
-// generateSecurePassword generates a cryptographically secure random password
-func generateSecurePassword() string {
+// generateSecurePassword generates a cryptographically secure random password.
+// It accepts an io.Reader to allow for deterministic testing with known bytes.
+func generateSecurePassword(r io.Reader) string {
 	// Generate 32 bytes of random data
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := r.Read(b); err != nil {
 		// Fallback to timestamp-based generation (not ideal but better than nothing)
 		return fmt.Sprintf("nebari-%d", time.Now().UnixNano())
 	}
