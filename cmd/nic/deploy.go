@@ -66,7 +66,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup status handler for progress updates
-	ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
+	ctx, cleanupStatusFn := status.StartHandler(ctx, statusLogHandler())
+	var statusCleanedUp bool
+	cleanupStatus := func() {
+		if !statusCleanedUp {
+			statusCleanedUp = true
+			cleanupStatusFn()
+		}
+	}
 	defer cleanupStatus()
 
 	// Handle context cancellation (from signal interrupt)
@@ -135,6 +142,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
+	// Track what was installed so we can print instructions after flushing status messages
+	var argoCDInstalled, keycloakInstalled bool
+
 	// Install Argo CD (skip in dry-run mode)
 	if !cfg.DryRun {
 		slog.Info("Installing Argo CD on cluster")
@@ -144,7 +154,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
 		} else {
 			slog.Info("Argo CD installed successfully")
-			printArgoCDInstructions(cfg)
+			argoCDInstalled = true
 
 			// Install foundational services via Argo CD
 			slog.Info("Installing foundational services")
@@ -169,11 +179,23 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
 			} else {
 				slog.Info("Foundational services installed successfully")
-				printKeycloakInstructions(cfg, foundationalCfg.Keycloak.AdminPassword)
+				keycloakInstalled = true
 			}
 		}
 	} else {
 		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
+	}
+
+	// Flush all pending status messages before printing instructions
+	// This prevents log messages from appearing in the middle of the instructions
+	cleanupStatus()
+
+	// Print instructions after status handler is cleaned up
+	if argoCDInstalled {
+		printArgoCDInstructions(cfg)
+	}
+	if keycloakInstalled {
+		printKeycloakInstructions(cfg)
 	}
 
 	// Print DNS guidance if no DNS provider is configured
@@ -339,15 +361,19 @@ func printArgoCDInstructions(cfg *config.NebariConfig) {
 }
 
 // printKeycloakInstructions prints instructions for accessing Keycloak
-func printKeycloakInstructions(cfg *config.NebariConfig, adminPassword string) {
+func printKeycloakInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  KEYCLOAK INSTALLED")
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
-	fmt.Println("  Keycloak has been successfully installed via Argo CD.")
+	fmt.Println("  Keycloak has been configured for installation via Argo CD.")
+	fmt.Println("  It may take several minutes for Keycloak to be fully deployed and ready.")
 	fmt.Println()
-	fmt.Println("  To access Keycloak:")
+	fmt.Println("  Check deployment status:")
+	fmt.Println("    kubectl get pods -n keycloak")
+	fmt.Println()
+	fmt.Println("  To access Keycloak after deployment:")
 	fmt.Println()
 	if cfg.Domain != "" {
 		fmt.Printf("    UI: https://keycloak.%s (after DNS configuration)\n", cfg.Domain)
@@ -358,19 +384,15 @@ func printKeycloakInstructions(cfg *config.NebariConfig, adminPassword string) {
 	fmt.Println("    kubectl port-forward svc/keycloak -n keycloak 8080:80")
 	fmt.Println("    Then visit: http://localhost:8080")
 	fmt.Println()
-	fmt.Println("  Admin credentials:")
-	fmt.Println("    Username: admin")
-	fmt.Printf("    Password: %s\n", adminPassword)
+	fmt.Println("  Get the admin password:")
 	fmt.Println()
-	fmt.Println("  IMPORTANT: Save this password securely! It will not be displayed again.")
-	fmt.Println()
-	fmt.Println("  To retrieve the password later:")
-	fmt.Println("    kubectl get secret keycloak-admin-credentials -n keycloak \\")
+	fmt.Println("    kubectl -n keycloak get secret keycloak-admin-credentials \\")
 	fmt.Println("      -o jsonpath=\"{.data.admin-password}\" | base64 -d")
 	fmt.Println()
-	fmt.Println("  Check deployment status:")
-	fmt.Println("    kubectl get application keycloak -n argocd")
-	fmt.Println("    kubectl get pods -n keycloak")
+	fmt.Println("  Login credentials:")
+	fmt.Println("    Username: admin")
+	fmt.Println("    Password: <from command above>")
+	fmt.Println()
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
