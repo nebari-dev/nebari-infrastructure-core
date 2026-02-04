@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -26,8 +25,24 @@ var (
 	}
 )
 
-// ApplyApplication creates or updates an Argo CD Application
-func ApplyApplication(ctx context.Context, kubeconfigBytes []byte, appManifest *unstructured.Unstructured) error {
+// NewDynamicClient creates a dynamic Kubernetes client from kubeconfig bytes.
+// This is the production way to create a client. For tests, use fake.NewSimpleDynamicClient.
+func NewDynamicClient(kubeconfigBytes []byte) (dynamic.Interface, error) {
+	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
+	}
+	client, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+	return client, nil
+}
+
+// ApplyApplication creates or updates an Argo CD Application.
+// The client parameter allows for dependency injection - use NewDynamicClient for production
+// or fake.NewSimpleDynamicClient for tests.
+func ApplyApplication(ctx context.Context, client dynamic.Interface, appManifest *unstructured.Unstructured) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ApplyApplication")
 	defer span.End()
@@ -45,28 +60,14 @@ func ApplyApplication(ctx context.Context, kubeconfigBytes []byte, appManifest *
 		WithAction("applying").
 		WithMetadata("application", appName))
 
-	// Create Kubernetes REST config
-	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create dynamic client: %w", err)
-	}
-
 	// Try to get existing application
-	existingApp, err := dynamicClient.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
+	existingApp, err := client.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
 	if err == nil {
 		// Application exists, update it
 		// Preserve resourceVersion from existing application
 		appManifest.SetResourceVersion(existingApp.GetResourceVersion())
 
-		_, err = dynamicClient.Resource(ApplicationGVR).Namespace(appNamespace).Update(ctx, appManifest, metav1.UpdateOptions{})
+		_, err = client.Resource(ApplicationGVR).Namespace(appNamespace).Update(ctx, appManifest, metav1.UpdateOptions{})
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to update Argo CD Application: %w", err)
@@ -77,7 +78,7 @@ func ApplyApplication(ctx context.Context, kubeconfigBytes []byte, appManifest *
 			WithMetadata("application", appName))
 	} else {
 		// Application doesn't exist, create it
-		_, err = dynamicClient.Resource(ApplicationGVR).Namespace(appNamespace).Create(ctx, appManifest, metav1.CreateOptions{})
+		_, err = client.Resource(ApplicationGVR).Namespace(appNamespace).Create(ctx, appManifest, metav1.CreateOptions{})
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Argo CD Application: %w", err)
@@ -91,8 +92,10 @@ func ApplyApplication(ctx context.Context, kubeconfigBytes []byte, appManifest *
 	return nil
 }
 
-// WaitForApplication waits for an Argo CD Application to reach a healthy and synced state
-func WaitForApplication(ctx context.Context, kubeconfigBytes []byte, appName, appNamespace string, timeout time.Duration) error {
+// WaitForApplication waits for an Argo CD Application to reach a healthy and synced state.
+// The client parameter allows for dependency injection - use NewDynamicClient for production
+// or fake.NewSimpleDynamicClient for tests.
+func WaitForApplication(ctx context.Context, client dynamic.Interface, appName, appNamespace string, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.WaitForApplication")
 	defer span.End()
@@ -111,20 +114,6 @@ func WaitForApplication(ctx context.Context, kubeconfigBytes []byte, appName, ap
 		WithAction("waiting").
 		WithMetadata("application", appName))
 
-	// Create Kubernetes REST config
-	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create dynamic client: %w", err)
-	}
-
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -135,7 +124,7 @@ func WaitForApplication(ctx context.Context, kubeconfigBytes []byte, appName, ap
 			span.RecordError(err)
 			return err
 		case <-ticker.C:
-			app, err := dynamicClient.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
+			app, err := client.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
 			if err != nil {
 				// Application not found yet, continue waiting
 				continue
@@ -173,21 +162,11 @@ func WaitForApplication(ctx context.Context, kubeconfigBytes []byte, appName, ap
 	}
 }
 
-// GetApplicationStatus returns the health and sync status of an Argo CD Application
-func GetApplicationStatus(ctx context.Context, client *kubernetes.Clientset, kubeconfigBytes []byte, appName, appNamespace string) (health, sync string, err error) {
-	// Create Kubernetes REST config
-	config, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create dynamic client: %w", err)
-	}
-
-	app, err := dynamicClient.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
+// GetApplicationStatus returns the health and sync status of an Argo CD Application.
+// The client parameter allows for dependency injection - use NewDynamicClient for production
+// or fake.NewSimpleDynamicClient for tests.
+func GetApplicationStatus(ctx context.Context, client dynamic.Interface, appName, appNamespace string) (health, sync string, err error) {
+	app, err := client.Resource(ApplicationGVR).Namespace(appNamespace).Get(ctx, appName, metav1.GetOptions{})
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get application: %w", err)
 	}

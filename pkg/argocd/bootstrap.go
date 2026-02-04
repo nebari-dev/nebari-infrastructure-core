@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	yamlserializer "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -109,8 +108,15 @@ func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, cfg *config
 		return fmt.Errorf("failed to decode root App-of-Apps manifest: %w", err)
 	}
 
+	// Create dynamic client
+	dynamicClient, err := NewDynamicClient(kubeconfigBytes)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
 	// Apply the root App-of-Apps
-	if err := ApplyApplication(ctx, kubeconfigBytes, obj); err != nil {
+	if err := ApplyApplication(ctx, dynamicClient, obj); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to apply root App-of-Apps: %w", err)
 	}
@@ -133,17 +139,24 @@ func InstallProject(ctx context.Context, kubeconfigBytes []byte) error {
 		WithResource("argocd-project").
 		WithAction("installing"))
 
+	// Create dynamic client
+	dynamicClient, err := NewDynamicClient(kubeconfigBytes)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
 	// Parse ArgoCD Project manifest
 	decoder := yamlserializer.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	obj := &unstructured.Unstructured{}
-	_, _, err := decoder.Decode([]byte(argoCDProjectManifest), nil, obj)
+	_, _, err = decoder.Decode([]byte(argoCDProjectManifest), nil, obj)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to decode ArgoCD Project manifest: %w", err)
 	}
 
 	// Apply ArgoCD Project resource
-	if err := applyResource(ctx, kubeconfigBytes, obj); err != nil {
+	if err := applyResource(ctx, dynamicClient, obj); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to apply ArgoCD Project: %w", err)
 	}
@@ -155,20 +168,10 @@ func InstallProject(ctx context.Context, kubeconfigBytes []byte) error {
 	return nil
 }
 
-// applyResource applies a Kubernetes resource using the dynamic client
-func applyResource(ctx context.Context, kubeconfigBytes []byte, obj *unstructured.Unstructured) error {
-	// Create Kubernetes REST config
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(restConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create dynamic client: %w", err)
-	}
-
+// applyResource applies a Kubernetes resource using the dynamic client.
+// The client parameter allows for dependency injection - use NewDynamicClient for production
+// or fake.NewSimpleDynamicClient for tests.
+func applyResource(ctx context.Context, client dynamic.Interface, obj *unstructured.Unstructured) error {
 	gvk := obj.GroupVersionKind()
 	resourceName := pluralizeKind(gvk.Kind)
 	gvr := gvk.GroupVersion().WithResource(resourceName)
@@ -176,19 +179,20 @@ func applyResource(ctx context.Context, kubeconfigBytes []byte, obj *unstructure
 
 	// Try to get existing resource
 	var existingObj *unstructured.Unstructured
+	var err error
 	if namespace != "" {
-		existingObj, err = dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, obj.GetName(), metav1.GetOptions{})
+		existingObj, err = client.Resource(gvr).Namespace(namespace).Get(ctx, obj.GetName(), metav1.GetOptions{})
 	} else {
-		existingObj, err = dynamicClient.Resource(gvr).Get(ctx, obj.GetName(), metav1.GetOptions{})
+		existingObj, err = client.Resource(gvr).Get(ctx, obj.GetName(), metav1.GetOptions{})
 	}
 
 	if err == nil {
 		// Resource exists, update it
 		obj.SetResourceVersion(existingObj.GetResourceVersion())
 		if namespace != "" {
-			_, err = dynamicClient.Resource(gvr).Namespace(namespace).Update(ctx, obj, metav1.UpdateOptions{})
+			_, err = client.Resource(gvr).Namespace(namespace).Update(ctx, obj, metav1.UpdateOptions{})
 		} else {
-			_, err = dynamicClient.Resource(gvr).Update(ctx, obj, metav1.UpdateOptions{})
+			_, err = client.Resource(gvr).Update(ctx, obj, metav1.UpdateOptions{})
 		}
 		if err != nil {
 			return fmt.Errorf("failed to update resource: %w", err)
@@ -196,9 +200,9 @@ func applyResource(ctx context.Context, kubeconfigBytes []byte, obj *unstructure
 	} else {
 		// Resource doesn't exist, create it
 		if namespace != "" {
-			_, err = dynamicClient.Resource(gvr).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+			_, err = client.Resource(gvr).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 		} else {
-			_, err = dynamicClient.Resource(gvr).Create(ctx, obj, metav1.CreateOptions{})
+			_, err = client.Resource(gvr).Create(ctx, obj, metav1.CreateOptions{})
 		}
 		if err != nil {
 			return fmt.Errorf("failed to create resource: %w", err)
