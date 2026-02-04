@@ -56,15 +56,17 @@ Files organized by **resource** (vpc, eks, nodegroups), not by operation. Each r
 ```go
 type Provider interface {
     Name() string
+    ConfigKey() string
     Validate(ctx context.Context, config *config.NebariConfig) error
     Deploy(ctx context.Context, config *config.NebariConfig) error
-    Reconcile(ctx context.Context, config *config.NebariConfig) error
+    Reconcile(ctx context.Context, config *config.NebariConfig) error  // Deprecated - see issue #44
     Destroy(ctx context.Context, config *config.NebariConfig) error
-    GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error)
+    GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
+    Summary(config *config.NebariConfig) map[string]string
 }
 ```
 
-`Deploy()` delegates to `Reconcile()`. The distinction exists for dry-run handling and future pre-flight checks.
+`Deploy()` is idempotent - running it multiple times with the same config produces the same result. Use `--dry-run` to preview changes.
 
 ---
 
