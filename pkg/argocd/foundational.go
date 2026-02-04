@@ -165,12 +165,30 @@ func createNamespace(ctx context.Context, client kubernetes.Interface, namespace
 	return nil
 }
 
+// createSecret creates a Kubernetes secret if it doesn't already exist
+func createSecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret) error {
+	namespace := secret.Namespace
+	_, err := client.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
+	if err != nil {
+		// Secret doesn't exist, create it
+		_, err = client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create secret %s: %w", secret.Name, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created secret %s", secret.Name)).
+			WithResource("secret").
+			WithAction("created").
+			WithMetadata("secret_name", secret.Name))
+	}
+	return nil
+}
+
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
 func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig) error {
 	namespace := "keycloak"
 
 	// 1. Create admin credentials secret
-	adminSecret := &corev1.Secret{
+	if err := createSecret(ctx, client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "keycloak-admin-credentials",
 			Namespace: namespace,
@@ -179,23 +197,12 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		StringData: map[string]string{
 			"admin-password": keycloakCfg.AdminPassword,
 		},
-	}
-
-	_, err := client.CoreV1().Secrets(namespace).Get(ctx, adminSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		// Secret doesn't exist, create it
-		_, err = client.CoreV1().Secrets(namespace).Create(ctx, adminSecret, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create admin credentials secret: %w", err)
-		}
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Created Keycloak admin credentials secret").
-			WithResource("secret").
-			WithAction("created").
-			WithMetadata("secret_name", adminSecret.Name))
+	}); err != nil {
+		return err
 	}
 
 	// 2. Create Keycloak PostgreSQL user credentials secret
-	keycloakDBSecret := &corev1.Secret{
+	if err := createSecret(ctx, client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "keycloak-postgresql-credentials",
 			Namespace: namespace,
@@ -204,23 +211,12 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		StringData: map[string]string{
 			"password": keycloakCfg.DBPassword,
 		},
-	}
-
-	_, err = client.CoreV1().Secrets(namespace).Get(ctx, keycloakDBSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		// Secret doesn't exist, create it
-		_, err = client.CoreV1().Secrets(namespace).Create(ctx, keycloakDBSecret, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create Keycloak PostgreSQL credentials secret: %w", err)
-		}
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Created Keycloak PostgreSQL credentials secret").
-			WithResource("secret").
-			WithAction("created").
-			WithMetadata("secret_name", keycloakDBSecret.Name))
+	}); err != nil {
+		return err
 	}
 
 	// 3. Create PostgreSQL main credentials secret (for PostgreSQL deployment)
-	postgresSecret := &corev1.Secret{
+	if err := createSecret(ctx, client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "postgresql-credentials",
 			Namespace: namespace,
@@ -230,24 +226,13 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			"postgres-password": keycloakCfg.PostgresAdminPassword,
 			"user-password":     keycloakCfg.PostgresUserPassword,
 		},
-	}
-
-	_, err = client.CoreV1().Secrets(namespace).Get(ctx, postgresSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		// Secret doesn't exist, create it
-		_, err = client.CoreV1().Secrets(namespace).Create(ctx, postgresSecret, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create PostgreSQL credentials secret: %w", err)
-		}
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Created PostgreSQL credentials secret").
-			WithResource("secret").
-			WithAction("created").
-			WithMetadata("secret_name", postgresSecret.Name))
+	}); err != nil {
+		return err
 	}
 
 	// 4. Create Nebari realm admin credentials secret
 	if keycloakCfg.RealmAdminPassword != "" {
-		realmAdminSecret := &corev1.Secret{
+		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
@@ -261,19 +246,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				"username": "admin",
 				"password": keycloakCfg.RealmAdminPassword,
 			},
-		}
-
-		_, err = client.CoreV1().Secrets(namespace).Get(ctx, realmAdminSecret.Name, metav1.GetOptions{})
-		if err != nil {
-			// Secret doesn't exist, create it
-			_, err = client.CoreV1().Secrets(namespace).Create(ctx, realmAdminSecret, metav1.CreateOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to create Nebari realm admin credentials secret: %w", err)
-			}
-			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Created Nebari realm admin credentials secret").
-				WithResource("secret").
-				WithAction("created").
-				WithMetadata("secret_name", realmAdminSecret.Name))
+		}); err != nil {
+			return err
 		}
 	}
 
