@@ -160,11 +160,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			slog.Info("Installing foundational services")
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
-					Enabled:            true,
-					AdminPassword:      generateSecurePassword(),
-					DBPassword:         generateSecurePassword(),
-					RealmAdminPassword: generateSecurePassword(),
-					Hostname:           "", // Will be auto-generated from domain
+					Enabled:               true,
+					AdminPassword:         generateSecurePassword(),
+					DBPassword:            generateSecurePassword(),
+					PostgresAdminPassword: generateSecurePassword(),
+					PostgresUserPassword:  generateSecurePassword(),
+					RealmAdminPassword:    generateSecurePassword(),
+					Hostname:              "", // Will be auto-generated from domain
 				},
 				// Enable MetalLB only for local deployments
 				MetalLB: argocd.MetalLBConfig{
