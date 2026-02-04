@@ -7,7 +7,7 @@ terraform {
 }
 
 module "eks_cluster" {
-  source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=032d522d8c359fedb1bfaa6714b560c61a38e782"
+  source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=db9fa83462f1169de85690014c30d24f17bbda5a"
 
   project_name                             = var.project_name
   tags                                     = var.tags
