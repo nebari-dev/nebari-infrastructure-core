@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -71,7 +70,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	span.SetAttributes(attribute.String("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := getKubeconfigPath()
+	kubeconfigPath := kubeconfig.GetPath()
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Verify kubeconfig file exists
@@ -97,7 +96,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 
 	// Verify the specified context exists
 	if _, exists := kubeconfigData.Contexts[contextName]; !exists {
-		availableContexts := getContextNames(kubeconfigData)
+		availableContexts := kubeconfig.GetContextNames(kubeconfigData)
 		err := fmt.Errorf("context %s not found in kubeconfig. Available contexts: %v", contextName, availableContexts)
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Context %s not found in kubeconfig", contextName)).
@@ -224,7 +223,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithMetadata("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := getKubeconfigPath()
+	kubeconfigPath := kubeconfig.GetPath()
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Load the kubeconfig file
@@ -238,22 +237,19 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		return nil, fmt.Errorf("failed to load kubeconfig from %s: %w", kubeconfigPath, err)
 	}
 
-	// Verify the context exists
-	if _, exists := kubeconfigData.Contexts[contextName]; !exists {
-		err := fmt.Errorf("context %s not found in kubeconfig", contextName)
+	// Filter to only the specified context
+	filteredConfig, err := kubeconfig.FilterByContext(kubeconfigData, contextName)
+	if err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Context %s not found in kubeconfig", contextName)).
 			WithResource("provider").
 			WithAction("get-kubeconfig").
-			WithMetadata("available_contexts", getContextNames(kubeconfigData)))
+			WithMetadata("available_contexts", kubeconfig.GetContextNames(kubeconfigData)))
 		return nil, err
 	}
 
-	// Create a new kubeconfig with only the specified context
-	filteredConfig := filterKubeconfigByContext(kubeconfigData, contextName)
-
 	// Write the filtered kubeconfig to bytes
-	kubeconfigBytes, err := clientcmd.Write(*filteredConfig)
+	kubeconfigBytes, err := kubeconfig.WriteBytes(filteredConfig)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to write kubeconfig: %w", err)
@@ -268,52 +264,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		WithMetadata("kube_context", contextName))
 
 	return kubeconfigBytes, nil
-}
-
-// getKubeconfigPath returns the path to the kubeconfig file
-// It checks KUBECONFIG env var first, then falls back to default location
-func getKubeconfigPath() string {
-	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
-		return kubeconfigEnv
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".kube", "config")
-	}
-	return filepath.Join(homeDir, ".kube", "config")
-}
-
-// getContextNames returns a list of all context names in the kubeconfig
-func getContextNames(config *clientcmdapi.Config) []string {
-	names := make([]string, 0, len(config.Contexts))
-	for name := range config.Contexts {
-		names = append(names, name)
-	}
-	return names
-}
-
-// filterKubeconfigByContext creates a new kubeconfig containing only the specified context
-func filterKubeconfigByContext(config *clientcmdapi.Config, contextName string) *clientcmdapi.Config {
-	context := config.Contexts[contextName]
-
-	filtered := clientcmdapi.NewConfig()
-	filtered.CurrentContext = contextName
-
-	// Add the context
-	filtered.Contexts[contextName] = context
-
-	// Add the cluster referenced by the context
-	if cluster, exists := config.Clusters[context.Cluster]; exists {
-		filtered.Clusters[context.Cluster] = cluster
-	}
-
-	// Add the user referenced by the context
-	if user, exists := config.AuthInfos[context.AuthInfo]; exists {
-		filtered.AuthInfos[context.AuthInfo] = user
-	}
-
-	return filtered
 }
 
 // Summary returns key configuration details for display purposes

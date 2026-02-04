@@ -3,16 +3,13 @@ package aws
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 )
 
 const (
@@ -77,7 +74,11 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	if cfg.IsExistingCluster() {
 		span.SetAttributes(attribute.String("kube_context", cfg.GetKubeContext()))
 		// Just validate that the kube context exists
-		return p.validateKubeContext(ctx, cfg.GetKubeContext())
+		if err := kubeconfig.ValidateContext(cfg.GetKubeContext()); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		return nil
 	}
 
 	// Extract and validate AWS configuration
@@ -570,7 +571,12 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 			attribute.String("kube_context", contextName),
 			attribute.Bool("existing_cluster", true),
 		)
-		return p.getKubeconfigFromContext(ctx, contextName)
+		kubeconfigBytes, err := kubeconfig.ExtractContext(contextName)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		return kubeconfigBytes, nil
 	}
 
 	// Extract AWS configuration
@@ -621,89 +627,4 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 	result["Region"] = awsCfg.Region
 	return result
-}
-
-// validateKubeContext validates that the specified kube context exists
-func (p *Provider) validateKubeContext(ctx context.Context, contextName string) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.validateKubeContext")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("kube_context", contextName))
-
-	kubeconfigPath := getKubeconfigPath()
-	kubeconfigData, err := clientcmd.LoadFromFile(kubeconfigPath)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to load kubeconfig from %s: %w", kubeconfigPath, err)
-	}
-
-	if _, exists := kubeconfigData.Contexts[contextName]; !exists {
-		availableContexts := make([]string, 0, len(kubeconfigData.Contexts))
-		for name := range kubeconfigData.Contexts {
-			availableContexts = append(availableContexts, name)
-		}
-		err := fmt.Errorf("context %q not found in kubeconfig. Available contexts: %v", contextName, availableContexts)
-		span.RecordError(err)
-		return err
-	}
-
-	return nil
-}
-
-// getKubeconfigFromContext extracts kubeconfig for the specified context
-func (p *Provider) getKubeconfigFromContext(ctx context.Context, contextName string) ([]byte, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.getKubeconfigFromContext")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("kube_context", contextName))
-
-	kubeconfigPath := getKubeconfigPath()
-	kubeconfigData, err := clientcmd.LoadFromFile(kubeconfigPath)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to load kubeconfig from %s: %w", kubeconfigPath, err)
-	}
-
-	context, exists := kubeconfigData.Contexts[contextName]
-	if !exists {
-		err := fmt.Errorf("context %q not found in kubeconfig", contextName)
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Create filtered kubeconfig with only the specified context
-	filtered := clientcmdapi.NewConfig()
-	filtered.CurrentContext = contextName
-	filtered.Contexts[contextName] = context
-
-	if cluster, exists := kubeconfigData.Clusters[context.Cluster]; exists {
-		filtered.Clusters[context.Cluster] = cluster
-	}
-
-	if user, exists := kubeconfigData.AuthInfos[context.AuthInfo]; exists {
-		filtered.AuthInfos[context.AuthInfo] = user
-	}
-
-	kubeconfigBytes, err := clientcmd.Write(*filtered)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to write kubeconfig: %w", err)
-	}
-
-	return kubeconfigBytes, nil
-}
-
-// getKubeconfigPath returns the path to the kubeconfig file
-func getKubeconfigPath() string {
-	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
-		return kubeconfigEnv
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".kube", "config")
-	}
-	return filepath.Join(homeDir, ".kube", "config")
 }
