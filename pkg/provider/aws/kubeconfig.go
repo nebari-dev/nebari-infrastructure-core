@@ -1,15 +1,10 @@
 package aws
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/goccy/go-yaml"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // KubeconfigCluster represents the cluster section of kubeconfig
@@ -71,88 +66,19 @@ type Kubeconfig struct {
 	Users          []KubeconfigNamedUser    `yaml:"users"`
 }
 
-// GetKubeconfigWithRegion generates a kubeconfig file for the EKS cluster in a specific region
-// Note: Thin wrapper that creates clients and delegates to generateKubeconfig().
-// Unit test coverage via generateKubeconfig().
-func (p *Provider) GetKubeconfigWithRegion(ctx context.Context, clusterName, region string) ([]byte, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.GetKubeconfigWithRegion")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("cluster_name", clusterName),
-		attribute.String("region", region),
-	)
-
-	// Initialize AWS clients
-	clients, err := newClientsFunc(ctx, region)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to create AWS clients: %w", err)
-	}
-
-	return p.generateKubeconfig(ctx, clients, clusterName, region)
-}
-
-// generateKubeconfig generates a kubeconfig file for the EKS cluster
-// Note: Pure orchestration function - delegates to DiscoverCluster() and formats YAML.
-// Unit test coverage via DiscoverCluster().
-func (p *Provider) generateKubeconfig(ctx context.Context, clients *Clients, clusterName string, region string) ([]byte, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("cluster_name", clusterName),
-		attribute.String("region", region),
-	)
-
-	// Describe the cluster to get endpoint and CA data
-	describeInput := &eks.DescribeClusterInput{
-		Name: aws.String(clusterName),
-	}
-
-	describeOutput, err := clients.EKSClient.DescribeCluster(ctx, describeInput)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to describe EKS cluster %s: %w", clusterName, err)
-	}
-
-	cluster := describeOutput.Cluster
-
-	// Validate cluster is active
-	if cluster.Status != "ACTIVE" {
-		err := fmt.Errorf("cluster %s is not active (status: %s)", clusterName, cluster.Status)
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Extract endpoint and CA data
-	endpoint := aws.ToString(cluster.Endpoint)
-	caData := aws.ToString(cluster.CertificateAuthority.Data)
-
+func buildKubeconfig(clusterName, endpoint, caData, region string) ([]byte, error) {
 	if endpoint == "" {
-		err := fmt.Errorf("cluster %s has no endpoint", clusterName)
-		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("cluster endpoint is required")
 	}
 
 	if caData == "" {
-		err := fmt.Errorf("cluster %s has no certificate authority data", clusterName)
-		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("cluster certificate authority data is required")
 	}
 
 	// Validate CA data is base64 encoded
 	if _, err := base64.StdEncoding.DecodeString(caData); err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("cluster %s has invalid certificate authority data: %w", clusterName, err)
+		return nil, fmt.Errorf("invalid certificate authority data: %w", err)
 	}
-
-	span.SetAttributes(
-		attribute.String("cluster_endpoint", endpoint),
-		attribute.Int("ca_data_length", len(caData)),
-	)
 
 	// Build kubeconfig using AWS IAM Authenticator
 	// https://docs.aws.amazon.com/eks/latest/userguide/create-kubeconfig.html
@@ -199,16 +125,10 @@ func (p *Provider) generateKubeconfig(ctx context.Context, clients *Clients, clu
 		},
 	}
 
-	// Marshal to YAML
 	kubeconfigBytes, err := yaml.Marshal(&kubeconfig)
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("failed to marshal kubeconfig: %w", err)
 	}
-
-	span.SetAttributes(
-		attribute.Int("kubeconfig_size_bytes", len(kubeconfigBytes)),
-	)
 
 	return kubeconfigBytes, nil
 }
