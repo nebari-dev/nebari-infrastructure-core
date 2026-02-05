@@ -4,7 +4,7 @@ domain: nebari.example.com
 
 # TLS certificate configuration
 certificate:
-  type: selfsigned  # Options: "selfsigned" or "letsencrypt"
+  type: selfsigned # Options: "selfsigned" or "letsencrypt"
   # For Let's Encrypt (production), use:
   # type: letsencrypt
   # acme:
@@ -13,11 +13,11 @@ certificate:
 # GitOps repository configuration (optional - remove this section if not using GitOps)
 # ArgoCD uses this repo to manage cluster resources via GitOps
 git_repository:
-  url: "git@github.com:my-org/my-gitops-repo.git"  # Your GitOps repo
+  url: "git@github.com:my-org/my-gitops-repo.git" # Your GitOps repo
   branch: main
-  path: "clusters/my-nebari-aws"  # Subdirectory for this cluster's manifests
+  path: "clusters/my-nebari-aws" # Subdirectory for this cluster's manifests
   auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Env var containing SSH private key
+    ssh_key_env: GIT_SSH_PRIVATE_KEY # Env var containing SSH private key
     # OR for HTTPS with token:
     # token_env: GITHUB_TOKEN
 
@@ -29,7 +29,7 @@ amazon_web_services:
     - us-west-2b
   vpc_cidr_block: "10.10.0.0/16"
   endpoint_private_access: true
-  endpoint_public_access: true
+  endpoint_public_access: false
 
   node_groups:
     # general:
