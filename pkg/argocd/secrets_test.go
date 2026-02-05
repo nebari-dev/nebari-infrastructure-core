@@ -34,7 +34,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns)
+		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -79,7 +79,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret)
+		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -104,7 +104,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	namespace := "argocd"
 
 	t.Run("returns nil when no git repository configured", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 		cfg := &config.NebariConfig{
 			GitRepository: nil,
 		}
@@ -117,13 +117,15 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 
 	t.Run("creates git secret with token auth", func(t *testing.T) {
 		// Set environment variable for token
-		os.Setenv("TEST_GIT_TOKEN", "ghp_test_token_123")
-		defer os.Unsetenv("TEST_GIT_TOKEN")
+		if err := os.Setenv("TEST_GIT_TOKEN", "ghp_test_token_123"); err != nil {
+			t.Fatalf("failed to set env: %v", err)
+		}
+		defer func() { _ = os.Unsetenv("TEST_GIT_TOKEN") }()
 
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns)
+		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := &config.NebariConfig{
 			GitRepository: &git.Config{
@@ -170,7 +172,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns)
+		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := &config.NebariConfig{
 			GitRepository: &git.Config{
@@ -187,8 +189,10 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 
 	t.Run("updates existing git secret", func(t *testing.T) {
 		// Set environment variable for token
-		os.Setenv("TEST_GIT_TOKEN_UPDATE", "new_token")
-		defer os.Unsetenv("TEST_GIT_TOKEN_UPDATE")
+		if err := os.Setenv("TEST_GIT_TOKEN_UPDATE", "new_token"); err != nil {
+			t.Fatalf("failed to set env: %v", err)
+		}
+		defer func() { _ = os.Unsetenv("TEST_GIT_TOKEN_UPDATE") }()
 
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
@@ -202,7 +206,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret)
+		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := &config.NebariConfig{
 			GitRepository: &git.Config{
@@ -234,13 +238,15 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		sshKey := `-----BEGIN OPENSSH PRIVATE KEY-----
 test-ssh-key-content
 -----END OPENSSH PRIVATE KEY-----`
-		os.Setenv("TEST_SSH_KEY", sshKey)
-		defer os.Unsetenv("TEST_SSH_KEY")
+		if err := os.Setenv("TEST_SSH_KEY", sshKey); err != nil {
+			t.Fatalf("failed to set env: %v", err)
+		}
+		defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
 
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns)
+		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := &config.NebariConfig{
 			GitRepository: &git.Config{

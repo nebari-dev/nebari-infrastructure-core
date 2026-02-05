@@ -63,13 +63,16 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 		span.RecordError(err)
 		return fmt.Errorf("failed to create temp kubeconfig: %w", err)
 	}
-	defer os.Remove(tmpKubeconfig.Name())
+	defer func() { _ = os.Remove(tmpKubeconfig.Name()) }()
 
 	if _, err := tmpKubeconfig.Write(kubeconfigBytes); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write temp kubeconfig: %w", err)
 	}
-	tmpKubeconfig.Close()
+	if err := tmpKubeconfig.Close(); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to close temp kubeconfig: %w", err)
+	}
 
 	// Create Helm action configuration
 	actionConfig, err := newHelmActionConfig(tmpKubeconfig.Name(), config.Namespace)

@@ -13,6 +13,13 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	// gitRepoType is the ArgoCD repository type for git repositories
+	gitRepoType = "git"
+	// gitTokenUsername is the username used with token-based auth for git providers (GitHub, GitLab, etc.)
+	gitTokenUsername = "git"
+)
+
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
 func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cfg *config.NebariConfig, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -33,7 +40,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 	// Create repository secret data
 	secretData := map[string]string{
 		"name": "gitops-repo",
-		"type": "git",
+		"type": gitRepoType,
 		"url":  cfg.GitRepository.URL,
 	}
 
@@ -42,7 +49,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 		secretData["sshPrivateKey"] = sshKey
 	} else if token, err := authCfg.GetToken(); err == nil && token != "" {
 		secretData["password"] = token
-		secretData["username"] = "git" // GitHub uses 'git' as username for token auth
+		secretData["username"] = gitTokenUsername
 	} else {
 		return fmt.Errorf("no valid credentials found for git repository")
 	}

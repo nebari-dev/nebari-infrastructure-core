@@ -27,13 +27,13 @@ type FoundationalConfig struct {
 
 // KeycloakConfig holds Keycloak-specific configuration
 type KeycloakConfig struct {
-	Enabled              bool
-	AdminPassword        string
-	DBPassword           string // Password for keycloak DB user
+	Enabled               bool
+	AdminPassword         string
+	DBPassword            string // Password for keycloak DB user
 	PostgresAdminPassword string // Password for postgres superuser
 	PostgresUserPassword  string // Password for postgres regular user
-	Hostname             string
-	RealmAdminPassword   string // Password for the admin user in the nebari realm
+	Hostname              string
+	RealmAdminPassword    string // Password for the admin user in the nebari realm
 }
 
 // MetalLBConfig holds MetalLB-specific configuration

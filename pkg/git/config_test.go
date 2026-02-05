@@ -124,10 +124,8 @@ func TestConfigValidate(t *testing.T) {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
 			}
 		})
 	}

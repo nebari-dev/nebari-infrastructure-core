@@ -190,7 +190,7 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 // Templates are processed with Go template syntax for dynamic values.
 func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "argocd.WriteAllToGit")
+	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	workDir := gitClient.WorkDir()
@@ -228,7 +228,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 
 		if d.IsDir() {
 			// Create directory
-			return os.MkdirAll(destPath, 0755)
+			return os.MkdirAll(destPath, 0750)
 		}
 
 		// Read template content
@@ -244,12 +244,12 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, 0644); err != nil {
+		if err := os.WriteFile(destPath, processed, 0600); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
 

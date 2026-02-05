@@ -245,7 +245,7 @@ func TestClientIsBootstrapped(t *testing.T) {
 
 			if tt.setupMarker {
 				markerPath := filepath.Join(client.WorkDir(), bootstrapMarkerFile)
-				if err := os.WriteFile(markerPath, []byte("test"), 0644); err != nil {
+				if err := os.WriteFile(markerPath, []byte("test"), 0600); err != nil {
 					t.Fatalf("failed to create marker file: %v", err)
 				}
 			}
@@ -293,7 +293,7 @@ func TestClientWriteBootstrapMarker(t *testing.T) {
 
 	// Verify marker exists
 	markerPath := filepath.Join(client.WorkDir(), bootstrapMarkerFile)
-	content, err := os.ReadFile(markerPath)
+	content, err := os.ReadFile(markerPath) //nolint:gosec // G304: path is constructed from known constant within test tempDir
 	if err != nil {
 		t.Fatalf("failed to read marker file: %v", err)
 	}
@@ -469,7 +469,7 @@ func setupLocalGitRepo(t *testing.T, branch string) (string, func()) {
 
 	// Create a file
 	readmeFile := filepath.Join(workDir, "README.md")
-	if err := os.WriteFile(readmeFile, []byte("# Test Repo\n"), 0644); err != nil {
+	if err := os.WriteFile(readmeFile, []byte("# Test Repo\n"), 0600); err != nil {
 		_ = os.RemoveAll(bareDir)
 		_ = os.RemoveAll(workDir)
 		t.Fatalf("failed to write README: %v", err)
@@ -698,7 +698,7 @@ func TestClientCommitAndPush(t *testing.T) {
 			name: "commit and push new file",
 			setupChanges: func(t *testing.T, workDir string) {
 				filePath := filepath.Join(workDir, "test.txt")
-				if err := os.WriteFile(filePath, []byte("test content"), 0644); err != nil {
+				if err := os.WriteFile(filePath, []byte("test content"), 0600); err != nil {
 					t.Fatalf("failed to write test file: %v", err)
 				}
 			},
@@ -716,7 +716,7 @@ func TestClientCommitAndPush(t *testing.T) {
 			setupChanges: func(t *testing.T, workDir string) {
 				// Modify README.md that exists from initial commit
 				readmePath := filepath.Join(workDir, "README.md")
-				if err := os.WriteFile(readmePath, []byte("# Modified\n"), 0644); err != nil {
+				if err := os.WriteFile(readmePath, []byte("# Modified\n"), 0600); err != nil {
 					t.Fatalf("failed to modify README: %v", err)
 				}
 			},
@@ -803,7 +803,7 @@ func TestClientCommitAndPushWithPath(t *testing.T) {
 
 	// Create file in subdirectory
 	filePath := filepath.Join(client.workDir, "config.yaml")
-	if err := os.WriteFile(filePath, []byte("key: value\n"), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte("key: value\n"), 0600); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
