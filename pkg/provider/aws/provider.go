@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -194,18 +195,22 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		}
 	}
 
-	// Validate AWS credentials
-	sdkCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(awsCfg.Region))
+	// Validate AWS credentials using GetCallerIdentity
+	stsClient, err := newSTSClient(ctx, awsCfg.Region)
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to load AWS config: %w", err)
+		return fmt.Errorf("failed to create STS client: %w", err)
 	}
-	if _, err := sdkCfg.Credentials.Retrieve(ctx); err != nil {
+
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to retrieve AWS credentials: %w", err)
+		return fmt.Errorf("AWS credential validation failed: %w", err)
 	}
 
 	span.SetAttributes(
+		attribute.String("aws.account_id", aws.ToString(identity.Account)),
+		attribute.String("aws.arn", aws.ToString(identity.Arn)),
 		attribute.Bool("validation_passed", true),
 		attribute.String("aws.region", awsCfg.Region),
 	)
