@@ -10,6 +10,11 @@ import (
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
+const (
+	// DefaultBranch is the default git branch name when none is specified.
+	DefaultBranch = "main"
+)
+
 // Config represents git repository configuration for GitOps bootstrap.
 // Secrets (SSH keys, tokens) are read from environment variables, never stored in config.
 type Config struct {
@@ -72,10 +77,10 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// GetBranch returns the configured branch or "main" as default.
+// GetBranch returns the configured branch or DefaultBranch as default.
 func (c *Config) GetBranch() string {
 	if c.Branch == "" {
-		return "main"
+		return DefaultBranch
 	}
 	return c.Branch
 }
@@ -160,9 +165,11 @@ func (a *AuthConfig) GetAuth() (transport.AuthMethod, error) {
 			User:   "git",
 			Signer: signer,
 			// Accept any host key - appropriate for automated systems
-			// where we trust the configured repository URL
+			// where we trust the configured repository URL.
+			// This is intentional for CI/CD environments where known_hosts
+			// may not be available or maintained.
 			HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
-				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(),
+				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(), //nolint:gosec // G106: Intentional for automated CI/CD systems
 			},
 		}, nil
 

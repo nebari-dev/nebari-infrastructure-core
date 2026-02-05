@@ -138,7 +138,7 @@ func (c *ClientImpl) Init(ctx context.Context) error {
 
 	// Create subdirectory if Path is specified
 	if c.cfg.Path != "" {
-		if err := os.MkdirAll(c.workDir, 0755); err != nil {
+		if err := os.MkdirAll(c.workDir, 0750); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
 		}
@@ -271,7 +271,7 @@ func (c *ClientImpl) WriteBootstrapMarker(ctx context.Context) error {
 
 	content := fmt.Sprintf("bootstrapped_at: %s\n", time.Now().UTC().Format(time.RFC3339))
 
-	if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(markerPath, []byte(content), 0600); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
