@@ -220,8 +220,34 @@ func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, time
 	return waitForClusterReadyWithLister(ctx, listNodes, timeout)
 }
 
-// waitForArgoCDReady waits for Argo CD deployments to be ready
-func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, namespace string, timeout time.Duration) error {
+// DeploymentListFunc is a function type for listing deployments, allowing for dependency injection in tests.
+type DeploymentListFunc func(ctx context.Context, names []string) ([]*appsv1.Deployment, error)
+
+// areDeploymentsReady checks if all deployments in the list are ready.
+// This is a pure function that can be easily tested.
+func areDeploymentsReady(deploys []*appsv1.Deployment) bool {
+	if len(deploys) == 0 {
+		return false
+	}
+	for _, deploy := range deploys {
+		if !isDeploymentReady(deploy) {
+			return false
+		}
+	}
+	return true
+}
+
+// isDeploymentReady checks if a deployment has all replicas ready
+func isDeploymentReady(deploy *appsv1.Deployment) bool {
+	if deploy.Spec.Replicas == nil {
+		return deploy.Status.ReadyReplicas > 0
+	}
+	return deploy.Status.ReadyReplicas >= *deploy.Spec.Replicas
+}
+
+// waitForArgoCDReadyWithLister waits for Argo CD deployments to be ready using the provided deployment lister.
+// This function separates the polling logic from the Kubernetes client, making it testable.
+func waitForArgoCDReadyWithLister(ctx context.Context, listDeployments DeploymentListFunc, requiredDeployments []string, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.waitForArgoCDReady")
 	defer span.End()
@@ -233,10 +259,21 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Deployments to wait for
-	requiredDeployments := []string{
-		"argocd-server",
-		"argocd-repo-server",
+	// Check function to avoid duplication
+	checkReady := func() bool {
+		deploys, err := listDeployments(ctx, requiredDeployments)
+		if err != nil {
+			return false
+		}
+		return areDeploymentsReady(deploys)
+	}
+
+	// Immediate check before starting the ticker
+	if checkReady() {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Argo CD is ready").
+			WithResource("argocd").
+			WithAction("ready"))
+		return nil
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -247,19 +284,7 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for Argo CD: %w", ctx.Err())
 		case <-ticker.C:
-			allReady := true
-			for _, deployName := range requiredDeployments {
-				deploy, err := client.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-				if err != nil {
-					allReady = false
-					break
-				}
-				if !isDeploymentReady(deploy) {
-					allReady = false
-					break
-				}
-			}
-			if allReady {
+			if checkReady() {
 				status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Argo CD is ready").
 					WithResource("argocd").
 					WithAction("ready"))
@@ -269,7 +294,24 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	}
 }
 
-// isDeploymentReady checks if a deployment has all replicas ready
-func isDeploymentReady(deploy *appsv1.Deployment) bool {
-	return deploy.Status.ReadyReplicas >= *deploy.Spec.Replicas
+// waitForArgoCDReady waits for Argo CD deployments to be ready using a Kubernetes client.
+func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, namespace string, timeout time.Duration) error {
+	requiredDeployments := []string{
+		"argocd-server",
+		"argocd-repo-server",
+	}
+
+	listDeployments := func(ctx context.Context, names []string) ([]*appsv1.Deployment, error) {
+		deploys := make([]*appsv1.Deployment, 0, len(names))
+		for _, name := range names {
+			deploy, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				return nil, err
+			}
+			deploys = append(deploys, deploy)
+		}
+		return deploys, nil
+	}
+
+	return waitForArgoCDReadyWithLister(ctx, listDeployments, requiredDeployments, timeout)
 }
