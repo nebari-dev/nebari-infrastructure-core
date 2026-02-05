@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
@@ -27,6 +28,22 @@ const (
 	repoURL   = "https://argoproj.github.io/argo-helm"
 	chartName = "argo/argo-cd"
 )
+
+// loadArgoCDChart locates and loads the Argo CD Helm chart.
+// This is extracted to avoid duplication between install and upgrade operations.
+func loadArgoCDChart(chartPathOptions action.ChartPathOptions) (*chart.Chart, error) {
+	chartPath, err := chartPathOptions.LocateChart(chartName, cli.New())
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate Argo CD chart: %w", err)
+	}
+
+	loadedChart, err := loader.Load(chartPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load Argo CD chart: %w", err)
+	}
+
+	return loadedChart, nil
+}
 
 // InstallHelm installs Argo CD using the Helm Go SDK
 func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) error {
@@ -92,16 +109,10 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 		WithMetadata("chart_version", config.Version))
 
 	// Locate and load the chart
-	chartPath, err := client.ChartPathOptions.LocateChart(chartName, cli.New())
+	chart, err := loadArgoCDChart(client.ChartPathOptions)
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to locate Argo CD chart: %w", err)
-	}
-
-	chart, err := loader.Load(chartPath)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to load Argo CD chart: %w", err)
+		return err
 	}
 
 	// Install the chart
@@ -137,16 +148,10 @@ func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config
 	client.Timeout = config.Timeout
 
 	// Locate and load the chart
-	chartPath, err := client.ChartPathOptions.LocateChart(chartName, cli.New())
+	chart, err := loadArgoCDChart(client.ChartPathOptions)
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to locate Argo CD chart: %w", err)
-	}
-
-	chart, err := loader.Load(chartPath)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to load Argo CD chart: %w", err)
+		return err
 	}
 
 	// Upgrade the chart
