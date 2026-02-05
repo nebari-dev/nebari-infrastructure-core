@@ -2,6 +2,21 @@ project_name: my-nebari-gcp
 provider: gcp
 domain: nebari.example.com
 
+certificate:
+  type: selfsigned  # Options: "selfsigned" or "letsencrypt"
+  # For Let's Encrypt:
+  # type: letsencrypt
+  # acme:
+  #   email: admin@example.com
+
+# GitOps repository configuration (optional - remove this section if not using GitOps)
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-gcp"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+
 google_cloud_platform:
   project: my-gcp-project-id
   region: us-central1

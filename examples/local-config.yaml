@@ -13,11 +13,10 @@ local:
     worker:
       kubernetes.io/os: linux
 
-# GitOps repository configuration (optional)
-# Configures the repository that ArgoCD will use to manage cluster resources
+# GitOps repository configuration (optional - remove this section if not using GitOps)
 git_repository:
   url: "git@github.com:my-org/my-gitops-repo.git"
   branch: main
-  path: "clusters/test1"  # Optional subdirectory within the repo
+  path: "clusters/my-nebari-local"
   auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
