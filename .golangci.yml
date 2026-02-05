@@ -1,0 +1,37 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - goconst
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+    - staticcheck
+    - unconvert
+    - unused
+
+  exclusions:
+    rules:
+      # Test files can have repeated strings for readability
+      - path: _test\.go
+        linters:
+          - goconst
+
+      # CLI tools need to read user-specified config files
+      - path: pkg/config/
+        linters:
+          - gosec
+        text: "G304"

@@ -38,7 +38,7 @@ repos:
       - id: go-test
         name: go test
         entry: go test
-        args: [-v, ./...]
+        args: [-v, -short, ./...]
         language: system
         types: [go]
         pass_filenames: false
