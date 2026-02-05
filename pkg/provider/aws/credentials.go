@@ -5,16 +5,29 @@ import (
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 // IAMClient defines the interface for IAM operations needed for credential validation.
 type IAMClient interface {
 	SimulatePrincipalPolicy(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error)
+}
+
+// newIAMClient creates a new IAM client for the specified region.
+func newIAMClient(ctx context.Context, region string) (IAMClient, error) {
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	return iam.NewFromConfig(cfg), nil
 }
 
 // CredentialValidationResult contains the results of credential validation.
@@ -197,3 +210,57 @@ func getRequiredPermissions(cfg *Config) []string {
 
 	return perms
 }
+
+// ValidateCredentials implements provider.CredentialValidator for thorough
+// credential validation including IAM permission checks.
+func (p *Provider) ValidateCredentials(ctx context.Context, cfg *config.NebariConfig) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.ValidateCredentials")
+	defer span.End()
+
+	// Extract AWS configuration
+	awsCfg, err := extractAWSConfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Create clients
+	stsClient, err := newSTSClient(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create STS client: %w", err)
+	}
+
+	iamClient, err := newIAMClient(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create IAM client: %w", err)
+	}
+
+	// Run validation
+	result, err := validateCredentialsWithClients(ctx, stsClient, iamClient, awsCfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Print success info
+	fmt.Printf("AWS credentials validated\n")
+	fmt.Printf("  Identity: %s\n", result.Arn)
+	fmt.Printf("  Account:  %s\n", result.AccountID)
+
+	// Check for missing permissions
+	if len(result.MissingPermissions) > 0 {
+		fmt.Printf("\nMissing permissions:\n")
+		for _, perm := range result.MissingPermissions {
+			fmt.Printf("  - %s\n", perm)
+		}
+		return fmt.Errorf("credential validation failed: %d missing permissions", len(result.MissingPermissions))
+	}
+
+	return nil
+}
+
+// Compile-time check that Provider implements CredentialValidator.
+var _ provider.CredentialValidator = (*Provider)(nil)
