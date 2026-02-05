@@ -2,13 +2,92 @@ package aws
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // IAMClient defines the interface for IAM operations needed for credential validation.
 type IAMClient interface {
 	SimulatePrincipalPolicy(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error)
+}
+
+// CredentialValidationResult contains the results of credential validation.
+type CredentialValidationResult struct {
+	AccountID          string
+	Arn                string
+	MissingPermissions []string
+}
+
+// validateCredentialsWithClients performs thorough credential validation using
+// provided clients (for testability).
+func validateCredentialsWithClients(ctx context.Context, stsClient STSClient, iamClient IAMClient, cfg *Config) (*CredentialValidationResult, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.validateCredentialsWithClients")
+	defer span.End()
+
+	// Get caller identity
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get caller identity: %w", err)
+	}
+
+	result := &CredentialValidationResult{
+		AccountID: aws.ToString(identity.Account),
+		Arn:       aws.ToString(identity.Arn),
+	}
+
+	span.SetAttributes(
+		attribute.String("aws.account_id", result.AccountID),
+		attribute.String("aws.arn", result.Arn),
+	)
+
+	// Get required permissions based on config
+	requiredPerms := getRequiredPermissions(cfg)
+
+	// Check permissions using IAM Policy Simulator
+	// Process in batches of 100 (API limit)
+	const batchSize = 100
+	var missingPerms []string
+
+	for i := 0; i < len(requiredPerms); i += batchSize {
+		end := i + batchSize
+		if end > len(requiredPerms) {
+			end = len(requiredPerms)
+		}
+		batch := requiredPerms[i:end]
+
+		simResult, err := iamClient.SimulatePrincipalPolicy(ctx, &iam.SimulatePrincipalPolicyInput{
+			PolicySourceArn: identity.Arn,
+			ActionNames:     batch,
+			ResourceArns:    []string{"*"},
+		})
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to simulate IAM policy: %w", err)
+		}
+
+		for _, evalResult := range simResult.EvaluationResults {
+			if evalResult.EvalDecision != iamtypes.PolicyEvaluationDecisionTypeAllowed {
+				missingPerms = append(missingPerms, aws.ToString(evalResult.EvalActionName))
+			}
+		}
+	}
+
+	result.MissingPermissions = missingPerms
+
+	span.SetAttributes(
+		attribute.Int("permissions.checked", len(requiredPerms)),
+		attribute.Int("permissions.missing", len(missingPerms)),
+	)
+
+	return result, nil
 }
 
 // getRequiredPermissions returns the list of AWS IAM permissions required

@@ -2,9 +2,13 @@ package aws
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // mockIAMClient implements IAMClient for testing.
@@ -168,4 +172,210 @@ func containsPermission(perms []string, perm string) bool {
 		}
 	}
 	return false
+}
+
+func TestValidateCredentialsWithClients(t *testing.T) {
+	t.Run("success with all permissions allowed", func(t *testing.T) {
+		stsMock := &mockSTSClient{
+			GetCallerIdentityFunc: func(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+				return &sts.GetCallerIdentityOutput{
+					Account: aws.String("123456789012"),
+					Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					UserId:  aws.String("AIDAEXAMPLE"),
+				}, nil
+			},
+		}
+
+		iamMock := &mockIAMClient{
+			SimulatePrincipalPolicyFunc: func(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+				results := make([]iamtypes.EvaluationResult, len(params.ActionNames))
+				for i, action := range params.ActionNames {
+					results[i] = iamtypes.EvaluationResult{
+						EvalActionName: aws.String(action),
+						EvalDecision:   iamtypes.PolicyEvaluationDecisionTypeAllowed,
+					}
+				}
+				return &iam.SimulatePrincipalPolicyOutput{
+					EvaluationResults: results,
+				}, nil
+			},
+		}
+
+		cfg := &Config{
+			Region: "us-east-1",
+			NodeGroups: map[string]NodeGroup{
+				"general": {Instance: "t3.medium"},
+			},
+		}
+
+		result, err := validateCredentialsWithClients(context.Background(), stsMock, iamMock, cfg)
+		if err != nil {
+			t.Errorf("validateCredentialsWithClients() error = %v", err)
+		}
+		if result.AccountID != "123456789012" {
+			t.Errorf("AccountID = %q, want %q", result.AccountID, "123456789012")
+		}
+		if result.Arn != "arn:aws:iam::123456789012:user/test-user" {
+			t.Errorf("Arn = %q, want %q", result.Arn, "arn:aws:iam::123456789012:user/test-user")
+		}
+		if len(result.MissingPermissions) != 0 {
+			t.Errorf("MissingPermissions = %v, want empty", result.MissingPermissions)
+		}
+	})
+
+	t.Run("reports missing permissions", func(t *testing.T) {
+		stsMock := &mockSTSClient{
+			GetCallerIdentityFunc: func(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+				return &sts.GetCallerIdentityOutput{
+					Account: aws.String("123456789012"),
+					Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					UserId:  aws.String("AIDAEXAMPLE"),
+				}, nil
+			},
+		}
+
+		iamMock := &mockIAMClient{
+			SimulatePrincipalPolicyFunc: func(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+				results := make([]iamtypes.EvaluationResult, len(params.ActionNames))
+				for i, action := range params.ActionNames {
+					decision := iamtypes.PolicyEvaluationDecisionTypeAllowed
+					// Deny eks:CreateCluster and iam:CreateRole
+					if action == "eks:CreateCluster" || action == "iam:CreateRole" {
+						decision = iamtypes.PolicyEvaluationDecisionTypeImplicitDeny
+					}
+					results[i] = iamtypes.EvaluationResult{
+						EvalActionName: aws.String(action),
+						EvalDecision:   decision,
+					}
+				}
+				return &iam.SimulatePrincipalPolicyOutput{
+					EvaluationResults: results,
+				}, nil
+			},
+		}
+
+		cfg := &Config{
+			Region: "us-east-1",
+			NodeGroups: map[string]NodeGroup{
+				"general": {Instance: "t3.medium"},
+			},
+		}
+
+		result, err := validateCredentialsWithClients(context.Background(), stsMock, iamMock, cfg)
+		if err != nil {
+			t.Errorf("validateCredentialsWithClients() error = %v", err)
+		}
+		if len(result.MissingPermissions) != 2 {
+			t.Errorf("MissingPermissions count = %d, want 2", len(result.MissingPermissions))
+		}
+		if !containsPermission(result.MissingPermissions, "eks:CreateCluster") {
+			t.Errorf("MissingPermissions should contain eks:CreateCluster")
+		}
+		if !containsPermission(result.MissingPermissions, "iam:CreateRole") {
+			t.Errorf("MissingPermissions should contain iam:CreateRole")
+		}
+	})
+
+	t.Run("error on STS GetCallerIdentity failure", func(t *testing.T) {
+		stsMock := &mockSTSClient{
+			GetCallerIdentityFunc: func(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+				return nil, fmt.Errorf("invalid credentials")
+			},
+		}
+
+		iamMock := &mockIAMClient{}
+
+		cfg := &Config{
+			Region: "us-east-1",
+			NodeGroups: map[string]NodeGroup{
+				"general": {Instance: "t3.medium"},
+			},
+		}
+
+		_, err := validateCredentialsWithClients(context.Background(), stsMock, iamMock, cfg)
+		if err == nil {
+			t.Error("validateCredentialsWithClients() expected error, got nil")
+		}
+	})
+
+	t.Run("error on IAM SimulatePrincipalPolicy failure", func(t *testing.T) {
+		stsMock := &mockSTSClient{
+			GetCallerIdentityFunc: func(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+				return &sts.GetCallerIdentityOutput{
+					Account: aws.String("123456789012"),
+					Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					UserId:  aws.String("AIDAEXAMPLE"),
+				}, nil
+			},
+		}
+
+		iamMock := &mockIAMClient{
+			SimulatePrincipalPolicyFunc: func(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+				return nil, fmt.Errorf("access denied to simulate policy")
+			},
+		}
+
+		cfg := &Config{
+			Region: "us-east-1",
+			NodeGroups: map[string]NodeGroup{
+				"general": {Instance: "t3.medium"},
+			},
+		}
+
+		_, err := validateCredentialsWithClients(context.Background(), stsMock, iamMock, cfg)
+		if err == nil {
+			t.Error("validateCredentialsWithClients() expected error, got nil")
+		}
+	})
+
+	t.Run("batches permissions in groups of 100", func(t *testing.T) {
+		stsMock := &mockSTSClient{
+			GetCallerIdentityFunc: func(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+				return &sts.GetCallerIdentityOutput{
+					Account: aws.String("123456789012"),
+					Arn:     aws.String("arn:aws:iam::123456789012:user/test-user"),
+					UserId:  aws.String("AIDAEXAMPLE"),
+				}, nil
+			},
+		}
+
+		callCount := 0
+		iamMock := &mockIAMClient{
+			SimulatePrincipalPolicyFunc: func(ctx context.Context, params *iam.SimulatePrincipalPolicyInput, optFns ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+				callCount++
+				if len(params.ActionNames) > 100 {
+					t.Errorf("batch size = %d, want <= 100", len(params.ActionNames))
+				}
+				results := make([]iamtypes.EvaluationResult, len(params.ActionNames))
+				for i, action := range params.ActionNames {
+					results[i] = iamtypes.EvaluationResult{
+						EvalActionName: aws.String(action),
+						EvalDecision:   iamtypes.PolicyEvaluationDecisionTypeAllowed,
+					}
+				}
+				return &iam.SimulatePrincipalPolicyOutput{
+					EvaluationResults: results,
+				}, nil
+			},
+		}
+
+		cfg := &Config{
+			Region: "us-east-1",
+			NodeGroups: map[string]NodeGroup{
+				"general": {Instance: "t3.medium"},
+			},
+			// Include all possible permissions (VPC, IAM, EFS) to get a larger list
+			EFS: &EFSConfig{Enabled: true},
+		}
+
+		_, err := validateCredentialsWithClients(context.Background(), stsMock, iamMock, cfg)
+		if err != nil {
+			t.Errorf("validateCredentialsWithClients() error = %v", err)
+		}
+
+		// With a full config, we expect at least one call
+		if callCount == 0 {
+			t.Error("expected SimulatePrincipalPolicy to be called at least once")
+		}
+	})
 }
