@@ -337,7 +337,7 @@ func TestParseConfig(t *testing.T) {
 project_name: test-project
 provider: aws
 `
-		if err := os.WriteFile(configFile, []byte(yaml), 0644); err != nil {
+		if err := os.WriteFile(configFile, []byte(yaml), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
@@ -363,7 +363,7 @@ provider: aws
 	t.Run("wraps parsing errors with filename", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
-		if err := os.WriteFile(configFile, []byte("provider: invalid"), 0644); err != nil {
+		if err := os.WriteFile(configFile, []byte("provider: invalid"), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 

@@ -203,7 +203,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 	err = argocd.WriteAll(ctx, func(appName string) (io.WriteCloser, error) {
 		path := filepath.Join(workDir, appName+".yaml")
 		slog.Debug("Writing application manifest", "app", appName, "path", path)
-		return os.Create(path)
+		return os.Create(path) //nolint:gosec // G304: path is constructed from trusted appName within controlled workDir
 	})
 	if err != nil {
 		span.RecordError(err)
