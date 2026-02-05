@@ -4,9 +4,11 @@ domain: nebari.example.com
 
 # TLS certificate configuration
 certificate:
-  type: letsencrypt
-  acme:
-    email: admin@example.com
+  type: selfsigned # Options: "selfsigned" or "letsencrypt"
+  # For Let's Encrypt (production), use:
+  # type: letsencrypt
+  # acme:
+  #   email: admin@example.com
 
 # GitOps repository configuration (required for foundational services)
 # ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
