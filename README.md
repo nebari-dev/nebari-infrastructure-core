@@ -101,7 +101,25 @@ Show version information and registered providers.
 
 ## Configuration
 
-NIC uses the standard `config.yaml` format. See `examples/` directory for sample configurations:
+NIC uses the standard `config.yaml` format.
+
+### Configuration Reference
+
+Full documentation for all configuration options is available in [`docs/configuration/`](docs/configuration/):
+
+- [Core Configuration](docs/configuration/core.md) - Project name, provider, domain, certificates
+- [AWS Configuration](docs/configuration/aws.md) - EKS, VPC, node groups, EFS
+- [GCP Configuration](docs/configuration/gcp.md) - GKE, VPC, node pools, GPUs
+- [Azure Configuration](docs/configuration/azure.md) - AKS, networking, node pools
+- [Local Configuration](docs/configuration/local.md) - K3s, kind, minikube
+- [Git Repository](docs/configuration/git.md) - GitOps with ArgoCD
+- [Cloudflare DNS](docs/configuration/cloudflare.md) - DNS provider
+
+> **Note**: Configuration docs are auto-generated from source code. Run `make docs` to regenerate.
+
+### Example Configurations
+
+See `examples/` directory for complete sample configurations:
 
 - `examples/aws-config.yaml` - AWS/EKS configuration
 - `examples/gcp-config.yaml` - GCP/GKE configuration
@@ -149,7 +167,7 @@ Due to difficulties with how networking works with Docker Desktop, using OrbStac
 
 See these docs for installing OrbStack: https://docs.orbstack.dev/quick-start
 
-A github repo needs to be created and the URL added to `local-config.yaml` file. 
+A github repo needs to be created and the URL added to `local-config.yaml` file.
 
 A valid private SSH key needs to be set as an environment variable `GIT_SSH_PRIVATE_KEY`
 
@@ -232,7 +250,11 @@ pre-commit run golangci-lint --all-files
 ### Project Structure
 
 ```
-cmd/nic/              # CLI entry point and commands
+cmd/
+  ├── nic/            # CLI entry point and commands
+  └── docgen/         # Configuration documentation generator
+docs/
+  └── configuration/  # Auto-generated config reference
 pkg/
   ├── config/         # Configuration parsing
   ├── provider/       # Provider interface and registry

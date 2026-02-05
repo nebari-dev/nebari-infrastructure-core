@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down docs
 
 # Variables
 BINARY_NAME=nic
@@ -172,5 +172,10 @@ deps-update: ## Update Go dependencies
 	go get -u ./...
 	go mod tidy
 	@echo "Dependencies updated successfully"
+
+docs: ## Generate configuration documentation
+	@echo "Generating configuration documentation..."
+	go run ./cmd/docgen -output docs/configuration
+	@echo "Documentation generated successfully"
 
 .DEFAULT_GOAL := help

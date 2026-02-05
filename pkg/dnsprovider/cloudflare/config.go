@@ -1,9 +1,12 @@
 package cloudflare
 
-// Config represents Cloudflare-specific DNS configuration
-// Secrets like API tokens are read from environment variables, not config
+// Config represents Cloudflare DNS provider configuration.
+// API credentials (CLOUDFLARE_API_TOKEN) must be set via environment variables.
 type Config struct {
-	ZoneName         string         `yaml:"zone_name" json:"zone_name"`             // Domain zone (e.g., example.com)
-	Email            string         `yaml:"email,omitempty" json:"email,omitempty"` // Email for Let's Encrypt notifications
+	// ZoneName is the DNS zone/domain to manage (e.g., example.com)
+	ZoneName string `yaml:"zone_name" json:"zone_name"`
+	// Email is the Cloudflare account email (optional, for API key auth)
+	Email string `yaml:"email,omitempty" json:"email,omitempty"`
+	// AdditionalFields captures any extra Cloudflare-specific configuration
 	AdditionalFields map[string]any `yaml:",inline" json:"-"`
 }
