@@ -367,7 +367,7 @@ func (d *Deployer) waitForFoundationalSoftware(ctx context.Context) error {
         {Name: "tempo", Namespace: "monitoring"},
         {Name: "grafana", Namespace: "monitoring"},
         {Name: "keycloak", Namespace: "nebari-system"},
-        {Name: "nebari-operator", Namespace: "nebari-system"},
+        {Name: "nebari-operator", Namespace: "nebari-operator-system"},
     }
 
     for _, component := range components {
