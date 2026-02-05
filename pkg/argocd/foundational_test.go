@@ -71,9 +71,11 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := KeycloakConfig{
-			Enabled:       true,
-			AdminPassword: "admin-pass-123",
-			DBPassword:    "db-pass-456",
+			Enabled:               true,
+			AdminPassword:         "admin-pass-123",
+			DBPassword:            "db-pass-456",
+			PostgresAdminPassword: "db-pass-456-admin",
+			PostgresUserPassword:  "db-pass-456-user",
 		}
 
 		err := createKeycloakSecrets(ctx, client, cfg)
