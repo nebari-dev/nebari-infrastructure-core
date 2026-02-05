@@ -184,7 +184,7 @@ func newHelmActionConfig(kubeconfigPath string, namespace string) (*action.Confi
 		&kubeconfigGetter{path: kubeconfigPath},
 		namespace,
 		os.Getenv("HELM_DRIVER"), // defaults to "secret" if empty
-		func(format string, v ...interface{}) {
+		func(format string, v ...any) {
 			// Helm debug logging (can be customized)
 		},
 	); err != nil {

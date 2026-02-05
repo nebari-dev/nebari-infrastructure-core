@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -12,8 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
-  "github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
-
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
 const (
