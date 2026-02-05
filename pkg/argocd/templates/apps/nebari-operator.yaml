@@ -14,33 +14,9 @@ spec:
   project: foundational
 
   source:
-    repoURL: https://github.com/nebari-dev/nebari-operator
-    targetRevision: HEAD
-    path: dist/chart
-    helm:
-      releaseName: nebari-operator
-      values: |
-        image:
-          repository: quay.io/nebari/nebari-operator
-          pullPolicy: IfNotPresent
-          tag: ""
-        replicaCount: 1
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-        webhook:
-          enabled: true
-          port: 9443
-        metrics:
-          enabled: true
-          port: 8080
-        health:
-          enabled: true
-          port: 8081
+    repoURL: {{ .GitRepoURL }}
+    targetRevision: {{ .GitBranch }}
+    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator
 
   destination:
     server: https://kubernetes.default.svc
