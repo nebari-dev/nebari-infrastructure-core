@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -25,12 +28,12 @@ func (p *Provider) Name() string {
 	return "local"
 }
 
-// ConfigKey returns the YAML configuration key for local
+// ConfigKey returns the YAML key for this provider's configuration
 func (p *Provider) ConfigKey() string {
 	return "local"
 }
 
-// Validate validates the local configuration (stub implementation)
+// Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Validate")
@@ -45,6 +48,70 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		WithResource("provider").
 		WithAction("validate").
 		WithMetadata("cluster_name", cfg.ProjectName))
+
+	// Parse local provider config
+	var localCfg Config
+	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal local config: %w", err)
+		}
+	}
+
+	// Get the context name: top-level kube_context takes precedence, then provider-specific
+	contextName := cfg.GetKubeContext()
+	if contextName == "" {
+		contextName = localCfg.KubeContext
+	}
+	if contextName == "" {
+		contextName = "default"
+	}
+
+	span.SetAttributes(attribute.String("kube_context", contextName))
+
+	// Get kubeconfig file path
+	kubeconfigPath := kubeconfig.GetPath()
+	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
+
+	// Verify kubeconfig file exists
+	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Kubeconfig file not found at %s", kubeconfigPath)).
+			WithResource("provider").
+			WithAction("validate").
+			WithMetadata("kubeconfig_path", kubeconfigPath))
+		return fmt.Errorf("kubeconfig file not found at %s", kubeconfigPath)
+	}
+
+	// Load and validate kubeconfig
+	kubeconfigData, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to load kubeconfig from %s", kubeconfigPath)).
+			WithResource("provider").
+			WithAction("validate").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("failed to load kubeconfig from %s: %w", kubeconfigPath, err)
+	}
+
+	// Verify the specified context exists
+	if _, exists := kubeconfigData.Contexts[contextName]; !exists {
+		availableContexts := kubeconfig.GetContextNames(kubeconfigData)
+		err := fmt.Errorf("context %s not found in kubeconfig. Available contexts: %v", contextName, availableContexts)
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Context %s not found in kubeconfig", contextName)).
+			WithResource("provider").
+			WithAction("validate").
+			WithMetadata("available_contexts", availableContexts))
+		return err
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Successfully validated local provider configuration with context: %s", contextName)).
+		WithResource("provider").
+		WithAction("validate").
+		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("kube_context", contextName))
+
 	return nil
 }
 
@@ -100,7 +167,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	return nil
 }
 
-// GetKubeconfig generates a kubeconfig file (stub implementation)
+// GetKubeconfig retrieves kubeconfig for the specified context
 func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.GetKubeconfig")
@@ -111,17 +178,87 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		attribute.String("cluster_name", cfg.ProjectName),
 	)
 
-	status.Send(ctx, status.NewUpdate(status.LevelWarning, "GetKubeconfig not yet implemented for local provider").
+	// Parse local provider config to get the kube context
+	var localCfg Config
+	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to unmarshal local config: %w", err)
+		}
+	}
+
+	// Get the context name: top-level kube_context takes precedence, then provider-specific
+	contextName := cfg.GetKubeContext()
+	if contextName == "" {
+		contextName = localCfg.KubeContext
+	}
+	if contextName == "" {
+		contextName = "default"
+	}
+
+	span.SetAttributes(attribute.String("kube_context", contextName))
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Retrieving kubeconfig for context: %s", contextName)).
 		WithResource("provider").
 		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", cfg.ProjectName))
-	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
+		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("kube_context", contextName))
+
+	// Get kubeconfig file path
+	kubeconfigPath := kubeconfig.GetPath()
+	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
+
+	// Load the kubeconfig file
+	kubeconfigData, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Failed to load kubeconfig from %s", kubeconfigPath)).
+			WithResource("provider").
+			WithAction("get-kubeconfig").
+			WithMetadata("error", err.Error()))
+		return nil, fmt.Errorf("failed to load kubeconfig from %s: %w", kubeconfigPath, err)
+	}
+
+	// Filter to only the specified context
+	filteredConfig, err := kubeconfig.FilterByContext(kubeconfigData, contextName)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Context %s not found in kubeconfig", contextName)).
+			WithResource("provider").
+			WithAction("get-kubeconfig").
+			WithMetadata("available_contexts", kubeconfig.GetContextNames(kubeconfigData)))
+		return nil, err
+	}
+
+	// Write the filtered kubeconfig to bytes
+	kubeconfigBytes, err := kubeconfig.WriteBytes(filteredConfig)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+
+	span.SetAttributes(attribute.Int("kubeconfig_size_bytes", len(kubeconfigBytes)))
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Successfully retrieved kubeconfig for context: %s", contextName)).
+		WithResource("provider").
+		WithAction("get-kubeconfig").
+		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("kube_context", contextName))
+
+	return kubeconfigBytes, nil
 }
 
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
 
+	// Check top-level kube_context first
+	if cfg.GetKubeContext() != "" {
+		result["Kube Context"] = cfg.GetKubeContext()
+		return result
+	}
+
+	// Fall back to provider-specific config
 	rawCfg := cfg.ProviderConfig["local"]
 	if rawCfg == nil {
 		return result

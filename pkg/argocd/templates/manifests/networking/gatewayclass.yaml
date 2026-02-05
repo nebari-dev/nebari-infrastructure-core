@@ -1,0 +1,9 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+  labels:
+    app.kubernetes.io/name: envoy-gateway
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller

@@ -22,15 +22,14 @@ func TestApplications(t *testing.T) {
 	}
 }
 
-func TestWriteApplication_ExampleTemplate(t *testing.T) {
-	// _example.yaml can still be read directly (useful for testing the template format)
-	// It's only filtered from Applications() enumeration
+func TestWriteApplication_CertManager(t *testing.T) {
+	// Test reading an actual application template
 	var buf bytes.Buffer
 	ctx := context.Background()
 
-	err := WriteApplication(ctx, &buf, "_example")
+	err := WriteApplication(ctx, &buf, "cert-manager")
 	if err != nil {
-		t.Fatalf("WriteApplication(_example) error: %v", err)
+		t.Fatalf("WriteApplication(cert-manager) error: %v", err)
 	}
 
 	content := buf.String()

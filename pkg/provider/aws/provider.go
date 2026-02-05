@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -11,7 +12,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
+)
+
+const (
+	// ReconcileTimeout is the maximum time allowed for a complete reconciliation operation
+	// This includes VPC, IAM, EKS cluster, and node group operations
+	ReconcileTimeout = 30 * time.Minute
 )
 
 // Provider implements the AWS provider
@@ -87,7 +95,19 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	span.SetAttributes(
 		attribute.String("provider", "aws"),
 		attribute.String("project_name", cfg.ProjectName),
+		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
+
+	// For existing clusters, we don't need AWS infrastructure config
+	if cfg.IsExistingCluster() {
+		span.SetAttributes(attribute.String("kube_context", cfg.GetKubeContext()))
+		// Just validate that the kube context exists
+		if err := kubeconfig.ValidateContext(cfg.GetKubeContext()); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		return nil
+	}
 
 	// Extract and validate AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, cfg)
@@ -203,7 +223,15 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("provider", "aws"),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("dry_run", cfg.DryRun),
+		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
+
+	// For existing clusters, skip infrastructure provisioning
+	if cfg.IsExistingCluster() {
+		span.SetAttributes(attribute.String("kube_context", cfg.GetKubeContext()))
+		// Nothing to deploy - using existing cluster
+		return nil
+	}
 
 	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, cfg)
@@ -375,6 +403,22 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
+	// For existing clusters, extract kubeconfig from the specified context
+	if cfg.IsExistingCluster() {
+		contextName := cfg.GetKubeContext()
+		span.SetAttributes(
+			attribute.String("provider", "aws"),
+			attribute.String("kube_context", contextName),
+			attribute.Bool("existing_cluster", true),
+		)
+		kubeconfigBytes, err := kubeconfig.ExtractContext(contextName)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		return kubeconfigBytes, nil
+	}
+
 	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, cfg)
 	if err != nil {
@@ -473,6 +517,13 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
+
+	// Show kube context if using existing cluster
+	if cfg.IsExistingCluster() {
+		result["Kube Context"] = cfg.GetKubeContext()
+		result["Mode"] = "existing-cluster"
+		return result
+	}
 
 	rawCfg := cfg.ProviderConfig["amazon_web_services"]
 	if rawCfg == nil {

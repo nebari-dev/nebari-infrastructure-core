@@ -66,8 +66,6 @@ func TestIsValidProvider(t *testing.T) {
 func TestProviderConfig_NilMapAccess(t *testing.T) {
 	// Verify that accessing a nil ProviderConfig map returns nil (Go behavior)
 	cfg := &NebariConfig{
-		ProjectName: "test",
-		Provider:    "aws",
 		// ProviderConfig is nil
 	}
 
@@ -85,8 +83,6 @@ func TestProviderConfig_DirectAccess(t *testing.T) {
 	}
 
 	cfg := &NebariConfig{
-		ProjectName: "test",
-		Provider:    "aws",
 		ProviderConfig: map[string]any{
 			"amazon_web_services": &mockConfig{Region: "us-west-2", Zone: "a"},
 		},
@@ -116,8 +112,6 @@ func TestProviderConfig_DirectAccess(t *testing.T) {
 func TestProviderConfig_MultipleProviders(t *testing.T) {
 	// Verify multiple provider configs can coexist
 	cfg := &NebariConfig{
-		ProjectName: "test",
-		Provider:    "aws",
 		ProviderConfig: map[string]any{
 			"amazon_web_services":   map[string]any{"region": "us-west-2"},
 			"google_cloud_platform": map[string]any{"project": "my-project"},
@@ -140,11 +134,8 @@ func TestProviderConfig_MultipleProviders(t *testing.T) {
 func TestNebariConfig_RuntimeOptions(t *testing.T) {
 	// Verify runtime options are independent of YAML parsing
 	cfg := &NebariConfig{
-		ProjectName:    "test",
-		Provider:       "aws",
-		ProviderConfig: map[string]any{"amazon_web_services": map[string]any{}},
-		DryRun:         true,
-		Force:          true,
+		DryRun: true,
+		Force:  true,
 	}
 
 	if !cfg.DryRun {

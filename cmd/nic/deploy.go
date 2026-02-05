@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -67,7 +67,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup status handler for progress updates
-	ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
+	ctx, cleanupStatusFn := status.StartHandler(ctx, statusLogHandler())
+	var statusCleanedUp bool
+	cleanupStatus := func() {
+		if !statusCleanedUp {
+			statusCleanedUp = true
+			cleanupStatusFn()
+		}
+	}
 	defer cleanupStatus()
 
 	// Handle context cancellation (from signal interrupt)
@@ -136,6 +143,64 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Deployment completed successfully", "provider", provider.Name())
 
+	// Track what was installed so we can print instructions after flushing status messages
+	var argoCDInstalled, keycloakInstalled bool
+
+	// Install Argo CD (skip in dry-run mode)
+	if !cfg.DryRun {
+		slog.Info("Installing Argo CD on cluster")
+		if err := argocd.Install(ctx, cfg, provider); err != nil {
+			// Log error but don't fail deployment
+			slog.Warn("Failed to install Argo CD", "error", err)
+			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
+		} else {
+			slog.Info("Argo CD installed successfully")
+			argoCDInstalled = true
+
+			// Install foundational services via Argo CD
+			slog.Info("Installing foundational services")
+			foundationalCfg := argocd.FoundationalConfig{
+				Keycloak: argocd.KeycloakConfig{
+					Enabled:               true,
+					AdminPassword:         generateSecurePassword(rand.Reader),
+					DBPassword:            generateSecurePassword(rand.Reader),
+					PostgresAdminPassword: generateSecurePassword(rand.Reader),
+					PostgresUserPassword:  generateSecurePassword(rand.Reader),
+					RealmAdminPassword:    generateSecurePassword(rand.Reader),
+					Hostname:              "", // Will be auto-generated from domain
+				},
+				// Enable MetalLB only for local deployments
+				MetalLB: argocd.MetalLBConfig{
+					Enabled:     cfg.Provider == "local",
+					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
+				},
+			}
+
+			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
+				// Log warning but don't fail deployment
+				slog.Warn("Failed to install foundational services", "error", err)
+				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
+			} else {
+				slog.Info("Foundational services installed successfully")
+				keycloakInstalled = true
+			}
+		}
+	} else {
+		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
+	}
+
+	// Flush all pending status messages before printing instructions
+	// This prevents log messages from appearing in the middle of the instructions
+	cleanupStatus()
+
+	// Print instructions after status handler is cleaned up
+	if argoCDInstalled {
+		printArgoCDInstructions(cfg)
+	}
+	if keycloakInstalled {
+		printKeycloakInstructions(cfg)
+	}
+
 	// Print DNS guidance if no DNS provider is configured
 	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
 		printDNSGuidance(cfg)
@@ -197,15 +262,9 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	// Write all ArgoCD application manifests
-	// This is the only place where filesystem I/O happens
-	workDir := gitClient.WorkDir()
-	err = argocd.WriteAll(ctx, func(appName string) (io.WriteCloser, error) {
-		path := filepath.Join(workDir, appName+".yaml")
-		slog.Debug("Writing application manifest", "app", appName, "path", path)
-		return os.Create(path) //nolint:gosec // G304: path is constructed from trusted appName within controlled workDir
-	})
-	if err != nil {
+	// Write all ArgoCD application manifests and raw K8s manifests to git
+	slog.Info("Writing ArgoCD application manifests to git repository")
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
@@ -269,4 +328,88 @@ func printDNSGuidance(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
+}
+
+// printArgoCDInstructions prints instructions for accessing Argo CD
+func printArgoCDInstructions(cfg *config.NebariConfig) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  ARGO CD INSTALLED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  Argo CD has been successfully installed on your cluster.")
+	fmt.Println()
+	fmt.Println("  To access Argo CD:")
+	fmt.Println()
+	if cfg.Domain != "" {
+		fmt.Printf("    UI: https://argocd.%s (after DNS configuration)\n", cfg.Domain)
+		fmt.Println()
+		fmt.Println("  Or use port-forwarding:")
+		fmt.Println()
+	}
+	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
+	fmt.Println("    Then visit: https://localhost:8080")
+	fmt.Println()
+	fmt.Println("  Get the admin password:")
+	fmt.Println()
+	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
+	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
+	fmt.Println()
+	fmt.Println("  Login credentials:")
+	fmt.Println("    Username: admin")
+	fmt.Println("    Password: <from command above>")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// printKeycloakInstructions prints instructions for accessing Keycloak
+func printKeycloakInstructions(cfg *config.NebariConfig) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  KEYCLOAK INSTALLED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  Keycloak has been configured for installation via Argo CD.")
+	fmt.Println("  It may take several minutes for Keycloak to be fully deployed and ready.")
+	fmt.Println()
+	fmt.Println("  Check deployment status:")
+	fmt.Println("    kubectl get pods -n keycloak")
+	fmt.Println()
+	fmt.Println("  To access Keycloak after deployment:")
+	fmt.Println()
+	if cfg.Domain != "" {
+		fmt.Printf("    UI: https://keycloak.%s (after DNS configuration)\n", cfg.Domain)
+		fmt.Println()
+		fmt.Println("  Or use port-forwarding:")
+		fmt.Println()
+	}
+	fmt.Println("    kubectl port-forward svc/keycloak -n keycloak 8080:80")
+	fmt.Println("    Then visit: http://localhost:8080")
+	fmt.Println()
+	fmt.Println("  Get the admin password:")
+	fmt.Println()
+	fmt.Println("    kubectl -n keycloak get secret keycloak-admin-credentials \\")
+	fmt.Println("      -o jsonpath=\"{.data.admin-password}\" | base64 -d")
+	fmt.Println()
+	fmt.Println("  Login credentials:")
+	fmt.Println("    Username: admin")
+	fmt.Println("    Password: <from command above>")
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// generateSecurePassword generates a cryptographically secure random password.
+// It accepts an io.Reader to allow for deterministic testing with known bytes.
+func generateSecurePassword(r io.Reader) string {
+	// Generate 32 bytes of random data
+	b := make([]byte, 32)
+	if _, err := r.Read(b); err != nil {
+		// Fallback to timestamp-based generation (not ideal but better than nothing)
+		return fmt.Sprintf("nebari-%d", time.Now().UnixNano())
+	}
+	// Encode to base64 and take first 43 characters (removes padding)
+	return base64.URLEncoding.EncodeToString(b)[:43]
 }

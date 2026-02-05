@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  parentRefs:
+    - name: nebari-gateway
+      namespace: envoy-gateway-system
+  hostnames:
+    - "argocd.{{ .Domain }}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: argocd-server
+          port: 80

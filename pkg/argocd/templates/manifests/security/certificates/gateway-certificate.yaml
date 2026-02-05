@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nebari-gateway-cert
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/name: nebari-gateway
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  secretName: nebari-gateway-tls
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  issuerRef:
+    name: {{ .CertificateIssuer }}
+    kind: ClusterIssuer
+  commonName: "*.{{ .Domain }}"
+  dnsNames:
+    - "*.{{ .Domain }}"
+    - "{{ .Domain }}"
+    - "keycloak.{{ .Domain }}"
+    - "argocd.{{ .Domain }}"

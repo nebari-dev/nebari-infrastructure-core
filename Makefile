@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs
+.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
 
 # Variables
 BINARY_NAME=nic
@@ -113,6 +113,23 @@ localstack-logs: ## Show LocalStack logs
 	else \
 		docker compose -f docker-compose.test.yml logs -f localstack; \
 	fi
+
+localkind-up: build ## Create local kind cluster and deploy Nebari
+	@echo "Setting up local kind cluster..."
+	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
+	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
+	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
+	-kind create cluster --name nebari-local
+	@echo "Deploying Nebari to local cluster..."
+	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml --regen-apps
+	@echo "Local kind cluster is ready!"
+
+localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster
+
+localkind-down: ## Delete local kind cluster
+	-kind delete cluster -n nebari-local
+	-docker network rm kind 2>/dev/null
+	@echo "Local kind cluster deleted"
 
 test-coverage: ## Run unit tests with coverage
 	@echo "Running unit tests with coverage..."

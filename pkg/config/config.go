@@ -13,6 +13,13 @@ type NebariConfig struct {
 	Provider    string `yaml:"provider"`
 	Domain      string `yaml:"domain,omitempty"`
 
+	// KubeContext specifies an existing Kubernetes context to deploy to.
+	// When set, this enables "bring your own cluster" mode - the provider's
+	// infrastructure provisioning (Terraform) is skipped, but provider-specific
+	// settings (storage classes, resource types) are still applied based on
+	// the provider field. This allows deploying to pre-existing clusters.
+	KubeContext string `yaml:"kube_context,omitempty"`
+
 	// DNS provider configuration (optional)
 	DNSProvider string         `yaml:"dns_provider,omitempty"`
 	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
@@ -26,11 +33,32 @@ type NebariConfig struct {
 	// Reading from a nil map is safe in Go (returns nil), so no getter needed.
 	// Extra YAML fields are captured here and safely ignored (forward compatibility).
 	ProviderConfig map[string]any `yaml:",inline"`
+	// Certificate configuration (optional)
+	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
 
 	// Runtime options (set by CLI, not from YAML file)
 	DryRun  bool          `yaml:"-"` // Preview changes without applying them
 	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
 	Timeout time.Duration `yaml:"-"` // Override default operation timeout
+}
+
+// CertificateConfig holds TLS certificate configuration
+type CertificateConfig struct {
+	// Type is the certificate type: "selfsigned" or "letsencrypt"
+	Type string `yaml:"type,omitempty"`
+
+	// ACME configuration for Let's Encrypt
+	ACME *ACMEConfig `yaml:"acme,omitempty"`
+}
+
+// ACMEConfig holds ACME (Let's Encrypt) configuration
+type ACMEConfig struct {
+	// Email is the email address for Let's Encrypt registration
+	Email string `yaml:"email"`
+
+	// Server is the ACME server URL (defaults to Let's Encrypt production)
+	// Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing
+	Server string `yaml:"server,omitempty"`
 }
 
 // ValidProviders lists the supported providers
@@ -64,4 +92,18 @@ func (c *NebariConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// GetKubeContext returns the effective Kubernetes context to use.
+// It checks the top-level kube_context first, which enables "bring your own cluster" mode.
+// Returns an empty string if no context is specified (provider will create the cluster).
+func (c *NebariConfig) GetKubeContext() string {
+	return c.KubeContext
+}
+
+// IsExistingCluster returns true if deploying to an existing cluster
+// (i.e., kube_context is specified at the top level).
+// When true, infrastructure provisioning should be skipped.
+func (c *NebariConfig) IsExistingCluster() bool {
+	return c.KubeContext != ""
 }

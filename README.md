@@ -144,6 +144,30 @@ OTEL_EXPORTER=none ./nic deploy -f config.yaml
 
 ## Development
 
+### Local cluster testing with Kind and OrbStack
+Due to difficulties with how networking works with Docker Desktop, using OrbStack for Docker is recommended on Mac.
+
+See these docs for installing OrbStack: https://docs.orbstack.dev/quick-start
+
+A github repo needs to be created and the URL added to `local-config.yaml` file. 
+
+A valid private SSH key needs to be set as an environment variable `GIT_SSH_PRIVATE_KEY`
+
+With these configured, to deploy a kind cluster and the foundational software with the `local-config.yaml` file, run the following command:
+
+```bash
+make localkind-up
+```
+
+In order to enable local UI access on a browser, add the following to /etc/hosts:
+```bash
+/etc/hosts: 192.168.1.100 keycloak.nebari.local argocd.nebari.local
+```
+
+Now ArgoCD and Keycloak can be accessed at the following URLs:
+- https://argocd.nebari.local
+- https://keycloak.nebari.local
+
 ### Running Tests
 
 ```bash
