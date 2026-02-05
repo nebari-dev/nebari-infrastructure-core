@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nebari-operator-controller-manager
+  namespace: nebari-operator-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          image: quay.io/nebari/nebari-operator:auth-reconciler
+          env:
+            # Keycloak integration configuration
+            - name: KEYCLOAK_ENABLED
+              value: "true"
+            - name: KEYCLOAK_URL
+              value: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080"
+            - name: KEYCLOAK_REALM
+              value: "nebari"
+            - name: KEYCLOAK_ADMIN_SECRET_NAME
+              value: "keycloak-admin-credentials"
+            - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
+              value: "keycloak"

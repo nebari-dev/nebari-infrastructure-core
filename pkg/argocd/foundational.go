@@ -195,6 +195,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
+			"admin-username": "admin",
 			"admin-password": keycloakCfg.AdminPassword,
 		},
 	}); err != nil {
