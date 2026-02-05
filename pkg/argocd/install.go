@@ -143,8 +143,25 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 	return nil
 }
 
-// waitForClusterReady waits for the cluster to be ready
-func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, timeout time.Duration) error {
+// NodeListFunc is a function type for listing nodes, allowing for dependency injection in tests.
+type NodeListFunc func(ctx context.Context) ([]corev1.Node, error)
+
+// isClusterReady checks if at least one node in the cluster is ready.
+// This is a pure function that can be easily tested.
+func isClusterReady(nodes []corev1.Node) bool {
+	for _, node := range nodes {
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// waitForClusterReadyWithLister waits for the cluster to be ready using the provided node lister.
+// This function separates the polling logic from the Kubernetes client, making it testable.
+func waitForClusterReadyWithLister(ctx context.Context, listNodes NodeListFunc, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.waitForClusterReady")
 	defer span.End()
@@ -156,6 +173,23 @@ func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, time
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Check function to avoid duplication
+	checkReady := func() bool {
+		nodes, err := listNodes(ctx)
+		if err != nil {
+			return false
+		}
+		return isClusterReady(nodes)
+	}
+
+	// Immediate check before starting the ticker
+	if checkReady() {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cluster is ready").
+			WithResource("cluster").
+			WithAction("ready"))
+		return nil
+	}
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -164,25 +198,26 @@ func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, time
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for cluster: %w", ctx.Err())
 		case <-ticker.C:
-			// Check if we can list nodes
-			nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-			if err != nil {
-				continue
-			}
-
-			// Check if at least one node is ready
-			for _, node := range nodes.Items {
-				for _, condition := range node.Status.Conditions {
-					if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
-						status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cluster is ready").
-							WithResource("cluster").
-							WithAction("ready"))
-						return nil
-					}
-				}
+			if checkReady() {
+				status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Cluster is ready").
+					WithResource("cluster").
+					WithAction("ready"))
+				return nil
 			}
 		}
 	}
+}
+
+// waitForClusterReady waits for the cluster to be ready using a Kubernetes client.
+func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, timeout time.Duration) error {
+	listNodes := func(ctx context.Context) ([]corev1.Node, error) {
+		nodeList, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+		return nodeList.Items, nil
+	}
+	return waitForClusterReadyWithLister(ctx, listNodes, timeout)
 }
 
 // waitForArgoCDReady waits for Argo CD deployments to be ready
