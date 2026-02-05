@@ -46,3 +46,6 @@ nic-state.json
 outputs.json
 
 CLAUDE.md
+
+# Git worktrees
+.worktrees/
