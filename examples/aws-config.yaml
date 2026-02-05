@@ -32,7 +32,7 @@ amazon_web_services:
     - us-west-2b
   vpc_cidr_block: "10.10.0.0/16"
   endpoint_private_access: true
-  endpoint_public_access: true
+  endpoint_public_access: true # Set to false to restrict access to within the VPC (requires a jumpbox or VPN)
 
   node_groups:
     # general:
