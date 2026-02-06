@@ -16,7 +16,7 @@ local:
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
 git_repository:
-  url: "git@github.com:openteams-ai/NIC-argocd-test.git"
+  url: "git@github.com:my-org/my-gitops-repo.git"
   branch: main
   path: "clusters/test1"  # Optional subdirectory within the repo
   auth:
