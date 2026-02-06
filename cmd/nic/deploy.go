@@ -18,6 +18,9 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -204,7 +207,30 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Print DNS guidance if no DNS provider is configured
 	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
-		printDNSGuidance(cfg, nil)
+		var lbEndpoint *endpoint.LoadBalancerEndpoint
+
+		kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
+		if err != nil {
+			slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		} else {
+			restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+			if err != nil {
+				slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+			} else {
+				k8sClient, err := kubernetes.NewForConfig(restConfig)
+				if err != nil {
+					slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
+				} else {
+					slog.Info("Waiting for load balancer endpoint...")
+					lbEndpoint, err = endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
+					if err != nil {
+						slog.Warn("Could not retrieve load balancer endpoint", "error", err)
+					}
+				}
+			}
+		}
+
+		printDNSGuidance(cfg, lbEndpoint)
 	}
 
 	return nil
