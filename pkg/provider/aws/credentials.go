@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // IAMClient defines the interface for IAM operations needed for credential validation.
@@ -245,18 +247,20 @@ func (p *Provider) ValidateCredentials(ctx context.Context, cfg *config.NebariCo
 		return err
 	}
 
-	// Print success info
-	fmt.Printf("AWS credentials validated\n")
-	fmt.Printf("  Identity: %s\n", result.Arn)
-	fmt.Printf("  Account:  %s\n", result.AccountID)
+	// Report identity via status channel
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "AWS credentials validated").
+		WithResource("credentials").
+		WithAction("validated").
+		WithMetadata("identity", result.Arn).
+		WithMetadata("account", result.AccountID))
 
 	// Check for missing permissions
 	if len(result.MissingPermissions) > 0 {
-		fmt.Printf("\nMissing permissions:\n")
-		for _, perm := range result.MissingPermissions {
-			fmt.Printf("  - %s\n", perm)
-		}
-		return fmt.Errorf("credential validation failed: %d missing permissions", len(result.MissingPermissions))
+		status.Send(ctx, status.NewUpdate(status.LevelError, fmt.Sprintf("Missing %d required permissions: %s", len(result.MissingPermissions), strings.Join(result.MissingPermissions, ", "))).
+			WithResource("credentials").
+			WithAction("validated").
+			WithMetadata("missing_permissions", result.MissingPermissions))
+		return fmt.Errorf("credential validation failed: missing %d permissions: %s", len(result.MissingPermissions), strings.Join(result.MissingPermissions, ", "))
 	}
 
 	return nil
