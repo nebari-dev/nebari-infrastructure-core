@@ -29,10 +29,12 @@ type FoundationalConfig struct {
 type KeycloakConfig struct {
 	Enabled               bool
 	AdminPassword         string
+	AdminUsername         string
 	DBPassword            string // Password for keycloak DB user
 	PostgresAdminPassword string // Password for postgres superuser
 	PostgresUserPassword  string // Password for postgres regular user
 	Hostname              string
+	RealmAdminUsername    string // Username for the admin user in the nebari realm
 	RealmAdminPassword    string // Password for the admin user in the nebari realm
 }
 
@@ -195,6 +197,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
+			"admin-username": keycloakCfg.AdminUsername,
 			"admin-password": keycloakCfg.AdminPassword,
 		},
 	}); err != nil {
@@ -243,7 +246,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			},
 			Type: corev1.SecretTypeOpaque,
 			StringData: map[string]string{
-				"username": "admin",
+				"username": keycloakCfg.RealmAdminUsername,
 				"password": keycloakCfg.RealmAdminPassword,
 			},
 		}); err != nil {
