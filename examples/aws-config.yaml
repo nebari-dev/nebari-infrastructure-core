@@ -35,7 +35,7 @@ amazon_web_services:
 
     user:
       instance: m7i.xlarge
-      min_nodes: 0
+      min_nodes: 1 # minimum of 1 node required
       max_nodes: 5
 
     # worker:
