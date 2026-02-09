@@ -1,6 +1,6 @@
 project_name: my-nebari-aws
 provider: aws
-domain: nic.openteams.app
+domain: nebari.example.com
 
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
