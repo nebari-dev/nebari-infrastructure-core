@@ -88,8 +88,8 @@ func TestProvisionRecords(t *testing.T) {
 			cfg:        baseCfg,
 			lbEndpoint: "203.0.113.42",
 			envToken:   "test-token",
-			mock: &mockClient{
-				// No existing records — ListDNSRecords returns empty
+			mock:       &mockClient{
+				// No existing records -- ListDNSRecords returns empty
 			},
 			wantCreates: []string{
 				"nebari.example.com:A:203.0.113.42",
@@ -101,8 +101,8 @@ func TestProvisionRecords(t *testing.T) {
 			cfg:        baseCfg,
 			lbEndpoint: "ab123.elb.us-west-2.amazonaws.com",
 			envToken:   "test-token",
-			mock: &mockClient{
-				// No existing records — ListDNSRecords returns empty
+			mock:       &mockClient{
+				// No existing records -- ListDNSRecords returns empty
 			},
 			wantCreates: []string{
 				"nebari.example.com:CNAME:ab123.elb.us-west-2.amazonaws.com",

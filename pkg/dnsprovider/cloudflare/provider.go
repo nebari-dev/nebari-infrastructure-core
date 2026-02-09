@@ -2,12 +2,22 @@ package cloudflare
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const defaultTTL = 300
+
 // Provider implements the Cloudflare DNS provider.
-// Stateless — config is parsed on each call, matching the cloud provider pattern.
+// Stateless -- config is parsed on each call, matching the cloud provider pattern.
 type Provider struct {
 	client CloudflareClient // nil = use real SDK client; set via NewProviderForTesting
 }
@@ -28,11 +38,193 @@ func (p *Provider) Name() string {
 }
 
 // ProvisionRecords creates or updates DNS records for the deployment.
+// It creates a root domain record and wildcard record pointing to the
+// load balancer endpoint. The record type (A or CNAME) is determined
+// automatically from the endpoint value.
 func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfig, lbEndpoint string) error {
-	return nil // Stub — implemented in Task 4
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cloudflare.ProvisionRecords")
+	defer span.End()
+
+	// Validate domain
+	if cfg.Domain == "" {
+		return fmt.Errorf("domain is required for DNS provisioning")
+	}
+	span.SetAttributes(attribute.String("domain", cfg.Domain))
+
+	// Parse Cloudflare-specific config from the DNS map
+	cfCfg, err := extractCloudflareConfig(cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	span.SetAttributes(attribute.String("zone_name", cfCfg.ZoneName))
+
+	// Get API token from environment
+	apiToken, err := getAPIToken()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Get client (mock for tests, real SDK for production)
+	client, err := p.getClient(apiToken)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Resolve zone ID from zone name
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Resolving Cloudflare zone ID for %s", cfCfg.ZoneName)).
+		WithResource("dns-zone").
+		WithAction("resolving"))
+
+	zoneID, err := client.ResolveZoneID(ctx, cfCfg.ZoneName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("zone not found for %q: %w", cfCfg.ZoneName, err)
+	}
+	span.SetAttributes(attribute.String("zone_id", zoneID))
+
+	// Determine record type from endpoint
+	recType := recordTypeForEndpoint(lbEndpoint)
+	span.SetAttributes(
+		attribute.String("endpoint", lbEndpoint),
+		attribute.String("record_type", recType),
+	)
+
+	// Ensure root domain record
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Ensuring DNS record for %s", cfg.Domain)).
+		WithResource("dns-record").
+		WithAction("ensuring"))
+
+	if err := ensureRecord(ctx, client, zoneID, cfg.Domain, recType, lbEndpoint); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to ensure record for %s: %w", cfg.Domain, err)
+	}
+
+	// Ensure wildcard record
+	wildcardName := "*." + cfg.Domain
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Ensuring DNS record for %s", wildcardName)).
+		WithResource("dns-record").
+		WithAction("ensuring"))
+
+	if err := ensureRecord(ctx, client, zoneID, wildcardName, recType, lbEndpoint); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to ensure record for %s: %w", wildcardName, err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records provisioned for %s", cfg.Domain)).
+		WithResource("dns-records").
+		WithAction("provisioned"))
+
+	return nil
 }
 
 // DestroyRecords removes DNS records created during deployment.
 func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig) error {
-	return nil // Stub — implemented in Task 6
+	return nil // Stub -- implemented in Task 6
+}
+
+// extractCloudflareConfig parses the cfg.DNS map into a Config struct.
+// Uses JSON marshal/unmarshal for robust conversion from map[string]any.
+func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
+	if cfg.DNS == nil {
+		return nil, fmt.Errorf("dns configuration is missing for cloudflare provider")
+	}
+
+	data, err := json.Marshal(cfg.DNS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal dns config: %w", err)
+	}
+
+	var cfCfg Config
+	if err := json.Unmarshal(data, &cfCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse cloudflare dns config: %w", err)
+	}
+
+	if cfCfg.ZoneName == "" {
+		return nil, fmt.Errorf("dns configuration is missing zone_name for cloudflare provider")
+	}
+
+	return &cfCfg, nil
+}
+
+// getAPIToken reads the Cloudflare API token from the environment.
+func getAPIToken() (string, error) {
+	token := os.Getenv("CLOUDFLARE_API_TOKEN")
+	if token == "" {
+		return "", fmt.Errorf("CLOUDFLARE_API_TOKEN environment variable is required")
+	}
+	return token, nil
+}
+
+// getClient returns the injected mock client or creates a real SDK client.
+func (p *Provider) getClient(apiToken string) (CloudflareClient, error) {
+	if p.client != nil {
+		return p.client, nil
+	}
+	return NewSDKClient(apiToken)
+}
+
+// isIPAddress returns true if the endpoint string is an IP address.
+func isIPAddress(endpoint string) bool {
+	return net.ParseIP(endpoint) != nil
+}
+
+// recordTypeForEndpoint returns "A" for IP addresses, "CNAME" for hostnames.
+func recordTypeForEndpoint(endpoint string) string {
+	if isIPAddress(endpoint) {
+		return "A"
+	}
+	return "CNAME"
+}
+
+// ensureRecord creates or updates a DNS record to match the desired state.
+// If the record exists with the correct content, it is a no-op.
+// If the record exists with different content, it is updated.
+// If the record does not exist, it is created.
+func ensureRecord(ctx context.Context, client CloudflareClient, zoneID, name, recordType, content string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cloudflare.ensureRecord")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("record_name", name),
+		attribute.String("record_type", recordType),
+		attribute.String("record_content", content),
+	)
+
+	// Check for existing records
+	existing, err := client.ListDNSRecords(ctx, zoneID, name, recordType)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to list records for %s: %w", name, err)
+	}
+
+	// If a matching record exists, check if it needs updating
+	if len(existing) > 0 {
+		rec := existing[0]
+		if rec.Content == content {
+			// Record already matches -- no-op
+			span.SetAttributes(attribute.String("action", "no-op"))
+			return nil
+		}
+		// Content differs -- update
+		span.SetAttributes(attribute.String("action", "update"))
+		if err := client.UpdateDNSRecord(ctx, zoneID, rec.ID, name, recordType, content, defaultTTL); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to update record %s: %w", name, err)
+		}
+		return nil
+	}
+
+	// No existing record -- create
+	span.SetAttributes(attribute.String("action", "create"))
+	if err := client.CreateDNSRecord(ctx, zoneID, name, recordType, content, defaultTTL); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create record %s: %w", name, err)
+	}
+
+	return nil
 }
