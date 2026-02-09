@@ -122,8 +122,104 @@ func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfi
 }
 
 // DestroyRecords removes DNS records created during deployment.
+// It checks for both A and CNAME record types since the original record type
+// is not stored. Idempotent -- succeeds even if records are already gone.
 func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig) error {
-	return nil // Stub -- implemented in Task 6
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cloudflare.DestroyRecords")
+	defer span.End()
+
+	// Validate domain
+	if cfg.Domain == "" {
+		return fmt.Errorf("domain is required for DNS record destruction")
+	}
+	span.SetAttributes(attribute.String("domain", cfg.Domain))
+
+	// Parse Cloudflare-specific config from the DNS map
+	cfCfg, err := extractCloudflareConfig(cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	span.SetAttributes(attribute.String("zone_name", cfCfg.ZoneName))
+
+	// Get API token from environment
+	apiToken, err := getAPIToken()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Get client (mock for tests, real SDK for production)
+	client, err := p.getClient(apiToken)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Resolve zone ID from zone name
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Resolving Cloudflare zone ID for %s", cfCfg.ZoneName)).
+		WithResource("dns-zone").
+		WithAction("resolving"))
+
+	zoneID, err := client.ResolveZoneID(ctx, cfCfg.ZoneName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("zone not found for %q: %w", cfCfg.ZoneName, err)
+	}
+	span.SetAttributes(attribute.String("zone_id", zoneID))
+
+	// Delete records for both root domain and wildcard
+	names := []string{cfg.Domain, "*." + cfg.Domain}
+	recordTypes := []string{"A", "CNAME"}
+
+	for _, name := range names {
+		for _, recType := range recordTypes {
+			if err := p.deleteRecordIfExists(ctx, client, zoneID, name, recType); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to delete %s record for %s: %w", recType, name, err)
+			}
+		}
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records destroyed for %s", cfg.Domain)).
+		WithResource("dns-records").
+		WithAction("destroyed"))
+
+	return nil
+}
+
+// deleteRecordIfExists lists DNS records matching the given name and type,
+// then deletes each one found. No records found is a no-op (idempotent).
+func (p *Provider) deleteRecordIfExists(ctx context.Context, client CloudflareClient, zoneID, name, recordType string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cloudflare.deleteRecordIfExists")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("record_name", name),
+		attribute.String("record_type", recordType),
+	)
+
+	existing, err := client.ListDNSRecords(ctx, zoneID, name, recordType)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to list %s records for %s: %w", recordType, name, err)
+	}
+
+	for _, rec := range existing {
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Deleting %s record %s (%s)", rec.Type, rec.Name, rec.ID)).
+			WithResource("dns-record").
+			WithAction("deleting"))
+
+		if err := client.DeleteDNSRecord(ctx, zoneID, rec.ID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to delete record %s (%s): %w", rec.Name, rec.ID, err)
+		}
+		span.SetAttributes(attribute.String("deleted_record_id", rec.ID))
+	}
+
+	return nil
 }
 
 // extractCloudflareConfig parses the cfg.DNS map into a Config struct.

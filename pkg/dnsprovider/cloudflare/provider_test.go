@@ -358,7 +358,7 @@ func TestDestroyRecords(t *testing.T) {
 			name:     "no-op when no records exist",
 			cfg:      baseCfg,
 			envToken: "test-token",
-			mock: &mockClient{
+			mock:     &mockClient{
 				// Default listDNSRecordsFn returns nil, nil -- no records found
 			},
 			wantDeletes: nil,
