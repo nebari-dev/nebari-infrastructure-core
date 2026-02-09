@@ -34,7 +34,7 @@ type KeycloakConfig struct {
 	PostgresAdminPassword string // Password for postgres superuser
 	PostgresUserPassword  string // Password for postgres regular user
 	Hostname              string
-	RealmAdminUsername    string // Useranme for the admin user in the nebari realm
+	RealmAdminUsername    string // Username for the admin user in the nebari realm
 	RealmAdminPassword    string // Password for the admin user in the nebari realm
 }
 
