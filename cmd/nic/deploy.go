@@ -195,22 +195,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Flush all pending status messages before printing instructions
-	// This prevents log messages from appearing in the middle of the instructions
-	cleanupStatus()
-
-	// Print instructions after status handler is cleaned up
-	if argoCDInstalled {
-		printArgoCDInstructions(cfg)
-	}
-	if keycloakInstalled {
-		printKeycloakInstructions(cfg)
-	}
-
-	// Print DNS guidance if no DNS provider is configured
-	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
-		var lbEndpoint *endpoint.LoadBalancerEndpoint
-
+	// Get load balancer endpoint (needed for both DNS provisioning and manual guidance)
+	var lbEndpoint *endpoint.LoadBalancerEndpoint
+	if cfg.Domain != "" && !deployDryRun {
 		kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
 		if err != nil {
 			slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
@@ -231,7 +218,43 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	}
 
+	// Provision DNS records if a DNS provider is configured
+	if cfg.DNSProvider != "" && !deployDryRun && lbEndpoint != nil {
+		dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+		if err != nil {
+			slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNSProvider, "error", err)
+		} else {
+			// Determine the endpoint string (hostname or IP)
+			lbEndpointStr := lbEndpoint.Hostname
+			if lbEndpointStr == "" {
+				lbEndpointStr = lbEndpoint.IP
+			}
+			slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+			if err := dnsProvider.ProvisionRecords(ctx, cfg, lbEndpointStr); err != nil {
+				slog.Warn("Failed to provision DNS records", "error", err)
+				slog.Warn("You can configure DNS manually — see instructions below")
+			} else {
+				slog.Info("DNS records provisioned successfully", "domain", cfg.Domain)
+			}
+		}
+	}
+
+	// Flush all pending status messages before printing instructions
+	// This prevents log messages from appearing in the middle of the instructions
+	cleanupStatus()
+
+	// Print instructions after status handler is cleaned up
+	if argoCDInstalled {
+		printArgoCDInstructions(cfg)
+	}
+	if keycloakInstalled {
+		printKeycloakInstructions(cfg)
+	}
+
+	// Print DNS guidance only if no DNS provider is configured
+	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
 		printDNSGuidance(cfg, lbEndpoint)
 	}
 
