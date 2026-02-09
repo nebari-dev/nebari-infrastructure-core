@@ -128,6 +128,23 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Clean up DNS records if a DNS provider is configured
+	if cfg.DNSProvider != "" && !destroyDryRun {
+		dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+		if err != nil {
+			slog.Warn("DNS provider not found, skipping DNS cleanup", "provider", cfg.DNSProvider, "error", err)
+		} else {
+			slog.Info("Cleaning up DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+			if err := dnsProvider.DestroyRecords(ctx, cfg); err != nil {
+				// Log warning but don't fail destruction
+				slog.Warn("Failed to clean up DNS records", "error", err)
+				slog.Warn("You may need to manually remove DNS records from your provider")
+			} else {
+				slog.Info("DNS records cleaned up successfully", "domain", cfg.Domain)
+			}
+		}
+	}
+
 	// Destroy infrastructure
 	if err := prov.Destroy(ctx, cfg); err != nil {
 		span.RecordError(err)
