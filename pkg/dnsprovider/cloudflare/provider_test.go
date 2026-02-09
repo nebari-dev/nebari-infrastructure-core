@@ -282,6 +282,155 @@ func TestProvisionRecords(t *testing.T) {
 	}
 }
 
+func TestDestroyRecords(t *testing.T) {
+	baseCfg := &config.NebariConfig{
+		ProjectName: "test-project",
+		Provider:    "aws",
+		Domain:      "nebari.example.com",
+		DNSProvider: "cloudflare",
+		DNS: map[string]any{
+			"zone_name": "example.com",
+		},
+	}
+
+	tests := []struct {
+		name           string
+		cfg            *config.NebariConfig
+		envToken       string
+		mock           *mockClient
+		wantErr        bool
+		wantErrContain string
+		wantDeletes    []string // record IDs deleted
+	}{
+		{
+			name:     "deletes existing A records",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
+					// Return A records for root and wildcard; CNAME queries return empty
+					if recordType == "A" {
+						switch name {
+						case "nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-1", Name: "nebari.example.com", Type: "A",
+								Content: "203.0.113.42", TTL: 300,
+							}}, nil
+						case "*.nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-2", Name: "*.nebari.example.com", Type: "A",
+								Content: "203.0.113.42", TTL: 300,
+							}}, nil
+						}
+					}
+					return nil, nil
+				},
+			},
+			wantDeletes: []string{"rec-1", "rec-2"},
+		},
+		{
+			name:     "deletes existing CNAME records",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
+					// Return CNAME records for root and wildcard; A queries return empty
+					if recordType == "CNAME" {
+						switch name {
+						case "nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-3", Name: "nebari.example.com", Type: "CNAME",
+								Content: "ab123.elb.us-west-2.amazonaws.com", TTL: 300,
+							}}, nil
+						case "*.nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-4", Name: "*.nebari.example.com", Type: "CNAME",
+								Content: "ab123.elb.us-west-2.amazonaws.com", TTL: 300,
+							}}, nil
+						}
+					}
+					return nil, nil
+				},
+			},
+			wantDeletes: []string{"rec-3", "rec-4"},
+		},
+		{
+			name:     "no-op when no records exist",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock: &mockClient{
+				// Default listDNSRecordsFn returns nil, nil -- no records found
+			},
+			wantDeletes: nil,
+		},
+		{
+			name: "error when DNS config missing",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "nebari.example.com",
+				DNSProvider: "cloudflare",
+				DNS:         nil,
+			},
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "dns configuration is missing",
+		},
+		{
+			name:           "error when API token missing",
+			cfg:            baseCfg,
+			envToken:       "", // no token
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "CLOUDFLARE_API_TOKEN",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.envToken != "" {
+				t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
+			}
+
+			// Track deletes via closure
+			var deletes []string
+			tc.mock.deleteDNSRecordFn = func(_ context.Context, _ string, recordID string) error {
+				deletes = append(deletes, recordID)
+				return nil
+			}
+
+			provider := NewProviderForTesting(tc.mock)
+			err := provider.DestroyRecords(context.Background(), tc.cfg)
+
+			// Check error expectations
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrContain)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContain) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrContain, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Check deletes
+			if len(tc.wantDeletes) != len(deletes) {
+				t.Errorf("expected %d deletes, got %d: %v", len(tc.wantDeletes), len(deletes), deletes)
+			} else {
+				for i, want := range tc.wantDeletes {
+					if deletes[i] != want {
+						t.Errorf("delete[%d] = %q, want %q", i, deletes[i], want)
+					}
+				}
+			}
+		})
+	}
+}
+
 // wrapCreate wraps an optional createDNSRecordFn to also track calls.
 func wrapCreate(original func(context.Context, string, string, string, string, int) error, tracker *[]string) func(context.Context, string, string, string, string, int) error {
 	return func(ctx context.Context, zoneID string, name string, recordType string, content string, ttl int) error {
