@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -224,6 +225,7 @@ func (p *Provider) deleteRecordIfExists(ctx context.Context, client CloudflareCl
 
 // extractCloudflareConfig parses the cfg.DNS map into a Config struct.
 // Uses JSON marshal/unmarshal for robust conversion from map[string]any.
+// Validates that cfg.Domain is a subdomain of the zone name.
 func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
 	if cfg.DNS == nil {
 		return nil, fmt.Errorf("dns configuration is missing for cloudflare provider")
@@ -241,6 +243,11 @@ func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
 
 	if cfCfg.ZoneName == "" {
 		return nil, fmt.Errorf("dns configuration is missing zone_name for cloudflare provider")
+	}
+
+	// Validate that domain is within the configured zone
+	if cfg.Domain != "" && !strings.HasSuffix(cfg.Domain, cfCfg.ZoneName) {
+		return nil, fmt.Errorf("domain %q is not within zone %q", cfg.Domain, cfCfg.ZoneName)
 	}
 
 	return &cfCfg, nil
@@ -277,9 +284,10 @@ func recordTypeForEndpoint(endpoint string) string {
 }
 
 // ensureRecord creates or updates a DNS record to match the desired state.
-// If the record exists with the correct content, it is a no-op.
-// If the record exists with different content, it is updated.
-// If the record does not exist, it is created.
+// If a single record exists with the correct content, it is a no-op.
+// If a single record exists with different content, it is updated.
+// If multiple records exist, duplicates are deleted and the first is updated.
+// If no record exists, one is created.
 func ensureRecord(ctx context.Context, client CloudflareClient, zoneID, name, recordType, content string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cloudflare.ensureRecord")
@@ -298,8 +306,15 @@ func ensureRecord(ctx context.Context, client CloudflareClient, zoneID, name, re
 		return fmt.Errorf("failed to list records for %s: %w", name, err)
 	}
 
-	// If a matching record exists, check if it needs updating
 	if len(existing) > 0 {
+		// Delete duplicates (all but the first record)
+		for _, dup := range existing[1:] {
+			if err := client.DeleteDNSRecord(ctx, zoneID, dup.ID); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to delete duplicate record %s (ID: %s): %w", name, dup.ID, err)
+			}
+		}
+
 		rec := existing[0]
 		if rec.Content == content {
 			// Record already matches -- no-op
