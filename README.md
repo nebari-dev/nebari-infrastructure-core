@@ -1,6 +1,9 @@
 <p align="center">
   <a href="https://nebari.dev">
-    <img src="docs/assets/nebari-logo.svg" alt="Nebari" width="400">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nebari-dev/nebari-design/blob/main/logo-mark/colored-background/Nebari-Logo-Black-Bg.png?raw=true">
+      <img src="docs/assets/nebari-logo.svg" alt="Nebari" style="border-radius: 12px; border: 2px solid white;">
+    </picture>
   </a>
 </p>
 
@@ -13,42 +16,56 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml"><img src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
+  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml"><img
+  src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a> <a
+  href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img
+  src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a> <a href="https://golang.org"><img
+  src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="docs/cli-reference.md">CLI Reference</a> &middot;
-  <a href="#architecture">Architecture</a> &middot;
-  <a href="#roadmap">Roadmap</a> &middot;
-  <a href="docs/design-doc/README.md">Documentation</a>
+  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/cli-reference.md">CLI Reference</a> &middot; <a
+  href="#architecture">Architecture</a> &middot; <a href="#roadmap">Roadmap</a> &middot; <a
+  href="docs/design-doc/README.md">Documentation</a>
 </p>
 
----
 
-> **Status**: Under heavy development and very unstable. APIs, configuration formats, and behavior will change without notice. Not yet suitable for production use.
+
+> **Status**: Under heavy development and very unstable. APIs, configuration formats, and behavior will change without
+> notice. Not yet suitable for production use.
 
 ## What is Nebari Infrastructure Core?
 
-Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever observability system you already run — all wired together and working out of the box.
+Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully
+configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes
+cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever
+observability system you already run — all wired together and working out of the box.
 
-NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
+NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial
+focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is
+general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
 
-NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up in Go based on seven years of lessons learned deploying data science platforms in production.
+NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up in Go based on seven
+years of lessons learned deploying data science platforms in production.
 
 ### The Problem
 
-Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
+Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating
+dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps
+tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
 
 ### The Solution
 
-NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the infrastructure and deploys foundational services that are pre-integrated and production-hardened.
+NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the
+infrastructure and deploys foundational services that are pre-integrated and production-hardened.
 
-On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
+On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of
+open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically
+register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
 
-Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is independent, so you deploy only what you need.
+Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe,
+Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is
+independent, so you deploy only what you need.
 
 ## Architecture
 
@@ -95,7 +112,8 @@ nic deploy -f config.yaml
 
 1. **Provisions infrastructure** — VPC, managed Kubernetes, node pools, storage, IAM via OpenTofu
 2. **Deploys foundational software** — ArgoCD installs Keycloak, Envoy Gateway, cert-manager, OpenTelemetry Collector
-3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and telemetry
+3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and
+   telemetry
 4. **Configures DNS** — optional Cloudflare integration for automatic record management
 
 ## Launchpad
@@ -209,7 +227,8 @@ NIC is under active development. Here's where we're headed:
 - [ ] Application stack specification (databases, caching, queues in config)
 - [ ] Compliance profiles (HIPAA, SOC2, PCI-DSS)
 
-See the [full milestone plan](docs/design-doc/operations/13-milestones.md) and [future enhancements spec](docs/design-doc/appendix/15-future-enhancements.md) for details.
+See the [full milestone plan](docs/design-doc/operations/13-milestones.md) and
+[future enhancements spec](docs/design-doc/appendix/15-future-enhancements.md) for details.
 
 ## Documentation
 
