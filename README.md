@@ -53,36 +53,38 @@ Want JupyterHub and conda-store? Install the Data Science Pack. Need model servi
 ## Architecture
 
 ```mermaid
-block-beta
-  columns 5
+flowchart TD
+  subgraph SP["Software Packs"]
+    direction LR
+    ds["Data Science"] ~~~ ml["ML Serving"] ~~~ obs["Observability"] ~~~ custom["Your Pack"]
+  end
 
-  sp["Software Packs"]:5
-  ds["Data Science"] ml["ML Serving"] obs["Observability"] custom["Your Pack"] space
+  subgraph NO["Nebari Operator"]
+    op["Auto-configures SSO, routing, TLS, telemetry via NebariApp CRD"]
+  end
 
-  no["Nebari Operator — auto-configures SSO, routing, TLS, telemetry"]:5
+  subgraph FS["Foundational Software"]
+    direction LR
+    kc["Keycloak"] ~~~ eg["Envoy GW"] ~~~ cm["cert-manager"] ~~~ ot["OTel"] ~~~ ac["ArgoCD"]
+  end
 
-  fs["Foundational Software"]:5
-  kc["Keycloak"] eg["Envoy Gateway"] cm["cert-manager"] ot["OTel Collector"] ac["ArgoCD"]
+  subgraph K8["Kubernetes Cluster"]
+    direction LR
+    vpc["VPC"] ~~~ np["Node Pools"] ~~~ st["Storage"] ~~~ iam["IAM"]
+  end
 
-  k8["Kubernetes Cluster"]:5
-  vpc["VPC"] np["Node Pools"] st["Storage"] iam["IAM"] space
+  subgraph CP["Cloud Provider"]
+    direction LR
+    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ k3s["Local K3s"]
+  end
 
-  cp["Cloud Provider"]:5
-  aws["AWS EKS"] gcp["GCP GKE"] az["Azure AKS"] k3s["Local K3s"] space
+  SP --> NO --> FS --> K8 --> CP
 
-  classDef purple fill:#7c3aed,color:#fff
-  classDef navy fill:#1e3a5f,color:#fff
-  classDef green fill:#065f46,color:#fff
-  classDef gray fill:#4a5568,color:#fff
-  classDef brown fill:#92400e,color:#fff
-  classDef light fill:#f8f9fa,stroke:#dee2e6,color:#333
-
-  class sp purple
-  class no navy
-  class fs green
-  class k8 gray
-  class cp brown
-  class ds,ml,obs,custom,kc,eg,cm,ot,ac,vpc,np,st,iam,aws,gcp,az,k3s light
+  style SP fill:#ede9fe,stroke:#7c3aed,color:#5b21b6
+  style NO fill:#e0e7ef,stroke:#1e3a5f,color:#1e3a5f
+  style FS fill:#d1fae5,stroke:#065f46,color:#065f46
+  style K8 fill:#e5e7eb,stroke:#4a5568,color:#374151
+  style CP fill:#fef3c7,stroke:#92400e,color:#78350f
 ```
 
 ### How It Works
