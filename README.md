@@ -7,7 +7,7 @@
 <h1 align="center">Nebari Infrastructure Core</h1>
 
 <p align="center">
-  <strong>An opinionated Kubernetes distribution with batteries-included foundational software.</strong>
+  <strong>An opinionated Kubernetes distribution built for AI/ML workflows.</strong>
   <br />
   One config file. Production-ready platform. Any cloud.
 </p>
@@ -33,6 +33,8 @@
 ## What is Nebari Infrastructure Core?
 
 Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever observability system you already run — all wired together and working out of the box.
+
+NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
 
 NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up in Go based on seven years of lessons learned deploying data science platforms in production.
 
