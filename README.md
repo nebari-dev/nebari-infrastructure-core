@@ -53,46 +53,34 @@ Want JupyterHub and conda-store? Install the Data Science Pack. Need model servi
 ## Architecture
 
 ```mermaid
-graph TB
-    subgraph SP["Software Packs"]
-        direction LR
-        DS["Data Science Pack<br/><i>JupyterHub, conda-store, Dask</i>"]
-        ML["ML Pack<br/><i>MLflow, KServe, Envoy AI Gateway</i>"]
-        OBS["Observability Pack<br/><i>Grafana, Loki, Tempo, Mimir</i>"]
-        Custom["Your Custom Pack<br/><i>Any ArgoCD application</i>"]
+block-beta
+    columns 1
+
+    block:SP["Software Packs"]:1
+        DS["Data Science\nJupyterHub, conda-store, Dask"]
+        ML["ML Serving\nMLflow, KServe, Envoy AI Gateway"]
+        OBS["Observability\nGrafana, Loki, Tempo, Mimir"]
+        Custom["Your Pack\nAny ArgoCD application"]
     end
 
-    subgraph OP["Nebari Operator"]
-        direction LR
-        CRD["NebariApp CRD"]
-        Auth["Auto-SSO via Keycloak"]
-        Route["Auto-routing via Envoy"]
-        Tel["Auto-telemetry via OTel"]
+    block:OP["Nebari Operator — auto-configures SSO, routing, TLS, telemetry via NebariApp CRD"]:1
+        space
     end
 
-    subgraph FS["Foundational Software — deployed by ArgoCD"]
-        direction LR
-        KC["Keycloak<br/><i>SSO & Identity</i>"]
-        EG["Envoy Gateway<br/><i>Ingress & API Gateway</i>"]
-        CM["cert-manager<br/><i>TLS Certificates</i>"]
-        OTEL["OpenTelemetry Collector<br/><i>Metrics, Logs, Traces Export</i>"]
-        ARGO["ArgoCD<br/><i>GitOps</i>"]
+    block:FS["Foundational Software — deployed by ArgoCD"]:1
+        KC["Keycloak\nSSO & Identity"]
+        EG["Envoy Gateway\nIngress & API GW"]
+        CM["cert-manager\nTLS Certificates"]
+        OTEL["OTel Collector\nMetrics, Logs, Traces"]
+        ARGO["ArgoCD\nGitOps"]
     end
 
-    subgraph K8S["Kubernetes Cluster — provisioned by NIC via OpenTofu"]
-        direction LR
-        Net["Networking & VPC"]
-        Nodes["Node Pools & Autoscaling"]
-        Storage["Persistent Storage"]
-        IAM["IAM & Security"]
+    block:K8S["Kubernetes — provisioned by NIC via OpenTofu"]:1
+        Net["VPC & Networking"] Nodes["Node Pools"] Storage["Storage"] IAM["IAM & Security"]
     end
 
-    subgraph Cloud["Cloud Provider"]
-        direction LR
-        AWS["AWS (EKS)"]
-        GCP["GCP (GKE)"]
-        Azure["Azure (AKS)"]
-        Local["Local (K3s)"]
+    block:Cloud["Cloud Provider"]:1
+        AWS["AWS EKS"] GCP["GCP GKE"] Azure["Azure AKS"] Local["Local K3s"]
     end
 
     SP --> OP
