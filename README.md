@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://nebari.dev">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nebari-dev/nebari-design/blob/main/logo-mark/colored-background/Nebari-Logo-Black-Bg.png?raw=true">
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/nebari-dev/nebari-design/blob/main/logo-mark/colored-background/Nebari-Logo-Black-Bg.png?raw=true" width="400" >
       <img src="docs/assets/nebari-logo.svg" alt="Nebari" style="border-radius: 12px; border: 2px solid white;">
     </picture>
   </a>
