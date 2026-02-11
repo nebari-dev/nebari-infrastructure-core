@@ -32,21 +32,21 @@
 
 ## What is Nebari Infrastructure Core?
 
-Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, observability, GitOps, API gateway, and TLS certificates — all wired together and working out of the box.
+Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever observability system you already run — all wired together and working out of the box.
 
 NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up in Go based on seven years of lessons learned deploying data science platforms in production.
 
 ### The Problem
 
-Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating dozens of components: identity providers, certificate management, ingress controllers, observability stacks, GitOps tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
+Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
 
 ### The Solution
 
 NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the infrastructure and deploys foundational services that are pre-integrated and production-hardened.
 
-On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NicApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and observability with zero manual configuration.
+On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NicApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
 
-Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Each pack is independent, so you deploy only what you need.
+Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is independent, so you deploy only what you need.
 
 ## Architecture
 
@@ -56,6 +56,7 @@ graph TB
         direction LR
         DS["Data Science Pack<br/><i>JupyterHub, conda-store, Dask</i>"]
         ML["ML Pack<br/><i>MLflow, KServe, Envoy AI Gateway</i>"]
+        OBS["Observability Pack<br/><i>Grafana, Loki, Tempo, Mimir</i>"]
         Custom["Your Custom Pack<br/><i>Any ArgoCD application</i>"]
     end
 
@@ -64,16 +65,15 @@ graph TB
         CRD["NicApp CRD"]
         Auth["Auto-SSO via Keycloak"]
         Route["Auto-routing via Envoy"]
-        Obs["Auto-observability via LGTM"]
+        Tel["Auto-telemetry via OTel"]
     end
 
     subgraph FS["Foundational Software — deployed by ArgoCD"]
         direction LR
         KC["Keycloak<br/><i>SSO & Identity</i>"]
-        LGTM["LGTM Stack<br/><i>Grafana, Loki, Tempo, Mimir</i>"]
         EG["Envoy Gateway<br/><i>Ingress & API Gateway</i>"]
         CM["cert-manager<br/><i>TLS Certificates</i>"]
-        OTEL["OpenTelemetry<br/><i>Metrics, Logs, Traces</i>"]
+        OTEL["OpenTelemetry Collector<br/><i>Metrics, Logs, Traces Export</i>"]
         ARGO["ArgoCD<br/><i>GitOps</i>"]
     end
 
@@ -112,8 +112,8 @@ nic deploy -f config.yaml
 ```
 
 1. **Provisions infrastructure** — VPC, managed Kubernetes, node pools, storage, IAM via OpenTofu
-2. **Deploys foundational software** — ArgoCD installs Keycloak, LGTM stack, Envoy Gateway, cert-manager, OpenTelemetry
-3. **Activates the Nebari Operator** — watches for `NicApp` resources, auto-configures SSO, routing, TLS, and observability
+2. **Deploys foundational software** — ArgoCD installs Keycloak, Envoy Gateway, cert-manager, OpenTelemetry Collector
+3. **Activates the Nebari Operator** — watches for `NicApp` resources, auto-configures SSO, routing, TLS, and telemetry
 4. **Configures DNS** — optional Cloudflare integration for automatic record management
 
 ## Launchpad
@@ -133,10 +133,10 @@ Every NIC deployment includes a landing page where users discover and access all
 | Feature | Description |
 |---------|-------------|
 | **Opinionated Defaults** | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices |
-| **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, observability, and routing |
+| **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing |
 | **Multi-Cloud** | AWS (EKS), GCP (GKE), Azure (AKS), and local (K3s) from the same config format |
 | **GitOps Native** | ArgoCD manages all foundational software with dependency ordering and health checks |
-| **Observability Built-In** | Full LGTM stack (Grafana, Loki, Tempo, Mimir) + OpenTelemetry — not an afterthought |
+| **OpenTelemetry Native** | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
 | **SSO Everywhere** | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically |
 | **Declarative** | One YAML config file. NIC reconciles actual state to match using OpenTofu |
 | **DNS Automation** | Optional Cloudflare provider for automatic DNS record management |
@@ -207,8 +207,8 @@ NIC is under active development. Here's where we're headed:
 ### Completed
 
 - [x] Core CLI with provider abstraction and AWS provider
-- [x] Foundational software deployment via ArgoCD (Keycloak, LGTM, cert-manager, Envoy Gateway)
-- [x] Nebari Operator with `NicApp` CRD (auto-SSO, routing, observability)
+- [x] Foundational software deployment via ArgoCD (Keycloak, cert-manager, Envoy Gateway, OTel Collector)
+- [x] Nebari Operator with `NicApp` CRD (auto-SSO, routing, telemetry)
 - [x] Multi-cloud support (AWS, GCP, Azure, Local)
 - [x] OpenTelemetry instrumentation throughout
 - [x] Cloudflare DNS provider integration
