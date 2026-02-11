@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -376,6 +377,18 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 			return err
 		}
 		return nil
+	}
+
+	// Clean up Kubernetes-created load balancers before destroying infrastructure.
+	// These are not managed by Terraform and will block VPC/subnet deletion.
+	slog.Info("Cleaning up Kubernetes-created load balancers", "cluster", cfg.ProjectName)
+	if err := cleanupKubernetesLoadBalancers(ctx, region, cfg.ProjectName); err != nil {
+		if cfg.Force {
+			slog.Warn("Failed to clean up load balancers, continuing with --force", "error", err)
+		} else {
+			span.RecordError(err)
+			return fmt.Errorf("failed to clean up load balancers: %w", err)
+		}
 	}
 
 	err = tf.Destroy(ctx)
