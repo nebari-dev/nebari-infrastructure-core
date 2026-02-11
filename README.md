@@ -46,7 +46,7 @@ Getting from a managed Kubernetes cluster to a platform teams can actually use r
 
 NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the infrastructure and deploys foundational services that are pre-integrated and production-hardened.
 
-On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NicApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
+On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
 
 Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is independent, so you deploy only what you need.
 
@@ -64,7 +64,7 @@ graph TB
 
     subgraph OP["Nebari Operator"]
         direction LR
-        CRD["NicApp CRD"]
+        CRD["NebariApp CRD"]
         Auth["Auto-SSO via Keycloak"]
         Route["Auto-routing via Envoy"]
         Tel["Auto-telemetry via OTel"]
@@ -115,7 +115,7 @@ nic deploy -f config.yaml
 
 1. **Provisions infrastructure** — VPC, managed Kubernetes, node pools, storage, IAM via OpenTofu
 2. **Deploys foundational software** — ArgoCD installs Keycloak, Envoy Gateway, cert-manager, OpenTelemetry Collector
-3. **Activates the Nebari Operator** — watches for `NicApp` resources, auto-configures SSO, routing, TLS, and telemetry
+3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and telemetry
 4. **Configures DNS** — optional Cloudflare integration for automatic record management
 
 ## Launchpad
@@ -382,7 +382,7 @@ NIC is under active development. Here's where we're headed:
 
 - [x] Core CLI with provider abstraction and AWS provider
 - [x] Foundational software deployment via ArgoCD (Keycloak, cert-manager, Envoy Gateway, OTel Collector)
-- [x] Nebari Operator with `NicApp` CRD (auto-SSO, routing, telemetry)
+- [x] Nebari Operator with `NebariApp` CRD (auto-SSO, routing, telemetry)
 - [x] Multi-cloud support (AWS, GCP, Azure, Local)
 - [x] OpenTelemetry instrumentation throughout
 - [x] Cloudflare DNS provider integration
@@ -411,7 +411,7 @@ See the [full milestone plan](docs/design-doc/operations/13-milestones.md) and [
 | [Architecture Overview](docs/design-doc/architecture/02-system-overview.md) | System components and deployment flow |
 | [Design Decisions](docs/design-doc/architecture/04-key-decisions.md) | Why OpenTofu, terraform-exec, and ArgoCD |
 | [Configuration Reference](docs/design-doc/appendix/16-configuration-reference.md) | Complete config.yaml schema and examples |
-| [Nebari Operator](docs/design-doc/implementation/11-nebari-operator.md) | NicApp CRD and automatic service integration |
+| [Nebari Operator](docs/design-doc/implementation/11-nebari-operator.md) | NebariApp CRD and automatic service integration |
 | [Testing Strategy](docs/design-doc/operations/12-testing-strategy.md) | Unit, integration, and provider testing approach |
 
 ## Contributing
