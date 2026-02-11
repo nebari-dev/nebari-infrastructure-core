@@ -52,47 +52,23 @@ Want JupyterHub and conda-store? Install the Data Science Pack. Need model servi
 
 ## Architecture
 
-```mermaid
-block-beta
-    columns 1
-
-    block:SP["Software Packs"]:1
-        DS["Data Science\nJupyterHub, conda-store, Dask"]
-        ML["ML Serving\nMLflow, KServe, Envoy AI Gateway"]
-        OBS["Observability\nGrafana, Loki, Tempo, Mimir"]
-        Custom["Your Pack\nAny ArgoCD application"]
-    end
-
-    block:OP["Nebari Operator — auto-configures SSO, routing, TLS, telemetry via NebariApp CRD"]:1
-        space
-    end
-
-    block:FS["Foundational Software — deployed by ArgoCD"]:1
-        KC["Keycloak\nSSO & Identity"]
-        EG["Envoy Gateway\nIngress & API GW"]
-        CM["cert-manager\nTLS Certificates"]
-        OTEL["OTel Collector\nMetrics, Logs, Traces"]
-        ARGO["ArgoCD\nGitOps"]
-    end
-
-    block:K8S["Kubernetes — provisioned by NIC via OpenTofu"]:1
-        Net["VPC & Networking"] Nodes["Node Pools"] Storage["Storage"] IAM["IAM & Security"]
-    end
-
-    block:Cloud["Cloud Provider"]:1
-        AWS["AWS EKS"] GCP["GCP GKE"] Azure["Azure AKS"] Local["Local K3s"]
-    end
-
-    SP --> OP
-    OP --> FS
-    FS --> K8S
-    K8S --> Cloud
-
-    style SP fill:#4a2882,stroke:#7c3aed,color:#fff
-    style OP fill:#1e3a5f,stroke:#3b82f6,color:#fff
-    style FS fill:#1a3c34,stroke:#10b981,color:#fff
-    style K8S fill:#3b3020,stroke:#f59e0b,color:#fff
-    style Cloud fill:#3b2020,stroke:#ef4444,color:#fff
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Software Packs                                                         │
+│  Data Science · ML Serving · Observability · Your Custom Pack           │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Nebari Operator                                                        │
+│  Auto-configures SSO, routing, TLS, and telemetry via NebariApp CRD     │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Foundational Software (deployed by ArgoCD)                             │
+│  Keycloak · Envoy Gateway · cert-manager · OTel Collector · ArgoCD      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Kubernetes (provisioned by NIC via OpenTofu)                           │
+│  VPC & Networking · Node Pools · Storage · IAM & Security               │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Cloud Provider                                                         │
+│  AWS (EKS) · GCP (GKE) · Azure (AKS) · Local (K3s)                     │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### How It Works
