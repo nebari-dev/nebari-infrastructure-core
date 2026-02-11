@@ -80,11 +80,11 @@ flowchart TD
 
   SP --> NO --> FS --> K8 --> CP
 
-  style SP fill:#ede9fe,stroke:#7c3aed,color:#5b21b6
-  style NO fill:#e0e7ef,stroke:#1e3a5f,color:#1e3a5f
-  style FS fill:#d1fae5,stroke:#065f46,color:#065f46
-  style K8 fill:#e5e7eb,stroke:#4a5568,color:#374151
-  style CP fill:#fef3c7,stroke:#92400e,color:#78350f
+  style SP fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  style NO fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  style FS fill:#dcfce7,stroke:#16a34a,color:#14532d
+  style K8 fill:#f3f4f6,stroke:#6b7280,color:#1f2937
+  style CP fill:#fef3c7,stroke:#d97706,color:#78350f
 ```
 
 ### How It Works
