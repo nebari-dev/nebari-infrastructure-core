@@ -53,20 +53,36 @@ Want JupyterHub and conda-store? Install the Data Science Pack. Need model servi
 ## Architecture
 
 ```mermaid
-graph TD
-    SP["<b>Software Packs</b><br/>Data Science · ML Serving · Observability · Custom"]
-    NO["<b>Nebari Operator</b><br/>Auto-SSO · Routing · TLS · Telemetry via NebariApp CRD"]
-    FS["<b>Foundational Software</b><br/>Keycloak · Envoy Gateway · cert-manager · OTel · ArgoCD"]
-    K8["<b>Kubernetes Cluster</b><br/>VPC · Node Pools · Storage · IAM"]
-    CP["<b>Cloud Provider</b><br/>AWS EKS · GCP GKE · Azure AKS · Local K3s"]
+block-beta
+  columns 5
 
-    SP --> NO --> FS --> K8 --> CP
+  sp["Software Packs"]:5
+  ds["Data Science"] ml["ML Serving"] obs["Observability"] custom["Your Pack"] space
 
-    style SP fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:2px
-    style NO fill:#1e3a5f,color:#fff,stroke:#0f2440,stroke-width:2px
-    style FS fill:#065f46,color:#fff,stroke:#064e3b,stroke-width:2px
-    style K8 fill:#4a5568,color:#fff,stroke:#2d3748,stroke-width:2px
-    style CP fill:#92400e,color:#fff,stroke:#78350f,stroke-width:2px
+  no["Nebari Operator — auto-configures SSO, routing, TLS, telemetry"]:5
+
+  fs["Foundational Software"]:5
+  kc["Keycloak"] eg["Envoy Gateway"] cm["cert-manager"] ot["OTel Collector"] ac["ArgoCD"]
+
+  k8["Kubernetes Cluster"]:5
+  vpc["VPC"] np["Node Pools"] st["Storage"] iam["IAM"] space
+
+  cp["Cloud Provider"]:5
+  aws["AWS EKS"] gcp["GCP GKE"] az["Azure AKS"] k3s["Local K3s"] space
+
+  classDef purple fill:#7c3aed,color:#fff
+  classDef navy fill:#1e3a5f,color:#fff
+  classDef green fill:#065f46,color:#fff
+  classDef gray fill:#4a5568,color:#fff
+  classDef brown fill:#92400e,color:#fff
+  classDef light fill:#f8f9fa,stroke:#dee2e6,color:#333
+
+  class sp purple
+  class no navy
+  class fs green
+  class k8 gray
+  class cp brown
+  class ds,ml,obs,custom,kc,eg,cm,ot,ac,vpc,np,st,iam,aws,gcp,az,k3s light
 ```
 
 ### How It Works
