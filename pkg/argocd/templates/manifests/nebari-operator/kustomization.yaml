@@ -4,7 +4,7 @@ kind: Kustomization
 namespace: nebari-operator-system
 
 resources:
-  - https://raw.githubusercontent.com/nebari-dev/nebari-operator/main/dist/install.yaml
+  - https://github.com/nebari-dev/nebari-operator/releases/download/v0.1.0-alpha.1/install.yaml
 
 patches:
   - path: deployment-patch.yaml
