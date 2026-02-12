@@ -184,6 +184,69 @@ func TestGetStateBucketName(t *testing.T) {
 	})
 }
 
+func TestStateBucketExists(t *testing.T) {
+	t.Run("returns true when bucket exists", func(t *testing.T) {
+		s3MockClient := &mockS3Client{
+			HeadBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+				return &s3.HeadBucketOutput{}, nil
+			},
+		}
+
+		exists, err := stateBucketExists(context.Background(), s3MockClient, "my-bucket")
+		if err != nil {
+			t.Errorf("stateBucketExists() error = %v, want nil", err)
+		}
+		if !exists {
+			t.Error("stateBucketExists() = false, want true")
+		}
+	})
+
+	t.Run("returns false when bucket not found", func(t *testing.T) {
+		s3MockClient := &mockS3Client{
+			HeadBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+				return nil, &types.NotFound{}
+			},
+		}
+
+		exists, err := stateBucketExists(context.Background(), s3MockClient, "my-bucket")
+		if err != nil {
+			t.Errorf("stateBucketExists() error = %v, want nil", err)
+		}
+		if exists {
+			t.Error("stateBucketExists() = true, want false")
+		}
+	})
+
+	t.Run("returns false when NoSuchBucket", func(t *testing.T) {
+		s3MockClient := &mockS3Client{
+			HeadBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+				return nil, &types.NoSuchBucket{}
+			},
+		}
+
+		exists, err := stateBucketExists(context.Background(), s3MockClient, "my-bucket")
+		if err != nil {
+			t.Errorf("stateBucketExists() error = %v, want nil", err)
+		}
+		if exists {
+			t.Error("stateBucketExists() = true, want false")
+		}
+	})
+
+	t.Run("returns error on unexpected failure", func(t *testing.T) {
+		s3MockClient := &mockS3Client{
+			HeadBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+				return nil, errors.New("access denied")
+			},
+		}
+
+		_, err := stateBucketExists(context.Background(), s3MockClient, "my-bucket")
+		if err == nil {
+			t.Error("stateBucketExists() expected error, got nil")
+		}
+	})
+}
+
 func TestEnsureStateBucket(t *testing.T) {
 	t.Run("bucket already exists", func(t *testing.T) {
 		s3MockClient := &mockS3Client{

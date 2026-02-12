@@ -77,6 +77,24 @@ func getStateBucketName(ctx context.Context, client STSClient, region, projectNa
 	return generateBucketName(accountID, region, projectName)
 }
 
+// stateBucketExists checks whether the state bucket already exists.
+func stateBucketExists(ctx context.Context, client S3Client, bucketName string) (bool, error) {
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil {
+		return true, nil
+	}
+
+	var notFound *types.NotFound
+	var noSuchBucket *types.NoSuchBucket
+	if errors.As(err, &notFound) || errors.As(err, &noSuchBucket) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("failed to check if bucket exists: %w", err)
+}
+
 // ensureStateBucket creates the state bucket if it doesn't exist.
 // The caller is responsible for providing the bucket name (via getStateBucketName or config override).
 func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName string) error {

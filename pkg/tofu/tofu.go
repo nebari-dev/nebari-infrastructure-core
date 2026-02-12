@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"time"
 
@@ -28,6 +29,22 @@ type TerraformExecutor struct {
 // Cleanup removes the temporary working directory.
 func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
+}
+
+// UseLocalBackend rewrites main.tf in the working directory to use a local
+// backend instead of a remote backend. This is used for dry-run operations
+// where no remote state storage should be created.
+func (te *TerraformExecutor) UseLocalBackend() error {
+	mainTfPath := filepath.Join(te.workingDir, "main.tf")
+	content, err := afero.ReadFile(te.appFs, mainTfPath)
+	if err != nil {
+		return fmt.Errorf("failed to read main.tf: %w", err)
+	}
+
+	re := regexp.MustCompile(`(?s)backend\s+"[^"]+"\s*\{[^}]*\}`)
+	newContent := re.ReplaceAll(content, []byte(`backend "local" {}`))
+
+	return afero.WriteFile(te.appFs, mainTfPath, newContent, 0644)
 }
 
 // binaryDownloader abstracts binary fetching to enable testing.

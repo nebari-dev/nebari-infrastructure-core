@@ -258,15 +258,28 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}
 
-	// Ensure state bucket exists
 	s3Client, err := newS3Client(ctx, awsCfg.Region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
-	if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to ensure state bucket: %w", err)
+
+	// For dry-run, check if the bucket already exists so we can skip creating it.
+	// If the bucket doesn't exist and this is a dry-run, we use a local backend
+	// to avoid creating any cloud resources.
+	useLocalBackend := false
+	if cfg.DryRun {
+		exists, err := stateBucketExists(ctx, s3Client, bucketName)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to check state bucket: %w", err)
+		}
+		useLocalBackend = !exists
+	} else {
+		if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to ensure state bucket: %w", err)
+		}
 	}
 
 	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
@@ -281,11 +294,19 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}()
 
-	err = tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
-		tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
-	)
+	if useLocalBackend {
+		if err := tf.UseLocalBackend(); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to configure local backend for dry-run: %w", err)
+		}
+		err = tf.Init(ctx)
+	} else {
+		err = tf.Init(ctx,
+			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
+			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+			tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
+		)
+	}
 	if err != nil {
 		span.RecordError(err)
 		return err

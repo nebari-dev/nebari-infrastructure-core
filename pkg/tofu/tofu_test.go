@@ -227,6 +227,65 @@ func TestExtractTemplates(t *testing.T) {
 	})
 }
 
+func TestUseLocalBackend(t *testing.T) {
+	t.Run("replaces s3 backend with local backend", func(t *testing.T) {
+		memFs := afero.NewMemMapFs()
+		workingDir, err := afero.TempDir(memFs, "", "tofu-test")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+
+		mainTf := `# Backend configuration will be populated dynamically during initialization
+terraform {
+  backend "s3" {
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+
+module "eks_cluster" {
+  source = "example"
+}
+`
+		if err := afero.WriteFile(memFs, filepath.Join(workingDir, "main.tf"), []byte(mainTf), 0644); err != nil {
+			t.Fatalf("Failed to write main.tf: %v", err)
+		}
+
+		te := &TerraformExecutor{workingDir: workingDir, appFs: memFs}
+		if err := te.UseLocalBackend(); err != nil {
+			t.Fatalf("UseLocalBackend() error = %v", err)
+		}
+
+		content, err := afero.ReadFile(memFs, filepath.Join(workingDir, "main.tf"))
+		if err != nil {
+			t.Fatalf("Failed to read main.tf: %v", err)
+		}
+
+		if strings.Contains(string(content), `backend "s3"`) {
+			t.Error("main.tf still contains s3 backend after UseLocalBackend()")
+		}
+		if !strings.Contains(string(content), `backend "local" {}`) {
+			t.Error("main.tf does not contain local backend after UseLocalBackend()")
+		}
+		if !strings.Contains(string(content), `module "eks_cluster"`) {
+			t.Error("main.tf lost non-backend content after UseLocalBackend()")
+		}
+	})
+
+	t.Run("returns error when main.tf does not exist", func(t *testing.T) {
+		memFs := afero.NewMemMapFs()
+		workingDir, err := afero.TempDir(memFs, "", "tofu-test")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+
+		te := &TerraformExecutor{workingDir: workingDir, appFs: memFs}
+		if err := te.UseLocalBackend(); err == nil {
+			t.Error("UseLocalBackend() expected error for missing main.tf, got nil")
+		}
+	})
+}
+
 func TestDownloadExecutable(t *testing.T) {
 	t.Run("writes binary to cache directory", func(t *testing.T) {
 		memFs := afero.NewMemMapFs()
