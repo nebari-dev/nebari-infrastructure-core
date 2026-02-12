@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: manager
-          image: quay.io/nebari/nebari-operator:auth-reconciler
+          image: quay.io/nebari/nebari-operator:v0.1.0-alpha.1
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED
