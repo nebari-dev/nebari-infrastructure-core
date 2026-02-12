@@ -46,3 +46,13 @@ nic-state.json
 outputs.json
 
 CLAUDE.md
+
+# User config files (contain environment-specific values)
+config*.yaml
+!examples/*.yaml
+
+# Internal design docs
+docs/plans/
+
+# Git worktrees
+.worktrees/
