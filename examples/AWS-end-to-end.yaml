@@ -1,4 +1,4 @@
-project_name: NIC-CICD
+project_name: nic-cicd
 provider: aws
 domain: NIC-CICD.nebari.dev
 

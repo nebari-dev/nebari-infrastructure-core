@@ -2,9 +2,7 @@ name: End-to-End Test
 
 on:
   push:
-    branches: [end_to_end] # TODO remove before merging PR
-  pull_request:
-    branches: [main] 
+    branches: [end_to_end] # TODO Change to main after testing
   workflow_dispatch:
 
 # Need ID token write permission to use OIDC
