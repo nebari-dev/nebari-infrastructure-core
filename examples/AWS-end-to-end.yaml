@@ -1,0 +1,39 @@
+project_name: nic-cicd
+provider: aws
+domain: NIC-CICD.nebari.dev
+
+git_repository:
+  url: "git@github.com:openteams-ai/NIC-CICD.git"
+  branch: main
+  path: "clusters/end-to-end"  # Optional subdirectory within the repo
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
+
+amazon_web_services:
+  region: us-east-1
+  kubernetes_version: "1.34"
+  availability_zones:
+    - us-east-1a
+    - us-east-1b
+  vpc_cidr_block: "10.10.0.0/16"
+  endpoint_private_access: true
+  endpoint_public_access: true
+
+  node_groups:
+    user:
+      instance: m7i.xlarge
+      min_nodes: 1
+      max_nodes: 5
+
+  efs:
+    enabled: true
+    performance_mode: generalPurpose # generalPurpose or maxIO
+    throughput_mode: bursting # bursting, provisioned, or elastic
+    encrypted: true
+    # storage_class_name: efs-sc      # Name for the K8s StorageClass (default: efs-sc)
+    # kms_key_id: ""                  # Optional: KMS key ARN for encryption
+    # provisioned_mbps: 100           # Required if throughput_mode is provisioned
+
+  tags:
+    Environment: development
+    Project: nebari
