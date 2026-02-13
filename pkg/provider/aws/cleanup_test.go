@@ -17,9 +17,9 @@ type mockAPIError struct {
 	message string
 }
 
-func (e *mockAPIError) Error() string   { return fmt.Sprintf("api error %s: %s", e.code, e.message) }
-func (e *mockAPIError) ErrorCode() string   { return e.code }
-func (e *mockAPIError) ErrorMessage() string { return e.message }
+func (e *mockAPIError) Error() string                 { return fmt.Sprintf("api error %s: %s", e.code, e.message) }
+func (e *mockAPIError) ErrorCode() string             { return e.code }
+func (e *mockAPIError) ErrorMessage() string          { return e.message }
 func (e *mockAPIError) ErrorFault() smithy.ErrorFault { return smithy.FaultUnknown }
 
 // mockEC2Client implements EC2Client for testing.
@@ -229,11 +229,11 @@ func TestRevokeReferencingRules(t *testing.T) {
 
 func TestDeleteSecurityGroupWithRetry(t *testing.T) {
 	tests := []struct {
-		name            string
-		deleteFunc      func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
-		cancelAfter     int // Cancel context after this many attempts (0 = no cancel)
-		wantErr         bool
-		wantAttempts    int
+		name         string
+		deleteFunc   func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
+		cancelAfter  int // Cancel context after this many attempts (0 = no cancel)
+		wantErr      bool
+		wantAttempts int
 	}{
 		{
 			name: "succeeds on first attempt",
