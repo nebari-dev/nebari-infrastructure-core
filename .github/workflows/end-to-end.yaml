@@ -1,0 +1,37 @@
+name: AWS OIDC Example
+
+on:
+  push:
+    branches: [main, end_to_end]
+  pull_request:
+    branches: [main, end_to_end]
+  workflow_dispatch:
+
+# Need ID token write permission to use OIDC
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  run_job_with_aws:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::038715196064:role/github-nebari-ci
+          aws-region: us-east-1
+
+      - name: Verify AWS credentials
+        run: |
+          aws sts get-caller-identity
+
+      - name: Additional steps
+        run: |
+          # Your commands that require AWS credentials
+          echo "AWS credentials are configured!"
+          # Example: List S3 buckets
+          # aws s3 ls
