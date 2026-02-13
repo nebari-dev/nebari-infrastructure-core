@@ -8,7 +8,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/smithy-go"
 )
+
+// mockAPIError implements smithy.APIError for testing.
+type mockAPIError struct {
+	code    string
+	message string
+}
+
+func (e *mockAPIError) Error() string   { return fmt.Sprintf("api error %s: %s", e.code, e.message) }
+func (e *mockAPIError) ErrorCode() string   { return e.code }
+func (e *mockAPIError) ErrorMessage() string { return e.message }
+func (e *mockAPIError) ErrorFault() smithy.ErrorFault { return smithy.FaultUnknown }
 
 // mockEC2Client implements EC2Client for testing.
 type mockEC2Client struct {
@@ -216,57 +228,78 @@ func TestRevokeReferencingRules(t *testing.T) {
 }
 
 func TestDeleteSecurityGroupWithRetry(t *testing.T) {
-	t.Run("succeeds on first attempt", func(t *testing.T) {
-		attempts := 0
-		mock := &mockEC2Client{
-			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-				attempts++
-				return &ec2.DeleteSecurityGroupOutput{}, nil
-			},
-		}
-
-		err := deleteSecurityGroupWithRetry(context.Background(), mock, "sg-111")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if attempts != 1 {
-			t.Errorf("expected 1 attempt, got %d", attempts)
-		}
-	})
-
-	t.Run("retries on DependencyViolation then succeeds", func(t *testing.T) {
-		attempts := 0
-		mock := &mockEC2Client{
-			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-				attempts++
-				if attempts <= 2 {
-					return nil, fmt.Errorf("api error DependencyViolation: resource %s has a dependent object", *params.GroupId)
+	tests := []struct {
+		name            string
+		deleteFunc      func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
+		cancelAfter     int // Cancel context after this many attempts (0 = no cancel)
+		wantErr         bool
+		wantAttempts    int
+	}{
+		{
+			name: "succeeds on first attempt",
+			deleteFunc: func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+				return func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					*attempts++
+					return &ec2.DeleteSecurityGroupOutput{}, nil
 				}
-				return &ec2.DeleteSecurityGroupOutput{}, nil
 			},
-		}
-
-		err := deleteSecurityGroupWithRetry(context.Background(), mock, "sg-111")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if attempts != 3 {
-			t.Errorf("expected 3 attempts, got %d", attempts)
-		}
-	})
-
-	t.Run("fails immediately on non-DependencyViolation error", func(t *testing.T) {
-		mock := &mockEC2Client{
-			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
-				return nil, fmt.Errorf("api error InvalidGroup.NotFound: sg not found")
+			wantErr:      false,
+			wantAttempts: 1,
+		},
+		{
+			name: "retries on DependencyViolation then succeeds",
+			deleteFunc: func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+				return func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					*attempts++
+					if *attempts <= 2 {
+						return nil, &mockAPIError{code: "DependencyViolation", message: "resource has a dependent object"}
+					}
+					return &ec2.DeleteSecurityGroupOutput{}, nil
+				}
 			},
-		}
+			wantErr:      false,
+			wantAttempts: 3,
+		},
+		{
+			name: "fails immediately on non-DependencyViolation error",
+			deleteFunc: func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+				return func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					*attempts++
+					return nil, &mockAPIError{code: "InvalidGroup.NotFound", message: "sg not found"}
+				}
+			},
+			wantErr:      true,
+			wantAttempts: 1,
+		},
+		{
+			name: "fails immediately on non-smithy error",
+			deleteFunc: func(attempts *int) func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+				return func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					*attempts++
+					return nil, fmt.Errorf("network error")
+				}
+			},
+			wantErr:      true,
+			wantAttempts: 1,
+		},
+	}
 
-		err := deleteSecurityGroupWithRetry(context.Background(), mock, "sg-111")
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			mock := &mockEC2Client{
+				DeleteSecurityGroupFunc: tt.deleteFunc(&attempts),
+			}
+
+			err := deleteSecurityGroupWithRetry(context.Background(), mock, "sg-111")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("deleteSecurityGroupWithRetry() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if attempts != tt.wantAttempts {
+				t.Errorf("attempts = %d, want %d", attempts, tt.wantAttempts)
+			}
+		})
+	}
 
 	t.Run("respects context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -275,7 +308,7 @@ func TestDeleteSecurityGroupWithRetry(t *testing.T) {
 			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
 				attempts++
 				cancel() // Cancel after first attempt
-				return nil, fmt.Errorf("api error DependencyViolation: has a dependent object")
+				return nil, &mockAPIError{code: "DependencyViolation", message: "has a dependent object"}
 			},
 		}
 
