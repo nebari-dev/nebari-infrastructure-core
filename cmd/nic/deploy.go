@@ -15,8 +15,12 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -205,7 +209,30 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Print DNS guidance if no DNS provider is configured
 	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
-		printDNSGuidance(cfg)
+		var lbEndpoint *endpoint.LoadBalancerEndpoint
+
+		kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
+		if err != nil {
+			slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		} else {
+			restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+			if err != nil {
+				slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+			} else {
+				k8sClient, err := kubernetes.NewForConfig(restConfig)
+				if err != nil {
+					slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
+				} else {
+					slog.Info("Waiting for load balancer endpoint...")
+					lbEndpoint, err = endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
+					if err != nil {
+						slog.Warn("Could not retrieve load balancer endpoint", "error", err)
+					}
+				}
+			}
+		}
+
+		printDNSGuidance(cfg, lbEndpoint)
 	}
 
 	return nil
@@ -292,7 +319,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration
-func printDNSGuidance(cfg *config.NebariConfig) {
+func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  DNS CONFIGURATION REQUIRED")
@@ -303,24 +330,37 @@ func printDNSGuidance(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Printf("  Domain: %s\n", cfg.Domain)
 	fmt.Println()
-	fmt.Println("  Required DNS Records:")
-	fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("  │ Type  │ Name                          │ Value                          │")
-	fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
-	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", cfg.Domain)
-	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", "*."+cfg.Domain)
-	fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println()
-	fmt.Println("  To get the load balancer endpoint, run:")
-	fmt.Println()
-	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'\n")
-	fmt.Println()
-	fmt.Println("  Or for IP-based load balancers:")
-	fmt.Println()
-	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'\n")
-	fmt.Println()
-	fmt.Println("  Note: Use CNAME records for hostname-based load balancers (AWS),")
-	fmt.Println("        or A records for IP-based load balancers (GCP, Azure).")
+
+	if lb != nil {
+		var recordType, value string
+		if lb.Hostname != "" {
+			recordType = "CNAME"
+			value = lb.Hostname
+		} else {
+			recordType = "A"
+			value = lb.IP
+		}
+
+		fmt.Println("  Required DNS Records:")
+		fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
+		fmt.Printf("  │ Type  : %-65s │\n", recordType)
+		fmt.Printf("  │ Name  : %-65s │\n", cfg.Domain)
+		fmt.Printf("  │ Value : %-65s │\n", value)
+		fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
+		fmt.Printf("  │ Type  : %-65s │\n", recordType)
+		fmt.Printf("  │ Name  : %-65s │\n", "*."+cfg.Domain)
+		fmt.Printf("  │ Value : %-65s │\n", value)
+		fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
+	} else {
+		fmt.Println("  The load balancer endpoint is not yet available.")
+		fmt.Println("  Run the following command to check when it's ready:")
+		fmt.Println()
+		fmt.Println("    nic status -f <config-file>")
+		fmt.Println()
+		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
+		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)
+	}
+
 	fmt.Println()
 	fmt.Println("  To automate DNS management, add a dns_provider to your configuration:")
 	fmt.Println()
