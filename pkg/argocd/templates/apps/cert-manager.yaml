@@ -21,6 +21,8 @@ spec:
       releaseName: cert-manager
       values: |
         installCRDs: true
+        config:
+          enableGatewayAPI: true
         prometheus:
           enabled: true
         resources:
