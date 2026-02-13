@@ -1,4 +1,4 @@
-name: AWS OIDC Example
+name: End-to-End Test
 
 on:
   push:
@@ -13,11 +13,22 @@ permissions:
   contents: read
 
 jobs:
-  run_job_with_aws:
+  end-to-end:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build NIC
+        run: make build
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -26,12 +37,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Verify AWS credentials
-        run: |
-          aws sts get-caller-identity
+        run: aws sts get-caller-identity
 
-      - name: Additional steps
-        run: |
-          # Your commands that require AWS credentials
-          echo "AWS credentials are configured!"
-          # Example: List S3 buckets
-          # aws s3 ls
+      - name: Deploy
+        run: ./nic deploy -f examples/AWS-end-to-end.yaml --regen-apps --timeout 40m
+
+      - name: Destroy
+        if: always()
+        run: ./nic destroy -f examples/AWS-end-to-end.yaml --auto-approve --timeout 40m
