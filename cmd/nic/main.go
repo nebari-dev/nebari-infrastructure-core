@@ -107,7 +107,7 @@ func main() {
 	_, shutdown, err := telemetry.Setup(ctx)
 	if err != nil {
 		slog.Error("Failed to setup telemetry", "error", err)
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // TODO: refactor to run() pattern to allow defers to run
 	}
 	defer func() {
 		// Use a fresh context for shutdown in case main context is cancelled

@@ -1,0 +1,104 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgresql
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: foundational
+
+  source:
+    chart: postgresql
+    repoURL: https://charts.bitnami.com/bitnami
+    targetRevision: 18.2.0
+    helm:
+      releaseName: postgresql
+      values: |
+        auth:
+          username: postgres
+          database: postgres
+          existingSecret: postgresql-credentials
+          secretKeys:
+            adminPasswordKey: postgres-password
+            userPasswordKey: user-password
+        primary:
+          persistence:
+            enabled: true
+            size: 10Gi
+            storageClass: "{{ .StorageClass }}"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          initdb:
+            scripts:
+              init-keycloak-db.sh: |
+                #!/bin/bash
+                set -e
+                PGPASSWORD=$POSTGRES_PASSWORD psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+                  SELECT 'CREATE DATABASE keycloak'
+                  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'keycloak')\gexec
+
+                  DO \$\$
+                  BEGIN
+                    IF NOT EXISTS (SELECT FROM pg_user WHERE usename = 'keycloak') THEN
+                      CREATE USER keycloak WITH PASSWORD '${KEYCLOAK_DB_PASSWORD}';
+                    END IF;
+                  END
+                  \$\$;
+
+                  GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak;
+                  ALTER DATABASE keycloak OWNER TO keycloak;
+                EOSQL
+                echo "Keycloak database and user created successfully"
+          extraEnvVars:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-credentials
+                  key: postgres-password
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-postgresql-credentials
+                  key: password
+        metrics:
+          enabled: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates

@@ -1,0 +1,28 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: nebari-gateway
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/name: nebari-gateway
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: nebari-gateway-tls
+            kind: Secret

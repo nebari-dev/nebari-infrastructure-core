@@ -56,15 +56,17 @@ Files organized by **resource** (vpc, eks, nodegroups), not by operation. Each r
 ```go
 type Provider interface {
     Name() string
+    ConfigKey() string
     Validate(ctx context.Context, config *config.NebariConfig) error
     Deploy(ctx context.Context, config *config.NebariConfig) error
-    Reconcile(ctx context.Context, config *config.NebariConfig) error
+    Reconcile(ctx context.Context, config *config.NebariConfig) error  // Deprecated - see issue #44
     Destroy(ctx context.Context, config *config.NebariConfig) error
-    GetKubeconfig(ctx context.Context, clusterName string) ([]byte, error)
+    GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
+    Summary(config *config.NebariConfig) map[string]string
 }
 ```
 
-`Deploy()` delegates to `Reconcile()`. The distinction exists for dry-run handling and future pre-flight checks.
+`Deploy()` is idempotent - running it multiple times with the same config produces the same result. Use `--dry-run` to preview changes.
 
 ---
 
@@ -140,11 +142,12 @@ Provider-specific configs stored as `any` in `NebariConfig`, concrete types in p
 ```go
 // pkg/config/config.go
 type NebariConfig struct {
-    ProjectName       string      `yaml:"project_name"`
-    Provider          string      `yaml:"provider"`
-    AmazonWebServices interface{} `yaml:"amazon_web_services,omitempty"`
+    ProjectName    string         `yaml:"project_name"`
+    Provider       string         `yaml:"provider"`
+    ProviderConfig map[string]any `yaml:",inline"` // Captures provider-specific config
     // ...
 }
+// Access provider config: cfg.ProviderConfig["amazon_web_services"]
 
 // pkg/provider/aws/config.go
 type Config struct {

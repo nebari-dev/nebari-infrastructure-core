@@ -1,253 +1,242 @@
 package aws
 
-// InfrastructureState represents AWS infrastructure state with AWS-specific details.
-// This is an in-memory representation populated by querying AWS APIs.
-// It is NEVER persisted to disk (stateless architecture).
-type InfrastructureState struct {
-	ClusterName string
-	Region      string
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 
-	// VPC and networking
-	VPC *VPCState
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+)
 
-	// EKS cluster
-	Cluster *ClusterState
+// See https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
+const maxBucketNameLength = 63
 
-	// EKS node groups
-	NodeGroups []NodeGroupState
-
-	// EFS storage
-	Storage *StorageState
-
-	// IAM roles
-	IAMRoles *IAMRoles
+// S3Client defines the S3 operations needed for state bucket management.
+type S3Client interface {
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
+	PutBucketVersioning(ctx context.Context, params *s3.PutBucketVersioningInput, optFns ...func(*s3.Options)) (*s3.PutBucketVersioningOutput, error)
+	PutPublicAccessBlock(ctx context.Context, params *s3.PutPublicAccessBlockInput, optFns ...func(*s3.Options)) (*s3.PutPublicAccessBlockOutput, error)
+	ListObjectVersions(ctx context.Context, params *s3.ListObjectVersionsInput, optFns ...func(*s3.Options)) (*s3.ListObjectVersionsOutput, error)
+	DeleteObjects(ctx context.Context, params *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
+	DeleteBucket(ctx context.Context, params *s3.DeleteBucketInput, optFns ...func(*s3.Options)) (*s3.DeleteBucketOutput, error)
 }
 
-// VPCState represents AWS VPC state discovered from EC2 APIs
-type VPCState struct {
-	// VPC ID
-	VPCID string
-
-	// VPC CIDR block
-	CIDR string
-
-	// Public subnet IDs (across availability zones)
-	PublicSubnetIDs []string
-
-	// Private subnet IDs (across availability zones)
-	PrivateSubnetIDs []string
-
-	// Availability zones
-	AvailabilityZones []string
-
-	// Internet Gateway ID
-	InternetGatewayID string
-
-	// NAT Gateway IDs (one per AZ)
-	NATGatewayIDs []string
-
-	// Route table IDs
-	PublicRouteTableID   string
-	PrivateRouteTableIDs []string
-
-	// Security group IDs
-	SecurityGroupIDs []string
-
-	// VPC Endpoint IDs (for private clusters)
-	VPCEndpointIDs []string
-
-	// VPC tags
-	Tags map[string]string
+// STSClient defines the STS operations needed to get account information.
+type STSClient interface {
+	GetCallerIdentity(ctx context.Context, params *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
 
-// ClusterState represents EKS cluster state discovered from EKS APIs
-type ClusterState struct {
-	// Cluster name
-	Name string
-
-	// Cluster ARN
-	ARN string
-
-	// Kubernetes API endpoint
-	Endpoint string
-
-	// Kubernetes version
-	Version string
-
-	// Cluster status (CREATING, ACTIVE, UPDATING, DELETING, FAILED)
-	Status string
-
-	// Certificate authority data (base64 encoded)
-	CertificateAuthority string
-
-	// VPC configuration
-	VPCID                  string
-	SubnetIDs              []string
-	SecurityGroupIDs       []string
-	ClusterSecurityGroupID string // EKS-managed cluster security group
-	EndpointPublic         bool
-	EndpointPrivate        bool
-	PublicAccessCIDRs      []string
-
-	// OIDC provider ARN for IRSA (IAM Roles for Service Accounts)
-	OIDCProviderARN string
-
-	// Encryption config
-	EncryptionKMSKeyARN string
-
-	// Control plane logging
-	EnabledLogTypes []string
-
-	// Cluster tags
-	Tags map[string]string
-
-	// Platform version
-	PlatformVersion string
-
-	// Created timestamp
-	CreatedAt string
+func newS3Client(ctx context.Context, region string) (S3Client, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	return s3.NewFromConfig(cfg), nil
 }
 
-// NodeGroupState represents EKS node group state discovered from EKS APIs
-type NodeGroupState struct {
-	// Node group name
-	Name string
-
-	// Node group ARN
-	ARN string
-
-	// Cluster name this node group belongs to
-	ClusterName string
-
-	// Instance types
-	InstanceTypes []string
-
-	// Autoscaling configuration
-	MinSize     int
-	MaxSize     int
-	DesiredSize int
-
-	// Current size
-	CurrentSize int
-
-	// Subnet IDs where nodes are placed
-	SubnetIDs []string
-
-	// Node IAM role ARN
-	NodeRoleARN string
-
-	// AMI type (AL2_x86_64, AL2_x86_64_GPU, AL2_ARM_64, etc.)
-	AMIType string
-
-	// Disk size in GB
-	DiskSize int
-
-	// Status (CREATING, ACTIVE, UPDATING, DELETING, etc.)
-	Status string
-
-	// Kubernetes labels
-	Labels map[string]string
-
-	// Kubernetes taints
-	Taints []Taint
-
-	// Launch template info
-	LaunchTemplateID      string
-	LaunchTemplateVersion string
-
-	// Capacity type (ON_DEMAND or SPOT)
-	CapacityType string
-
-	// Node group tags
-	Tags map[string]string
-
-	// Health status
-	Health NodeGroupHealth
-
-	// Created timestamp
-	CreatedAt string
-
-	// Modified timestamp
-	ModifiedAt string
+func newSTSClient(ctx context.Context, region string) (STSClient, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	return sts.NewFromConfig(cfg), nil
 }
 
-// NodeGroupHealth represents the health status of a node group
-type NodeGroupHealth struct {
-	// Issues affecting node group
-	Issues []string
+// generateBucketName creates a deterministic bucket name from account ID, region, and project name.
+// The account ID is hashed to avoid exposing it directly in the bucket name.
+func generateBucketName(accountID, region, projectName string) (string, error) {
+	hash := sha256.Sum256([]byte(accountID))
+	suffix := fmt.Sprintf("%x", hash[:4]) // 8 hex chars
+	name := fmt.Sprintf("nic-tfstate-%s-%s-%s", projectName, region, suffix)
+	if len(name) > maxBucketNameLength {
+		return "", fmt.Errorf("bucket name %q exceeds %d chars: consider a shorter project name", name, maxBucketNameLength)
+	}
+	return name, nil
 }
 
-// StorageState represents EFS state discovered from EFS APIs
-type StorageState struct {
-	// File system ID
-	FileSystemID string
-
-	// File system ARN
-	ARN string
-
-	// Lifecycle state (creating, available, updating, deleting, deleted)
-	LifeCycleState string
-
-	// Performance mode (generalPurpose, maxIO)
-	PerformanceMode string
-
-	// Throughput mode (bursting, provisioned, elastic)
-	ThroughputMode string
-
-	// Provisioned throughput in MiB/s (if throughput mode is provisioned)
-	ProvisionedThroughputMiBps float64
-
-	// Mount target IDs and subnets
-	MountTargets []MountTarget
-
-	// Security group IDs for mount targets
-	SecurityGroupIDs []string
-
-	// Size in bytes
-	SizeInBytes int64
-
-	// Encrypted
-	Encrypted bool
-
-	// KMS key ID (if encrypted)
-	KMSKeyID string
-
-	// Tags
-	Tags map[string]string
-
-	// Created timestamp
-	CreatedAt string
+func stateKey(projectName string) string {
+	return fmt.Sprintf("%s/terraform.tfstate", projectName)
 }
 
-// MountTarget represents an EFS mount target
-type MountTarget struct {
-	// Mount target ID
-	MountTargetID string
+// getStateBucketName generates a bucket name from the AWS account ID, region, and project name.
+func getStateBucketName(ctx context.Context, client STSClient, region, projectName string) (string, error) {
+	output, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get AWS account ID: %w", err)
+	}
+	accountID := aws.ToString(output.Account)
 
-	// Subnet ID where mount target is placed
-	SubnetID string
-
-	// IP address
-	IPAddress string
-
-	// Availability zone
-	AvailabilityZone string
-
-	// Life cycle state
-	LifeCycleState string
+	return generateBucketName(accountID, region, projectName)
 }
 
-// IAMRoles represents IAM roles created for the cluster
-type IAMRoles struct {
-	// EKS cluster service role
-	ClusterRoleARN string
+// ensureStateBucket creates the state bucket if it doesn't exist.
+// The caller is responsible for providing the bucket name (via getStateBucketName or config override).
+func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.EnsureStateBucket")
+	defer span.End()
 
-	// EKS node instance role
-	NodeRoleARN string
+	span.SetAttributes(
+		attribute.String("bucket_name", bucketName),
+		attribute.String("region", region),
+	)
 
-	// OIDC provider ARN for IRSA
-	OIDCProviderARN string
+	// Check if bucket exists
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil {
+		span.SetAttributes(attribute.Bool("bucket_created", false))
+		return nil
+	}
 
-	// Additional service account roles (for IRSA)
-	ServiceAccountRoles map[string]string
+	// If error is NotFound or NoSuchBucket, create the bucket. Other errors are returned.
+	var notFound *types.NotFound
+	var noSuchBucket *types.NoSuchBucket
+	if !errors.As(err, &notFound) && !errors.As(err, &noSuchBucket) {
+		span.RecordError(err)
+		return fmt.Errorf("failed to check if bucket exists: %w", err)
+	}
+
+	createInput := &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	}
+	if region != "us-east-1" {
+		createInput.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(region),
+		}
+	}
+
+	if _, err := client.CreateBucket(ctx, createInput); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create state bucket: %w", err)
+	}
+
+	// Enable versioning
+	_, err = client.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucketName),
+		VersioningConfiguration: &types.VersioningConfiguration{
+			Status: types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to enable bucket versioning: %w", err)
+	}
+
+	// Block public access
+	_, err = client.PutPublicAccessBlock(ctx, &s3.PutPublicAccessBlockInput{
+		Bucket: aws.String(bucketName),
+		PublicAccessBlockConfiguration: &types.PublicAccessBlockConfiguration{
+			BlockPublicAcls:       aws.Bool(true),
+			BlockPublicPolicy:     aws.Bool(true),
+			IgnorePublicAcls:      aws.Bool(true),
+			RestrictPublicBuckets: aws.Bool(true),
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to block public access: %w", err)
+	}
+
+	span.SetAttributes(attribute.Bool("bucket_created", true))
+	return nil
+}
+
+// destroyStateBucket deletes the state bucket and all its contents.
+// The caller is responsible for providing the bucket name (via getStateBucketName or config override).
+func destroyStateBucket(ctx context.Context, client S3Client, region, bucketName string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "aws.DestroyStateBucket")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("bucket_name", bucketName),
+		attribute.String("region", region),
+	)
+
+	// Check if bucket exists
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		var notFound *types.NotFound
+		var noSuchBucket *types.NoSuchBucket
+		if errors.As(err, &notFound) || errors.As(err, &noSuchBucket) {
+			span.SetAttributes(attribute.Bool("bucket_existed", false))
+			return nil
+		}
+		span.RecordError(err)
+		return fmt.Errorf("failed to check if bucket exists: %w", err)
+	}
+
+	span.SetAttributes(attribute.Bool("bucket_existed", true))
+
+	// Delete all object versions (required for versioned buckets)
+	var objectVersions []types.ObjectIdentifier
+	listVersionsPaginator := s3.NewListObjectVersionsPaginator(client, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucketName),
+	})
+
+	for listVersionsPaginator.HasMorePages() {
+		page, err := listVersionsPaginator.NextPage(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to list object versions: %w", err)
+		}
+
+		for _, version := range page.Versions {
+			objectVersions = append(objectVersions, types.ObjectIdentifier{
+				Key:       version.Key,
+				VersionId: version.VersionId,
+			})
+		}
+
+		for _, deleteMarker := range page.DeleteMarkers {
+			objectVersions = append(objectVersions, types.ObjectIdentifier{
+				Key:       deleteMarker.Key,
+				VersionId: deleteMarker.VersionId,
+			})
+		}
+	}
+
+	// Delete objects in batches (max 1000 per request)
+	for i := 0; i < len(objectVersions); i += 1000 {
+		end := i + 1000
+		if end > len(objectVersions) {
+			end = len(objectVersions)
+		}
+		batch := objectVersions[i:end]
+
+		_, err = client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: batch,
+				Quiet:   aws.Bool(true),
+			},
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to delete objects: %w", err)
+		}
+	}
+
+	_, err = client.DeleteBucket(ctx, &s3.DeleteBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to delete state bucket: %w", err)
+	}
+
+	span.SetAttributes(attribute.Bool("bucket_deleted", true))
+	return nil
 }

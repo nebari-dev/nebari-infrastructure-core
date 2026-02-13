@@ -10,9 +10,23 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// ParseConfig parses a nebari-config.yaml file and returns the configuration.
-// This function uses lenient parsing - it only validates that the provider field
-// exists and is valid. Additional validation can be added later.
+// ParseConfigBytes parses YAML configuration from bytes and validates it.
+// This is the core parsing logic, separated from file I/O for testability.
+func ParseConfigBytes(data []byte) (*NebariConfig, error) {
+	var config NebariConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// ParseConfig reads and parses a nebari-config.yaml file.
+// This is a convenience wrapper around ParseConfigBytes that handles file I/O.
 func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "config.ParseConfig")
@@ -20,31 +34,16 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 
 	span.SetAttributes(attribute.String("config.file", filePath))
 
-	// Read the file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to read config file %s: %w", filePath, err)
 	}
 
-	// Parse YAML
-	var config NebariConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	config, err := ParseConfigBytes(data)
+	if err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("failed to parse config file %s: %w", filePath, err)
-	}
-
-	// Validate provider field (lenient - only check this required field)
-	if config.Provider == "" {
-		err := fmt.Errorf("provider field is required in config")
-		span.RecordError(err)
-		return nil, err
-	}
-
-	if !IsValidProvider(config.Provider) {
-		err := fmt.Errorf("invalid provider %q, must be one of: %v", config.Provider, ValidProviders)
-		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("config file %s: %w", filePath, err)
 	}
 
 	span.SetAttributes(
@@ -52,7 +51,7 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 		attribute.String("config.project_name", config.ProjectName),
 	)
 
-	return &config, nil
+	return config, nil
 }
 
 // UnmarshalProviderConfig converts the any provider config to a concrete type.

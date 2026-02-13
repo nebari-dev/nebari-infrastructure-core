@@ -64,7 +64,7 @@ nebari-infrastructure-core/
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Defines `Provider` interface with Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig() |
+| `provider.go` | Defines `Provider` interface with Name(), ConfigKey(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
 | `registry.go` | Thread-safe provider registry with registration and lookup |
 
 ### AWS Provider (pkg/provider/aws/) - **Fully Implemented**
@@ -237,19 +237,20 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 **Central Config (pkg/config/config.go):**
 ```go
 type NebariConfig struct {
-    Provider            string      `yaml:"provider"`              // Required: "aws", "gcp", "azure", "local"
-    ProjectName         string      `yaml:"project_name"`          // Required: cluster name
-    Domain              string      `yaml:"domain,omitempty"`      // Optional: domain for ingress
+    Provider       string         `yaml:"provider"`         // Required: "aws", "gcp", "azure", "local"
+    ProjectName    string         `yaml:"project_name"`     // Required: cluster name
+    Domain         string         `yaml:"domain,omitempty"` // Optional: domain for ingress
+    DNSProvider    string         `yaml:"dns_provider,omitempty"`
+    DNS            map[string]any `yaml:"dns,omitempty"`
 
-    // Provider configs stored as any for polymorphism
-    AmazonWebServices   any `yaml:"amazon_web_services,omitempty"`
-    GoogleCloudPlatform any `yaml:"google_cloud_platform,omitempty"`
-    Azure               any `yaml:"azure,omitempty"`
-    Local               any `yaml:"local,omitempty"`
+    // Provider-specific config captured via inline YAML
+    // Access via: cfg.ProviderConfig["amazon_web_services"], etc.
+    ProviderConfig map[string]any `yaml:",inline"`
 
-    // DNS configuration
-    DNSProvider         string `yaml:"dns_provider,omitempty"`
-    DNS                 any    `yaml:"dns,omitempty"`
+    // Runtime options (not from YAML)
+    DryRun  bool          `yaml:"-"`
+    Force   bool          `yaml:"-"`
+    Timeout time.Duration `yaml:"-"`
 }
 ```
 

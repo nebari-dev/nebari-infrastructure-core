@@ -1,9 +1,10 @@
 project_name: my-nebari-local
 provider: local
 domain: nebari.local
-
+certificate:
+  type: selfsigned
+kube_context: "kind-nebari-local"
 local:
-  kube_context: "default"
   node_selectors:
     general:
       kubernetes.io/os: linux
@@ -11,3 +12,12 @@ local:
       kubernetes.io/os: linux
     worker:
       kubernetes.io/os: linux
+
+# GitOps repository configuration (optional)
+# Configures the repository that ArgoCD will use to manage cluster resources
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/test1"  # Optional subdirectory within the repo
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key

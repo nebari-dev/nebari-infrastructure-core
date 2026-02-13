@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs
+.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
 
 # Variables
 BINARY_NAME=nic
@@ -18,22 +18,22 @@ help: ## Display this help message
 
 build: ## Build the binary
 	@echo "Building $(BINARY_NAME)..."
-	go build $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
+	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BINARY_NAME) successfully"
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 $(CMD_DIR)
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-arm64 $(CMD_DIR)
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 $(CMD_DIR)
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 $(CMD_DIR)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-arm64.exe $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-linux-arm64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-windows-arm64.exe $(CMD_DIR)
 	@echo "Built all platform binaries successfully"
 
 install: ## Install the binary to $GOPATH/bin
 	@echo "Installing $(BINARY_NAME)..."
-	go install $(LDFLAGS) $(CMD_DIR)
+	CGO_ENABLED=0 go install -trimpath $(LDFLAGS) $(CMD_DIR)
 	@echo "Installed $(BINARY_NAME) to $(shell go env GOPATH)/bin/$(BINARY_NAME)"
 
 clean: ## Remove build artifacts
@@ -54,10 +54,10 @@ vet: ## Run go vet
 	go vet $(PKG_DIRS)
 	@echo "Vet passed successfully"
 
-lint: ## Run golint
-	@echo "Running golint..."
-	@which golint > /dev/null || (echo "Installing golint..." && go install golang.org/x/lint/golint@latest)
-	golint -set_exit_status $(PKG_DIRS)
+lint: ## Run golangci-lint
+	@echo "Running golangci-lint..."
+	@which golangci-lint > /dev/null || (echo "Error: golangci-lint is not installed. See https://golangci-lint.run/welcome/install/" && exit 1)
+	golangci-lint run
 	@echo "Lint passed successfully"
 
 test: test-unit ## Run unit tests (default)
@@ -113,6 +113,23 @@ localstack-logs: ## Show LocalStack logs
 	else \
 		docker compose -f docker-compose.test.yml logs -f localstack; \
 	fi
+
+localkind-up: build ## Create local kind cluster and deploy Nebari
+	@echo "Setting up local kind cluster..."
+	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
+	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
+	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
+	-kind create cluster --name nebari-local
+	@echo "Deploying Nebari to local cluster..."
+	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml --regen-apps
+	@echo "Local kind cluster is ready!"
+
+localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster
+
+localkind-down: ## Delete local kind cluster
+	-kind delete cluster -n nebari-local
+	-docker network rm kind 2>/dev/null
+	@echo "Local kind cluster deleted"
 
 test-coverage: ## Run unit tests with coverage
 	@echo "Running unit tests with coverage..."

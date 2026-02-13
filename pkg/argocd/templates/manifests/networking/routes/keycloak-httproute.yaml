@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  parentRefs:
+    - name: nebari-gateway
+      namespace: envoy-gateway-system
+  hostnames:
+    - "keycloak.{{ .Domain }}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: keycloak-keycloakx-http
+          port: 8080
