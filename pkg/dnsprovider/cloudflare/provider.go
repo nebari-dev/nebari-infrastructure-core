@@ -246,7 +246,9 @@ func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
 	}
 
 	// Validate that domain is within the configured zone
-	if cfg.Domain != "" && !strings.HasSuffix(cfg.Domain, cfCfg.ZoneName) {
+	// Must match exactly or be a subdomain (with dot separator) to prevent
+	// "notexample.com" from matching zone "example.com".
+	if cfg.Domain != "" && cfg.Domain != cfCfg.ZoneName && !strings.HasSuffix(cfg.Domain, "."+cfCfg.ZoneName) {
 		return nil, fmt.Errorf("domain %q is not within zone %q", cfg.Domain, cfCfg.ZoneName)
 	}
 

@@ -205,6 +205,23 @@ func TestProvisionRecords(t *testing.T) {
 			wantErrContain: "domain",
 		},
 		{
+			name: "error when domain not in zone",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "notexample.com",
+				DNSProvider: "cloudflare",
+				DNS: map[string]any{
+					"zone_name": "example.com",
+				},
+			},
+			lbEndpoint:     "203.0.113.42",
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "not within zone",
+		},
+		{
 			name:       "error when zone resolution fails",
 			cfg:        baseCfg,
 			lbEndpoint: "203.0.113.42",
