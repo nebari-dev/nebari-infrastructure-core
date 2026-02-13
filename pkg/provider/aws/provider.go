@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -25,23 +24,6 @@ const (
 
 // Provider implements the AWS provider
 type Provider struct{}
-
-// ---- test seams (override in unit tests) ----
-// GetKubeconfig reaches into OpenTofu state + kubeconfig helpers.
-// These vars keep runtime behavior identical while making unit tests possible.
-type tfClient interface {
-	Init(context.Context, ...tfexec.InitOption) error
-	Output(context.Context, ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error)
-	Cleanup() error
-}
-
-var (
-	extractAWSConfigFn  = extractAWSConfig
-	kubeconfigExtractFn = kubeconfig.ExtractContext
-	tofuSetupFn         = func(ctx context.Context, templates fs.FS, tfvars any) (tfClient, error) {
-		return tofu.Setup(ctx, templates, tfvars)
-	}
-)
 
 // NewProvider creates a new AWS provider
 func NewProvider() *Provider {
@@ -429,7 +411,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 			attribute.String("kube_context", contextName),
 			attribute.Bool("existing_cluster", true),
 		)
-		kubeconfigBytes, err := kubeconfigExtractFn(contextName)
+		kubeconfigBytes, err := kubeconfig.ExtractContext(contextName)
 		if err != nil {
 			span.RecordError(err)
 			return nil, err
@@ -438,7 +420,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	// Extract AWS configuration
-	awsCfg, err := extractAWSConfigFn(ctx, cfg)
+	awsCfg, err := extractAWSConfig(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -469,7 +451,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	)
 
 	// Initialize terraform to read outputs from state
-	tf, err := tofuSetupFn(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to setup terraform: %w", err)
