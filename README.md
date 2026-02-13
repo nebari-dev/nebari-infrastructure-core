@@ -129,7 +129,25 @@ Show version information and registered providers.
 
 ## Configuration
 
-NIC uses a YAML configuration file. See the `examples/` directory for sample configurations:
+NIC uses a YAML configuration file.
+
+### Configuration Reference
+
+Full documentation for all configuration options is available in [`docs/configuration/`](docs/configuration/):
+
+- [Core Configuration](docs/configuration/core.md) - Project name, provider, domain, certificates
+- [AWS Configuration](docs/configuration/aws.md) - EKS, VPC, node groups, EFS
+- [GCP Configuration](docs/configuration/gcp.md) - GKE, VPC, node pools, GPUs
+- [Azure Configuration](docs/configuration/azure.md) - AKS, networking, node pools
+- [Local Configuration](docs/configuration/local.md) - K3s, kind, minikube
+- [Git Repository](docs/configuration/git.md) - GitOps with ArgoCD
+- [Cloudflare DNS](docs/configuration/cloudflare.md) - DNS provider
+
+> **Note**: Configuration docs are auto-generated from source code. Run `make docs` to regenerate.
+
+### Example Configurations
+
+See the `examples/` directory for complete sample configurations:
 
 - `examples/aws-config.yaml` - AWS/EKS configuration
 - `examples/aws-config-with-dns.yaml` - AWS with Cloudflare DNS automation
@@ -211,10 +229,31 @@ pre-commit run --all-files
 
 ## Architecture
 
+```mermaid
+graph TD
+    SP["<b>Software Packs</b><br/>Data Science · ML Serving · Observability · Custom"]
+    NO["<b>Nebari Operator</b><br/>Auto-SSO · Routing · TLS · Telemetry via NebariApp CRD"]
+    FS["<b>Foundational Software</b><br/>Keycloak · Envoy Gateway · cert-manager · OTel · ArgoCD"]
+    K8["<b>Kubernetes Cluster</b><br/>VPC · Node Pools · Storage · IAM"]
+    CP["<b>Cloud Provider</b><br/>AWS EKS · GCP GKE · Azure AKS · Local K3s"]
+
+    SP --> NO --> FS --> K8 --> CP
+
+    style SP fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:2px
+    style NO fill:#1e3a5f,color:#fff,stroke:#0f2440,stroke-width:2px
+    style FS fill:#065f46,color:#fff,stroke:#064e3b,stroke-width:2px
+    style K8 fill:#4a5568,color:#fff,stroke:#2d3748,stroke-width:2px
+    style CP fill:#92400e,color:#fff,stroke:#78350f,stroke-width:2px
+```
+
 ### Project Structure
 
 ```
-cmd/nic/              # CLI entry point and commands
+cmd/
+  ├── nic/            # CLI entry point and commands
+  └── docgen/         # Configuration documentation generator
+docs/
+  └── configuration/  # Auto-generated config reference
 pkg/
   ├── argocd/         # ArgoCD installation, Helm charts, app manifests
   ├── config/         # Configuration parsing and validation

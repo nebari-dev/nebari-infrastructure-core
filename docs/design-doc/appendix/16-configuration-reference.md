@@ -1,5 +1,10 @@
 # Configuration Reference
 
+> **Note**: Auto-generated configuration documentation is available at [`docs/configuration/`](../../configuration/).
+> The auto-generated docs are always in sync with the source code. Run `make docs` to regenerate.
+>
+> This document provides additional context, examples, and best practices beyond the auto-generated reference.
+
 This document provides a complete reference for all configuration options in NIC, based on the actual struct definitions in `pkg/config/config.go`.
 
 ## Table of Contents
@@ -1208,6 +1213,6 @@ KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 
 ---
 
-**Last Updated**: 2025-01-14
+**Last Updated**: 2026-02-05
 **NIC Version**: v0.1.0
-**Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
+**Source**: See auto-generated docs at [`docs/configuration/`](../../configuration/) for field-level reference. This document provides examples and best practices.
