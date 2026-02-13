@@ -15,7 +15,11 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-const defaultTTL = 300
+const (
+	defaultTTL      = 300
+	recordTypeA     = "A"
+	recordTypeCNAME = "CNAME"
+)
 
 // Provider implements the Cloudflare DNS provider.
 // Stateless -- config is parsed on each call, matching the cloud provider pattern.
@@ -172,7 +176,7 @@ func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig)
 
 	// Delete records for both root domain and wildcard
 	names := []string{cfg.Domain, "*." + cfg.Domain}
-	recordTypes := []string{"A", "CNAME"}
+	recordTypes := []string{recordTypeA, recordTypeCNAME}
 
 	for _, name := range names {
 		for _, recType := range recordTypes {
@@ -280,9 +284,9 @@ func isIPAddress(endpoint string) bool {
 // recordTypeForEndpoint returns "A" for IP addresses, "CNAME" for hostnames.
 func recordTypeForEndpoint(endpoint string) string {
 	if isIPAddress(endpoint) {
-		return "A"
+		return recordTypeA
 	}
-	return "CNAME"
+	return recordTypeCNAME
 }
 
 // ensureRecord creates or updates a DNS record to match the desired state.

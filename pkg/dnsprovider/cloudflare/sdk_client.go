@@ -192,14 +192,14 @@ func (c *sdkClient) DeleteDNSRecord(ctx context.Context, zoneID string, recordID
 // given record type. Only A and CNAME are supported.
 func buildRecordBody(name, recordType, content string, ttl int) (dns.RecordNewParamsBodyUnion, error) {
 	switch recordType {
-	case "A":
+	case recordTypeA:
 		return dns.ARecordParam{
 			Name:    cfapi.F(name),
 			Type:    cfapi.F(dns.ARecordTypeA),
 			Content: cfapi.F(content),
 			TTL:     cfapi.F(dns.TTL(ttl)),
 		}, nil
-	case "CNAME":
+	case recordTypeCNAME:
 		return dns.CNAMERecordParam{
 			Name:    cfapi.F(name),
 			Type:    cfapi.F(dns.CNAMERecordTypeCNAME),
@@ -215,14 +215,14 @@ func buildRecordBody(name, recordType, content string, ttl int) (dns.RecordNewPa
 // for the given record type. Only A and CNAME are supported.
 func buildUpdateRecordBody(name, recordType, content string, ttl int) (dns.RecordUpdateParamsBodyUnion, error) {
 	switch recordType {
-	case "A":
+	case recordTypeA:
 		return dns.ARecordParam{
 			Name:    cfapi.F(name),
 			Type:    cfapi.F(dns.ARecordTypeA),
 			Content: cfapi.F(content),
 			TTL:     cfapi.F(dns.TTL(ttl)),
 		}, nil
-	case "CNAME":
+	case recordTypeCNAME:
 		return dns.CNAMERecordParam{
 			Name:    cfapi.F(name),
 			Type:    cfapi.F(dns.CNAMERecordTypeCNAME),
