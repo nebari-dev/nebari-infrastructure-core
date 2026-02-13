@@ -45,10 +45,12 @@ spec:
                 secretKeyRef:
                   name: keycloak-postgresql-credentials
                   key: password
+            - name: KC_HOSTNAME
+              value: "keycloak.{{ .Domain }}"
             - name: KC_HOSTNAME_STRICT
-              value: "false"
-            - name: KC_PROXY
-              value: "edge"
+              value: "true"
+          proxy:
+            mode: xforwarded
           livenessProbe: |
             httpGet:
               path: /auth/health/live
