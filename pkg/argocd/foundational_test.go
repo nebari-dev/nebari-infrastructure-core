@@ -72,6 +72,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 
 		cfg := KeycloakConfig{
 			Enabled:               true,
+			AdminUsername:         "keycloak-admin",
 			AdminPassword:         "admin-pass-123",
 			DBPassword:            "db-pass-456",
 			PostgresAdminPassword: "db-pass-456-admin",
@@ -87,6 +88,9 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		adminSecret, err := client.CoreV1().Secrets("keycloak").Get(ctx, "keycloak-admin-credentials", metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("failed to get admin secret: %v", err)
+		}
+		if got := getSecretValue(adminSecret, "admin-username"); got != "keycloak-admin" {
+			t.Errorf("admin username = %q, want %q", got, "keycloak-admin")
 		}
 		if got := getSecretValue(adminSecret, "admin-password"); got != "admin-pass-123" {
 			t.Errorf("admin password = %q, want %q", got, "admin-pass-123")
@@ -123,6 +127,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			Enabled:            true,
 			AdminPassword:      "admin-pass",
 			DBPassword:         "db-pass",
+			RealmAdminUsername: "nebari-admin",
 			RealmAdminPassword: "realm-admin-pass",
 		}
 
@@ -136,8 +141,8 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get realm admin secret: %v", err)
 		}
-		if got := getSecretValue(realmAdminSecret, "username"); got != "admin" {
-			t.Errorf("realm admin username = %q, want %q", got, "admin")
+		if got := getSecretValue(realmAdminSecret, "username"); got != "nebari-admin" {
+			t.Errorf("realm admin username = %q, want %q", got, "nebari-admin")
 		}
 		if got := getSecretValue(realmAdminSecret, "password"); got != "realm-admin-pass" {
 			t.Errorf("realm admin password = %q, want %q", got, "realm-admin-pass")

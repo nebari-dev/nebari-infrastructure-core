@@ -27,7 +27,7 @@ module "eks_cluster" {
   existing_cluster_iam_role_arn            = var.existing_cluster_iam_role_arn
   existing_node_iam_role_arn               = var.existing_node_iam_role_arn
   iam_role_permissions_boundary            = var.iam_role_permissions_boundary
-  enable_cluster_creator_admin_permissions = false
+  enable_cluster_creator_admin_permissions = true
   node_groups                              = var.node_groups
   efs_enabled                              = var.efs_enabled
   efs_performance_mode                     = var.efs_performance_mode

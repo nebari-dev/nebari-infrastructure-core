@@ -18,22 +18,22 @@ help: ## Display this help message
 
 build: ## Build the binary
 	@echo "Building $(BINARY_NAME)..."
-	go build $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
+	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BINARY_NAME) successfully"
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 $(CMD_DIR)
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-arm64 $(CMD_DIR)
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 $(CMD_DIR)
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 $(CMD_DIR)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-arm64.exe $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-linux-arm64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME)-windows-arm64.exe $(CMD_DIR)
 	@echo "Built all platform binaries successfully"
 
 install: ## Install the binary to $GOPATH/bin
 	@echo "Installing $(BINARY_NAME)..."
-	go install $(LDFLAGS) $(CMD_DIR)
+	CGO_ENABLED=0 go install -trimpath $(LDFLAGS) $(CMD_DIR)
 	@echo "Installed $(BINARY_NAME) to $(shell go env GOPATH)/bin/$(BINARY_NAME)"
 
 clean: ## Remove build artifacts
