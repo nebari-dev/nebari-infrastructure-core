@@ -58,7 +58,6 @@ func TestBuildKubeconfig(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // capture
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := buildKubeconfig(tt.clusterName, tt.endpoint, tt.caData, tt.region)
 
@@ -135,6 +134,15 @@ func TestBuildKubeconfig(t *testing.T) {
 			exec := kc.Users[0].User.Exec
 			if exec.Command != "aws" {
 				t.Fatalf("unexpected exec command: got %q, want %q", exec.Command, "aws")
+			}
+
+			// Reviewer request: validate exec.APIVersion (kubectl auth plugin selection)
+			if exec.APIVersion != "client.authentication.k8s.io/v1beta1" {
+				t.Fatalf(
+					"unexpected exec apiVersion: got %q, want %q",
+					exec.APIVersion,
+					"client.authentication.k8s.io/v1beta1",
+				)
 			}
 
 			wantArgs := []string{
