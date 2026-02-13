@@ -1,6 +1,6 @@
-project_name: tyler-destroyable
+project_name: NIC-CICD
 provider: aws
-domain: tylerdestroyable.nebari.dev
+domain: NIC-CICD.nebari.dev
 
 git_repository:
   url: "git@github.com:openteams-ai/NIC-CICD.git"
