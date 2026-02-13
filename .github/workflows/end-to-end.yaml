@@ -2,9 +2,9 @@ name: End-to-End Test
 
 on:
   push:
-    branches: [main, end_to_end]
+    branches: [main]
   pull_request:
-    branches: [main, end_to_end]
+    branches: [end_to_end]
   workflow_dispatch:
 
 # Need ID token write permission to use OIDC
