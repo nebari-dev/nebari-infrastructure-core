@@ -2,6 +2,21 @@ project_name: my-nebari-azure
 provider: azure
 domain: nebari.example.com
 
+certificate:
+  type: selfsigned  # Options: "selfsigned" or "letsencrypt"
+  # For Let's Encrypt:
+  # type: letsencrypt
+  # acme:
+  #   email: admin@example.com
+
+# GitOps repository configuration (optional - remove this section if not using GitOps)
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-azure"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+
 azure:
   region: eastus
   kubernetes_version: "1.34"

@@ -8,22 +8,16 @@
 
 project_name: my-nebari-aws
 provider: aws
-domain: nebari.local
-kube_context: "arn:aws:eks:us-west-2:123456789012:cluster/my-nebari-aws"
+domain: nebari.example.com
+kube_context: "arn:aws:eks:us-west-2:123456789012:cluster/my-existing-cluster"
 
 certificate:
   type: selfsigned
 
-# GitOps repository configuration (optional)
-# Configures the repository that ArgoCD will use to manage cluster resources
+# GitOps repository configuration (optional - remove this section if not using GitOps)
 git_repository:
   url: "git@github.com:my-org/my-gitops-repo.git"
   branch: main
-  path: "clusters/test1"  # Optional subdirectory within the repo
+  path: "clusters/my-nebari-aws"
   auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
-    # OR use token for HTTPS:
-    # token_env: GIT_TOKEN
-  # Optional: separate read-only credentials for ArgoCD (falls back to auth if not set)
-  # argocd_auth:
-  #   ssh_key_env: ARGOCD_SSH_KEY
+    ssh_key_env: GIT_SSH_PRIVATE_KEY

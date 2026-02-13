@@ -479,6 +479,76 @@ func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	}
 }
 
+func TestCertificateConfigValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      CertificateConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid selfsigned",
+			config:  CertificateConfig{Type: "selfsigned"},
+			wantErr: false,
+		},
+		{
+			name: "valid letsencrypt with email",
+			config: CertificateConfig{
+				Type: "letsencrypt",
+				ACME: &ACMEConfig{Email: "admin@example.com"},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "empty type is valid (defaults to selfsigned)",
+			config:  CertificateConfig{},
+			wantErr: false,
+		},
+		{
+			name:        "invalid type",
+			config:      CertificateConfig{Type: "invalid"},
+			wantErr:     true,
+			errContains: "invalid type",
+		},
+		{
+			name:        "letsencrypt without acme",
+			config:      CertificateConfig{Type: "letsencrypt"},
+			wantErr:     true,
+			errContains: "acme.email is required",
+		},
+		{
+			name: "letsencrypt with empty email",
+			config: CertificateConfig{
+				Type: "letsencrypt",
+				ACME: &ACMEConfig{Email: ""},
+			},
+			wantErr:     true,
+			errContains: "acme.email is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestUnmarshalProviderConfig(t *testing.T) {
 	tests := []struct {
 		name        string

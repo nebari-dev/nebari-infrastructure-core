@@ -2,6 +2,19 @@ project_name: my-nebari-aws
 provider: aws
 domain: nebari.example.com
 
+certificate:
+  type: letsencrypt
+  acme:
+    email: admin@example.com
+
+# GitOps repository configuration (optional - remove this section if not using GitOps)
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-aws"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+
 amazon_web_services:
   region: us-west-2
   kubernetes_version: "1.34"

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
@@ -66,12 +67,7 @@ var ValidProviders = []string{"aws", "gcp", "azure", "local"}
 
 // IsValidProvider checks if the provider string is valid
 func IsValidProvider(provider string) bool {
-	for _, p := range ValidProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ValidProviders, provider)
 }
 
 // Validate checks that the configuration is valid.
@@ -88,6 +84,28 @@ func (c *NebariConfig) Validate() error {
 	if c.GitRepository != nil {
 		if err := c.GitRepository.Validate(); err != nil {
 			return fmt.Errorf("invalid git_repository: %w", err)
+		}
+	}
+
+	if c.Certificate != nil {
+		if err := c.Certificate.Validate(); err != nil {
+			return fmt.Errorf("invalid certificate: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// Validate checks that the certificate configuration is valid.
+func (c *CertificateConfig) Validate() error {
+	validTypes := []string{"selfsigned", "letsencrypt"}
+	if c.Type != "" && !slices.Contains(validTypes, c.Type) {
+		return fmt.Errorf("invalid type %q, must be one of: %v", c.Type, validTypes)
+	}
+
+	if c.Type == "letsencrypt" {
+		if c.ACME == nil || c.ACME.Email == "" {
+			return fmt.Errorf("acme.email is required when type is letsencrypt")
 		}
 	}
 
