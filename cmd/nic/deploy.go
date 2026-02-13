@@ -166,10 +166,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
+					AdminUsername:         "admin",
 					AdminPassword:         generateSecurePassword(rand.Reader),
 					DBPassword:            generateSecurePassword(rand.Reader),
 					PostgresAdminPassword: generateSecurePassword(rand.Reader),
 					PostgresUserPassword:  generateSecurePassword(rand.Reader),
+					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
