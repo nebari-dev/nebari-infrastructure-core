@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -39,12 +40,6 @@ type ELBClient interface {
 	DescribeLoadBalancers(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error)
 	DescribeTags(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error)
 	DeleteLoadBalancer(ctx context.Context, params *elb.DeleteLoadBalancerInput, optFns ...func(*elb.Options)) (*elb.DeleteLoadBalancerOutput, error)
-}
-
-// ELBPaginator defines the paginator interface for listing load balancers.
-type ELBPaginator interface {
-	HasMorePages() bool
-	NextPage(ctx context.Context, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error)
 }
 
 // cleanupKubernetesLoadBalancers deletes any Classic ELBs tagged with the cluster name.
@@ -157,7 +152,7 @@ func cleanupK8sELBSecurityGroups(ctx context.Context, client EC2Client, tagKey s
 
 	var deleted int
 	for _, sg := range sgs.SecurityGroups {
-		if sg.GroupName == nil || !hasPrefix(*sg.GroupName, "k8s-elb-") {
+		if sg.GroupName == nil || !strings.HasPrefix(*sg.GroupName, "k8s-elb-") {
 			continue
 		}
 
@@ -184,11 +179,6 @@ func cleanupK8sELBSecurityGroups(ctx context.Context, client EC2Client, tagKey s
 		WithResource("security-group").
 		WithAction("cleanup"))
 	return deleted, nil
-}
-
-// hasPrefix checks if s starts with prefix.
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // revokeReferencingRules finds and removes ingress rules in other security groups

@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	elb "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
+	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
 	"github.com/aws/smithy-go"
 )
 
@@ -48,6 +50,215 @@ func (m *mockEC2Client) RevokeSecurityGroupIngress(ctx context.Context, params *
 		return m.RevokeSecurityGroupIngressFunc(ctx, params, optFns...)
 	}
 	return &ec2.RevokeSecurityGroupIngressOutput{}, nil
+}
+
+// mockELBClient implements ELBClient for testing.
+type mockELBClient struct {
+	DescribeLoadBalancersFunc func(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error)
+	DescribeTagsFunc          func(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error)
+	DeleteLoadBalancerFunc    func(ctx context.Context, params *elb.DeleteLoadBalancerInput, optFns ...func(*elb.Options)) (*elb.DeleteLoadBalancerOutput, error)
+}
+
+func (m *mockELBClient) DescribeLoadBalancers(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error) {
+	if m.DescribeLoadBalancersFunc != nil {
+		return m.DescribeLoadBalancersFunc(ctx, params, optFns...)
+	}
+	return &elb.DescribeLoadBalancersOutput{}, nil
+}
+
+func (m *mockELBClient) DescribeTags(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error) {
+	if m.DescribeTagsFunc != nil {
+		return m.DescribeTagsFunc(ctx, params, optFns...)
+	}
+	return &elb.DescribeTagsOutput{}, nil
+}
+
+func (m *mockELBClient) DeleteLoadBalancer(ctx context.Context, params *elb.DeleteLoadBalancerInput, optFns ...func(*elb.Options)) (*elb.DeleteLoadBalancerOutput, error) {
+	if m.DeleteLoadBalancerFunc != nil {
+		return m.DeleteLoadBalancerFunc(ctx, params, optFns...)
+	}
+	return &elb.DeleteLoadBalancerOutput{}, nil
+}
+
+func TestCleanupKubernetesLoadBalancers(t *testing.T) {
+	clusterName := "my-cluster"
+	tagKey := "kubernetes.io/cluster/" + clusterName
+
+	t.Run("deletes ELBs with matching cluster tag and cleans up SGs", func(t *testing.T) {
+		var deletedELBs []string
+		var deletedSGs []string
+
+		elbMock := &mockELBClient{
+			DescribeLoadBalancersFunc: func(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error) {
+				// Return ELBs on first call (paginator)
+				return &elb.DescribeLoadBalancersOutput{
+					LoadBalancerDescriptions: []elbtypes.LoadBalancerDescription{
+						{LoadBalancerName: aws.String("k8s-elb-abc123")},
+						{LoadBalancerName: aws.String("other-elb")},
+					},
+				}, nil
+			},
+			DescribeTagsFunc: func(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error) {
+				return &elb.DescribeTagsOutput{
+					TagDescriptions: []elbtypes.TagDescription{
+						{
+							LoadBalancerName: aws.String("k8s-elb-abc123"),
+							Tags: []elbtypes.Tag{
+								{Key: aws.String(tagKey), Value: aws.String("owned")},
+							},
+						},
+						{
+							LoadBalancerName: aws.String("other-elb"),
+							Tags: []elbtypes.Tag{
+								{Key: aws.String("some-other-tag"), Value: aws.String("value")},
+							},
+						},
+					},
+				}, nil
+			},
+			DeleteLoadBalancerFunc: func(ctx context.Context, params *elb.DeleteLoadBalancerInput, optFns ...func(*elb.Options)) (*elb.DeleteLoadBalancerOutput, error) {
+				deletedELBs = append(deletedELBs, *params.LoadBalancerName)
+				return &elb.DeleteLoadBalancerOutput{}, nil
+			},
+		}
+
+		ec2Mock := &mockEC2Client{
+			DescribeSecurityGroupsFunc: func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+				for _, f := range params.Filters {
+					if *f.Name == "group-name" {
+						return &ec2.DescribeSecurityGroupsOutput{
+							SecurityGroups: []ec2types.SecurityGroup{
+								{
+									GroupId:   aws.String("sg-elb"),
+									GroupName: aws.String("k8s-elb-abc123"),
+									Tags: []ec2types.Tag{
+										{Key: aws.String(tagKey), Value: aws.String("owned")},
+									},
+								},
+							},
+						}, nil
+					}
+				}
+				return &ec2.DescribeSecurityGroupsOutput{}, nil
+			},
+			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+				deletedSGs = append(deletedSGs, *params.GroupId)
+				return &ec2.DeleteSecurityGroupOutput{}, nil
+			},
+		}
+
+		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(deletedELBs) != 1 || deletedELBs[0] != "k8s-elb-abc123" {
+			t.Errorf("expected k8s-elb-abc123 to be deleted, got %v", deletedELBs)
+		}
+		if len(deletedSGs) != 1 || deletedSGs[0] != "sg-elb" {
+			t.Errorf("expected sg-elb to be deleted, got %v", deletedSGs)
+		}
+	})
+
+	t.Run("leaves ELBs without cluster tag alone", func(t *testing.T) {
+		elbMock := &mockELBClient{
+			DescribeLoadBalancersFunc: func(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error) {
+				return &elb.DescribeLoadBalancersOutput{
+					LoadBalancerDescriptions: []elbtypes.LoadBalancerDescription{
+						{LoadBalancerName: aws.String("unrelated-elb")},
+					},
+				}, nil
+			},
+			DescribeTagsFunc: func(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error) {
+				return &elb.DescribeTagsOutput{
+					TagDescriptions: []elbtypes.TagDescription{
+						{
+							LoadBalancerName: aws.String("unrelated-elb"),
+							Tags: []elbtypes.Tag{
+								{Key: aws.String("kubernetes.io/cluster/other-cluster"), Value: aws.String("owned")},
+							},
+						},
+					},
+				}, nil
+			},
+			DeleteLoadBalancerFunc: func(ctx context.Context, params *elb.DeleteLoadBalancerInput, optFns ...func(*elb.Options)) (*elb.DeleteLoadBalancerOutput, error) {
+				t.Fatal("DeleteLoadBalancer should not be called")
+				return nil, nil
+			},
+		}
+
+		ec2Mock := &mockEC2Client{}
+
+		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("handles empty paginator with no ELBs", func(t *testing.T) {
+		elbMock := &mockELBClient{
+			DescribeLoadBalancersFunc: func(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error) {
+				return &elb.DescribeLoadBalancersOutput{
+					LoadBalancerDescriptions: []elbtypes.LoadBalancerDescription{},
+				}, nil
+			},
+		}
+
+		ec2Mock := &mockEC2Client{}
+
+		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("batches DescribeTags calls for more than 20 ELBs", func(t *testing.T) {
+		// Create 25 ELBs to test batching
+		var elbNames []string
+		for i := range 25 {
+			elbNames = append(elbNames, fmt.Sprintf("elb-%d", i))
+		}
+
+		var describedBatches [][]string
+		elbMock := &mockELBClient{
+			DescribeLoadBalancersFunc: func(ctx context.Context, params *elb.DescribeLoadBalancersInput, optFns ...func(*elb.Options)) (*elb.DescribeLoadBalancersOutput, error) {
+				var descs []elbtypes.LoadBalancerDescription
+				for _, name := range elbNames {
+					descs = append(descs, elbtypes.LoadBalancerDescription{LoadBalancerName: aws.String(name)})
+				}
+				return &elb.DescribeLoadBalancersOutput{LoadBalancerDescriptions: descs}, nil
+			},
+			DescribeTagsFunc: func(ctx context.Context, params *elb.DescribeTagsInput, optFns ...func(*elb.Options)) (*elb.DescribeTagsOutput, error) {
+				describedBatches = append(describedBatches, params.LoadBalancerNames)
+				// Return empty tags (no cluster tags)
+				var tagDescs []elbtypes.TagDescription
+				for _, name := range params.LoadBalancerNames {
+					tagDescs = append(tagDescs, elbtypes.TagDescription{
+						LoadBalancerName: aws.String(name),
+						Tags:             []elbtypes.Tag{},
+					})
+				}
+				return &elb.DescribeTagsOutput{TagDescriptions: tagDescs}, nil
+			},
+		}
+
+		ec2Mock := &mockEC2Client{}
+
+		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify batching: should have 2 batches (20 + 5)
+		if len(describedBatches) != 2 {
+			t.Errorf("expected 2 DescribeTags batches, got %d", len(describedBatches))
+		}
+		if len(describedBatches) >= 1 && len(describedBatches[0]) != 20 {
+			t.Errorf("expected first batch to have 20 ELBs, got %d", len(describedBatches[0]))
+		}
+		if len(describedBatches) >= 2 && len(describedBatches[1]) != 5 {
+			t.Errorf("expected second batch to have 5 ELBs, got %d", len(describedBatches[1]))
+		}
+	})
 }
 
 func TestCleanupK8sELBSecurityGroups(t *testing.T) {
