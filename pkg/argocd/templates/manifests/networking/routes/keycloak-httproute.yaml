@@ -18,5 +18,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: keycloak-keycloakx-http
+        - name: {{ .KeycloakServiceName }}
           port: 8080
