@@ -224,6 +224,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip MetalLB templates for cloud providers that use their own load balancers
+		if isMetalLBPath(relPath) && !needsMetalLB(data.Provider) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -278,6 +286,19 @@ func storageClassForProvider(provider string) string {
 	default:
 		return "standard"
 	}
+}
+
+// isMetalLBPath returns true if the relative path is a MetalLB-related template.
+func isMetalLBPath(relPath string) bool {
+	return relPath == "apps/metallb.yaml" ||
+		relPath == "apps/metallb-config.yaml" ||
+		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+// needsMetalLB returns true if the provider requires MetalLB for load balancing.
+// Cloud providers (aws, gcp, azure) have native load balancers and don't need MetalLB.
+func needsMetalLB(provider string) bool {
+	return provider == "local"
 }
 
 // processTemplate processes a template file with the given data.
