@@ -18,6 +18,9 @@ import (
 )
 
 const (
+	// ProviderName is the identifier for the AWS provider.
+	ProviderName = "aws"
+
 	// ReconcileTimeout is the maximum time allowed for a complete reconciliation operation
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
@@ -33,7 +36,7 @@ func NewProvider() *Provider {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "aws"
+	return ProviderName
 }
 
 // contains checks if a string slice contains a string
@@ -94,7 +97,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
@@ -221,7 +224,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("dry_run", cfg.DryRun),
 		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
@@ -341,7 +344,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	}
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", cfg.ProjectName),
 		attribute.String("region", region),
 		attribute.Bool("dry_run", cfg.DryRun),
@@ -434,7 +437,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	if cfg.IsExistingCluster() {
 		contextName := cfg.GetKubeContext()
 		span.SetAttributes(
-			attribute.String("provider", "aws"),
+			attribute.String("provider", ProviderName),
 			attribute.String("kube_context", contextName),
 			attribute.Bool("existing_cluster", true),
 		)
@@ -472,7 +475,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", clusterName),
 		attribute.String("region", region),
 	)
