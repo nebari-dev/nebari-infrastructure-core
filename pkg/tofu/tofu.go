@@ -207,7 +207,7 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 	// empty and Remove cleans it up.
 	defer func() {
 		if err != nil {
-			// Remove only removes a directory if it's empty, so this won't accidentally 
+			// Remove only removes a directory if it's empty, so this won't accidentally
 			// delete any existing cache if it was already populated from a previous run.
 			_ = appFs.Remove(pluginCacheDir)
 			_ = appFs.Remove(cacheDir)
