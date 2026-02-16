@@ -84,7 +84,7 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	// Check if release already exists (idempotency)
 	histClient := action.NewHistory(actionConfig)
 	histClient.Max = 1
-	if releases, err := histClient.Run(config.ReleaseName); err == nil {
+	if releases, err := histClient.Run(config.ReleaseName); err == nil && len(releases) > 0 {
 		// Release exists - check if upgrade is actually needed
 		current := releases[0]
 		if current.Chart != nil && current.Chart.Metadata != nil &&
