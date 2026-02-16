@@ -105,21 +105,21 @@ func getPluginCacheDir(appFs afero.Fs, cacheDir string) (string, error) {
 	return pluginCacheDir, nil
 }
 
-// downloadExecutable writes the binary from downloader to the cache directory.
+// downloadExecutable writes the binary from downloader to the specified directory.
 // It's separate from download to allow testing the file-writing logic independently
 // by injecting a mock binaryDownloader that doesn't require network access.
-func downloadExecutable(ctx context.Context, appFs afero.Fs, cacheDir string, downloader binaryDownloader) (string, error) {
+func downloadExecutable(ctx context.Context, appFs afero.Fs, dir string, downloader binaryDownloader) (string, error) {
 	binary, err := downloader.download(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	execPath := filepath.Join(cacheDir, "tofu")
+	execPath := filepath.Join(dir, "tofu")
 	if runtime.GOOS == "windows" {
 		execPath += ".exe"
 	}
 	if err := afero.WriteFile(appFs, execPath, binary, 0755); err != nil {
-		return "", fmt.Errorf("failed to write tofu binary to cache: %w", err)
+		return "", fmt.Errorf("failed to write tofu binary: %w", err)
 	}
 
 	return execPath, nil
@@ -168,14 +168,28 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 	return dir, nil
 }
 
-// Setup prepares the OpenTofu environment by downloading the binary (if not cached),
-// configuring provider plugin caching, extracting provider-specific templates,
-// and writing tfvars. Returns a TerraformExecutor configured with stdout/stderr.
+// Setup prepares the OpenTofu environment by extracting provider-specific templates,
+// downloading the binary, configuring provider plugin caching, and writing tfvars.
+// Returns a TerraformExecutor configured with stdout/stderr.
 // The caller is responsible for calling Init() and Apply() with appropriate options and
 // deferring Cleanup() to remove the temporary working directory.
-// The binary and providers are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
+// Downloaded archives are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
+// The extracted binary is written to the temporary working directory to avoid conflicts
+// when multiple deployments run concurrently or use different OpenTofu versions.
 func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
 	appFs := afero.NewOsFs()
+
+	workingDir, err := extractTemplates(appFs, templates)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove workingDir and its contents if we return an error after this point.
+	defer func() {
+		if err != nil {
+			_ = appFs.RemoveAll(workingDir)
+		}
+	}()
 
 	cacheDir, err := getCacheDir(appFs)
 	if err != nil {
@@ -187,23 +201,24 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		return nil, fmt.Errorf("failed to get plugin cache directory: %w", err)
 	}
 
+	// Remove cache directories if empty on error. A separate defer is not needed
+	// between getCacheDir and getPluginCacheDir because pluginCacheDir is a
+	// subdirectory of cacheDir. If getPluginCacheDir fails, cacheDir is still
+	// empty and Remove cleans it up.
+	defer func() {
+		if err != nil {
+			// Remove only removes a directory if it's empty, so this won't accidentally 
+			// delete any existing cache if it was already populated from a previous run.
+			_ = appFs.Remove(pluginCacheDir)
+			_ = appFs.Remove(cacheDir)
+		}
+	}()
+
 	downloader := &tofuDownloader{cacheDir: cacheDir, version: DefaultVersion}
-	execPath, err := downloadExecutable(ctx, appFs, cacheDir, downloader)
+	execPath, err := downloadExecutable(ctx, appFs, workingDir, downloader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable: %w", err)
 	}
-
-	workingDir, err := extractTemplates(appFs, templates)
-	if err != nil {
-		return nil, err
-	}
-
-	// Remove workingDir and its contents if we return an error after this point
-	defer func() {
-		if err != nil {
-			_ = appFs.RemoveAll(workingDir)
-		}
-	}()
 
 	if err = os.Setenv("TF_PLUGIN_CACHE_DIR", pluginCacheDir); err != nil {
 		return nil, fmt.Errorf("failed to set TF_PLUGIN_CACHE_DIR: %w", err)
