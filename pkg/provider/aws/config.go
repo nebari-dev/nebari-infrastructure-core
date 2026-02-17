@@ -19,6 +19,7 @@ type Config struct {
 	NodeGroups               map[string]NodeGroup `yaml:"node_groups"`
 	Tags                     map[string]string    `yaml:"tags,omitempty"`
 	EFS                      *EFSConfig           `yaml:"efs,omitempty"`
+	Longhorn                 *LonghornConfig      `yaml:"longhorn,omitempty"`
 }
 
 type NodeGroup struct {
@@ -40,10 +41,25 @@ type Taint struct {
 }
 
 // LonghornEnabled returns whether Longhorn distributed block storage should
-// be deployed on this AWS cluster. Returns true by default.
-// TODO: Replace with config-driven implementation in Task 2 (LonghornConfig).
+// be deployed on this AWS cluster. Defaults to true when the Longhorn config
+// is nil or Enabled is not set.
 func (c *Config) LonghornEnabled() bool {
-	return true
+	if c.Longhorn == nil {
+		return true
+	}
+	if c.Longhorn.Enabled == nil {
+		return true
+	}
+	return *c.Longhorn.Enabled
+}
+
+// LonghornReplicaCount returns the number of Longhorn volume replicas.
+// Defaults to 2 when not set.
+func (c *Config) LonghornReplicaCount() int {
+	if c.Longhorn == nil || c.Longhorn.ReplicaCount == 0 {
+		return 2
+	}
+	return c.Longhorn.ReplicaCount
 }
 
 type EFSConfig struct {
@@ -53,4 +69,11 @@ type EFSConfig struct {
 	ProvisionedThroughput int    `yaml:"provisioned_throughput_mibps,omitempty"`
 	Encrypted             bool   `yaml:"encrypted,omitempty"` // default: true
 	KMSKeyArn             string `yaml:"kms_key_arn,omitempty"`
+}
+
+type LonghornConfig struct {
+	Enabled        *bool             `yaml:"enabled,omitempty"`
+	ReplicaCount   int               `yaml:"replica_count,omitempty"`
+	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
+	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
 }
