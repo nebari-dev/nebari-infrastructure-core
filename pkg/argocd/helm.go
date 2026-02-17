@@ -63,7 +63,7 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 		span.RecordError(err)
 		return fmt.Errorf("failed to create temp kubeconfig: %w", err)
 	}
-	defer func() { _ = os.Remove(tmpKubeconfig.Name()) }()
+	defer func() { _ = os.Remove(tmpKubeconfig.Name()) }() //nolint:gosec // Path is from os.CreateTemp, not user input
 
 	if _, err := tmpKubeconfig.Write(kubeconfigBytes); err != nil {
 		span.RecordError(err)
