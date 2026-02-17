@@ -70,7 +70,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		cfg := KeycloakConfig{
+		cfg := KeycloakConfig{ //nolint:gosec // Test fixture with fake credentials
 			Enabled:               true,
 			AdminUsername:         "keycloak-admin",
 			AdminPassword:         "admin-pass-123",
