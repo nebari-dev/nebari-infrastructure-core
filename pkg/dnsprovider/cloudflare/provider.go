@@ -249,7 +249,7 @@ func (p *Provider) GetCertManagerConfig(ctx context.Context) (map[string]string,
 	span.SetAttributes(attribute.String("cloudflare.zone_name", p.config.ZoneName))
 
 	// Return Cloudflare-specific cert-manager configuration
-	certManagerConfig := map[string]string{
+	certManagerConfig := map[string]string{ //nolint:gosec // Secret name reference, not a credential
 		"apiTokenSecretRef": "cloudflare-api-token",
 		"email":             p.config.Email,
 	}

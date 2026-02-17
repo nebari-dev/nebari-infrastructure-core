@@ -30,12 +30,12 @@ spec:
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-admin-credentials
+                  name: {{ .KeycloakAdminSecretName }}
                   key: admin-password
             - name: KC_DB
               value: postgres
             - name: KC_DB_URL_HOST
-              value: postgresql.keycloak.svc.cluster.local
+              value: postgresql.{{ .KeycloakNamespace }}.svc.cluster.local
             - name: KC_DB_URL_DATABASE
               value: keycloak
             - name: KC_DB_USERNAME
