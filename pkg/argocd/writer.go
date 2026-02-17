@@ -47,15 +47,30 @@ type TemplateData struct {
 
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
+
+	// Keycloak configuration
+	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
+	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
+	KeycloakServiceURL      string // In-cluster URL for Keycloak (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
+	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
 }
 
 // NewTemplateData creates TemplateData from NebariConfig
 func NewTemplateData(cfg *config.NebariConfig) TemplateData {
+	keycloakServiceName := "keycloak-keycloakx-http"
+
 	data := TemplateData{
 		Domain:              cfg.Domain,
 		Provider:            cfg.Provider,
 		StorageClass:        storageClassForProvider(cfg.Provider),
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
+
+		KeycloakNamespace:       KeycloakDefaultNamespace,
+		KeycloakServiceName:     keycloakServiceName,
+		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakRealm:           "nebari",
+		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
 	}
 
 	// Set git repository info
