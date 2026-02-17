@@ -21,7 +21,7 @@ const (
 	KeycloakDefaultNamespace = "keycloak"
 
 	// KeycloakDefaultAdminSecretName is the name of the Kubernetes secret containing Keycloak admin credentials.
-	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials"
+	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
