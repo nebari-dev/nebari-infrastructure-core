@@ -39,6 +39,13 @@ type Taint struct {
 	Effect string `yaml:"effect" json:"effect"` // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
 }
 
+// LonghornEnabled returns whether Longhorn distributed block storage should
+// be deployed on this AWS cluster. Returns true by default.
+// TODO: Replace with config-driven implementation in Task 2 (LonghornConfig).
+func (c *Config) LonghornEnabled() bool {
+	return true
+}
+
 type EFSConfig struct {
 	Enabled               bool   `yaml:"enabled,omitempty"`
 	PerformanceMode       string `yaml:"performance_mode,omitempty"` // default: generalPurpose
