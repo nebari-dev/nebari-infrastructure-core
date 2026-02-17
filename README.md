@@ -314,25 +314,6 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-## Architecture
-
-```mermaid
-graph TD
-    SP["<b>Software Packs</b><br/>Data Science · ML Serving · Observability · Custom"]
-    NO["<b>Nebari Operator</b><br/>Auto-SSO · Routing · TLS · Telemetry via NebariApp CRD"]
-    FS["<b>Foundational Software</b><br/>Keycloak · Envoy Gateway · cert-manager · OTel · ArgoCD"]
-    K8["<b>Kubernetes Cluster</b><br/>VPC · Node Pools · Storage · IAM"]
-    CP["<b>Cloud Provider</b><br/>AWS EKS · GCP GKE · Azure AKS · Local K3s"]
-
-    SP --> NO --> FS --> K8 --> CP
-
-    style SP fill:#7c3aed,color:#fff,stroke:#5b21b6,stroke-width:2px
-    style NO fill:#1e3a5f,color:#fff,stroke:#0f2440,stroke-width:2px
-    style FS fill:#065f46,color:#fff,stroke:#064e3b,stroke-width:2px
-    style K8 fill:#4a5568,color:#fff,stroke:#2d3748,stroke-width:2px
-    style CP fill:#92400e,color:#fff,stroke:#78350f,stroke-width:2px
-```
-
 ### Project Structure
 ```
 cmd/nic/              CLI entry point and commands
