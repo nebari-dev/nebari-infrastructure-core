@@ -23,6 +23,7 @@ const (
 	// ReconcileTimeout is the maximum time allowed for a complete reconciliation operation
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
+	AWS              = "aws"
 )
 
 // Provider implements the AWS provider
