@@ -335,6 +335,20 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
+	// Install Longhorn storage if enabled
+	if awsCfg.LonghornEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, cfg)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
+		}
+
+		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+	}
+
 	return nil
 }
 

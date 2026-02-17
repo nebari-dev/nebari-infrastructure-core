@@ -16,9 +16,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// TODO(Task 6): Remove once installLonghorn is wired into Deploy().
-var _ = installLonghorn
-
 const (
 	longhornRepoName     = "longhorn"
 	longhornRepoURL      = "https://charts.longhorn.io"
