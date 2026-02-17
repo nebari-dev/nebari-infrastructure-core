@@ -112,16 +112,16 @@ Every NIC deployment includes a landing page where users discover and access all
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| **Opinionated Defaults** | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices |
-| **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing |
-| **Multi-Cloud** | AWS (EKS), GCP (GKE), Azure (AKS), and local (K3s) from the same config format |
-| **GitOps Native** | ArgoCD manages all foundational software with dependency ordering and health checks |
-| **OpenTelemetry Native** | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
-| **SSO Everywhere** | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically |
-| **Declarative** | One YAML config file. NIC reconciles actual state to match using OpenTofu |
-| **DNS Automation** | Optional Cloudflare provider for automatic DNS record management |
+| Feature                       | Description                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Opinionated Defaults**      | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices               |
+| **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing                       |
+| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), and local (K3s) from the same config format                               |
+| **GitOps Native**             | ArgoCD manages all foundational software with dependency ordering and health checks                          |
+| **OpenTelemetry Native**      | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
+| **SSO Everywhere**            | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically                  |
+| **Declarative**               | One YAML config file. NIC reconciles actual state to match using OpenTofu                                    |
+| **DNS Automation**            | Optional Cloudflare provider for automatic DNS record management                                             |
 
 ## Quick Start
 
@@ -176,6 +176,7 @@ Options:
 - `--regen-apps`: Regenerate ArgoCD application manifests even if already bootstrapped
 
 The deploy command:
+
 1. Provisions cloud infrastructure via the selected provider (OpenTofu)
 2. Bootstraps a GitOps repository with ArgoCD application manifests (if configured)
 3. Installs ArgoCD and foundational services (Keycloak, Envoy Gateway, cert-manager)
@@ -315,6 +316,7 @@ pre-commit run --all-files
 ```
 
 ### Project Structure
+
 ```
 cmd/nic/              CLI entry point and commands
 pkg/
@@ -337,43 +339,20 @@ docs/                 Architecture docs, design decisions, ADRs
 
 ## Roadmap
 
-NIC is under active development. Here's where we're headed:
+NIC is under very active development.
 
-### Completed
-
-- [x] Core CLI with provider abstraction and AWS provider
-- [x] Foundational software deployment via ArgoCD (Keycloak, cert-manager, Envoy Gateway, OTel Collector)
-- [x] Nebari Operator with `NebariApp` CRD (auto-SSO, routing, telemetry)
-- [x] Multi-cloud support (AWS, GCP, Azure, Local)
-- [x] OpenTelemetry instrumentation throughout
-- [x] Cloudflare DNS provider integration
-
-### In Progress
-
-- [ ] AWS credential validation with IAM policy simulation
-- [ ] OpenTofu output piped through structured logging
-- [ ] State lock recovery (`nic unlock`)
-
-### Planned
-
-- [ ] Software Pack marketplace and community registry
-- [ ] Configuration overlays for multi-environment support (base + dev/staging/prod)
-- [ ] Git repository auto-provisioning with CI/CD workflow generation
-- [ ] Application stack specification (databases, caching, queues in config)
-- [ ] Compliance profiles (HIPAA, SOC2, PCI-DSS)
-
-See the [full milestone plan](docs/design-doc/operations/13-milestones.md) and [future enhancements spec](docs/design-doc/appendix/15-future-enhancements.md) for details.
+Our current roadmap can be found at [docs/plans/2026-02-04-roadmap.md](2025-02-04.roadmap.md). We welcome feedback and contributions to help shape the future of the project!
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [CLI Reference](docs/cli-reference.md) | All commands, flags, and configuration options |
-| [Architecture Overview](docs/design-doc/architecture/02-system-overview.md) | System components and deployment flow |
-| [Design Decisions](docs/design-doc/architecture/04-key-decisions.md) | Why OpenTofu, terraform-exec, and ArgoCD |
-| [Configuration Reference](docs/design-doc/appendix/16-configuration-reference.md) | Complete config.yaml schema and examples |
-| [Nebari Operator](docs/design-doc/implementation/11-nebari-operator.md) | NebariApp CRD and automatic service integration |
-| [Testing Strategy](docs/design-doc/operations/12-testing-strategy.md) | Unit, integration, and provider testing approach |
+| Document                                                                          | Description                                      |
+| --------------------------------------------------------------------------------- | ------------------------------------------------ |
+| [CLI Reference](docs/cli-reference.md)                                            | All commands, flags, and configuration options   |
+| [Architecture Overview](docs/design-doc/architecture/02-system-overview.md)       | System components and deployment flow            |
+| [Design Decisions](docs/design-doc/architecture/04-key-decisions.md)              | Why OpenTofu, terraform-exec, and ArgoCD         |
+| [Configuration Reference](docs/design-doc/appendix/16-configuration-reference.md) | Complete config.yaml schema and examples         |
+| [Nebari Operator](docs/design-doc/implementation/11-nebari-operator.md)           | NebariApp CRD and automatic service integration  |
+| [Testing Strategy](docs/design-doc/operations/12-testing-strategy.md)             | Unit, integration, and provider testing approach |
 
 ## Contributing
 
