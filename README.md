@@ -341,18 +341,15 @@ docs/                 Architecture docs, design decisions, ADRs
 
 NIC is under very active development.
 
-Our current roadmap can be found at [2026-02-04-roadmap.md](docr/plans/2026-02-04.roadmap.md). We welcome feedback and contributions to help shape the future of the project!
+Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04.roadmap.md). We welcome feedback and contributions to help shape the future of the project!
 
 ## Documentation
 
-| Document                                                                          | Description                                      |
-| --------------------------------------------------------------------------------- | ------------------------------------------------ |
-| [CLI Reference](docs/cli-reference.md)                                            | All commands, flags, and configuration options   |
-| [Architecture Overview](docs/design-doc/architecture/02-system-overview.md)       | System components and deployment flow            |
-| [Design Decisions](docs/design-doc/architecture/04-key-decisions.md)              | Why OpenTofu, terraform-exec, and ArgoCD         |
-| [Configuration Reference](docs/design-doc/appendix/16-configuration-reference.md) | Complete config.yaml schema and examples         |
-| [Nebari Operator](docs/design-doc/implementation/11-nebari-operator.md)           | NebariApp CRD and automatic service integration  |
-| [Testing Strategy](docs/design-doc/operations/12-testing-strategy.md)             | Unit, integration, and provider testing approach |
+| Document                                             | Description                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [CLI Reference](docs/cli-reference.md)               | All commands, flags, and configuration options                                                                                                                                                                                                                                                                                                             |
+| [Design Doc](docs/design-doc/README.md)              | The original design document that laid the foundation for NIC's architecture and implementation. It includes detailed explanations of the core components, design decisions, and implementation details. The document is organized into sections covering architecture, design decisions, configuration reference, Nebari Operator, and testing strategy.) |
+| [Architectural Decision Records](docs/adr/README.md) | Architectural decision records recording design decisions as we build                                                                                                                                                                                                                                                                                      |
 
 ## Contributing
 
