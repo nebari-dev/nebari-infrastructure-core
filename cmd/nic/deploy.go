@@ -17,6 +17,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	providerPkg "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 
 	"k8s.io/client-go/kubernetes"
@@ -195,54 +196,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Get load balancer endpoint (needed for both DNS provisioning and manual guidance)
+	// Look up LB endpoint and provision DNS records if configured
 	var lbEndpoint *endpoint.LoadBalancerEndpoint
 	if cfg.Domain != "" && !deployDryRun {
-		kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
-		if err != nil {
-			slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
-		} else {
-			restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-			if err != nil {
-				slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
-			} else {
-				k8sClient, err := kubernetes.NewForConfig(restConfig)
-				if err != nil {
-					slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
-				} else {
-					slog.Info("Waiting for load balancer endpoint...")
-					lbEndpoint, err = endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
-					if err != nil {
-						slog.Warn("Could not retrieve load balancer endpoint", "error", err)
-					}
-				}
-			}
-		}
-	}
-
-	// Provision DNS records if a DNS provider is configured
-	if cfg.DNSProvider != "" && !deployDryRun && lbEndpoint != nil {
-		dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
-		if err != nil {
-			slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNSProvider, "error", err)
-		} else {
-			// Determine the endpoint string (hostname or IP)
-			lbEndpointStr := lbEndpoint.Hostname
-			if lbEndpointStr == "" {
-				lbEndpointStr = lbEndpoint.IP
-			}
-			if lbEndpointStr == "" {
-				slog.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
-			} else {
-				slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
-				if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS, lbEndpointStr); err != nil {
-					slog.Warn("Failed to provision DNS records", "error", err)
-					slog.Warn("You can configure DNS manually - see instructions below")
-				} else {
-					slog.Info("DNS records provisioned successfully", "domain", cfg.Domain)
-				}
-			}
-		}
+		lbEndpoint = lookupEndpointAndProvisionDNS(ctx, cfg, provider)
 	}
 
 	// Flush all pending status messages before printing instructions
@@ -263,6 +220,71 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
+// and provisions DNS records if a DNS provider is configured. Returns the LB
+// endpoint for use in manual DNS guidance (may be nil if lookup failed).
+func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider) *endpoint.LoadBalancerEndpoint {
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	if err != nil {
+		slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		return nil
+	}
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+		return nil
+	}
+
+	k8sClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
+		return nil
+	}
+
+	slog.Info("Waiting for load balancer endpoint...")
+	lbEndpoint, err := endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
+	if err != nil {
+		slog.Warn("Could not retrieve load balancer endpoint", "error", err)
+		return nil
+	}
+
+	// Provision DNS records if a provider is configured
+	if cfg.DNSProvider == "" {
+		return lbEndpoint
+	}
+
+	if lbEndpoint == nil {
+		slog.Warn("Skipping DNS provisioning: load balancer endpoint not available")
+		return nil
+	}
+
+	lbEndpointStr := lbEndpoint.Hostname
+	if lbEndpointStr == "" {
+		lbEndpointStr = lbEndpoint.IP
+	}
+	if lbEndpointStr == "" {
+		slog.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
+		return lbEndpoint
+	}
+
+	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+	if err != nil {
+		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNSProvider, "error", err)
+		return lbEndpoint
+	}
+
+	slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS, lbEndpointStr); err != nil {
+		slog.Warn("Failed to provision DNS records", "error", err)
+		slog.Warn("You can configure DNS manually - see instructions below")
+	} else {
+		slog.Info("DNS records provisioned successfully", "domain", cfg.Domain)
+	}
+
+	return lbEndpoint
 }
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
