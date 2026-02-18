@@ -2,6 +2,23 @@ project_name: my-nebari-aws
 provider: aws
 domain: nebari.example.com
 
+# TLS certificate configuration
+certificate:
+  type: letsencrypt
+  acme:
+    email: admin@example.com
+
+# GitOps repository configuration (required for foundational services)
+# ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-aws"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+    # OR use token for HTTPS:
+    # token_env: GIT_TOKEN
+
 amazon_web_services:
   region: us-west-2
   kubernetes_version: "1.34"
@@ -37,4 +54,3 @@ amazon_web_services:
 dns_provider: cloudflare
 dns:
   zone_name: example.com # Your Cloudflare zone/domain
-  email: admin@example.com # Email for Let's Encrypt cert-manager notifications

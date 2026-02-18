@@ -2,18 +2,56 @@ package cloudflare
 
 import (
 	"context"
-	"os"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 )
 
-func TestNewProvider(t *testing.T) {
-	provider := NewProvider()
-	if provider == nil {
-		t.Fatal("NewProvider() returned nil")
+// mockClient implements CloudflareClient for testing.
+// Each method delegates to a function field if non-nil, otherwise returns a sensible default.
+type mockClient struct {
+	resolveZoneIDFn   func(ctx context.Context, zoneName string) (string, error)
+	listDNSRecordsFn  func(ctx context.Context, zoneID string, name string, recordType string) ([]DNSRecordResult, error)
+	createDNSRecordFn func(ctx context.Context, zoneID string, name string, recordType string, content string, ttl int) error
+	updateDNSRecordFn func(ctx context.Context, zoneID string, recordID string, name string, recordType string, content string, ttl int) error
+	deleteDNSRecordFn func(ctx context.Context, zoneID string, recordID string) error
+}
+
+func (m *mockClient) ResolveZoneID(ctx context.Context, zoneName string) (string, error) {
+	if m.resolveZoneIDFn != nil {
+		return m.resolveZoneIDFn(ctx, zoneName)
 	}
+	return "zone-123", nil
+}
+
+func (m *mockClient) ListDNSRecords(ctx context.Context, zoneID string, name string, recordType string) ([]DNSRecordResult, error) {
+	if m.listDNSRecordsFn != nil {
+		return m.listDNSRecordsFn(ctx, zoneID, name, recordType)
+	}
+	return nil, nil
+}
+
+func (m *mockClient) CreateDNSRecord(ctx context.Context, zoneID string, name string, recordType string, content string, ttl int) error {
+	if m.createDNSRecordFn != nil {
+		return m.createDNSRecordFn(ctx, zoneID, name, recordType, content, ttl)
+	}
+	return nil
+}
+
+func (m *mockClient) UpdateDNSRecord(ctx context.Context, zoneID string, recordID string, name string, recordType string, content string, ttl int) error {
+	if m.updateDNSRecordFn != nil {
+		return m.updateDNSRecordFn(ctx, zoneID, recordID, name, recordType, content, ttl)
+	}
+	return nil
+}
+
+func (m *mockClient) DeleteDNSRecord(ctx context.Context, zoneID string, recordID string) error {
+	if m.deleteDNSRecordFn != nil {
+		return m.deleteDNSRecordFn(ctx, zoneID, recordID)
+	}
+	return nil
 }
 
 func TestProviderName(t *testing.T) {
@@ -23,218 +61,398 @@ func TestProviderName(t *testing.T) {
 	}
 }
 
-func TestInitialize(t *testing.T) {
-	ctx := context.Background()
-	provider := NewProvider()
-
-	tests := []struct {
-		name        string
-		cfg         *config.NebariConfig
-		envToken    string
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "success with env token",
-			cfg: &config.NebariConfig{
-				ProjectName: "test",
-				DNSProvider: "cloudflare",
-				DNS: map[string]any{
-					"zone_name": "example.com",
-					"email":     "admin@example.com",
-				},
-			},
-			envToken: "test-token",
-			wantErr:  false,
-		},
-		{
-			name: "missing DNS config",
-			cfg: &config.NebariConfig{
-				ProjectName: "test",
-				DNSProvider: "cloudflare",
-			},
-			envToken:    "test-token",
-			wantErr:     true,
-			errContains: "dns configuration is missing",
-		},
-		{
-			name: "missing API token",
-			cfg: &config.NebariConfig{
-				ProjectName: "test",
-				DNSProvider: "cloudflare",
-				DNS: map[string]any{
-					"zone_name": "example.com",
-				},
-			},
-			envToken:    "",
-			wantErr:     true,
-			errContains: "CLOUDFLARE_API_TOKEN",
+func TestProvisionRecords(t *testing.T) {
+	baseCfg := &config.NebariConfig{
+		ProjectName: "test-project",
+		Provider:    "aws",
+		Domain:      "nebari.example.com",
+		DNSProvider: "cloudflare",
+		DNS: map[string]any{
+			"zone_name": "example.com",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set environment variable
-			if tt.envToken != "" {
-				if err := os.Setenv("CLOUDFLARE_API_TOKEN", tt.envToken); err != nil {
-					t.Fatalf("Failed to set env var: %v", err)
-				}
-				defer func() {
-					if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
-						t.Logf("Failed to unset env var: %v", err)
+	tests := []struct {
+		name           string
+		cfg            *config.NebariConfig
+		lbEndpoint     string
+		envToken       string
+		mock           *mockClient
+		wantErr        bool
+		wantErrContain string
+		wantCreates    []string // "name:type:content" format
+		wantUpdates    []string // "name:type:content" format
+	}{
+		{
+			name:       "creates A records for IP endpoint",
+			cfg:        baseCfg,
+			lbEndpoint: "203.0.113.42",
+			envToken:   "test-token",
+			mock:       &mockClient{
+				// No existing records -- ListDNSRecords returns empty
+			},
+			wantCreates: []string{
+				"nebari.example.com:A:203.0.113.42",
+				"*.nebari.example.com:A:203.0.113.42",
+			},
+		},
+		{
+			name:       "creates CNAME records for hostname endpoint",
+			cfg:        baseCfg,
+			lbEndpoint: "ab123.elb.us-west-2.amazonaws.com",
+			envToken:   "test-token",
+			mock:       &mockClient{
+				// No existing records -- ListDNSRecords returns empty
+			},
+			wantCreates: []string{
+				"nebari.example.com:CNAME:ab123.elb.us-west-2.amazonaws.com",
+				"*.nebari.example.com:CNAME:ab123.elb.us-west-2.amazonaws.com",
+			},
+		},
+		{
+			name:       "updates existing record when content differs",
+			cfg:        baseCfg,
+			lbEndpoint: "203.0.113.99",
+			envToken:   "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, _ string) ([]DNSRecordResult, error) {
+					switch name {
+					case "nebari.example.com":
+						return []DNSRecordResult{{
+							ID: "rec-1", Name: "nebari.example.com", Type: "A",
+							Content: "203.0.113.1", TTL: 300,
+						}}, nil
+					case "*.nebari.example.com":
+						return []DNSRecordResult{{
+							ID: "rec-2", Name: "*.nebari.example.com", Type: "A",
+							Content: "203.0.113.1", TTL: 300,
+						}}, nil
+					default:
+						return nil, nil
 					}
-				}()
+				},
+			},
+			wantUpdates: []string{
+				"nebari.example.com:A:203.0.113.99",
+				"*.nebari.example.com:A:203.0.113.99",
+			},
+		},
+		{
+			name:       "no-op when records already match",
+			cfg:        baseCfg,
+			lbEndpoint: "203.0.113.42",
+			envToken:   "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, _ string) ([]DNSRecordResult, error) {
+					switch name {
+					case "nebari.example.com":
+						return []DNSRecordResult{{
+							ID: "rec-1", Name: "nebari.example.com", Type: "A",
+							Content: "203.0.113.42", TTL: 300,
+						}}, nil
+					case "*.nebari.example.com":
+						return []DNSRecordResult{{
+							ID: "rec-2", Name: "*.nebari.example.com", Type: "A",
+							Content: "203.0.113.42", TTL: 300,
+						}}, nil
+					default:
+						return nil, nil
+					}
+				},
+			},
+			wantCreates: nil,
+			wantUpdates: nil,
+		},
+		{
+			name: "error when DNS config missing",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "nebari.example.com",
+				DNSProvider: "cloudflare",
+				DNS:         nil,
+			},
+			lbEndpoint:     "203.0.113.42",
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "dns configuration is missing",
+		},
+		{
+			name:           "error when API token missing",
+			cfg:            baseCfg,
+			lbEndpoint:     "203.0.113.42",
+			envToken:       "", // no token
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "CLOUDFLARE_API_TOKEN",
+		},
+		{
+			name: "error when domain empty",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "",
+				DNSProvider: "cloudflare",
+				DNS: map[string]any{
+					"zone_name": "example.com",
+				},
+			},
+			lbEndpoint:     "203.0.113.42",
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "domain",
+		},
+		{
+			name: "error when domain not in zone",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "notexample.com",
+				DNSProvider: "cloudflare",
+				DNS: map[string]any{
+					"zone_name": "example.com",
+				},
+			},
+			lbEndpoint:     "203.0.113.42",
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "not within zone",
+		},
+		{
+			name:       "error when zone resolution fails",
+			cfg:        baseCfg,
+			lbEndpoint: "203.0.113.42",
+			envToken:   "test-token",
+			mock: &mockClient{
+				resolveZoneIDFn: func(_ context.Context, _ string) (string, error) {
+					return "", fmt.Errorf("zone not found")
+				},
+			},
+			wantErr:        true,
+			wantErrContain: "not found",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
+			// Track creates and updates
+			var creates []string
+			var updates []string
+
+			tc.mock.createDNSRecordFn = wrapCreate(tc.mock.createDNSRecordFn, &creates)
+			tc.mock.updateDNSRecordFn = wrapUpdate(tc.mock.updateDNSRecordFn, &updates)
+
+			provider := NewProviderForTesting(tc.mock)
+			err := provider.ProvisionRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS, tc.lbEndpoint)
+
+			// Check error expectations
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrContain)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContain) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrContain, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Check creates
+			if len(tc.wantCreates) != len(creates) {
+				t.Errorf("expected %d creates, got %d: %v", len(tc.wantCreates), len(creates), creates)
 			} else {
-				if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
-					t.Logf("Failed to unset env var: %v", err)
+				for i, want := range tc.wantCreates {
+					if creates[i] != want {
+						t.Errorf("create[%d] = %q, want %q", i, creates[i], want)
+					}
 				}
 			}
 
-			err := provider.Initialize(ctx, tt.cfg)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Initialize() error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !contains(err.Error(), tt.errContains) {
-					t.Fatalf("Initialize() error = %v, want error containing %q", err, tt.errContains)
+			// Check updates
+			if len(tc.wantUpdates) != len(updates) {
+				t.Errorf("expected %d updates, got %d: %v", len(tc.wantUpdates), len(updates), updates)
+			} else {
+				for i, want := range tc.wantUpdates {
+					if updates[i] != want {
+						t.Errorf("update[%d] = %q, want %q", i, updates[i], want)
+					}
 				}
 			}
 		})
 	}
 }
 
-func TestGetRecord(t *testing.T) {
-	ctx := context.Background()
-	provider := NewProvider()
-
-	// Test without initialization
-	_, err := provider.GetRecord(ctx, "test", "A")
-	if err == nil {
-		t.Fatal("GetRecord() should fail without initialization")
-	}
-
-	// Initialize provider
-	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-	defer func() {
-		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
-			t.Logf("Failed to unset env var: %v", err)
-		}
-	}()
-
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
+func TestDestroyRecords(t *testing.T) {
+	baseCfg := &config.NebariConfig{
+		ProjectName: "test-project",
+		Provider:    "aws",
+		Domain:      "nebari.example.com",
 		DNSProvider: "cloudflare",
 		DNS: map[string]any{
 			"zone_name": "example.com",
 		},
 	}
-	err = provider.Initialize(ctx, cfg)
-	if err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
 
-	// Test GetRecord (stub returns nil, nil)
-	record, err := provider.GetRecord(ctx, "test", "A")
-	if err != nil {
-		t.Fatalf("GetRecord() failed: %v", err)
-	}
-	if record != nil {
-		t.Fatal("GetRecord() stub should return nil record")
-	}
-}
-
-func TestEnsureRecord(t *testing.T) {
-	ctx := context.Background()
-	provider := NewProvider()
-
-	// Initialize provider
-	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-	defer func() {
-		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
-			t.Logf("Failed to unset env var: %v", err)
-		}
-	}()
-
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		DNSProvider: "cloudflare",
-		DNS: map[string]any{
-			"zone_name": "example.com",
+	tests := []struct {
+		name           string
+		cfg            *config.NebariConfig
+		envToken       string
+		mock           *mockClient
+		wantErr        bool
+		wantErrContain string
+		wantDeletes    []string // record IDs deleted
+	}{
+		{
+			name:     "deletes existing A records",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
+					// Return A records for root and wildcard; CNAME queries return empty
+					if recordType == "A" {
+						switch name {
+						case "nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-1", Name: "nebari.example.com", Type: "A",
+								Content: "203.0.113.42", TTL: 300,
+							}}, nil
+						case "*.nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-2", Name: "*.nebari.example.com", Type: "A",
+								Content: "203.0.113.42", TTL: 300,
+							}}, nil
+						}
+					}
+					return nil, nil
+				},
+			},
+			wantDeletes: []string{"rec-1", "rec-2"},
+		},
+		{
+			name:     "deletes existing CNAME records",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock: &mockClient{
+				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
+					// Return CNAME records for root and wildcard; A queries return empty
+					if recordType == "CNAME" {
+						switch name {
+						case "nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-3", Name: "nebari.example.com", Type: "CNAME",
+								Content: "ab123.elb.us-west-2.amazonaws.com", TTL: 300,
+							}}, nil
+						case "*.nebari.example.com":
+							return []DNSRecordResult{{
+								ID: "rec-4", Name: "*.nebari.example.com", Type: "CNAME",
+								Content: "ab123.elb.us-west-2.amazonaws.com", TTL: 300,
+							}}, nil
+						}
+					}
+					return nil, nil
+				},
+			},
+			wantDeletes: []string{"rec-3", "rec-4"},
+		},
+		{
+			name:     "no-op when no records exist",
+			cfg:      baseCfg,
+			envToken: "test-token",
+			mock:     &mockClient{
+				// Default listDNSRecordsFn returns nil, nil -- no records found
+			},
+			wantDeletes: nil,
+		},
+		{
+			name: "error when DNS config missing",
+			cfg: &config.NebariConfig{
+				ProjectName: "test-project",
+				Provider:    "aws",
+				Domain:      "nebari.example.com",
+				DNSProvider: "cloudflare",
+				DNS:         nil,
+			},
+			envToken:       "test-token",
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "dns configuration is missing",
+		},
+		{
+			name:           "error when API token missing",
+			cfg:            baseCfg,
+			envToken:       "", // no token
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "CLOUDFLARE_API_TOKEN",
 		},
 	}
-	err := provider.Initialize(ctx, cfg)
-	if err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
 
-	// Test EnsureRecord
-	record := dnsprovider.DNSRecord{
-		Name:    "test",
-		Type:    "A",
-		Content: "1.2.3.4",
-		TTL:     300,
-	}
-	err = provider.EnsureRecord(ctx, record)
-	if err != nil {
-		t.Fatalf("EnsureRecord() failed: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
+
+			// Track deletes via closure
+			var deletes []string
+			tc.mock.deleteDNSRecordFn = func(_ context.Context, _ string, recordID string) error {
+				deletes = append(deletes, recordID)
+				return nil
+			}
+
+			provider := NewProviderForTesting(tc.mock)
+			err := provider.DestroyRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS)
+
+			// Check error expectations
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrContain)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContain) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrContain, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Check deletes
+			if len(tc.wantDeletes) != len(deletes) {
+				t.Errorf("expected %d deletes, got %d: %v", len(tc.wantDeletes), len(deletes), deletes)
+			} else {
+				for i, want := range tc.wantDeletes {
+					if deletes[i] != want {
+						t.Errorf("delete[%d] = %q, want %q", i, deletes[i], want)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestGetCertManagerConfig(t *testing.T) {
-	ctx := context.Background()
-	provider := NewProvider()
-
-	// Initialize provider
-	if err := os.Setenv("CLOUDFLARE_API_TOKEN", "test-token"); err != nil {
-		t.Fatalf("Failed to set env var: %v", err)
-	}
-	defer func() {
-		if err := os.Unsetenv("CLOUDFLARE_API_TOKEN"); err != nil {
-			t.Logf("Failed to unset env var: %v", err)
+// wrapCreate wraps an optional createDNSRecordFn to also track calls.
+func wrapCreate(original func(context.Context, string, string, string, string, int) error, tracker *[]string) func(context.Context, string, string, string, string, int) error {
+	return func(ctx context.Context, zoneID string, name string, recordType string, content string, ttl int) error {
+		*tracker = append(*tracker, fmt.Sprintf("%s:%s:%s", name, recordType, content))
+		if original != nil {
+			return original(ctx, zoneID, name, recordType, content, ttl)
 		}
-	}()
-
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		DNSProvider: "cloudflare",
-		DNS: map[string]any{
-			"zone_name": "example.com",
-			"email":     "admin@example.com",
-		},
-	}
-	err := provider.Initialize(ctx, cfg)
-	if err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
-
-	// Test GetCertManagerConfig
-	certConfig, err := provider.GetCertManagerConfig(ctx)
-	if err != nil {
-		t.Fatalf("GetCertManagerConfig() failed: %v", err)
-	}
-	if certConfig == nil {
-		t.Fatal("GetCertManagerConfig() returned nil")
-	}
-	if certConfig["email"] != "admin@example.com" {
-		t.Fatalf("GetCertManagerConfig() email = %q, want %q", certConfig["email"], "admin@example.com")
+		return nil
 	}
 }
 
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+// wrapUpdate wraps an optional updateDNSRecordFn to also track calls.
+func wrapUpdate(original func(context.Context, string, string, string, string, string, int) error, tracker *[]string) func(context.Context, string, string, string, string, string, int) error {
+	return func(ctx context.Context, zoneID string, recordID string, name string, recordType string, content string, ttl int) error {
+		*tracker = append(*tracker, fmt.Sprintf("%s:%s:%s", name, recordType, content))
+		if original != nil {
+			return original(ctx, zoneID, recordID, name, recordType, content, ttl)
 		}
+		return nil
 	}
-	return false
 }
