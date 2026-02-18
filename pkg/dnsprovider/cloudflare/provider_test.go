@@ -247,7 +247,7 @@ func TestProvisionRecords(t *testing.T) {
 			tc.mock.updateDNSRecordFn = wrapUpdate(tc.mock.updateDNSRecordFn, &updates)
 
 			provider := NewProviderForTesting(tc.mock)
-			err := provider.ProvisionRecords(context.Background(), tc.cfg, tc.lbEndpoint)
+			err := provider.ProvisionRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS, tc.lbEndpoint)
 
 			// Check error expectations
 			if tc.wantErr {
@@ -405,7 +405,7 @@ func TestDestroyRecords(t *testing.T) {
 			}
 
 			provider := NewProviderForTesting(tc.mock)
-			err := provider.DestroyRecords(context.Background(), tc.cfg)
+			err := provider.DestroyRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS)
 
 			// Check error expectations
 			if tc.wantErr {

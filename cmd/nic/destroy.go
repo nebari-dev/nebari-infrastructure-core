@@ -135,7 +135,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			slog.Warn("DNS provider not found, skipping DNS cleanup", "provider", cfg.DNSProvider, "error", err)
 		} else {
 			slog.Info("Cleaning up DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
-			if err := dnsProvider.DestroyRecords(ctx, cfg); err != nil {
+			if err := dnsProvider.DestroyRecords(ctx, cfg.Domain, cfg.DNS); err != nil {
 				// Log warning but don't fail destruction
 				slog.Warn("Failed to clean up DNS records", "error", err)
 				slog.Warn("You may need to manually remove DNS records from your provider")

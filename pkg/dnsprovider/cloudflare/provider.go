@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -46,19 +45,19 @@ func (p *Provider) Name() string {
 // It creates a root domain record and wildcard record pointing to the
 // load balancer endpoint. The record type (A or CNAME) is determined
 // automatically from the endpoint value.
-func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfig, lbEndpoint string) error {
+func (p *Provider) ProvisionRecords(ctx context.Context, domain string, dnsConfig map[string]any, lbEndpoint string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cloudflare.ProvisionRecords")
 	defer span.End()
 
 	// Validate domain
-	if cfg.Domain == "" {
+	if domain == "" {
 		return fmt.Errorf("domain is required for DNS provisioning")
 	}
-	span.SetAttributes(attribute.String("domain", cfg.Domain))
+	span.SetAttributes(attribute.String("domain", domain))
 
 	// Parse Cloudflare-specific config from the DNS map
-	cfCfg, err := extractCloudflareConfig(cfg)
+	cfCfg, err := extractCloudflareConfig(domain, dnsConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -99,17 +98,17 @@ func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfi
 	)
 
 	// Ensure root domain record
-	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Ensuring DNS record for %s", cfg.Domain)).
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Ensuring DNS record for %s", domain)).
 		WithResource("dns-record").
 		WithAction("ensuring"))
 
-	if err := ensureRecord(ctx, client, zoneID, cfg.Domain, recType, lbEndpoint); err != nil {
+	if err := ensureRecord(ctx, client, zoneID, domain, recType, lbEndpoint); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to ensure record for %s: %w", cfg.Domain, err)
+		return fmt.Errorf("failed to ensure record for %s: %w", domain, err)
 	}
 
 	// Ensure wildcard record
-	wildcardName := "*." + cfg.Domain
+	wildcardName := "*." + domain
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Ensuring DNS record for %s", wildcardName)).
 		WithResource("dns-record").
 		WithAction("ensuring"))
@@ -119,7 +118,7 @@ func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfi
 		return fmt.Errorf("failed to ensure record for %s: %w", wildcardName, err)
 	}
 
-	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records provisioned for %s", cfg.Domain)).
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records provisioned for %s", domain)).
 		WithResource("dns-records").
 		WithAction("provisioned"))
 
@@ -129,19 +128,19 @@ func (p *Provider) ProvisionRecords(ctx context.Context, cfg *config.NebariConfi
 // DestroyRecords removes DNS records created during deployment.
 // It checks for both A and CNAME record types since the original record type
 // is not stored. Idempotent -- succeeds even if records are already gone.
-func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) DestroyRecords(ctx context.Context, domain string, dnsConfig map[string]any) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cloudflare.DestroyRecords")
 	defer span.End()
 
 	// Validate domain
-	if cfg.Domain == "" {
+	if domain == "" {
 		return fmt.Errorf("domain is required for DNS record destruction")
 	}
-	span.SetAttributes(attribute.String("domain", cfg.Domain))
+	span.SetAttributes(attribute.String("domain", domain))
 
 	// Parse Cloudflare-specific config from the DNS map
-	cfCfg, err := extractCloudflareConfig(cfg)
+	cfCfg, err := extractCloudflareConfig(domain, dnsConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -175,7 +174,7 @@ func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig)
 	span.SetAttributes(attribute.String("zone_id", zoneID))
 
 	// Delete records for both root domain and wildcard
-	names := []string{cfg.Domain, "*." + cfg.Domain}
+	names := []string{domain, "*." + domain}
 	recordTypes := []string{recordTypeA, recordTypeCNAME}
 
 	for _, name := range names {
@@ -187,7 +186,7 @@ func (p *Provider) DestroyRecords(ctx context.Context, cfg *config.NebariConfig)
 		}
 	}
 
-	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records destroyed for %s", cfg.Domain)).
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("DNS records destroyed for %s", domain)).
 		WithResource("dns-records").
 		WithAction("destroyed"))
 
@@ -230,12 +229,12 @@ func (p *Provider) deleteRecordIfExists(ctx context.Context, client CloudflareCl
 // extractCloudflareConfig parses the cfg.DNS map into a Config struct.
 // Uses JSON marshal/unmarshal for robust conversion from map[string]any.
 // Validates that cfg.Domain is a subdomain of the zone name.
-func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
-	if cfg.DNS == nil {
+func extractCloudflareConfig(domain string, dnsConfig map[string]any) (*Config, error) {
+	if dnsConfig == nil {
 		return nil, fmt.Errorf("dns configuration is missing for cloudflare provider")
 	}
 
-	data, err := json.Marshal(cfg.DNS)
+	data, err := json.Marshal(dnsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal dns config: %w", err)
 	}
@@ -252,8 +251,8 @@ func extractCloudflareConfig(cfg *config.NebariConfig) (*Config, error) {
 	// Validate that domain is within the configured zone
 	// Must match exactly or be a subdomain (with dot separator) to prevent
 	// "notexample.com" from matching zone "example.com".
-	if cfg.Domain != "" && cfg.Domain != cfCfg.ZoneName && !strings.HasSuffix(cfg.Domain, "."+cfCfg.ZoneName) {
-		return nil, fmt.Errorf("domain %q is not within zone %q", cfg.Domain, cfCfg.ZoneName)
+	if domain != "" && domain != cfCfg.ZoneName && !strings.HasSuffix(domain, "."+cfCfg.ZoneName) {
+		return nil, fmt.Errorf("domain %q is not within zone %q", domain, cfCfg.ZoneName)
 	}
 
 	return &cfCfg, nil

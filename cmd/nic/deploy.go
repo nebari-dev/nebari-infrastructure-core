@@ -235,7 +235,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				slog.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
 			} else {
 				slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
-				if err := dnsProvider.ProvisionRecords(ctx, cfg, lbEndpointStr); err != nil {
+				if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS, lbEndpointStr); err != nil {
 					slog.Warn("Failed to provision DNS records", "error", err)
 					slog.Warn("You can configure DNS manually - see instructions below")
 				} else {
