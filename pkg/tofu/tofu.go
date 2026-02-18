@@ -30,6 +30,28 @@ func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
 }
 
+// backendOverrideJSON overrides the configured backend with a local backend.
+const backendOverrideJSON = `{
+  "terraform": {
+    "backend": {
+      "local": {}
+    }
+  }
+}
+`
+
+// WriteBackendOverride writes a backend_override.tf.json file to the working directory
+// that overrides the configured backend with a local backend. This is useful for
+// dry-run scenarios where the remote state bucket does not yet exist.
+func (te *TerraformExecutor) WriteBackendOverride() error {
+	path := filepath.Join(te.workingDir, "backend_override.tf.json")
+	if err := afero.WriteFile(te.appFs, path, []byte(backendOverrideJSON), 0644); err != nil {
+		return fmt.Errorf("failed to write backend override: %w", err)
+	}
+
+	return nil
+}
+
 // binaryDownloader abstracts binary fetching to enable testing.
 // Tests can provide a mock implementation that returns fake binary data,
 // allowing downloadExecutable to be tested without network access.
