@@ -226,9 +226,9 @@ func (p *Provider) deleteRecordIfExists(ctx context.Context, client CloudflareCl
 	return nil
 }
 
-// extractCloudflareConfig parses the cfg.DNS map into a Config struct.
+// extractCloudflareConfig parses the dnsConfig map into a Config struct.
 // Uses JSON marshal/unmarshal for robust conversion from map[string]any.
-// Validates that cfg.Domain is a subdomain of the zone name.
+// Validates that domain is a subdomain of the zone name.
 func extractCloudflareConfig(domain string, dnsConfig map[string]any) (*Config, error) {
 	if dnsConfig == nil {
 		return nil, fmt.Errorf("dns configuration is missing for cloudflare provider")
