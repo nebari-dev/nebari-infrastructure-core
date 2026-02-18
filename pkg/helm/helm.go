@@ -168,20 +168,3 @@ func WriteTempKubeconfig(kubeconfigBytes []byte) (string, func(), error) {
 
 	return tmpFile.Name(), cleanup, nil
 }
-
-// ReleaseExists checks whether a Helm release with the given name exists in the
-// specified namespace.
-func ReleaseExists(kubeconfigPath, namespace, releaseName string) (bool, error) {
-	actionConfig, err := NewActionConfig(kubeconfigPath, namespace)
-	if err != nil {
-		return false, fmt.Errorf("failed to create Helm action config: %w", err)
-	}
-
-	histClient := action.NewHistory(actionConfig)
-	histClient.Max = 1
-	if _, err := histClient.Run(releaseName); err != nil {
-		return false, nil
-	}
-
-	return true, nil
-}
