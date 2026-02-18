@@ -1,0 +1,5 @@
+# OpenTelemetry Collector overrides
+# Software packs can add exporters and pipeline configuration here.
+# Values in this file are deep-merged with the base config.
+# Note: array values (like pipeline exporter lists) are replaced, not appended.
+{}

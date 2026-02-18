@@ -21,7 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-//go:embed templates
+//go:embed all:templates
 var templates embed.FS
 
 const templateDir = "templates"
@@ -231,8 +231,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		// Get the relative path from templates/
 		relPath := strings.TrimPrefix(path, templateDir+"/")
 
-		// Skip hidden files and underscore-prefixed files
-		if strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_") {
+		// Skip hidden files and underscore-prefixed files (except _nooverwrite_ files)
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), "_") && !strings.HasPrefix(d.Name(), "_nooverwrite_") {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -249,9 +255,25 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 
 		destPath := filepath.Join(workDir, relPath)
 
+		// Handle _nooverwrite_ prefix: strip prefix for destination, skip if file already exists
+		noOverwrite := false
+		if strings.HasPrefix(d.Name(), "_nooverwrite_") {
+			noOverwrite = true
+			strippedName := strings.TrimPrefix(d.Name(), "_nooverwrite_")
+			destPath = filepath.Join(filepath.Dir(destPath), strippedName)
+			relPath = filepath.Join(filepath.Dir(relPath), strippedName)
+		}
+
 		if d.IsDir() {
 			// Create directory
 			return os.MkdirAll(destPath, 0750)
+		}
+
+		// For _nooverwrite_ files, skip if the destination already exists
+		if noOverwrite {
+			if _, err := os.Stat(destPath); err == nil {
+				return nil
+			}
 		}
 
 		// Read template content
