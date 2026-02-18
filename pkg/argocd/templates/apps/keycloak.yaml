@@ -46,9 +46,7 @@ spec:
                   name: keycloak-postgresql-credentials
                   key: password
             - name: KC_HOSTNAME
-              value: "keycloak.{{ .Domain }}"
-            - name: KC_HOSTNAME_STRICT
-              value: "true"
+              value: "https://keycloak.{{ .Domain }}/auth"
           proxy:
             mode: xforwarded
           livenessProbe: |
