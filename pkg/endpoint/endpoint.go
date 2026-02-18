@@ -2,7 +2,6 @@ package endpoint
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 const (
 	DefaultNamespace     = "envoy-gateway-system"
 	DefaultLabelSelector = "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway"
-	DefaultTimeout       = 3 * time.Minute
+	DefaultTimeout       = 5 * time.Minute
 	DefaultPollInterval  = 5 * time.Second
 )
 
@@ -66,8 +65,9 @@ func WithPollInterval(d time.Duration) Option {
 
 // GetLoadBalancerEndpoint polls the Kubernetes API for a service matching the
 // configured label selector and returns the load balancer endpoint once available.
-// It fails fast if no services match the selector. If a service exists but has
-// no ingress entries yet, it keeps polling until the timeout expires.
+// It keeps polling for both service creation and ingress assignment until the
+// timeout expires. This handles the case where ArgoCD hasn't yet reconciled
+// the Gateway resource that triggers service creation.
 func GetLoadBalancerEndpoint(ctx context.Context, client kubernetes.Interface, opts ...Option) (*LoadBalancerEndpoint, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "endpoint.GetLoadBalancerEndpoint")
@@ -95,9 +95,6 @@ func GetLoadBalancerEndpoint(ctx context.Context, client kubernetes.Interface, o
 			attribute.String("ip", ep.IP),
 		)
 		return ep, nil
-	} else if isServiceNotFound(err) {
-		span.RecordError(err)
-		return nil, err
 	}
 
 	for {
@@ -117,10 +114,6 @@ func GetLoadBalancerEndpoint(ctx context.Context, client kubernetes.Interface, o
 					attribute.String("ip", ep.IP),
 				)
 				return ep, nil
-			}
-			if isServiceNotFound(err) {
-				span.RecordError(err)
-				return nil, err
 			}
 		}
 	}
@@ -142,7 +135,7 @@ func checkEndpoint(ctx context.Context, client kubernetes.Interface, cfg *option
 	}
 
 	if len(services.Items) == 0 {
-		return nil, &serviceNotFoundError{namespace: cfg.namespace, labelSelector: cfg.labelSelector}
+		return nil, fmt.Errorf("no services found in namespace %q matching %q", cfg.namespace, cfg.labelSelector)
 	}
 
 	svc := services.Items[0]
@@ -155,18 +148,4 @@ func checkEndpoint(ctx context.Context, client kubernetes.Interface, cfg *option
 		Hostname: ingress[0].Hostname,
 		IP:       ingress[0].IP,
 	}, nil
-}
-
-type serviceNotFoundError struct {
-	namespace     string
-	labelSelector string
-}
-
-func (e *serviceNotFoundError) Error() string {
-	return fmt.Sprintf("no services found in namespace %q matching %q", e.namespace, e.labelSelector)
-}
-
-func isServiceNotFound(err error) bool {
-	var svcErr *serviceNotFoundError
-	return errors.As(err, &svcErr)
 }
