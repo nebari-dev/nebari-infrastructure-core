@@ -87,7 +87,8 @@ func (s Update) WithMetadata(key string, value any) Update {
 }
 
 // Send sends a status update through the channel stored in the context (if present)
-// This function is non-blocking and will drop the message if the channel is full
+// This function is non-blocking and will drop the message if the channel is full.
+// It is safe to call after the channel has been closed.
 func Send(ctx context.Context, update Update) {
 	ch := getChannel(ctx)
 	if ch == nil {
@@ -100,13 +101,19 @@ func Send(ctx context.Context, update Update) {
 		update.Timestamp = time.Now()
 	}
 
+	// Recover from send on closed channel. This can happen when the status
+	// handler has been cleaned up but the context (with the now-closed channel)
+	// is still in use by downstream code.
+	defer func() {
+		recover() //nolint:errcheck // intentionally discarding - closed channel sends are safe to ignore
+	}()
+
 	// Non-blocking send - drop message if channel is full
 	select {
 	case ch <- update:
 		// Message sent successfully
 	default:
 		// Channel full - drop message
-		// In production, you might want to log this or use a metric
 	}
 }
 
