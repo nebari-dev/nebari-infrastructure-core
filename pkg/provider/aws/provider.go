@@ -17,9 +17,13 @@ import (
 )
 
 const (
+	// ProviderName is the name of the AWS provider
+	ProviderName = "aws"
+
 	// ReconcileTimeout is the maximum time allowed for a complete reconciliation operation
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
+	AWS              = "aws"
 )
 
 // Provider implements the AWS provider
@@ -32,7 +36,7 @@ func NewProvider() *Provider {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "aws"
+	return ProviderName
 }
 
 // contains checks if a string slice contains a string
@@ -93,7 +97,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
@@ -220,7 +224,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("dry_run", cfg.DryRun),
 		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
@@ -258,15 +262,24 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}
 
-	// Ensure state bucket exists
+	// Check if state bucket exists
 	s3Client, err := newS3Client(ctx, awsCfg.Region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
-	if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
+	bucketExists, err := stateBucketExists(ctx, s3Client, bucketName)
+	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to ensure state bucket: %w", err)
+		return err
+	}
+
+	// Only create the state bucket for non-dry-run operations
+	if !cfg.DryRun {
+		if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to ensure state bucket: %w", err)
+		}
 	}
 
 	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
@@ -281,11 +294,21 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}()
 
-	err = tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
-		tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
-	)
+	if cfg.DryRun && !bucketExists {
+		// First-time dry run: override the S3 backend with a local backend since
+		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
+		if err := tf.WriteBackendOverride(); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		err = tf.Init(ctx)
+	} else {
+		err = tf.Init(ctx,
+			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
+			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+			tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
+		)
+	}
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -340,12 +363,24 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	}
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", cfg.ProjectName),
 		attribute.String("region", region),
 		attribute.Bool("dry_run", cfg.DryRun),
 		attribute.Bool("force", cfg.Force),
 	)
+
+	// Check if state bucket exists
+	s3Client, err := newS3Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+	bucketExists, err := stateBucketExists(ctx, s3Client, bucketName)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
 	if err != nil {
@@ -359,11 +394,21 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		}
 	}()
 
-	err = tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
-		tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
-	)
+	if cfg.DryRun && !bucketExists {
+		// First-time dry run: override the S3 backend with a local backend since
+		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
+		if err := tf.WriteBackendOverride(); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		err = tf.Init(ctx)
+	} else {
+		err = tf.Init(ctx,
+			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
+			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+			tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
+		)
+	}
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -375,6 +420,8 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 			span.RecordError(err)
 			return err
 		}
+
+		// Since this is a dry run, we return earlier to avoid destroying the state bucket
 		return nil
 	}
 
@@ -384,11 +431,6 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return err
 	}
 
-	s3Client, err := newS3Client(ctx, region)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create S3 client: %w", err)
-	}
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to destroy state bucket: %w", err)
@@ -407,7 +449,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	if cfg.IsExistingCluster() {
 		contextName := cfg.GetKubeContext()
 		span.SetAttributes(
-			attribute.String("provider", "aws"),
+			attribute.String("provider", ProviderName),
 			attribute.String("kube_context", contextName),
 			attribute.Bool("existing_cluster", true),
 		)
@@ -445,10 +487,27 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	span.SetAttributes(
-		attribute.String("provider", "aws"),
+		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", clusterName),
 		attribute.String("region", region),
 	)
+
+	// Verify the state bucket exists before attempting to read outputs
+	s3Client, err := newS3Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to create S3 client: %w", err)
+	}
+	bucketExists, err := stateBucketExists(ctx, s3Client, bucketName)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	if !bucketExists {
+		err := fmt.Errorf("state bucket does not exist: run 'deploy' first")
+		span.RecordError(err)
+		return nil, err
+	}
 
 	// Initialize terraform to read outputs from state
 	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
