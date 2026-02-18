@@ -238,18 +238,7 @@ func TestProvisionRecords(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set or clear the API token env var
-			if tc.envToken != "" {
-				t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
-			}
-			// When envToken is empty, we need to ensure the env var is unset.
-			// t.Setenv sets it; not calling t.Setenv leaves it at its current
-			// value. To force it unset, set to empty and rely on validation.
-			// Actually, t.Setenv("CLOUDFLARE_API_TOKEN", "") would set it to "".
-			// We need to unset. Use os.Unsetenv inside test cleanup, but t.Setenv
-			// already saves/restores, so we just don't set it.
-			// The test binary shouldn't have CLOUDFLARE_API_TOKEN set by default.
-
+			t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
 			// Track creates and updates
 			var creates []string
 			var updates []string
@@ -406,9 +395,7 @@ func TestDestroyRecords(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.envToken != "" {
-				t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
-			}
+			t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
 
 			// Track deletes via closure
 			var deletes []string
