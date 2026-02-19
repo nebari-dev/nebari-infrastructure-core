@@ -8,8 +8,10 @@ clusterRole:
   create: true
   rules:
     - apiGroups: [""]
-      resources: ["pods"]
+      resources: ["pods", "nodes", "nodes/metrics", "nodes/proxy"]
       verbs: ["get", "list", "watch"]
+    - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+      verbs: ["get"]
 resources:
   requests:
     cpu: 100m
@@ -44,6 +46,23 @@ config:
                 regex: ([^:]+)(?::\d+)?;(\d+)
                 replacement: $1:$2
                 target_label: __address__
+          - job_name: 'kubernetes-nodes-cadvisor'
+            kubernetes_sd_configs:
+              - role: node
+            scheme: https
+            tls_config:
+              ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              insecure_skip_verify: true
+            bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            relabel_configs:
+              - action: labelmap
+                regex: __meta_kubernetes_node_label_(.+)
+              - target_label: __address__
+                replacement: kubernetes.default.svc:443
+              - source_labels: [__meta_kubernetes_node_name]
+                regex: (.+)
+                target_label: __metrics_path__
+                replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
   processors:
     batch:
       timeout: 10s
