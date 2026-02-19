@@ -29,6 +29,11 @@ type NebariConfig struct {
 	// (e.g., Hetzner CCM, cloud provider LB).
 	DisableMetalLB bool `yaml:"disable_metallb,omitempty"`
 
+	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
+	// Use this for BYOC setups where the cloud controller manager requires annotations
+	// (e.g., load-balancer.hetzner.cloud/location: ash).
+	LoadBalancerAnnotations map[string]string `yaml:"load_balancer_annotations,omitempty"`
+
 	// DNS provider configuration (optional)
 	DNSProvider string         `yaml:"dns_provider,omitempty"`
 	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider

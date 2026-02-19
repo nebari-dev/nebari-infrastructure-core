@@ -48,6 +48,9 @@ type TemplateData struct {
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
+	// LoadBalancerAnnotations are propagated to the Gateway's provisioned Service
+	LoadBalancerAnnotations map[string]string
+
 	// Keycloak configuration
 	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
 	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
@@ -69,7 +72,8 @@ func NewTemplateData(cfg *config.NebariConfig) TemplateData {
 		Domain:              cfg.Domain,
 		Provider:            cfg.Provider,
 		StorageClass:        storageClass,
-		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
+		MetalLBAddressRange:    "192.168.1.100-192.168.1.110", // Default, can be overridden
+		LoadBalancerAnnotations: cfg.LoadBalancerAnnotations,
 
 		KeycloakNamespace:       KeycloakDefaultNamespace,
 		KeycloakServiceName:     keycloakServiceName,
