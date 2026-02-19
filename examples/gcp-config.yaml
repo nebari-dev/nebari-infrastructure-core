@@ -2,6 +2,23 @@ project_name: my-nebari-gcp
 provider: gcp
 domain: nebari.example.com
 
+# TLS certificate configuration
+certificate:
+  type: letsencrypt
+  acme:
+    email: admin@example.com
+
+# GitOps repository configuration (required for foundational services)
+# ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-gcp"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+    # OR use token for HTTPS:
+    # token_env: GIT_TOKEN
+
 google_cloud_platform:
   project: my-gcp-project-id
   region: us-central1

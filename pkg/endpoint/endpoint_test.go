@@ -66,13 +66,13 @@ func TestGetLoadBalancerEndpoint(t *testing.T) {
 			wantIP: "34.120.50.99",
 		},
 		{
-			name:    "returns error when no matching services found",
+			name:    "polls until timeout when no matching services found",
 			objects: []runtime.Object{},
 			opts: []Option{
 				WithTimeout(100 * time.Millisecond),
 				WithPollInterval(10 * time.Millisecond),
 			},
-			errContains: "no services found",
+			errContains: "timed out",
 		},
 		{
 			name: "returns error when LB ingress is empty after timeout",

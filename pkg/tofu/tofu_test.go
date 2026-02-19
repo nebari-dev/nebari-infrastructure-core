@@ -227,6 +227,34 @@ func TestExtractTemplates(t *testing.T) {
 	})
 }
 
+func TestWriteBackendOverride(t *testing.T) {
+	t.Run("writes backend override file with correct content", func(t *testing.T) {
+		memFs := afero.NewMemMapFs()
+		workingDir, err := afero.TempDir(memFs, "", "nic-tofu")
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+
+		te := &TerraformExecutor{
+			workingDir: workingDir,
+			appFs:      memFs,
+		}
+
+		if err := te.WriteBackendOverride(); err != nil {
+			t.Fatalf("WriteBackendOverride() error = %v", err)
+		}
+
+		content, err := afero.ReadFile(memFs, filepath.Join(workingDir, "backend_override.tf.json"))
+		if err != nil {
+			t.Fatalf("Failed to read override file: %v", err)
+		}
+
+		if string(content) != backendOverrideJSON {
+			t.Errorf("content = %q, want %q", string(content), backendOverrideJSON)
+		}
+	})
+}
+
 func TestDownloadExecutable(t *testing.T) {
 	t.Run("writes binary to cache directory", func(t *testing.T) {
 		memFs := afero.NewMemMapFs()
