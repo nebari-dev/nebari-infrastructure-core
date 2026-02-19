@@ -60,10 +60,15 @@ type TemplateData struct {
 func NewTemplateData(cfg *config.NebariConfig) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
+	storageClass := cfg.StorageClass
+	if storageClass == "" {
+		storageClass = storageClassForProvider(cfg.Provider)
+	}
+
 	data := TemplateData{
 		Domain:              cfg.Domain,
 		Provider:            cfg.Provider,
-		StorageClass:        storageClassForProvider(cfg.Provider),
+		StorageClass:        storageClass,
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
 
 		KeycloakNamespace:       KeycloakDefaultNamespace,
@@ -239,8 +244,8 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for cloud providers that use their own load balancers
-		if isMetalLBPath(relPath) && !needsMetalLB(data.Provider) {
+		// Skip MetalLB templates for providers that don't need it
+		if isMetalLBPath(relPath) && !needsMetalLB(cfg) {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -312,8 +317,12 @@ func isMetalLBPath(relPath string) bool {
 
 // needsMetalLB returns true if the provider requires MetalLB for load balancing.
 // Cloud providers (aws, gcp, azure) have native load balancers and don't need MetalLB.
-func needsMetalLB(provider string) bool {
-	return provider == "local"
+// Returns false when DisableMetalLB is set (e.g., BYOC setups with their own LB).
+func needsMetalLB(cfg *config.NebariConfig) bool {
+	if cfg.DisableMetalLB {
+		return false
+	}
+	return cfg.Provider == "local"
 }
 
 // processTemplate processes a template file with the given data.

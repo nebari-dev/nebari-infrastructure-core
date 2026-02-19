@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 func TestApplications(t *testing.T) {
@@ -93,6 +95,83 @@ func TestWriteAll(t *testing.T) {
 		if !strings.Contains(content, appName) {
 			t.Errorf("Application %q content doesn't contain app name", appName)
 		}
+	}
+}
+
+func TestStorageClassForProvider(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"aws", "gp2"},
+		{"gcp", "standard-rwo"},
+		{"azure", "managed-csi"},
+		{"local", "standard"},
+		{"unknown", "standard"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := storageClassForProvider(tt.provider)
+			if got != tt.want {
+				t.Errorf("storageClassForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNeedsMetalLB(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.NebariConfig
+		want bool
+	}{
+		{
+			name: "local provider needs MetalLB",
+			cfg:  &config.NebariConfig{Provider: "local"},
+			want: true,
+		},
+		{
+			name: "aws provider does not need MetalLB",
+			cfg:  &config.NebariConfig{Provider: "aws"},
+			want: false,
+		},
+		{
+			name: "local provider with DisableMetalLB",
+			cfg:  &config.NebariConfig{Provider: "local", DisableMetalLB: true},
+			want: false,
+		},
+		{
+			name: "aws provider with DisableMetalLB",
+			cfg:  &config.NebariConfig{Provider: "aws", DisableMetalLB: true},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := needsMetalLB(tt.cfg)
+			if got != tt.want {
+				t.Errorf("needsMetalLB() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewTemplateData_StorageClassOverride(t *testing.T) {
+	// Default: uses provider's storage class
+	cfg := &config.NebariConfig{
+		Provider: "local",
+		Domain:   "test.example.com",
+	}
+	data := NewTemplateData(cfg)
+	if data.StorageClass != "standard" {
+		t.Errorf("expected default storage class 'standard', got %q", data.StorageClass)
+	}
+
+	// Override: uses custom storage class
+	cfg.StorageClass = "hcloud-volumes"
+	data = NewTemplateData(cfg)
+	if data.StorageClass != "hcloud-volumes" {
+		t.Errorf("expected overridden storage class 'hcloud-volumes', got %q", data.StorageClass)
 	}
 }
 
