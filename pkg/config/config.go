@@ -20,6 +20,20 @@ type NebariConfig struct {
 	// the provider field. This allows deploying to pre-existing clusters.
 	KubeContext string `yaml:"kube_context,omitempty"`
 
+	// StorageClass overrides the provider's default storage class.
+	// Use this for BYOC setups where the cluster has its own storage provisioner.
+	StorageClass string `yaml:"storage_class,omitempty"`
+
+	// DisableMetalLB skips MetalLB installation for the local provider.
+	// Use this for BYOC setups where the cluster already has a load balancer
+	// (e.g., Hetzner CCM, cloud provider LB).
+	DisableMetalLB bool `yaml:"disable_metallb,omitempty"`
+
+	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
+	// Use this for BYOC setups where the cloud controller manager requires annotations
+	// (e.g., load-balancer.hetzner.cloud/location: ash).
+	LoadBalancerAnnotations map[string]string `yaml:"load_balancer_annotations,omitempty"`
+
 	// DNS provider configuration (optional)
 	DNSProvider string         `yaml:"dns_provider,omitempty"`
 	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
