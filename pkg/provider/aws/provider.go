@@ -294,6 +294,12 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}()
 
+	// Ctrl+C delivers SIGINT to the entire process group, so tofu already
+	// receives it directly. Detach from parent cancellation to prevent
+	// terraform-exec from sending a second SIGINT, which causes tofu to
+	// abort immediately instead of shutting down gracefully (state drift).
+	tofuCtx := context.WithoutCancel(ctx)
+
 	if cfg.DryRun && !bucketExists {
 		// First-time dry run: override the S3 backend with a local backend since
 		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
@@ -301,9 +307,9 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 			span.RecordError(err)
 			return err
 		}
-		err = tf.Init(ctx)
+		err = tf.Init(tofuCtx)
 	} else {
-		err = tf.Init(ctx,
+		err = tf.Init(tofuCtx,
 			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
 			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
 			tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
@@ -315,7 +321,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	}
 
 	if cfg.DryRun {
-		_, err = tf.Plan(ctx)
+		_, err = tf.Plan(tofuCtx)
 		if err != nil {
 			span.RecordError(err)
 			return err
@@ -323,7 +329,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return nil
 	}
 
-	err = tf.Apply(ctx)
+	err = tf.Apply(tofuCtx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -394,6 +400,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		}
 	}()
 
+	// Ctrl+C delivers SIGINT to the entire process group, so tofu already
+	// receives it directly. Detach from parent cancellation to prevent
+	// terraform-exec from sending a second SIGINT, which causes tofu to
+	// abort immediately instead of shutting down gracefully (state drift).
+	tofuCtx := context.WithoutCancel(ctx)
+
 	if cfg.DryRun && !bucketExists {
 		// First-time dry run: override the S3 backend with a local backend since
 		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
@@ -401,9 +413,9 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 			span.RecordError(err)
 			return err
 		}
-		err = tf.Init(ctx)
+		err = tf.Init(tofuCtx)
 	} else {
-		err = tf.Init(ctx,
+		err = tf.Init(tofuCtx,
 			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
 			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
 			tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
@@ -415,7 +427,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	}
 
 	if cfg.DryRun {
-		_, err = tf.Plan(ctx, tfexec.Destroy(true))
+		_, err = tf.Plan(tofuCtx, tfexec.Destroy(true))
 		if err != nil {
 			span.RecordError(err)
 			return err
@@ -425,7 +437,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return nil
 	}
 
-	err = tf.Destroy(ctx)
+	err = tf.Destroy(tofuCtx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -522,7 +534,13 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		}
 	}()
 
-	err = tf.Init(ctx,
+	// Ctrl+C delivers SIGINT to the entire process group, so tofu already
+	// receives it directly. Detach from parent cancellation to prevent
+	// terraform-exec from sending a second SIGINT, which causes tofu to
+	// abort immediately instead of shutting down gracefully (state drift).
+	tofuCtx := context.WithoutCancel(ctx)
+
+	err = tf.Init(tofuCtx,
 		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
 		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
 		tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
@@ -533,7 +551,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	// Get outputs from terraform state
-	outputs, err := tf.Output(ctx)
+	outputs, err := tf.Output(tofuCtx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to get terraform outputs: %w", err)
