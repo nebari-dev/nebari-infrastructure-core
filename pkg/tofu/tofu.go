@@ -51,8 +51,8 @@ func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.Destroy
 }
 
 // Output wraps tfexec.Terraform.Output with a signal-safe context.
-func (te *TerraformExecutor) Output(ctx context.Context) (map[string]tfexec.OutputMeta, error) {
-	return te.Terraform.Output(signalSafeContext(ctx))
+func (te *TerraformExecutor) Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error) {
+	return te.Terraform.Output(signalSafeContext(ctx), opts...)
 }
 
 // backendOverrideJSON overrides the configured backend with a local backend.
