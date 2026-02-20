@@ -15,8 +15,13 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	providerPkg "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -162,10 +167,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
+					AdminUsername:         "admin",
 					AdminPassword:         generateSecurePassword(rand.Reader),
 					DBPassword:            generateSecurePassword(rand.Reader),
 					PostgresAdminPassword: generateSecurePassword(rand.Reader),
 					PostgresUserPassword:  generateSecurePassword(rand.Reader),
+					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
@@ -189,6 +196,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
 	}
 
+	// Look up LB endpoint and provision DNS records if configured
+	var lbEndpoint *endpoint.LoadBalancerEndpoint
+	if cfg.Domain != "" && !deployDryRun {
+		lbEndpoint = lookupEndpointAndProvisionDNS(ctx, cfg, provider)
+	}
+
 	// Flush all pending status messages before printing instructions
 	// This prevents log messages from appearing in the middle of the instructions
 	cleanupStatus()
@@ -201,12 +214,77 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		printKeycloakInstructions(cfg)
 	}
 
-	// Print DNS guidance if no DNS provider is configured
+	// Print DNS guidance only if no DNS provider is configured
 	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
-		printDNSGuidance(cfg)
+		printDNSGuidance(cfg, lbEndpoint)
 	}
 
 	return nil
+}
+
+// lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
+// and provisions DNS records if a DNS provider is configured. Returns the LB
+// endpoint for use in manual DNS guidance (may be nil if lookup failed).
+func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider) *endpoint.LoadBalancerEndpoint {
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	if err != nil {
+		slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		return nil
+	}
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+		return nil
+	}
+
+	k8sClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
+		return nil
+	}
+
+	slog.Info("Waiting for load balancer endpoint...")
+	lbEndpoint, err := endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
+	if err != nil {
+		slog.Warn("Could not retrieve load balancer endpoint", "error", err)
+		return nil
+	}
+
+	// Provision DNS records if a provider is configured
+	if cfg.DNSProvider == "" {
+		return lbEndpoint
+	}
+
+	if lbEndpoint == nil {
+		slog.Warn("Skipping DNS provisioning: load balancer endpoint not available")
+		return nil
+	}
+
+	lbEndpointStr := lbEndpoint.Hostname
+	if lbEndpointStr == "" {
+		lbEndpointStr = lbEndpoint.IP
+	}
+	if lbEndpointStr == "" {
+		slog.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
+		return lbEndpoint
+	}
+
+	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+	if err != nil {
+		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNSProvider, "error", err)
+		return lbEndpoint
+	}
+
+	slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS, lbEndpointStr); err != nil {
+		slog.Warn("Failed to provision DNS records", "error", err)
+		slog.Warn("You can configure DNS manually - see instructions below")
+	} else {
+		slog.Info("DNS records provisioned successfully", "domain", cfg.Domain)
+	}
+
+	return lbEndpoint
 }
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
@@ -290,7 +368,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration
-func printDNSGuidance(cfg *config.NebariConfig) {
+func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  DNS CONFIGURATION REQUIRED")
@@ -301,24 +379,37 @@ func printDNSGuidance(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Printf("  Domain: %s\n", cfg.Domain)
 	fmt.Println()
-	fmt.Println("  Required DNS Records:")
-	fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
-	fmt.Println("  │ Type  │ Name                          │ Value                          │")
-	fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
-	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", cfg.Domain)
-	fmt.Printf("  │ A/CNAME │ %-29s │ <load-balancer-endpoint>       │\n", "*."+cfg.Domain)
-	fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
-	fmt.Println()
-	fmt.Println("  To get the load balancer endpoint, run:")
-	fmt.Println()
-	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'\n")
-	fmt.Println()
-	fmt.Println("  Or for IP-based load balancers:")
-	fmt.Println()
-	fmt.Printf("    kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'\n")
-	fmt.Println()
-	fmt.Println("  Note: Use CNAME records for hostname-based load balancers (AWS),")
-	fmt.Println("        or A records for IP-based load balancers (GCP, Azure).")
+
+	if lb != nil {
+		var recordType, value string
+		if lb.Hostname != "" {
+			recordType = "CNAME"
+			value = lb.Hostname
+		} else {
+			recordType = "A"
+			value = lb.IP
+		}
+
+		fmt.Println("  Required DNS Records:")
+		fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
+		fmt.Printf("  │ Type  : %-65s │\n", recordType)
+		fmt.Printf("  │ Name  : %-65s │\n", cfg.Domain)
+		fmt.Printf("  │ Value : %-65s │\n", value)
+		fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
+		fmt.Printf("  │ Type  : %-65s │\n", recordType)
+		fmt.Printf("  │ Name  : %-65s │\n", "*."+cfg.Domain)
+		fmt.Printf("  │ Value : %-65s │\n", value)
+		fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
+	} else {
+		fmt.Println("  The load balancer endpoint is not yet available.")
+		fmt.Println("  Run the following command to check when it's ready:")
+		fmt.Println()
+		fmt.Println("    nic status -f <config-file>")
+		fmt.Println()
+		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
+		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)
+	}
+
 	fmt.Println()
 	fmt.Println("  To automate DNS management, add a dns_provider to your configuration:")
 	fmt.Println()

@@ -1,56 +1,190 @@
-# Nebari Infrastructure Core (NIC)
+<p align="center">
+  <a href="https://nebari.dev">
+    <img src="docs/assets/nebari-logo.svg" alt="Nebari" width="400">
+  </a>
+</p>
 
-Nebari Infrastructure Core is a standalone Go CLI tool that manages cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.
+<h1 align="center">Nebari Infrastructure Core</h1>
 
-## Features
+<p align="center">
+  <strong>An opinionated Kubernetes distribution built for AI/ML workflows.</strong>
+  <br />
+  One config file. Production-ready platform. Any cloud.
+</p>
 
-- **Declarative Infrastructure**: Define your desired state, NIC reconciles actual state to match
-- **Native Cloud SDKs**: Direct integration with AWS, GCP, Azure, and local K3s
-- **Configuration Compatible**: Works with existing `config.yaml` files
-- **OpenTelemetry Instrumented**: Full distributed tracing support
-- **Structured Logging**: JSON structured logging with slog
+<p align="center">
+  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml"><img src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="docs/cli-reference.md">CLI Reference</a> &middot;
+  <a href="#architecture">Architecture</a> &middot;
+  <a href="#roadmap">Roadmap</a> &middot;
+  <a href="docs/design-doc/README.md">Documentation</a>
+</p>
+
+---
+
+> **Status**: Under heavy development and very unstable. APIs, configuration formats, and behavior will change without notice. Not yet suitable for production use.
+
+## What is Nebari Infrastructure Core?
+
+Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever observability system you already run — all wired together and working out of the box.
+
+NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
+
+NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up, based on seven years of lessons learned deploying data science platforms in production.
+
+### The Problem
+
+Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
+
+### The Solution
+
+NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the infrastructure and deploys foundational services that are pre-integrated and production-hardened.
+
+On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
+
+Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is independent, so you deploy only what you need.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  subgraph SP["Software Packs"]
+    direction LR
+    ds["Data Science"] ~~~ ml["ML Serving"] ~~~ obs["Observability"] ~~~ custom["Your Pack"]
+  end
+
+  subgraph NO["Nebari Operator"]
+    op["Auto-configures SSO, routing, TLS, telemetry via NebariApp CRD"]
+  end
+
+  subgraph FS["Foundational Software"]
+    direction LR
+    kc["Keycloak"] ~~~ eg["Envoy GW"] ~~~ cm["cert-manager"] ~~~ ot["OTel"] ~~~ ac["ArgoCD"]
+  end
+
+  subgraph K8["Kubernetes Cluster"]
+    direction LR
+    vpc["VPC"] ~~~ np["Node Pools"] ~~~ st["Storage"] ~~~ iam["IAM"]
+  end
+
+  subgraph CP["Cloud Provider"]
+    direction LR
+    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ k3s["Local K3s"]
+  end
+
+  SP --> NO --> FS --> K8 --> CP
+
+  style SP fill:#f3e8fc,stroke:#c840e9,color:#6b21a8
+  style NO fill:#d4f5f2,stroke:#20aaa1,color:#0d5d57
+  style FS fill:#fef0db,stroke:#e8952c,color:#7c4a03
+  style K8 fill:#eeeef3,stroke:#4a4a6a,color:#1a1a2e
+  style CP fill:#e8faf8,stroke:#20aaa1,color:#0d5d57
+```
+
+### How It Works
+
+```
+nic deploy -f config.yaml
+```
+
+1. **Provisions infrastructure** — VPC, managed Kubernetes, node pools, storage, IAM via OpenTofu
+2. **Deploys foundational software** — ArgoCD installs Keycloak, Envoy Gateway, cert-manager, OpenTelemetry Collector
+3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and telemetry
+4. **Configures DNS** — optional Cloudflare integration for automatic record management
+
+## Launchpad
+
+Every NIC deployment includes a landing page where users discover and access all deployed services.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/launchpad-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/launchpad-light.png">
+    <img alt="Nebari Launchpad — service discovery and access portal" src="docs/assets/launchpad-light.png" width="800">
+  </picture>
+</p>
+
+## Key Features
+
+| Feature                       | Description                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Opinionated Defaults**      | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices               |
+| **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing                       |
+| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), and local (K3s) from the same config format                               |
+| **GitOps Native**             | ArgoCD manages all foundational software with dependency ordering and health checks                          |
+| **OpenTelemetry Native**      | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
+| **SSO Everywhere**            | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically                  |
+| **Declarative**               | One YAML config file. NIC reconciles actual state to match using OpenTofu                                    |
+| **DNS Automation**            | Optional Cloudflare provider for automatic DNS record management                                             |
 
 ## Quick Start
 
-### Build
+### Prerequisites
+
+- Go 1.25+
+- Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
+
+NIC automatically downloads and manages its own OpenTofu binary — no manual installation required.
+
+### Install
 
 ```bash
-go build -o nic ./cmd/nic
+# From source
+make build
+
+# Or install to $GOPATH/bin
+make install
 ```
 
-### Usage
+### Deploy
 
 ```bash
-# Show version and registered providers
-./nic version
+# Copy and edit a sample config
+cp examples/aws-config.yaml config.yaml
 
-# Validate configuration file
+# Set your credentials
+cp .env.example .env  # Edit with your cloud provider credentials
+
+# Validate your config
 ./nic validate -f config.yaml
 
-# Deploy infrastructure
+# Deploy everything
 ./nic deploy -f config.yaml
-
-# Destroy infrastructure
-./nic destroy -f config.yaml
 ```
 
-## Commands
+See the [CLI Reference](docs/cli-reference.md) for all commands and options.
 
 ### `nic deploy`
 
-Deploy infrastructure based on configuration file.
+Deploy infrastructure and foundational services based on a configuration file.
 
 ```bash
-./nic deploy -f <config-file>
+./nic deploy -f <config-file> [flags]
 ```
 
 Options:
 
 - `-f, --file`: Path to config.yaml file (required)
+- `--dry-run`: Preview changes without applying them
+- `--timeout`: Override default timeout (e.g., '45m', '1h')
+- `--regen-apps`: Regenerate ArgoCD application manifests even if already bootstrapped
+
+The deploy command:
+
+1. Provisions cloud infrastructure via the selected provider (OpenTofu)
+2. Bootstraps a GitOps repository with ArgoCD application manifests (if configured)
+3. Installs ArgoCD and foundational services (Keycloak, Envoy Gateway, cert-manager)
+4. Configures DNS records (if a DNS provider is configured)
 
 ### `nic validate`
 
-Validate configuration file without deploying.
+Validate a configuration file without deploying any infrastructure.
 
 ```bash
 ./nic validate -f <config-file>
@@ -62,10 +196,10 @@ Options:
 
 ### `nic destroy`
 
-Destroy all infrastructure resources in reverse order of creation.
+Destroy all infrastructure resources.
 
 ```bash
-./nic destroy -f <config-file>
+./nic destroy -f <config-file> [flags]
 ```
 
 Options:
@@ -76,20 +210,20 @@ Options:
 - `--force`: Continue destruction even if some resources fail to delete
 - `--timeout`: Override default timeout (e.g., '45m', '1h')
 
-**WARNING**: This operation is destructive and cannot be undone. By default, you will be prompted to confirm before destruction begins.
+**WARNING**: This operation is destructive and cannot be undone.
 
-Example with dry-run:
+### `nic kubeconfig`
+
+Generate a kubeconfig for the deployed Kubernetes cluster.
 
 ```bash
-# Preview what would be destroyed
-./nic destroy -f config.yaml --dry-run
-
-# Destroy with confirmation prompt
-./nic destroy -f config.yaml
-
-# Destroy without confirmation
-./nic destroy -f config.yaml --auto-approve
+./nic kubeconfig -f <config-file> [-o output-file]
 ```
+
+Options:
+
+- `-f, --file`: Path to config.yaml file (required)
+- `-o, --output`: Path to output kubeconfig file (defaults to stdout)
 
 ### `nic version`
 
@@ -101,72 +235,51 @@ Show version information and registered providers.
 
 ## Configuration
 
-NIC uses the standard `config.yaml` format. See `examples/` directory for sample configurations:
+NIC uses a YAML configuration file. See the `examples/` directory for sample configurations:
 
 - `examples/aws-config.yaml` - AWS/EKS configuration
+- `examples/aws-config-with-dns.yaml` - AWS with Cloudflare DNS automation
+- `examples/aws-existing.yaml` - Deploy to an existing EKS cluster
 - `examples/gcp-config.yaml` - GCP/GKE configuration
 - `examples/azure-config.yaml` - Azure/AKS configuration
-- `examples/local-config.yaml` - Local K3s configuration
+- `examples/local-config.yaml` - Local Kind/K3s configuration
+
+### Environment Variables
+
+Secrets are never stored in configuration files. Use environment variables or a `.env` file (see `.env.example`):
+
+```bash
+# Copy the example and fill in your values
+cp .env.example .env
+```
 
 ## OpenTelemetry Configuration
 
 NIC supports OpenTelemetry tracing with configurable exporters:
 
-### Environment Variables
-
-- `OTEL_EXPORTER`: Exporter type (default: "none")
-
-  - `none` - Disable trace export (traces still collected, default)
-  - `console` - Export traces to stdout (development/debugging)
-  - `otlp` - Export to OTLP endpoint
-  - `both` - Export to both console and OTLP
-
-- `OTEL_ENDPOINT`: OTLP endpoint (default: "localhost:4317")
-
-### Examples
+- `OTEL_EXPORTER`: Exporter type — `none` (default), `console`, `otlp`, or `both`
+- `OTEL_ENDPOINT`: OTLP endpoint (default: `localhost:4317`)
 
 ```bash
-# No trace export (default)
-./nic deploy -f config.yaml
-
 # Console traces (debugging)
 OTEL_EXPORTER=console ./nic deploy -f config.yaml
 
 # OTLP traces
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
-
-# Both console and OTLP
-OTEL_EXPORTER=both ./nic deploy -f config.yaml
-
-# No trace export
-OTEL_EXPORTER=none ./nic deploy -f config.yaml
 ```
 
 ## Development
 
-### Local cluster testing with Kind and OrbStack
-Due to difficulties with how networking works with Docker Desktop, using OrbStack for Docker is recommended on Mac.
+### Local Cluster Testing with Kind
 
-See these docs for installing OrbStack: https://docs.orbstack.dev/quick-start
-
-A github repo needs to be created and the URL added to `local-config.yaml` file. 
-
-A valid private SSH key needs to be set as an environment variable `GIT_SSH_PRIVATE_KEY`
-
-With these configured, to deploy a kind cluster and the foundational software with the `local-config.yaml` file, run the following command:
+For local development, you can deploy a Kind cluster with foundational services:
 
 ```bash
-make localkind-up
+make localkind-up    # Create Kind cluster and deploy
+make localkind-down  # Tear down
 ```
 
-In order to enable local UI access on a browser, add the following to /etc/hosts:
-```bash
-/etc/hosts: 192.168.1.100 keycloak.nebari.local argocd.nebari.local
-```
-
-Now ArgoCD and Keycloak can be accessed at the following URLs:
-- https://argocd.nebari.local
-- https://keycloak.nebari.local
+A GitHub repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the `GIT_SSH_PRIVATE_KEY` environment variable.
 
 ### Running Tests
 
@@ -182,112 +295,86 @@ go tool cover -html=coverage.out
 ### Code Quality
 
 ```bash
-# Format code
-go fmt ./...
+# Format, vet, lint, and test
+make check
 
-# Vet code
-go vet ./...
-
-# Lint (requires golangci-lint)
-golangci-lint run
+# Or individually:
+make fmt
+make vet
+make lint
+make test
 ```
 
 ### Pre-commit Hooks
 
-This project uses pre-commit hooks to ensure code quality before commits. The hooks automatically run formatting, linting, and tests.
-
-#### Installation
-
 ```bash
-# Install pre-commit hooks (one-time setup)
+# Install hooks (one-time setup)
 pre-commit install
-```
 
-#### Usage
-
-Pre-commit hooks will automatically run on `git commit`. To manually run all hooks:
-
-```bash
-# Run all pre-commit hooks on all files
+# Run all hooks manually
 pre-commit run --all-files
-
-# Run specific hook
-pre-commit run golangci-lint --all-files
 ```
-
-#### Configured Hooks
-
-- **trailing-whitespace**: Remove trailing whitespace
-- **end-of-file-fixer**: Ensure files end with newline
-- **check-yaml**: Validate YAML files
-- **check-added-large-files**: Prevent large files from being committed
-- **check-merge-conflict**: Detect merge conflict markers
-- **go-fmt**: Format Go code with `gofmt -s -w`
-- **go-vet**: Run `go vet` for static analysis
-- **golangci-lint**: Run comprehensive linting with auto-fix
-- **go-test**: Run all tests with `go test -v ./...`
-
-## Architecture
 
 ### Project Structure
 
 ```
-cmd/nic/              # CLI entry point and commands
+cmd/nic/              CLI entry point and commands
 pkg/
-  ├── config/         # Configuration parsing
-  ├── provider/       # Provider interface and registry
-  │   ├── aws/        # AWS provider implementation
-  │   ├── gcp/        # GCP provider implementation
-  │   ├── azure/      # Azure provider implementation
-  │   └── local/      # Local K3s provider implementation
-  └── telemetry/      # OpenTelemetry setup
+  ├── argocd/         ArgoCD installation, Helm charts, app manifests
+  ├── config/         Configuration parsing and validation
+  ├── dnsprovider/    DNS provider interface (Cloudflare)
+  ├── git/            Git client for GitOps repository management
+  ├── kubeconfig/     Kubeconfig generation
+  ├── provider/       Cloud provider interface
+  │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
+  │   ├── gcp/        GCP provider
+  │   ├── azure/      Azure provider
+  │   └── local/      Local Kind/K3s provider
+  ├── telemetry/      OpenTelemetry setup
+  └── tofu/           OpenTofu binary management and execution
+terraform/            OpenTofu/Terraform modules per provider
+examples/             Sample configuration files
+docs/                 Architecture docs, design decisions, ADRs
 ```
 
-### Provider Registration
+## Roadmap
 
-All providers are explicitly registered in `cmd/nic/main.go`:
+NIC is under very active development.
 
-```go
-registry := provider.NewRegistry()
-registry.Register(ctx, "aws", aws.NewProvider())
-registry.Register(ctx, "gcp", gcp.NewProvider())
-registry.Register(ctx, "azure", azure.NewProvider())
-registry.Register(ctx, "local", local.NewProvider())
+Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04.roadmap.md). We welcome feedback and contributions to help shape the future of the project!
+
+## Documentation
+
+| Document                                             | Description                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [CLI Reference](docs/cli-reference.md)               | All commands, flags, and configuration options                                                                                                                                                                                                                                                                                                             |
+| [Design Doc](docs/design-doc/README.md)              | The original design document that laid the foundation for NIC's architecture and implementation. It includes detailed explanations of the core components, design decisions, and implementation details. The document is organized into sections covering architecture, design decisions, configuration reference, Nebari Operator, and testing strategy.) |
+| [Architectural Decision Records](docs/adr/README.md) | Architectural decision records recording design decisions as we build                                                                                                                                                                                                                                                                                      |
+
+## Contributing
+
+Contributions are welcome! To get started:
+
+```bash
+# Clone the repo
+git clone https://github.com/nebari-dev/nebari-infrastructure-core.git
+cd nebari-infrastructure-core
+
+# Install dependencies and build
+make build
+
+# Run tests
+go test ./... -v
+
+# Run all checks (fmt, vet, lint, test)
+make check
+
+# Install pre-commit hooks
+pre-commit install
 ```
 
-## Current Status
-
-### AWS Provider (Fully Implemented)
-
-The AWS provider has complete native SDK implementation with stateless reconciliation:
-
-- **VPC**: Creates/manages VPC, subnets, internet gateway, NAT gateways, route tables, security groups
-- **EKS**: Creates/manages EKS cluster with version upgrades, logging, endpoint access configuration
-- **Node Groups**: Parallel creation/update/deletion with scaling, labels, and taints
-- **EFS**: Optional shared storage with mount targets
-- **IAM**: Service roles and node instance profiles
-
-**Reconciliation behavior:**
-- Discovers actual state by querying AWS APIs with NIC tags (`nic.nebari.dev/*`)
-- Compares all config attributes against actual state
-- Creates missing resources, updates mutable fields, deletes orphaned resources
-- Errors on immutable field changes requiring manual intervention:
-  - VPC: CIDR, availability zones
-  - EKS: KMS encryption key
-  - Node Groups: instance type, AMI type, capacity type (Spot)
-  - EFS: performance mode, encryption, KMS key
-
-### GCP, Azure, Local Providers (Stubs)
-
-These providers are stub implementations that print config as JSON and return success. Native SDK implementation pending.
-
-### Next Steps
-
-- Implement GCP provider with Google Cloud Client Libraries
-- Implement Azure provider with Azure SDK for Go
-- Implement local K3s provider
-- Add import from Terraform functionality
+See our [issue tracker](https://github.com/nebari-dev/nebari-infrastructure-core/issues) for open issues.
 
 ## License
 
-See LICENSE file for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

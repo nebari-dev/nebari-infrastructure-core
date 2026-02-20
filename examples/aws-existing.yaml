@@ -9,7 +9,7 @@
 project_name: my-nebari-aws
 provider: aws
 domain: nebari.local
-kube_context: "arn:aws:eks:us-west-2:390259467264:cluster/my-nebari-aws"
+kube_context: "arn:aws:eks:us-west-2:123456789012:cluster/my-nebari-aws"
 
 certificate:
   type: selfsigned
@@ -17,7 +17,7 @@ certificate:
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
 git_repository:
-  url: "git@github.com:openteams-ai/NIC-argocd-test.git"
+  url: "git@github.com:my-org/my-gitops-repo.git"
   branch: main
   path: "clusters/test1"  # Optional subdirectory within the repo
   auth:
