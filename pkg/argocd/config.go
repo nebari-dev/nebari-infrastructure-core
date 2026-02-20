@@ -23,7 +23,7 @@ type Config struct {
 // DefaultConfig returns the default Argo CD configuration
 func DefaultConfig() Config {
 	return Config{
-		Version:     "7.7.9", // Chart version that installs Argo CD v2.11.0
+		Version:     "9.4.1", // Chart version that installs Argo CD v3.3.0
 		Namespace:   "argocd",
 		ReleaseName: "argocd",
 		Timeout:     5 * time.Minute,

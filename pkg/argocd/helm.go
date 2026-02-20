@@ -84,8 +84,17 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	// Check if release already exists (idempotency)
 	histClient := action.NewHistory(actionConfig)
 	histClient.Max = 1
-	if _, err := histClient.Run(config.ReleaseName); err == nil {
-		// Release exists - upgrade instead of install
+	if releases, err := histClient.Run(config.ReleaseName); err == nil && len(releases) > 0 {
+		// Release exists - check if upgrade is actually needed
+		current := releases[0]
+		if current.Chart != nil && current.Chart.Metadata != nil &&
+			current.Chart.Metadata.Version == config.Version {
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already up to date, skipping").
+				WithResource("argocd").
+				WithAction("up-to-date").
+				WithMetadata("version", config.Version))
+			return nil
+		}
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already installed, upgrading").
 			WithResource("argocd").
 			WithAction("upgrading"))
