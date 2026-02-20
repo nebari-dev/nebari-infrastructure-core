@@ -34,7 +34,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Nebari Infrastructure Core (NIC)\n")
 	fmt.Printf("Version: %s\n", version)
 	fmt.Printf("Commit: %s\n", commit)
-	fmt.Printf("OpenTofu version: %s\n", tofu.DefaultVersion)
+	fmt.Printf("OpenTofu version: %s\n", tofu.TofuVersion)
 
 	// Show registered providers
 	providers := registry.List(ctx)
