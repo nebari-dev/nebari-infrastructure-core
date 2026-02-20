@@ -47,7 +47,7 @@ type ELBClient interface {
 // Terraform and must be cleaned up before destroying the VPC and subnets.
 func cleanupKubernetesLoadBalancers(ctx context.Context, elbClient ELBClient, ec2Client EC2Client, clusterName string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.cleanupKubernetesLoadBalancers")
+	ctx, span := tracer.Start(ctx, "aws.cleanupKubernetesLoadBalancers")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("cluster_name", clusterName))
