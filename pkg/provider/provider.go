@@ -52,3 +52,15 @@ type Provider interface {
 	// name in different regions).
 	Summary(config *config.NebariConfig) map[string]string
 }
+
+// CredentialValidator is an optional interface for providers that support
+// thorough credential validation beyond basic authentication.
+// Providers implement this to enable the --validate-creds flag.
+// Providers that don't implement this (e.g., local) will show a message
+// indicating the flag is not supported.
+type CredentialValidator interface {
+	// ValidateCredentials performs thorough credential validation including
+	// permission checks using provider-specific APIs (e.g., IAM Policy Simulator).
+	// Returns nil if all required permissions are present.
+	ValidateCredentials(ctx context.Context, config *config.NebariConfig) error
+}
