@@ -234,7 +234,7 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		return nil, fmt.Errorf("failed to get plugin cache directory: %w", err)
 	}
 
-	downloader := &tofuDownloader{cacheDir: cacheDir, version: DefaultVersion}
+	downloader := &tofuDownloader{cacheDir: cacheDir, version: Version}
 	execPath, err := downloadExecutable(ctx, appFs, cacheDir, downloader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable: %w", err)
