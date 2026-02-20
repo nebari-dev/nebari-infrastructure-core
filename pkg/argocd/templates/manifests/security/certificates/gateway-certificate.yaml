@@ -13,9 +13,8 @@ spec:
   issuerRef:
     name: {{ .CertificateIssuer }}
     kind: ClusterIssuer
-  commonName: "*.{{ .Domain }}"
+  commonName: "{{ .Domain }}"
   dnsNames:
-    - "*.{{ .Domain }}"
     - "{{ .Domain }}"
     - "keycloak.{{ .Domain }}"
     - "argocd.{{ .Domain }}"

@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nebari-operator-controller-manager
+  namespace: nebari-operator-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          env:
+            # Keycloak integration configuration
+            - name: KEYCLOAK_ENABLED
+              value: "true"
+            - name: KEYCLOAK_URL
+              value: "{{ .KeycloakServiceURL }}"
+            - name: KEYCLOAK_REALM
+              value: "{{ .KeycloakRealm }}"
+            - name: KEYCLOAK_ADMIN_SECRET_NAME
+              value: "{{ .KeycloakAdminSecretName }}"
+            - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
+              value: "{{ .KeycloakNamespace }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

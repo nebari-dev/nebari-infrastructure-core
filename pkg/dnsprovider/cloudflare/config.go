@@ -5,8 +5,6 @@ package cloudflare
 type Config struct {
 	// ZoneName is the DNS zone/domain to manage (e.g., example.com)
 	ZoneName string `yaml:"zone_name" json:"zone_name"`
-	// Email is the Cloudflare account email (optional, for API key auth)
-	Email string `yaml:"email,omitempty" json:"email,omitempty"`
 	// AdditionalFields captures any extra Cloudflare-specific configuration
 	AdditionalFields map[string]any `yaml:",inline" json:"-"`
 }

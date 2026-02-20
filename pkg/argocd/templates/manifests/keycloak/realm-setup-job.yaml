@@ -21,7 +21,7 @@ spec:
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-admin-credentials
+                  name: {{ .KeycloakAdminSecretName }}
                   key: admin-password
             - name: REALM_ADMIN_PASSWORD
               valueFrom:
@@ -29,7 +29,7 @@ spec:
                   name: nebari-realm-admin-credentials
                   key: password
             - name: KEYCLOAK_URL
-              value: http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth
+              value: {{ .KeycloakServiceURL }}/auth
           command:
             - /bin/bash
             - -c
