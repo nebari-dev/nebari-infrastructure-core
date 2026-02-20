@@ -30,8 +30,20 @@ linters:
         linters:
           - goconst
 
+      # Test files use hardcoded credentials for testing purposes
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G101"
+
       # CLI tools need to read user-specified config files
       - path: pkg/config/
         linters:
           - gosec
         text: "G304"
+
+      # Temp file cleanup uses os.CreateTemp paths, not user input
+      - path: pkg/argocd/helm\.go
+        linters:
+          - gosec
+        text: "G703"

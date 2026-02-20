@@ -211,7 +211,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		cfg := &config.NebariConfig{
 			GitRepository: &git.Config{
 				URL: "https://github.com/example/new-repo.git",
-				Auth: git.AuthConfig{ //nolint:gosec // Env var name, not a credential
+				Auth: git.AuthConfig{
 					TokenEnv: "TEST_GIT_TOKEN_UPDATE",
 				},
 			},
