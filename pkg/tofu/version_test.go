@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestTofuVersion(t *testing.T) {
-	if TofuVersion == "" {
-		t.Error("TofuVersion should not be empty")
+func TestVersion(t *testing.T) {
+	if Version == "" {
+		t.Error("Version should not be empty")
 	}
 
-	parts := strings.Split(TofuVersion, ".")
+	parts := strings.Split(Version, ".")
 	if len(parts) < 2 {
-		t.Errorf("TofuVersion = %v, expected semver format (x.y.z)", TofuVersion)
+		t.Errorf("Version = %v, expected semver format (x.y.z)", Version)
 	}
 }
