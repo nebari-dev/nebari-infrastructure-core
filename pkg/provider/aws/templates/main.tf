@@ -1,11 +1,3 @@
-# Backend configuration will be populated dynamically during initialization
-terraform {
-  backend "s3" {
-    encrypt      = true
-    use_lockfile = true
-  }
-}
-
 module "eks_cluster" {
   source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=b7c1f0caa5b9fbe685844fee7f43bd2b444e3427"
 

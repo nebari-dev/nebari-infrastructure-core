@@ -47,15 +47,30 @@ type TemplateData struct {
 
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
+
+	// Keycloak configuration
+	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
+	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
+	KeycloakServiceURL      string // In-cluster URL for Keycloak (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
+	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
 }
 
 // NewTemplateData creates TemplateData from NebariConfig
 func NewTemplateData(cfg *config.NebariConfig) TemplateData {
+	keycloakServiceName := "keycloak-keycloakx-http"
+
 	data := TemplateData{
 		Domain:              cfg.Domain,
 		Provider:            cfg.Provider,
 		StorageClass:        storageClassForProvider(cfg.Provider),
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
+
+		KeycloakNamespace:       KeycloakDefaultNamespace,
+		KeycloakServiceName:     keycloakServiceName,
+		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakRealm:           "nebari",
+		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
 	}
 
 	// Set git repository info
@@ -224,6 +239,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip MetalLB templates for cloud providers that use their own load balancers
+		if isMetalLBPath(relPath) && !needsMetalLB(data.Provider) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -278,6 +301,19 @@ func storageClassForProvider(provider string) string {
 	default:
 		return "standard"
 	}
+}
+
+// isMetalLBPath returns true if the relative path is a MetalLB-related template.
+func isMetalLBPath(relPath string) bool {
+	return relPath == "apps/metallb.yaml" ||
+		relPath == "apps/metallb-config.yaml" ||
+		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+// needsMetalLB returns true if the provider requires MetalLB for load balancing.
+// Cloud providers (aws, gcp, azure) have native load balancers and don't need MetalLB.
+func needsMetalLB(provider string) bool {
+	return provider == "local"
 }
 
 // processTemplate processes a template file with the given data.
