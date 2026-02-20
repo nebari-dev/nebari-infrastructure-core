@@ -30,6 +30,31 @@ func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
 }
 
+// Init wraps tfexec.Terraform.Init with a signal-safe context.
+func (te *TerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption) error {
+	return te.Terraform.Init(signalSafeContext(ctx), opts...)
+}
+
+// Plan wraps tfexec.Terraform.Plan with a signal-safe context.
+func (te *TerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOption) (bool, error) {
+	return te.Terraform.Plan(signalSafeContext(ctx), opts...)
+}
+
+// Apply wraps tfexec.Terraform.Apply with a signal-safe context.
+func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
+	return te.Terraform.Apply(signalSafeContext(ctx), opts...)
+}
+
+// Destroy wraps tfexec.Terraform.Destroy with a signal-safe context.
+func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.DestroyOption) error {
+	return te.Terraform.Destroy(signalSafeContext(ctx), opts...)
+}
+
+// Output wraps tfexec.Terraform.Output with a signal-safe context.
+func (te *TerraformExecutor) Output(ctx context.Context) (map[string]tfexec.OutputMeta, error) {
+	return te.Terraform.Output(signalSafeContext(ctx))
+}
+
 // backendOverrideJSON overrides the configured backend with a local backend.
 const backendOverrideJSON = `{
   "terraform": {
