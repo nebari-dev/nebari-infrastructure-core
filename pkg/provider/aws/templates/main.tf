@@ -27,4 +27,5 @@ module "eks_cluster" {
   efs_provisioned_throughput_in_mibps      = var.efs_provisioned_throughput_in_mibps
   efs_encrypted                            = var.efs_encrypted
   efs_kms_key_arn                          = var.efs_kms_key_arn
+  node_security_group_additional_rules     = var.node_security_group_additional_rules
 }

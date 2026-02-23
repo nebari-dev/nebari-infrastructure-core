@@ -34,6 +34,7 @@ type TFVars struct {
 	EFSProvisionedThroughputMibps *int                 `json:"efs_provisioned_throughput_in_mibps,omitempty"`
 	EFSEncrypted                  bool                 `json:"efs_encrypted"`
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
+	NodeSGAdditionalRules         map[string]any       `json:"node_security_group_additional_rules,omitempty"`
 }
 
 func (c *Config) toTFVars(projectName string) TFVars {
@@ -77,6 +78,27 @@ func (c *Config) toTFVars(projectName string) TFVars {
 	}
 	if c.PermissionsBoundary != "" {
 		vars.IAMRolePermissionsBoundary = &c.PermissionsBoundary
+	}
+
+	if c.LonghornEnabled() {
+		vars.NodeSGAdditionalRules = map[string]any{
+			"longhorn_webhook_admission": map[string]any{
+				"description":                   "Cluster API to Longhorn admission webhook",
+				"protocol":                      "tcp",
+				"from_port":                     9502,
+				"to_port":                       9502,
+				"type":                          "ingress",
+				"source_cluster_security_group": true,
+			},
+			"longhorn_webhook_conversion": map[string]any{
+				"description":                   "Cluster API to Longhorn conversion webhook",
+				"protocol":                      "tcp",
+				"from_port":                     9501,
+				"to_port":                       9501,
+				"type":                          "ingress",
+				"source_cluster_security_group": true,
+			},
+		}
 	}
 
 	if c.EFS != nil {
