@@ -261,7 +261,7 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		}
 	}()
 
-	downloader := &tofuDownloader{cacheDir: cacheDir, version: DefaultVersion}
+	downloader := &tofuDownloader{cacheDir: cacheDir, version: Version}
 	execPath, err := downloadExecutable(ctx, appFs, workingDir, downloader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get executable: %w", err)
