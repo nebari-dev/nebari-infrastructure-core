@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -152,19 +153,21 @@ func WriteTempKubeconfig(kubeconfigBytes []byte) (string, func(), error) {
 		return "", nil, fmt.Errorf("failed to create temp kubeconfig: %w", err)
 	}
 
+	tmpPath := filepath.Clean(tmpFile.Name())
+
 	if _, err := tmpFile.Write(kubeconfigBytes); err != nil {
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpPath)
 		return "", nil, fmt.Errorf("failed to write temp kubeconfig: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpPath)
 		return "", nil, fmt.Errorf("failed to close temp kubeconfig: %w", err)
 	}
 
 	cleanup := func() {
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpPath)
 	}
 
-	return tmpFile.Name(), cleanup, nil
+	return tmpPath, cleanup, nil
 }
