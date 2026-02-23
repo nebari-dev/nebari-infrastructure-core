@@ -13,7 +13,7 @@ spec:
             - name: KEYCLOAK_ENABLED
               value: "true"
             - name: KEYCLOAK_URL
-              value: "{{ .KeycloakServiceURL }}"
+              value: "{{ .KeycloakServiceURL }}/auth"
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAME
