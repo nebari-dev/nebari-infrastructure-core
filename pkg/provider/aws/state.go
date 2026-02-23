@@ -77,6 +77,23 @@ func getStateBucketName(ctx context.Context, client STSClient, region, projectNa
 	return generateBucketName(accountID, region, projectName)
 }
 
+// stateBucketExists checks whether the state bucket already exists.
+func stateBucketExists(ctx context.Context, client S3Client, bucketName string) (bool, error) {
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err == nil {
+		return true, nil
+	}
+
+	var notFound *types.NotFound
+	var noSuchBucket *types.NoSuchBucket
+	if errors.As(err, &notFound) || errors.As(err, &noSuchBucket) {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to check if bucket exists: %w", err)
+}
+
 // ensureStateBucket creates the state bucket if it doesn't exist.
 // The caller is responsible for providing the bucket name (via getStateBucketName or config override).
 func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName string) error {
@@ -89,21 +106,14 @@ func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName 
 		attribute.String("region", region),
 	)
 
-	// Check if bucket exists
-	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
-		Bucket: aws.String(bucketName),
-	})
-	if err == nil {
+	exists, err := stateBucketExists(ctx, client, bucketName)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if exists {
 		span.SetAttributes(attribute.Bool("bucket_created", false))
 		return nil
-	}
-
-	// If error is NotFound or NoSuchBucket, create the bucket. Other errors are returned.
-	var notFound *types.NotFound
-	var noSuchBucket *types.NoSuchBucket
-	if !errors.As(err, &notFound) && !errors.As(err, &noSuchBucket) {
-		span.RecordError(err)
-		return fmt.Errorf("failed to check if bucket exists: %w", err)
 	}
 
 	createInput := &s3.CreateBucketInput{
@@ -163,19 +173,14 @@ func destroyStateBucket(ctx context.Context, client S3Client, region, bucketName
 		attribute.String("region", region),
 	)
 
-	// Check if bucket exists
-	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
-		Bucket: aws.String(bucketName),
-	})
+	exists, err := stateBucketExists(ctx, client, bucketName)
 	if err != nil {
-		var notFound *types.NotFound
-		var noSuchBucket *types.NoSuchBucket
-		if errors.As(err, &notFound) || errors.As(err, &noSuchBucket) {
-			span.SetAttributes(attribute.Bool("bucket_existed", false))
-			return nil
-		}
 		span.RecordError(err)
-		return fmt.Errorf("failed to check if bucket exists: %w", err)
+		return err
+	}
+	if !exists {
+		span.SetAttributes(attribute.Bool("bucket_existed", false))
+		return nil
 	}
 
 	span.SetAttributes(attribute.Bool("bucket_existed", true))
