@@ -256,9 +256,9 @@ func TestWriteBackendOverride(t *testing.T) {
 }
 
 func TestDownloadExecutable(t *testing.T) {
-	t.Run("writes binary to cache directory", func(t *testing.T) {
+	t.Run("writes binary to directory", func(t *testing.T) {
 		memFs := afero.NewMemMapFs()
-		cacheDir, err := afero.TempDir(memFs, "", "tofu-cache")
+		dir, err := afero.TempDir(memFs, "", "tofu-working")
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
@@ -266,7 +266,7 @@ func TestDownloadExecutable(t *testing.T) {
 		fakeBinary := []byte("fake tofu binary content")
 		downloader := &mockDownloader{binary: fakeBinary}
 
-		execPath, err := downloadExecutable(context.Background(), memFs, cacheDir, downloader)
+		execPath, err := downloadExecutable(context.Background(), memFs, dir, downloader)
 		if err != nil {
 			t.Fatalf("downloadExecutable() error = %v", err)
 		}
@@ -292,14 +292,14 @@ func TestDownloadExecutable(t *testing.T) {
 
 	t.Run("returns error when download fails", func(t *testing.T) {
 		memFs := afero.NewMemMapFs()
-		cacheDir, err := afero.TempDir(memFs, "", "tofu-cache")
+		dir, err := afero.TempDir(memFs, "", "tofu-working")
 		if err != nil {
 			t.Fatalf("Failed to create temp dir: %v", err)
 		}
 
 		downloader := &mockDownloader{err: errors.New("network error")}
 
-		_, err = downloadExecutable(context.Background(), memFs, cacheDir, downloader)
+		_, err = downloadExecutable(context.Background(), memFs, dir, downloader)
 		if err == nil {
 			t.Fatal("downloadExecutable() expected error, got nil")
 		}
