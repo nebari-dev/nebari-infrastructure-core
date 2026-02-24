@@ -63,6 +63,30 @@ This should complete now that the instance-manager PDB allows eviction.
 - **Drain hangs on instance-manager:** You skipped step 2. The PDB blocks eviction until replicas are migrated. Set `evictionRequested: true` on the Longhorn node object.
 - **Replica doesn't migrate:** Check that the new node has `allowScheduling: true` in its Longhorn node object and has available disk space.
 
+## Single-node limitations
+
+**WARNING:** A single-node Longhorn setup with `numberOfReplicas: 1` has no resilience against node failure. If the node dies, the volume data is lost unless you have backups.
+
+### Why single-node single-replica fails
+
+Longhorn stores replica data on the node's local EBS volume. EBS volumes are AZ-bound. When a single-node cluster loses its only node:
+
+1. The old node's EBS volume is stuck in its original AZ
+2. The ASG launches a replacement node, potentially in a different AZ
+3. The new node gets a fresh disk with no Longhorn data
+4. Longhorn marks the volume as `faulted` - no healthy replicas exist
+5. PVCs remain unbound and workloads will not start
+
+This is a key difference from EFS, where data is AZ-independent and any replacement node can mount it immediately.
+
+### Mitigations for single-node setups
+
+- **Pin the node group to a single AZ** so replacement nodes land in the same AZ. This does not guarantee data recovery (the old EBS volume may not be reattached), but improves the odds.
+- **Configure Longhorn recurring backups to S3** so you can restore volumes on any new node regardless of AZ. See the [Longhorn backup docs](https://longhorn.io/docs/latest/snapshots-and-backups/backup-and-restore/).
+- **Accept the risk** for dev/test environments where data loss is tolerable.
+
+For any environment where data durability matters, use at least 2 nodes with `numberOfReplicas: 2` across multiple AZs.
+
 ## Abrupt node failure recovery
 
 When a node is terminated without draining (instance failure, spot termination, AZ outage):
@@ -70,8 +94,8 @@ When a node is terminated without draining (instance failure, spot termination, 
 1. Kubernetes marks the node as `NotReady` after ~40 seconds
 2. After the pod eviction timeout (~5 minutes by default), pods are rescheduled to surviving nodes
 3. If the Longhorn volume has 2+ replicas, it fails over to a surviving replica automatically
-4. If the volume has only 1 replica and it was on the failed node, the volume is unavailable until the node returns or a new replica is rebuilt from a backup
-5. After the `replica-replenishment-wait-interval` (default: 600 seconds), Longhorn rebuilds replacement replicas on available nodes
+4. If the volume has only 1 replica and it was on the failed node, **the volume is unavailable** - see [Single-node limitations](#single-node-limitations) above
+5. After the `replica-replenishment-wait-interval` (default: 600 seconds), Longhorn rebuilds replacement replicas on available nodes (only if other healthy replicas exist to copy from)
 
 ### Monitoring recovery
 
