@@ -378,3 +378,11 @@ See our [issue tracker](https://github.com/nebari-dev/nebari-infrastructure-core
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
+
+## OpenTofu lockfile updates
+
+If you change provider templates under `pkg/provider/**/templates/`, regenerate the provider lockfile(s) locally:
+
+```bash
+./scripts/pre-commit-tofu-lock.sh
+```
