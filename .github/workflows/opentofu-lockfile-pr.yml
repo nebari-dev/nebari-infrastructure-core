@@ -1,41 +1,35 @@
-name: Update OpenTofu lockfile on template changes
+name: OpenTofu lockfile drift check
 
 on:
-  push:
-    branches-ignore: [main]
+  pull_request:
     paths:
       - "pkg/provider/**/templates/**/*.tf"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: opentofu-lockfile-${{ github.ref }}
+  group: opentofu-lockfile-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  lockfile:
+  drift:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup OpenTofu
-        # NOTE: dcmcand requested pinning third-party actions to a commit SHA.
-        # Replace <PINNED_SHA> with the actual commit SHA for the release you choose.
         uses: opentofu/setup-opentofu@<PINNED_SHA>
         with:
           tofu_version: "1.9.0"
 
-      - name: Regenerate lockfile(s)
+      - name: Regenerate lockfile(s) and fail if drift exists
         shell: bash
         run: |
           set -euo pipefail
 
-          # Discover template dirs (future-proof when more providers are added)
           mapfile -t dirs < <(find pkg/provider -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
 
           platforms=(
@@ -62,21 +56,8 @@ jobs:
             popd >/dev/null
           done
 
-      - name: Commit & push lockfile updates
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Robust recursive add (no bash ** glob dependency)
-          find pkg/provider -name ".terraform.lock.hcl" -path "*/templates/*" -exec git add {} +
-
-          if git diff --cached --quiet; then
-            echo "No lockfile changes."
-            exit 0
+          if ! git diff --quiet -- pkg/provider/**/templates/.terraform.lock.hcl; then
+            echo "Lockfile drift detected. Please regenerate .terraform.lock.hcl and commit it."
+            git diff -- pkg/provider/**/templates/.terraform.lock.hcl
+            exit 1
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git commit -m "chore(tofu): update .terraform.lock.hcl"
-          git push
