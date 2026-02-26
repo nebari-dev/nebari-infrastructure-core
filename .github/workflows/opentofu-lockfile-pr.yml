@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@<PINNED_SHA>
+        uses: opentofu/setup-opentofu@9d84900 # v1.0.8
         with:
           tofu_version: "1.9.0"
 
@@ -52,12 +52,23 @@ jobs:
             done
 
             tofu providers lock "${args[@]}"
+
+            # Hygiene: don't leave local state dirs behind
             rm -rf .terraform
+
             popd >/dev/null
           done
 
-          if ! git diff --quiet -- pkg/provider/**/templates/.terraform.lock.hcl; then
-            echo "Lockfile drift detected. Please regenerate .terraform.lock.hcl and commit it."
-            git diff -- pkg/provider/**/templates/.terraform.lock.hcl
+          # Check only lockfiles under templates/ (avoid brittle ** globs)
+          mapfile -t lockfiles < <(find pkg/provider -type f -path "*/templates/.terraform.lock.hcl")
+
+          if [ "${#lockfiles[@]}" -eq 0 ]; then
+            echo "No lockfiles found under pkg/provider/**/templates/.terraform.lock.hcl"
+            exit 0
+          fi
+
+          if ! git diff --quiet -- "${lockfiles[@]}"; then
+            echo "Lockfile drift detected. Please regenerate .terraform.lock.hcl locally and commit it."
+            git diff -- "${lockfiles[@]}"
             exit 1
           fi

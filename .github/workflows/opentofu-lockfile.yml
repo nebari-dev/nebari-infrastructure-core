@@ -24,9 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup OpenTofu
-        # NOTE: dcmcand requested pinning third-party actions to a commit SHA.
-        # Replace <PINNED_SHA> with the actual commit SHA for the release you choose.
-        uses: opentofu/setup-opentofu@<PINNED_SHA>
+        uses: opentofu/setup-opentofu@9d84900 # v1.0.8
         with:
           tofu_version: "1.9.0"
 
@@ -58,7 +56,10 @@ jobs:
             done
 
             tofu providers lock "${args[@]}"
+
+            # Hygiene: don't leave local state dirs behind
             rm -rf .terraform
+
             popd >/dev/null
           done
 
@@ -68,7 +69,7 @@ jobs:
           set -euo pipefail
 
           # Robust recursive add (no bash ** glob dependency)
-          find pkg/provider -name ".terraform.lock.hcl" -path "*/templates/*" -exec git add {} +
+          find pkg/provider -type f -path "*/templates/.terraform.lock.hcl" -exec git add {} +
 
           if git diff --cached --quiet; then
             echo "No lockfile changes."
