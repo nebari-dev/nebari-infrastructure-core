@@ -51,7 +51,8 @@ type TemplateData struct {
 	// Keycloak configuration
 	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
 	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
-	KeycloakServiceURL      string // In-cluster URL for Keycloak (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakServiceURL      string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakAuthURL         string // Keycloak application root including context path (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth")
 	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
 }
@@ -69,6 +70,7 @@ func NewTemplateData(cfg *config.NebariConfig) TemplateData {
 		KeycloakNamespace:       KeycloakDefaultNamespace,
 		KeycloakServiceName:     keycloakServiceName,
 		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakAuthURL:         fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/auth", keycloakServiceName, KeycloakDefaultNamespace),
 		KeycloakRealm:           "nebari",
 		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
 	}

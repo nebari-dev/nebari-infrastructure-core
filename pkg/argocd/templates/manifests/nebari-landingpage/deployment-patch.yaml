@@ -12,7 +12,7 @@ spec:
             - name: ENABLE_AUTH
               value: "true"
             - name: KEYCLOAK_URL
-              value: "{{ .KeycloakServiceURL }}"
+              value: "{{ .KeycloakAuthURL }}"
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
           resources:
