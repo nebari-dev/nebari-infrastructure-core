@@ -21,3 +21,5 @@ spec:
               value: "keycloak-admin-credentials"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
               value: "keycloak"
+            - name: TLS_CLUSTER_ISSUER_NAME
+              value: "{{ .CertificateIssuer }}"
