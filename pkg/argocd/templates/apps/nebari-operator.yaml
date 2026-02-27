@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator
+    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator"
 
   destination:
     server: https://kubernetes.default.svc

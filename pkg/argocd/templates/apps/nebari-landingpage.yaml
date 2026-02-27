@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-landingpage
+    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-landingpage"
 
   destination:
     server: https://kubernetes.default.svc
