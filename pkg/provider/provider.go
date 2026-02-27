@@ -6,6 +6,28 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
+// InfraSettings describes provider-specific Kubernetes infrastructure settings.
+// The ArgoCD writer and deploy command use these to configure templates
+// without importing provider packages or switching on provider names.
+type InfraSettings struct {
+	// StorageClass is the default Kubernetes StorageClass for persistent volumes.
+	// Examples: "gp2" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
+	StorageClass string
+
+	// NeedsMetalLB indicates whether this provider requires MetalLB for load balancing.
+	// Cloud providers with native LBs return false; local provider returns true.
+	NeedsMetalLB bool
+
+	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
+	// Used by providers whose cloud controller manager requires annotations
+	// (e.g., {"load-balancer.hetzner.cloud/location": "ash"}).
+	LoadBalancerAnnotations map[string]string
+
+	// KeycloakBasePath is appended to the Keycloak service URL for the operator.
+	// Most providers leave this empty; Hetzner requires "/auth".
+	KeycloakBasePath string
+}
+
 // Provider defines the interface that all cloud providers must implement.
 //
 // This interface establishes the abstraction boundary between CLI commands and
@@ -51,4 +73,9 @@ type Provider interface {
 	// the correct infrastructure (e.g., distinguishing clusters with the same
 	// name in different regions).
 	Summary(config *config.NebariConfig) map[string]string
+
+	// InfraSettings returns provider-specific Kubernetes infrastructure settings.
+	// CLI commands and the ArgoCD writer use these to configure templates
+	// without importing provider packages or switching on provider names.
+	InfraSettings(config *config.NebariConfig) InfraSettings
 }
