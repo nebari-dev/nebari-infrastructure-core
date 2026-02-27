@@ -73,11 +73,12 @@ func TestResolveNodeGroupAMIs(t *testing.T) {
 					t.Errorf("node group %q missing from result", name)
 					continue
 				}
-				if expectedAMI == nil && g.AMIType != nil {
+				switch {
+				case expectedAMI == nil && g.AMIType != nil:
 					t.Errorf("node group %q: expected no AMIType, got %q", name, *g.AMIType)
-				} else if expectedAMI != nil && g.AMIType == nil {
+				case expectedAMI != nil && g.AMIType == nil:
 					t.Errorf("node group %q: expected AMIType %q, got nil", name, *expectedAMI)
-				} else if expectedAMI != nil && *g.AMIType != *expectedAMI {
+				case expectedAMI != nil && *g.AMIType != *expectedAMI:
 					t.Errorf("node group %q: expected AMIType %q, got %q", name, *expectedAMI, *g.AMIType)
 				}
 			}
