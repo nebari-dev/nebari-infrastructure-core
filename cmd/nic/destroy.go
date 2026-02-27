@@ -129,7 +129,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Clean up DNS records if a DNS provider is configured
-	if cfg.DNSProvider != "" {
+	if cfg.DNS != nil {
 		err := destroyDNS(ctx, cfg)
 		if err != nil {
 			slog.Warn("Failed to clean up DNS records", "error", err)
@@ -155,17 +155,17 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 
 func destroyDNS(ctx context.Context, cfg *config.NebariConfig) error {
 	if destroyDryRun {
-		slog.Info("Would clean up DNS records (dry-run)", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+		slog.Info("Would clean up DNS records (dry-run)", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
 		return nil
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		return err
 	}
-	slog.Info("Cleaning up DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
+	slog.Info("Cleaning up DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
 
-	if err := dnsProvider.DestroyRecords(ctx, cfg.Domain, cfg.DNS); err != nil {
+	if err := dnsProvider.DestroyRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig()); err != nil {
 		return err
 	}
 
