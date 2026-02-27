@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // mockClient implements CloudflareClient for testing.
@@ -62,19 +60,12 @@ func TestProviderName(t *testing.T) {
 }
 
 func TestProvisionRecords(t *testing.T) {
-	baseCfg := &config.NebariConfig{
-		ProjectName: "test-project",
-		Provider:    "aws",
-		Domain:      "nebari.example.com",
-		DNSProvider: "cloudflare",
-		DNS: map[string]any{
-			"zone_name": "example.com",
-		},
-	}
+	baseDNS := map[string]any{"zone_name": "example.com"}
 
 	tests := []struct {
 		name           string
-		cfg            *config.NebariConfig
+		domain         string
+		dnsConfig      map[string]any
 		lbEndpoint     string
 		envToken       string
 		mock           *mockClient
@@ -85,7 +76,8 @@ func TestProvisionRecords(t *testing.T) {
 	}{
 		{
 			name:       "creates A records for IP endpoint",
-			cfg:        baseCfg,
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
 			lbEndpoint: "203.0.113.42",
 			envToken:   "test-token",
 			mock:       &mockClient{
@@ -98,7 +90,8 @@ func TestProvisionRecords(t *testing.T) {
 		},
 		{
 			name:       "creates CNAME records for hostname endpoint",
-			cfg:        baseCfg,
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
 			lbEndpoint: "ab123.elb.us-west-2.amazonaws.com",
 			envToken:   "test-token",
 			mock:       &mockClient{
@@ -111,7 +104,8 @@ func TestProvisionRecords(t *testing.T) {
 		},
 		{
 			name:       "updates existing record when content differs",
-			cfg:        baseCfg,
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
 			lbEndpoint: "203.0.113.99",
 			envToken:   "test-token",
 			mock: &mockClient{
@@ -139,7 +133,8 @@ func TestProvisionRecords(t *testing.T) {
 		},
 		{
 			name:       "no-op when records already match",
-			cfg:        baseCfg,
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
 			lbEndpoint: "203.0.113.42",
 			envToken:   "test-token",
 			mock: &mockClient{
@@ -164,14 +159,9 @@ func TestProvisionRecords(t *testing.T) {
 			wantUpdates: nil,
 		},
 		{
-			name: "error when DNS config missing",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
-				Domain:      "nebari.example.com",
-				DNSProvider: "cloudflare",
-				DNS:         nil,
-			},
+			name:           "error when DNS config missing",
+			domain:         "nebari.example.com",
+			dnsConfig:      nil,
 			lbEndpoint:     "203.0.113.42",
 			envToken:       "test-token",
 			mock:           &mockClient{},
@@ -180,7 +170,8 @@ func TestProvisionRecords(t *testing.T) {
 		},
 		{
 			name:           "error when API token missing",
-			cfg:            baseCfg,
+			domain:         "nebari.example.com",
+			dnsConfig:      baseDNS,
 			lbEndpoint:     "203.0.113.42",
 			envToken:       "", // no token
 			mock:           &mockClient{},
@@ -188,16 +179,9 @@ func TestProvisionRecords(t *testing.T) {
 			wantErrContain: "CLOUDFLARE_API_TOKEN",
 		},
 		{
-			name: "error when domain empty",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
-				Domain:      "",
-				DNSProvider: "cloudflare",
-				DNS: map[string]any{
-					"zone_name": "example.com",
-				},
-			},
+			name:           "error when domain empty",
+			domain:         "",
+			dnsConfig:      baseDNS,
 			lbEndpoint:     "203.0.113.42",
 			envToken:       "test-token",
 			mock:           &mockClient{},
@@ -205,16 +189,9 @@ func TestProvisionRecords(t *testing.T) {
 			wantErrContain: "domain",
 		},
 		{
-			name: "error when domain not in zone",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
-				Domain:      "notexample.com",
-				DNSProvider: "cloudflare",
-				DNS: map[string]any{
-					"zone_name": "example.com",
-				},
-			},
+			name:           "error when domain not in zone",
+			domain:         "notexample.com",
+			dnsConfig:      map[string]any{"zone_name": "example.com"},
 			lbEndpoint:     "203.0.113.42",
 			envToken:       "test-token",
 			mock:           &mockClient{},
@@ -223,7 +200,8 @@ func TestProvisionRecords(t *testing.T) {
 		},
 		{
 			name:       "error when zone resolution fails",
-			cfg:        baseCfg,
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
 			lbEndpoint: "203.0.113.42",
 			envToken:   "test-token",
 			mock: &mockClient{
@@ -247,7 +225,7 @@ func TestProvisionRecords(t *testing.T) {
 			tc.mock.updateDNSRecordFn = wrapUpdate(tc.mock.updateDNSRecordFn, &updates)
 
 			provider := NewProviderForTesting(tc.mock)
-			err := provider.ProvisionRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS, tc.lbEndpoint)
+			err := provider.ProvisionRecords(context.Background(), tc.domain, tc.dnsConfig, tc.lbEndpoint)
 
 			// Check error expectations
 			if tc.wantErr {
@@ -289,19 +267,12 @@ func TestProvisionRecords(t *testing.T) {
 }
 
 func TestDestroyRecords(t *testing.T) {
-	baseCfg := &config.NebariConfig{
-		ProjectName: "test-project",
-		Provider:    "aws",
-		Domain:      "nebari.example.com",
-		DNSProvider: "cloudflare",
-		DNS: map[string]any{
-			"zone_name": "example.com",
-		},
-	}
+	baseDNS := map[string]any{"zone_name": "example.com"}
 
 	tests := []struct {
 		name           string
-		cfg            *config.NebariConfig
+		domain         string
+		dnsConfig      map[string]any
 		envToken       string
 		mock           *mockClient
 		wantErr        bool
@@ -309,9 +280,10 @@ func TestDestroyRecords(t *testing.T) {
 		wantDeletes    []string // record IDs deleted
 	}{
 		{
-			name:     "deletes existing A records",
-			cfg:      baseCfg,
-			envToken: "test-token",
+			name:      "deletes existing A records",
+			domain:    "nebari.example.com",
+			dnsConfig: baseDNS,
+			envToken:  "test-token",
 			mock: &mockClient{
 				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
 					// Return A records for root and wildcard; CNAME queries return empty
@@ -335,9 +307,10 @@ func TestDestroyRecords(t *testing.T) {
 			wantDeletes: []string{"rec-1", "rec-2"},
 		},
 		{
-			name:     "deletes existing CNAME records",
-			cfg:      baseCfg,
-			envToken: "test-token",
+			name:      "deletes existing CNAME records",
+			domain:    "nebari.example.com",
+			dnsConfig: baseDNS,
+			envToken:  "test-token",
 			mock: &mockClient{
 				listDNSRecordsFn: func(_ context.Context, _ string, name string, recordType string) ([]DNSRecordResult, error) {
 					// Return CNAME records for root and wildcard; A queries return empty
@@ -361,23 +334,19 @@ func TestDestroyRecords(t *testing.T) {
 			wantDeletes: []string{"rec-3", "rec-4"},
 		},
 		{
-			name:     "no-op when no records exist",
-			cfg:      baseCfg,
-			envToken: "test-token",
-			mock:     &mockClient{
+			name:      "no-op when no records exist",
+			domain:    "nebari.example.com",
+			dnsConfig: baseDNS,
+			envToken:  "test-token",
+			mock:      &mockClient{
 				// Default listDNSRecordsFn returns nil, nil -- no records found
 			},
 			wantDeletes: nil,
 		},
 		{
-			name: "error when DNS config missing",
-			cfg: &config.NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
-				Domain:      "nebari.example.com",
-				DNSProvider: "cloudflare",
-				DNS:         nil,
-			},
+			name:           "error when DNS config missing",
+			domain:         "nebari.example.com",
+			dnsConfig:      nil,
 			envToken:       "test-token",
 			mock:           &mockClient{},
 			wantErr:        true,
@@ -385,7 +354,8 @@ func TestDestroyRecords(t *testing.T) {
 		},
 		{
 			name:           "error when API token missing",
-			cfg:            baseCfg,
+			domain:         "nebari.example.com",
+			dnsConfig:      baseDNS,
 			envToken:       "", // no token
 			mock:           &mockClient{},
 			wantErr:        true,
@@ -405,7 +375,7 @@ func TestDestroyRecords(t *testing.T) {
 			}
 
 			provider := NewProviderForTesting(tc.mock)
-			err := provider.DestroyRecords(context.Background(), tc.cfg.Domain, tc.cfg.DNS)
+			err := provider.DestroyRecords(context.Background(), tc.domain, tc.dnsConfig)
 
 			// Check error expectations
 			if tc.wantErr {
