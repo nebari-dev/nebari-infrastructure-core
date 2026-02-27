@@ -3,8 +3,6 @@ package dnsprovider
 import (
 	"context"
 	"testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // mockDNSProvider is a mock implementation for testing
@@ -16,32 +14,12 @@ func (m *mockDNSProvider) Name() string {
 	return m.name
 }
 
-func (m *mockDNSProvider) Initialize(ctx context.Context, config *config.NebariConfig) error {
+func (m *mockDNSProvider) ProvisionRecords(ctx context.Context, domain string, dnsConfig map[string]any, lbEndpoint string) error {
 	return nil
 }
 
-func (m *mockDNSProvider) GetRecord(ctx context.Context, name string, recordType string) (*DNSRecord, error) {
-	return nil, nil
-}
-
-func (m *mockDNSProvider) AddRecord(ctx context.Context, record DNSRecord) error {
+func (m *mockDNSProvider) DestroyRecords(ctx context.Context, domain string, dnsConfig map[string]any) error {
 	return nil
-}
-
-func (m *mockDNSProvider) UpdateRecord(ctx context.Context, record DNSRecord) error {
-	return nil
-}
-
-func (m *mockDNSProvider) DeleteRecord(ctx context.Context, name string, recordType string) error {
-	return nil
-}
-
-func (m *mockDNSProvider) EnsureRecord(ctx context.Context, record DNSRecord) error {
-	return nil
-}
-
-func (m *mockDNSProvider) GetCertManagerConfig(ctx context.Context) (map[string]string, error) {
-	return nil, nil
 }
 
 func TestNewRegistry(t *testing.T) {

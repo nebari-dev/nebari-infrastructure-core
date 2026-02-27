@@ -1,11 +1,3 @@
-# Backend configuration will be populated dynamically during initialization
-terraform {
-  backend "s3" {
-    encrypt      = true
-    use_lockfile = true
-  }
-}
-
 module "eks_cluster" {
   source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=b7c1f0caa5b9fbe685844fee7f43bd2b444e3427"
 
@@ -27,7 +19,7 @@ module "eks_cluster" {
   existing_cluster_iam_role_arn            = var.existing_cluster_iam_role_arn
   existing_node_iam_role_arn               = var.existing_node_iam_role_arn
   iam_role_permissions_boundary            = var.iam_role_permissions_boundary
-  enable_cluster_creator_admin_permissions = false
+  enable_cluster_creator_admin_permissions = true
   node_groups                              = var.node_groups
   efs_enabled                              = var.efs_enabled
   efs_performance_mode                     = var.efs_performance_mode

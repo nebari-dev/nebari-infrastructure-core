@@ -16,6 +16,14 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	// KeycloakDefaultNamespace is the namespace where Keycloak is deployed.
+	KeycloakDefaultNamespace = "keycloak"
+
+	// KeycloakDefaultAdminSecretName is the name of the Kubernetes secret containing Keycloak admin credentials.
+	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
+)
+
 // FoundationalConfig holds configuration for foundational services
 type FoundationalConfig struct {
 	// Keycloak configuration
@@ -29,10 +37,12 @@ type FoundationalConfig struct {
 type KeycloakConfig struct {
 	Enabled               bool
 	AdminPassword         string
+	AdminUsername         string
 	DBPassword            string // Password for keycloak DB user
 	PostgresAdminPassword string // Password for postgres superuser
 	PostgresUserPassword  string // Password for postgres regular user
 	Hostname              string
+	RealmAdminUsername    string // Username for the admin user in the nebari realm
 	RealmAdminPassword    string // Password for the admin user in the nebari realm
 }
 
@@ -92,7 +102,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 
 		// Create namespace for Keycloak
-		if err := createNamespace(ctx, k8sClient, "keycloak"); err != nil {
+		if err := createNamespace(ctx, k8sClient, KeycloakDefaultNamespace); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak namespace: %w", err)
 		}
@@ -185,17 +195,17 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
 func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig) error {
-	namespace := "keycloak"
+	namespace := KeycloakDefaultNamespace
 
 	// 1. Create admin credentials secret
 	if err := createSecret(ctx, client, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "keycloak-admin-credentials",
+			Name:      KeycloakDefaultAdminSecretName,
 			Namespace: namespace,
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"admin-username": "admin",
+			"admin-username": keycloakCfg.AdminUsername,
 			"admin-password": keycloakCfg.AdminPassword,
 		},
 	}); err != nil {
@@ -244,7 +254,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			},
 			Type: corev1.SecretTypeOpaque,
 			StringData: map[string]string{
-				"username": "admin",
+				"username": keycloakCfg.RealmAdminUsername,
 				"password": keycloakCfg.RealmAdminPassword,
 			},
 		}); err != nil {

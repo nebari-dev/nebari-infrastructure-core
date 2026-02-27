@@ -8,16 +8,22 @@ spec:
     spec:
       containers:
         - name: manager
-          image: quay.io/nebari/nebari-operator:auth-reconciler
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED
               value: "true"
             - name: KEYCLOAK_URL
-              value: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080"
+              value: "{{ .KeycloakServiceURL }}"
             - name: KEYCLOAK_REALM
-              value: "nebari"
+              value: "{{ .KeycloakRealm }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAME
-              value: "keycloak-admin-credentials"
+              value: "{{ .KeycloakAdminSecretName }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
-              value: "keycloak"
+              value: "{{ .KeycloakNamespace }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
