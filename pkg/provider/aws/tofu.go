@@ -41,9 +41,10 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	for name, group := range nodeGroups {
 		if group.AMIType == nil {
 			var ami string
-			if group.GPU {
+			switch {
+			case group.GPU:
 				ami = "AL2023_x86_64_NVIDIA"
-			} else {
+			default:
 				ami = "AL2023_x86_64_STANDARD"
 			}
 			group.AMIType = &ami
