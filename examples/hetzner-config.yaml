@@ -1,0 +1,17 @@
+project_name: my-nebari
+provider: hetzner
+domain: nebari.example.com
+
+hetzner_cloud:
+  location: ash
+  kubernetes_version: "1.32"
+  masters_pool:
+    instance_type: cpx21
+    instance_count: 1
+  worker_node_pools:
+    - name: workers
+      instance_type: cpx31
+      instance_count: 2
+
+certificate:
+  type: selfsigned
