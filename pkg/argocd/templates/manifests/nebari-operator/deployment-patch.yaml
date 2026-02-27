@@ -8,22 +8,16 @@ spec:
     spec:
       containers:
         - name: manager
+          image: quay.io/nebari/nebari-operator:v0.1.0-alpha.1
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED
               value: "true"
             - name: KEYCLOAK_URL
-              value: "{{ .KeycloakServiceURL }}"
+              value: "{{ .KeycloakAuthURL }}"
             - name: KEYCLOAK_REALM
-              value: "{{ .KeycloakRealm }}"
+              value: "nebari"
             - name: KEYCLOAK_ADMIN_SECRET_NAME
-              value: "{{ .KeycloakAdminSecretName }}"
+              value: "keycloak-admin-credentials"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
-              value: "{{ .KeycloakNamespace }}"
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
+              value: "keycloak"
