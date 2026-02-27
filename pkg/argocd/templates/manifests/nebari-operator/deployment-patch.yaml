@@ -4,7 +4,13 @@ metadata:
   name: nebari-operator-controller-manager
   namespace: nebari-operator-system
 spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
   template:
+    metadata:
+      labels:
+        control-plane: controller-manager
     spec:
       containers:
         - name: manager
@@ -23,3 +29,10 @@ spec:
               value: "{{ .KeycloakNamespace }}"
             - name: TLS_CLUSTER_ISSUER_NAME
               value: "{{ .CertificateIssuer }}"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
