@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
@@ -20,9 +22,9 @@ type NebariConfig struct {
 	// the provider field. This allows deploying to pre-existing clusters.
 	KubeContext string `yaml:"kube_context,omitempty"`
 
-	// DNS provider configuration (optional)
-	DNSProvider string         `yaml:"dns_provider,omitempty"`
-	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
+	// DNS provider configuration (optional).
+	// Only one provider can be configured at a time.
+	DNS *DNSConfig `yaml:"dns,omitempty"`
 
 	// GitRepository configures the GitOps repository for ArgoCD bootstrap (optional)
 	GitRepository *git.Config `yaml:"git_repository,omitempty"`
@@ -40,6 +42,43 @@ type NebariConfig struct {
 	DryRun  bool          `yaml:"-"` // Preview changes without applying them
 	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
 	Timeout time.Duration `yaml:"-"` // Override default operation timeout
+}
+
+// DNSConfig holds typed DNS provider configuration.
+// Only one provider field should be set at a time.
+type DNSConfig struct {
+	Cloudflare *cloudflare.Config `yaml:"cloudflare,omitempty"`
+}
+
+// ProviderName returns the name of the configured DNS provider,
+// or an empty string if none is configured.
+func (d *DNSConfig) ProviderName() string {
+	if d.Cloudflare != nil {
+		return "cloudflare"
+	}
+	return ""
+}
+
+// ProviderConfig returns the DNS provider config as a map for use with the provider
+// interface.
+func (d *DNSConfig) ProviderConfig() map[string]any {
+	var v any
+	switch {
+	case d.Cloudflare != nil:
+		v = d.Cloudflare
+	default:
+		return nil
+	}
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // CertificateConfig holds TLS certificate configuration
@@ -74,6 +113,23 @@ func IsValidProvider(provider string) bool {
 	return false
 }
 
+// Validate checks that exactly one DNS provider is configured.
+func (d *DNSConfig) Validate() error {
+	count := 0
+	if d.Cloudflare != nil {
+		count++
+	}
+	// Add future providers here: if d.Route53 != nil { count++ }
+
+	if count == 0 {
+		return fmt.Errorf("dns block is present but no provider is configured")
+	}
+	if count > 1 {
+		return fmt.Errorf("only one DNS provider can be configured at a time")
+	}
+	return nil
+}
+
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate() error {
@@ -83,6 +139,12 @@ func (c *NebariConfig) Validate() error {
 
 	if !IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
+	}
+
+	if c.DNS != nil {
+		if err := c.DNS.Validate(); err != nil {
+			return fmt.Errorf("invalid dns: %w", err)
+		}
 	}
 
 	if c.GitRepository != nil {
