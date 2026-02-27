@@ -56,6 +56,49 @@ func TestGenerateClusterYAML(t *testing.T) {
 	if !strings.Contains(yaml, "test-token") {
 		t.Error("expected hetzner_token in generated YAML")
 	}
+
+	// Default network config should use 0.0.0.0/0
+	if !strings.Contains(yaml, "0.0.0.0/0") {
+		t.Error("expected default 0.0.0.0/0 in allowed_networks")
+	}
+}
+
+func TestGenerateClusterYAML_CustomNetwork(t *testing.T) {
+	cfg := Config{
+		Location:          "ash",
+		KubernetesVersion: "1.32",
+		MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+		WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+		Network: &NetworkConfig{
+			SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+			APIAllowedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+		},
+	}
+
+	params := clusterParams{
+		ClusterName:    "test",
+		K3sVersion:     "v1.32.12+k3s1",
+		HetznerToken:   "tok",
+		SSHPublicKey:   "/tmp/key.pub",
+		SSHPrivateKey:  "/tmp/key",
+		KubeconfigPath: "/tmp/kubeconfig",
+		Config:         cfg,
+	}
+
+	yaml, err := generateClusterYAML(params)
+	if err != nil {
+		t.Fatalf("generateClusterYAML() error = %v", err)
+	}
+
+	if strings.Contains(yaml, "0.0.0.0/0") {
+		t.Error("custom network config should NOT contain 0.0.0.0/0")
+	}
+	if !strings.Contains(yaml, "10.0.0.0/8") {
+		t.Error("expected custom SSH CIDR 10.0.0.0/8")
+	}
+	if !strings.Contains(yaml, "192.168.0.0/16") {
+		t.Error("expected custom API CIDR 192.168.0.0/16")
+	}
 }
 
 func TestGenerateClusterYAML_WithAutoscaling(t *testing.T) {

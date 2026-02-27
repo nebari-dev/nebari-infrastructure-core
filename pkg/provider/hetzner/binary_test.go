@@ -23,7 +23,7 @@ func TestDownloadBinary(t *testing.T) {
 		cacheDir: cacheDir,
 	}
 
-	execPath, err := ensureBinary(context.Background(), cacheDir, downloader)
+	execPath, err := ensureBinary(context.Background(), cacheDir, DefaultHetznerK3sVersion, downloader)
 	if err != nil {
 		t.Fatalf("ensureBinary() error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestDownloadBinary_CachesResult(t *testing.T) {
 	}
 
 	// First call downloads
-	_, err := ensureBinary(context.Background(), cacheDir, downloader)
+	_, err := ensureBinary(context.Background(), cacheDir, DefaultHetznerK3sVersion, downloader)
 	if err != nil {
 		t.Fatalf("first call error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestDownloadBinary_CachesResult(t *testing.T) {
 	}
 
 	// Second call should use cache
-	_, err = ensureBinary(context.Background(), cacheDir, downloader)
+	_, err = ensureBinary(context.Background(), cacheDir, DefaultHetznerK3sVersion, downloader)
 	if err != nil {
 		t.Fatalf("second call error = %v", err)
 	}

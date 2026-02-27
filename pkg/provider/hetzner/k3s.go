@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const k3sReleasesURL = "https://api.github.com/repos/k3s-io/k3s/releases"
+const k3sReleasesURL = "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100"
 
 // ghRelease is the subset of GitHub release API response we need.
 type ghRelease struct {

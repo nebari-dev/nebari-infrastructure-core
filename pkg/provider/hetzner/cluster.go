@@ -34,9 +34,13 @@ networking:
     private_key_path: "{{ .SSHPrivateKey }}"
   allowed_networks:
     ssh:
-      - 0.0.0.0/0
+{{- range sshAllowedNetworks .Config }}
+      - {{ . }}
+{{- end }}
     api:
-      - 0.0.0.0/0
+{{- range apiAllowedNetworks .Config }}
+      - {{ . }}
+{{- end }}
   public_network:
     ipv4: true
     ipv6: true
@@ -104,6 +108,12 @@ func generateClusterYAML(params clusterParams) (string, error) {
 				}
 			}
 			return false
+		},
+		"sshAllowedNetworks": func(cfg Config) []string {
+			return cfg.SSHAllowedNetworks()
+		},
+		"apiAllowedNetworks": func(cfg Config) []string {
+			return cfg.APIAllowedNetworks()
 		},
 	}
 

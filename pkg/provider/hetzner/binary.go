@@ -17,6 +17,9 @@ const (
 
 	defaultBaseURL  = "https://github.com/vitobotta/hetzner-k3s/releases/download"
 	downloadTimeout = 5 * time.Minute
+
+	// maxBinarySize limits the download to 100 MB to prevent OOM from rogue servers.
+	maxBinarySize = 100 * 1024 * 1024
 )
 
 // binaryDownloader abstracts binary fetching for testability.
@@ -66,17 +69,23 @@ func (d *hetznerK3sDownloader) download(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("download returned status %d for %s", resp.StatusCode, url)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// TODO: Add SHA256 checksum verification against a known digest for each release.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read download response: %w", err)
+	}
+	if int64(len(body)) > maxBinarySize {
+		return nil, fmt.Errorf("downloaded binary exceeds maximum size of %d bytes", maxBinarySize)
 	}
 
 	return body, nil
 }
 
 // ensureBinary returns the path to the hetzner-k3s binary, downloading it if not cached.
-func ensureBinary(ctx context.Context, cacheDir string, downloader binaryDownloader) (string, error) {
-	execPath := filepath.Join(cacheDir, "hetzner-k3s")
+// The binary is cached with its version in the filename to avoid reusing stale binaries
+// after version bumps.
+func ensureBinary(ctx context.Context, cacheDir, version string, downloader binaryDownloader) (string, error) {
+	execPath := filepath.Join(cacheDir, fmt.Sprintf("hetzner-k3s-%s", version))
 	if runtime.GOOS == "windows" {
 		execPath += ".exe"
 	}

@@ -107,7 +107,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		WithResource("provider").WithAction("deploy"))
 
 	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, downloader)
+	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
@@ -211,8 +211,15 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return fmt.Errorf("cluster.yaml not found at %s - was this cluster created by NIC?", clusterYAMLPath)
 	}
 
+	if cfg.DryRun {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would destroy Hetzner k3s cluster").
+			WithResource("provider").WithAction("destroy").
+			WithMetadata("cluster_yaml", clusterYAMLPath))
+		return nil
+	}
+
 	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, downloader)
+	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)

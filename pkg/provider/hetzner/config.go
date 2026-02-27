@@ -13,6 +13,15 @@ type Config struct {
 	MastersPool       MastersPool      `yaml:"masters_pool"`
 	WorkerNodePools   []WorkerNodePool `yaml:"worker_node_pools"`
 	SSH               *SSHConfig       `yaml:"ssh,omitempty"`
+	Network           *NetworkConfig   `yaml:"network,omitempty"`
+}
+
+// NetworkConfig controls firewall rules for SSH and Kubernetes API access.
+// Defaults to 0.0.0.0/0 (open to all) if not specified - restrict these
+// in production to your IP ranges.
+type NetworkConfig struct {
+	SSHAllowedCIDRs []string `yaml:"ssh_allowed_cidrs,omitempty"`
+	APIAllowedCIDRs []string `yaml:"api_allowed_cidrs,omitempty"`
 }
 
 // MastersPool defines the control plane node pool.
@@ -43,6 +52,22 @@ type SSHConfig struct {
 	PrivateKeyPath string `yaml:"private_key_path"`
 }
 
+// SSHAllowedNetworks returns the configured SSH CIDR ranges, defaulting to 0.0.0.0/0.
+func (c *Config) SSHAllowedNetworks() []string {
+	if c.Network != nil && len(c.Network.SSHAllowedCIDRs) > 0 {
+		return c.Network.SSHAllowedCIDRs
+	}
+	return []string{"0.0.0.0/0"}
+}
+
+// APIAllowedNetworks returns the configured API CIDR ranges, defaulting to 0.0.0.0/0.
+func (c *Config) APIAllowedNetworks() []string {
+	if c.Network != nil && len(c.Network.APIAllowedCIDRs) > 0 {
+		return c.Network.APIAllowedCIDRs
+	}
+	return []string{"0.0.0.0/0"}
+}
+
 // IsExplicitK3sVersion returns true if the kubernetes_version already contains
 // a k3s revision suffix (e.g., "v1.32.0+k3s1"), meaning no API lookup is needed.
 func (c *Config) IsExplicitK3sVersion() bool {
@@ -63,6 +88,9 @@ func (c *Config) Validate() error {
 	if c.MastersPool.InstanceCount < 1 {
 		return fmt.Errorf("hetzner_cloud.masters_pool.instance_count must be at least 1")
 	}
+	if c.MastersPool.InstanceCount > 1 && c.MastersPool.InstanceCount%2 == 0 {
+		return fmt.Errorf("hetzner_cloud.masters_pool.instance_count should be odd (1, 3, 5) for k3s HA with embedded etcd; got %d", c.MastersPool.InstanceCount)
+	}
 	if len(c.WorkerNodePools) == 0 {
 		return fmt.Errorf("hetzner_cloud.worker_node_pools must have at least one pool")
 	}
@@ -75,6 +103,18 @@ func (c *Config) Validate() error {
 		}
 		if pool.InstanceCount < 1 && (pool.Autoscaling == nil || !pool.Autoscaling.Enabled) {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].instance_count must be at least 1 (or enable autoscaling)", i)
+		}
+		if pool.Autoscaling != nil && pool.Autoscaling.Enabled {
+			if pool.Autoscaling.MinInstances < 0 {
+				return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].autoscaling.min_instances must not be negative", i)
+			}
+			if pool.Autoscaling.MaxInstances < 1 {
+				return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].autoscaling.max_instances must be at least 1", i)
+			}
+			if pool.Autoscaling.MinInstances > pool.Autoscaling.MaxInstances {
+				return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].autoscaling.min_instances (%d) must not exceed max_instances (%d)",
+					i, pool.Autoscaling.MinInstances, pool.Autoscaling.MaxInstances)
+			}
 		}
 	}
 	return nil

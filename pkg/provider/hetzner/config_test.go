@@ -89,6 +89,67 @@ func TestConfigValidate(t *testing.T) {
 				}},
 			},
 		},
+		{
+			name: "even master count rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 2},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "odd",
+		},
+		{
+			name: "3 masters is valid",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 3},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+		},
+		{
+			name: "autoscaling min exceeds max",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools: []WorkerNodePool{{
+					Name: "w", InstanceType: "cpx31", InstanceCount: 0,
+					Autoscaling: &Autoscaling{Enabled: true, MinInstances: 10, MaxInstances: 5},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "min_instances",
+		},
+		{
+			name: "autoscaling max zero",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools: []WorkerNodePool{{
+					Name: "w", InstanceType: "cpx31", InstanceCount: 0,
+					Autoscaling: &Autoscaling{Enabled: true, MinInstances: 0, MaxInstances: 0},
+				}},
+			},
+			wantErr: true,
+			errMsg:  "max_instances",
+		},
+		{
+			name: "custom network config is valid",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				Network: &NetworkConfig{
+					SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+					APIAllowedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,6 +164,40 @@ func TestConfigValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAllowedNetworksDefaults(t *testing.T) {
+	t.Run("defaults to 0.0.0.0/0 when no network config", func(t *testing.T) {
+		cfg := &Config{}
+		if got := cfg.SSHAllowedNetworks(); len(got) != 1 || got[0] != "0.0.0.0/0" {
+			t.Errorf("SSHAllowedNetworks() = %v, want [0.0.0.0/0]", got)
+		}
+		if got := cfg.APIAllowedNetworks(); len(got) != 1 || got[0] != "0.0.0.0/0" {
+			t.Errorf("APIAllowedNetworks() = %v, want [0.0.0.0/0]", got)
+		}
+	})
+
+	t.Run("uses configured CIDRs when present", func(t *testing.T) {
+		cfg := &Config{
+			Network: &NetworkConfig{
+				SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+				APIAllowedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+			},
+		}
+		if got := cfg.SSHAllowedNetworks(); len(got) != 1 || got[0] != "10.0.0.0/8" {
+			t.Errorf("SSHAllowedNetworks() = %v, want [10.0.0.0/8]", got)
+		}
+		if got := cfg.APIAllowedNetworks(); len(got) != 2 {
+			t.Errorf("APIAllowedNetworks() = %v, want 2 entries", got)
+		}
+	})
+
+	t.Run("falls back when network config has empty lists", func(t *testing.T) {
+		cfg := &Config{Network: &NetworkConfig{}}
+		if got := cfg.SSHAllowedNetworks(); len(got) != 1 || got[0] != "0.0.0.0/0" {
+			t.Errorf("SSHAllowedNetworks() = %v, want [0.0.0.0/0]", got)
+		}
+	})
 }
 
 func TestIsExplicitK3sVersion(t *testing.T) {
