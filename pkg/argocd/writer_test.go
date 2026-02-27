@@ -6,6 +6,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 func TestApplications(t *testing.T) {
@@ -93,6 +96,77 @@ func TestWriteAll(t *testing.T) {
 		if !strings.Contains(content, appName) {
 			t.Errorf("Application %q content doesn't contain app name", appName)
 		}
+	}
+}
+
+func TestNewTemplateData_WithInfraSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings provider.InfraSettings
+		wantSC   string
+		wantLBA  int
+		wantKBP  string
+	}{
+		{
+			name:     "aws defaults",
+			settings: provider.InfraSettings{StorageClass: "gp2"},
+			wantSC:   "gp2",
+			wantLBA:  0,
+		},
+		{
+			name: "hetzner with annotations and keycloak path",
+			settings: provider.InfraSettings{
+				StorageClass:            "hcloud-volumes",
+				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
+				KeycloakBasePath:        "/auth",
+			},
+			wantSC:  "hcloud-volumes",
+			wantLBA: 1,
+			wantKBP: "/auth",
+		},
+		{
+			name: "local with MetalLB",
+			settings: provider.InfraSettings{
+				StorageClass: "standard",
+				NeedsMetalLB: true,
+			},
+			wantSC: "standard",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
+			data := NewTemplateData(cfg, tt.settings)
+			if data.StorageClass != tt.wantSC {
+				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantSC)
+			}
+			if len(data.LoadBalancerAnnotations) != tt.wantLBA {
+				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBA)
+			}
+			if data.KeycloakBasePath != tt.wantKBP {
+				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKBP)
+			}
+		})
+	}
+}
+
+func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
+	cfg := &config.NebariConfig{Provider: "hetzner", Domain: "test.example.com"}
+	settings := provider.InfraSettings{
+		StorageClass:     "hcloud-volumes",
+		KeycloakBasePath: "/auth",
+	}
+	data := NewTemplateData(cfg, settings)
+
+	if !strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
+		t.Errorf("KeycloakServiceURL = %q, should end with /auth", data.KeycloakServiceURL)
+	}
+
+	// Without base path
+	settings.KeycloakBasePath = ""
+	data = NewTemplateData(cfg, settings)
+	if strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
+		t.Errorf("KeycloakServiceURL = %q, should NOT end with /auth", data.KeycloakServiceURL)
 	}
 }
 
