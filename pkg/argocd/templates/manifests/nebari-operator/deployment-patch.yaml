@@ -16,10 +16,10 @@ spec:
             - name: KEYCLOAK_URL
               value: "{{ .KeycloakAuthURL }}"
             - name: KEYCLOAK_REALM
-              value: "nebari"
+              value: "{{ .KeycloakRealm }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAME
-              value: "keycloak-admin-credentials"
+              value: "{{ .KeycloakAdminSecretName }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
-              value: "keycloak"
+              value: "{{ .KeycloakNamespace }}"
             - name: TLS_CLUSTER_ISSUER_NAME
               value: "{{ .CertificateIssuer }}"
