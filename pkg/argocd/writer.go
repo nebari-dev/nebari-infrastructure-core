@@ -19,6 +19,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 //go:embed templates
@@ -48,6 +49,12 @@ type TemplateData struct {
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
+	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
+	LoadBalancerAnnotations map[string]string
+
+	// KeycloakBasePath is appended to the Keycloak in-cluster URL (e.g., "/auth").
+	KeycloakBasePath string
+
 	// Keycloak configuration
 	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
 	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
@@ -56,19 +63,21 @@ type TemplateData struct {
 	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
 }
 
-// NewTemplateData creates TemplateData from NebariConfig
-func NewTemplateData(cfg *config.NebariConfig) TemplateData {
+// NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
+func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	data := TemplateData{
-		Domain:              cfg.Domain,
-		Provider:            cfg.Provider,
-		StorageClass:        storageClassForProvider(cfg.Provider),
-		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
+		Domain:                  cfg.Domain,
+		Provider:                cfg.Provider,
+		StorageClass:            settings.StorageClass,
+		MetalLBAddressRange:     "192.168.1.100-192.168.1.110",
+		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
+		KeycloakBasePath:        settings.KeycloakBasePath,
 
 		KeycloakNamespace:       KeycloakDefaultNamespace,
 		KeycloakServiceName:     keycloakServiceName,
-		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080%s", keycloakServiceName, KeycloakDefaultNamespace, settings.KeycloakBasePath),
 		KeycloakRealm:           "nebari",
 		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
 	}
@@ -203,13 +212,13 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig) error {
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, settings provider.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	workDir := gitClient.WorkDir()
-	data := NewTemplateData(cfg)
+	data := NewTemplateData(cfg, settings)
 
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),
@@ -239,8 +248,8 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for cloud providers that use their own load balancers
-		if isMetalLBPath(relPath) && !needsMetalLB(data.Provider) {
+		// Skip MetalLB templates for providers that don't need it
+		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -287,33 +296,11 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	return nil
 }
 
-// storageClassForProvider returns the appropriate storage class for the given provider.
-func storageClassForProvider(provider string) string {
-	switch provider {
-	case "aws":
-		return "gp2"
-	case "gcp":
-		return "standard-rwo"
-	case "azure":
-		return "managed-csi"
-	case "local":
-		return "standard"
-	default:
-		return "standard"
-	}
-}
-
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
-}
-
-// needsMetalLB returns true if the provider requires MetalLB for load balancing.
-// Cloud providers (aws, gcp, azure) have native load balancers and don't need MetalLB.
-func needsMetalLB(provider string) bool {
-	return provider == "local"
 }
 
 // processTemplate processes a template file with the given data.

@@ -10,59 +10,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-func TestIsValidProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{
-			name:     "aws is valid",
-			provider: "aws",
-			want:     true,
-		},
-		{
-			name:     "gcp is valid",
-			provider: "gcp",
-			want:     true,
-		},
-		{
-			name:     "azure is valid",
-			provider: "azure",
-			want:     true,
-		},
-		{
-			name:     "local is valid",
-			provider: "local",
-			want:     true,
-		},
-		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
-		},
-		{
-			name:     "unknown provider is invalid",
-			provider: "unknown",
-			want:     false,
-		},
-		{
-			name:     "AWS uppercase is invalid",
-			provider: "AWS",
-			want:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidProvider(%q) = %v, want %v", tt.provider, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestProviderConfig_NilMapAccess(t *testing.T) {
 	// Verify that accessing a nil ProviderConfig map returns nil (Go behavior)
 	cfg := &NebariConfig{
@@ -238,13 +185,17 @@ project_name: test-project
 			errContains: "provider field is required",
 		},
 		{
-			name: "invalid provider",
+			name: "any provider string is accepted by config parser",
 			yaml: `
 project_name: test-project
-provider: invalid
+provider: hetzner
 `,
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Provider != "hetzner" {
+					t.Errorf("Provider = %q, want %q", cfg.Provider, "hetzner")
+				}
+			},
 		},
 		{
 			name: "invalid git_repository - missing url",
@@ -354,7 +305,8 @@ provider: aws
 	t.Run("wraps parsing errors with filename", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
-		if err := os.WriteFile(configFile, []byte("provider: invalid"), 0600); err != nil {
+		// Missing provider field triggers validation error
+		if err := os.WriteFile(configFile, []byte("project_name: test"), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
@@ -404,12 +356,11 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name: "invalid provider",
+			name: "provider name validation deferred to registry",
 			config: NebariConfig{
-				Provider: "invalid",
+				Provider: "any-provider-name",
 			},
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
 		},
 		{
 			name: "invalid git_repository",

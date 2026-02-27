@@ -61,28 +61,13 @@ type ACMEConfig struct {
 	Server string `yaml:"server,omitempty"`
 }
 
-// ValidProviders lists the supported providers
-var ValidProviders = []string{"aws", "gcp", "azure", "local"}
-
-// IsValidProvider checks if the provider string is valid
-func IsValidProvider(provider string) bool {
-	for _, p := range ValidProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
-
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
+// Note: provider name validation is handled by the provider registry,
+// not here - the config package should not hardcode valid provider names.
 func (c *NebariConfig) Validate() error {
 	if c.Provider == "" {
 		return fmt.Errorf("provider field is required")
-	}
-
-	if !IsValidProvider(c.Provider) {
-		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
 	}
 
 	if c.GitRepository != nil {
