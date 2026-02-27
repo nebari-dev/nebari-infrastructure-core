@@ -1,4 +1,4 @@
-package aws
+package local
 
 import (
 	"testing"
@@ -6,26 +6,10 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
-// TestProviderName tests the Name method
-func TestProviderName(t *testing.T) {
-	provider := NewProvider()
-	if provider.Name() != "aws" {
-		t.Errorf("expected provider name to be 'aws', got %s", provider.Name())
-	}
-}
-
-// TestNewProvider tests provider creation
-func TestNewProvider(t *testing.T) {
-	provider := NewProvider()
-	if provider == nil {
-		t.Fatal("expected provider to be non-nil")
-	}
-}
-
 func TestInfraSettings(t *testing.T) {
 	p := NewProvider()
 	cfg := &config.NebariConfig{
-		Provider:    "aws",
+		Provider:    "local",
 		ProjectName: "test",
 	}
 
@@ -36,8 +20,8 @@ func TestInfraSettings(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"StorageClass", settings.StorageClass, "gp2"},
-		{"NeedsMetalLB", settings.NeedsMetalLB, false},
+		{"StorageClass", settings.StorageClass, "standard"},
+		{"NeedsMetalLB", settings.NeedsMetalLB, true},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
 	}

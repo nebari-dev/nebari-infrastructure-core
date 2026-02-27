@@ -13,6 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -596,4 +597,12 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 	result["Region"] = awsCfg.Region
 	return result
+}
+
+// InfraSettings returns AWS-specific Kubernetes infrastructure settings.
+func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
+	return provider.InfraSettings{
+		StorageClass: "gp2",
+		NeedsMetalLB: false,
+	}
 }
