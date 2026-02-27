@@ -1,6 +1,10 @@
 module "eks_cluster" {
+<<<<<<< feature/longhorn-storage
+  source = "github.com/nebari-dev/terraform-aws-eks-cluster?ref=feature/longhorn-sg-rules"
+=======
   source  = "nebari-dev/eks-cluster/aws"
   version = "0.1.0"
+>>>>>>> main
 
   project_name                             = var.project_name
   tags                                     = var.tags
@@ -28,4 +32,5 @@ module "eks_cluster" {
   efs_provisioned_throughput_in_mibps      = var.efs_provisioned_throughput_in_mibps
   efs_encrypted                            = var.efs_encrypted
   efs_kms_key_arn                          = var.efs_kms_key_arn
+  node_security_group_additional_rules     = var.node_security_group_additional_rules
 }

@@ -248,6 +248,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return kubeconfigBytes, nil
 }
 
+// StorageClass returns the default StorageClass for the local provider.
+func (p *Provider) StorageClass(_ *config.NebariConfig) string {
+	return "standard"
+}
+
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)

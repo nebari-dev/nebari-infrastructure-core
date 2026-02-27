@@ -47,3 +47,9 @@ linters:
         linters:
           - gosec
         text: "G703"
+
+      # Temp file cleanup uses os.CreateTemp paths, not user input
+      - path: pkg/helm/helm\.go
+        linters:
+          - gosec
+        text: "G703"

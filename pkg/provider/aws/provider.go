@@ -25,6 +25,12 @@ const (
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
+
+	// storageClassLonghorn is the StorageClass name used when Longhorn is enabled.
+	storageClassLonghorn = "longhorn"
+
+	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
+	storageClassGP2 = "gp2"
 )
 
 // Provider implements the AWS provider
@@ -330,6 +336,20 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
+	// Install Longhorn storage if enabled
+	if awsCfg.LonghornEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, cfg)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
+		}
+
+		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -598,6 +618,25 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	return kubeconfigBytes, nil
+}
+
+// StorageClass returns the default StorageClass for the AWS provider.
+// Returns "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
+func (p *Provider) StorageClass(cfg *config.NebariConfig) string {
+	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	if rawCfg == nil {
+		return storageClassLonghorn
+	}
+
+	var awsCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err != nil {
+		return storageClassLonghorn
+	}
+
+	if awsCfg.LonghornEnabled() {
+		return storageClassLonghorn
+	}
+	return storageClassGP2
 }
 
 // Summary returns key configuration details for display purposes
