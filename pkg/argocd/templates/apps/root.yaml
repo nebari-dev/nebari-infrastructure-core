@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}apps
+    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}apps"
     directory:
       recurse: false
       include: '*.yaml'

@@ -1,13 +1,13 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nebari-operator
+  name: nebari-landingpage
   namespace: argocd
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-wave: "6"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -16,11 +16,11 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator"
+    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-landingpage"
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: nebari-operator-system
+    namespace: nebari-system
 
   syncPolicy:
     automated:

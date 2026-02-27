@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapi
+  namespace: nebari-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: ENABLE_AUTH
+              value: "true"
+            - name: KEYCLOAK_URL
+              value: "{{ .KeycloakAuthURL }}"
+            - name: KEYCLOAK_REALM
+              value: "{{ .KeycloakRealm }}"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi

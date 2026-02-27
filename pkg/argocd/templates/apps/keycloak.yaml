@@ -90,7 +90,7 @@ spec:
     # Source 2: Realm setup job (PostSync hook)
     - repoURL: {{ .GitRepoURL }}
       targetRevision: {{ .GitBranch }}
-      path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/keycloak
+      path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/keycloak"
 
   destination:
     server: https://kubernetes.default.svc

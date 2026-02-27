@@ -4,22 +4,31 @@ metadata:
   name: nebari-operator-controller-manager
   namespace: nebari-operator-system
 spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
   template:
+    metadata:
+      labels:
+        control-plane: controller-manager
     spec:
       containers:
         - name: manager
+          image: quay.io/nebari/nebari-operator:v0.1.0-alpha.1
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED
               value: "true"
             - name: KEYCLOAK_URL
-              value: "{{ .KeycloakServiceURL }}"
+              value: "{{ .KeycloakAuthURL }}"
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAME
               value: "{{ .KeycloakAdminSecretName }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
               value: "{{ .KeycloakNamespace }}"
+            - name: TLS_CLUSTER_ISSUER_NAME
+              value: "{{ .CertificateIssuer }}"
           resources:
             requests:
               cpu: 100m
