@@ -4,7 +4,11 @@ kind: Kustomization
 namespace: nebari-operator-system
 
 resources:
-  - https://raw.githubusercontent.com/nebari-dev/nebari-operator/main/dist/install.yaml
+  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=feature/landing-page-service-discovery
+
+images:
+  - name: quay.io/nebari/nebari-operator
+    newTag: feature-landing-page-service-discovery
 
 patches:
   - path: deployment-patch.yaml
