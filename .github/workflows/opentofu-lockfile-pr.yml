@@ -1,0 +1,74 @@
+name: OpenTofu lockfile drift check
+
+on:
+  pull_request:
+    paths:
+      - "pkg/provider/**/templates/**/*.tf"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opentofu-lockfile-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@9d84900 # v1.0.8
+        with:
+          tofu_version: "1.9.0"
+
+      - name: Regenerate lockfile(s) and fail if drift exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t dirs < <(find pkg/provider -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
+
+          platforms=(
+            "linux_amd64"
+            "linux_arm64"
+            "darwin_amd64"
+            "darwin_arm64"
+            "windows_amd64"
+          )
+
+          for d in "${dirs[@]}"; do
+            echo "==> $d"
+            pushd "$d" >/dev/null
+
+            tofu init -upgrade -backend=false -input=false
+
+            args=()
+            for p in "${platforms[@]}"; do
+              args+=("-platform=$p")
+            done
+
+            tofu providers lock "${args[@]}"
+
+            # Hygiene: don't leave local state dirs behind
+            rm -rf .terraform
+
+            popd >/dev/null
+          done
+
+          # Check only lockfiles under templates/ (avoid brittle ** globs)
+          mapfile -t lockfiles < <(find pkg/provider -type f -path "*/templates/.terraform.lock.hcl")
+
+          if [ "${#lockfiles[@]}" -eq 0 ]; then
+            echo "No lockfiles found under pkg/provider/**/templates/.terraform.lock.hcl"
+            exit 0
+          fi
+
+          if ! git diff --quiet -- "${lockfiles[@]}"; then
+            echo "Lockfile drift detected. Please regenerate .terraform.lock.hcl locally and commit it."
+            git diff -- "${lockfiles[@]}"
+            exit 1
+          fi
