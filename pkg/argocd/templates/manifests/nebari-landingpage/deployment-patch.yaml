@@ -4,6 +4,9 @@ metadata:
   name: webapi
   namespace: nebari-system
 spec:
+  selector:
+    matchLabels:
+      app: webapi
   template:
     spec:
       containers:
@@ -13,10 +16,8 @@ spec:
               value: "true"
             - name: KEYCLOAK_URL
               value: "{{ .KeycloakAuthURL }}"
-            {{- if .KeycloakIssuerURL }}
             - name: KEYCLOAK_ISSUER_URL
               value: "{{ .KeycloakIssuerURL }}"
-            {{- end }}
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
           resources:
