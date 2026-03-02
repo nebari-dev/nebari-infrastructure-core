@@ -6,7 +6,8 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: webapi
+      app.kubernetes.io/component: webapi
+      app.kubernetes.io/name: nebari-operator
   template:
     spec:
       containers:
