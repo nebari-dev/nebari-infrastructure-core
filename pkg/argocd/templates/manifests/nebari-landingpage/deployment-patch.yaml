@@ -13,6 +13,7 @@ spec:
       containers:
         - name: api
           env:
+            # JWT validation
             - name: ENABLE_AUTH
               value: "true"
             - name: KEYCLOAK_URL
@@ -21,6 +22,33 @@ spec:
               value: "{{ .KeycloakIssuerURL }}"
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
+            # Keycloak admin credentials — same Secret the operator uses.
+            # Secret must contain 'username' and 'password' keys.
+            # Note: secretKeyRef only supports same-namespace secrets; the
+            # Keycloak admin Secret must be copied to nebari-system if it
+            # originates from the keycloak namespace.
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .KeycloakAdminSecretName }}"
+                  key: username
+                  optional: true
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ .KeycloakAdminSecretName }}"
+                  key: password
+                  optional: true
+            # Admin access-control
+            - name: ADMIN_GROUP
+              value: admin
+            # Persistent stores (bbolt)
+            - name: ACCESS_REQUESTS_DB_PATH
+              value: /data/access_requests.db
+            - name: NOTIFICATIONS_DB_PATH
+              value: /data/notifications.db
+            - name: PINS_DB_PATH
+              value: /data/pins.db
           resources:
             requests:
               cpu: 10m
