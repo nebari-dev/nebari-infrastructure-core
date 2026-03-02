@@ -54,8 +54,9 @@ type TemplateData struct {
 	KeycloakServiceURL      string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
 	KeycloakAuthURL         string // Keycloak application root including context path (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth")
 	KeycloakIssuerURL       string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com/auth")
-	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
-	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
+	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
 }
 
 // NewTemplateData creates TemplateData from NebariConfig
@@ -73,8 +74,9 @@ func NewTemplateData(cfg *config.NebariConfig) TemplateData {
 		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
 		KeycloakAuthURL:         fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/auth", keycloakServiceName, KeycloakDefaultNamespace),
 		KeycloakIssuerURL:       "", // set after Domain is resolved below
-		KeycloakRealm:           "nebari",
-		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
+		KeycloakRealm:                "nebari",
+		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
+		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
 	}
 
 	// Set git repository info

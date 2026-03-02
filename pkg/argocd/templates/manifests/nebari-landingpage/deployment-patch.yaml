@@ -22,23 +22,13 @@ spec:
               value: "{{ .KeycloakIssuerURL }}"
             - name: KEYCLOAK_REALM
               value: "{{ .KeycloakRealm }}"
-            # Keycloak admin credentials — same Secret the operator uses.
-            # Secret must contain 'username' and 'password' keys.
-            # Note: secretKeyRef only supports same-namespace secrets; the
-            # Keycloak admin Secret must be copied to nebari-system if it
-            # originates from the keycloak namespace.
-            - name: KEYCLOAK_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ .KeycloakAdminSecretName }}"
-                  key: username
-                  optional: true
-            - name: KEYCLOAK_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: "{{ .KeycloakAdminSecretName }}"
-                  key: password
-                  optional: true
+            # Keycloak admin credentials — the webapi reads the Secret directly
+            # via the k8s API (cross-namespace), same as the operator does.
+            # A Role + RoleBinding in the Keycloak namespace grants access.
+            - name: KEYCLOAK_ADMIN_SECRET_NAME
+              value: "{{ .KeycloakAdminSecretName }}"
+            - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
+              value: "{{ .KeycloakAdminSecretNamespace }}"
             # Admin access-control
             - name: ADMIN_GROUP
               value: admin
