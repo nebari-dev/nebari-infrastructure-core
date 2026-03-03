@@ -36,6 +36,24 @@ type TFVars struct {
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
 }
 
+func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
+	result := make(map[string]NodeGroup, len(nodeGroups))
+	for name, group := range nodeGroups {
+		if group.AMIType == nil {
+			var ami string
+			switch {
+			case group.GPU:
+				ami = "AL2023_x86_64_NVIDIA"
+			default:
+				ami = "AL2023_x86_64_STANDARD"
+			}
+			group.AMIType = &ami
+		}
+		result[name] = group
+	}
+	return result
+}
+
 func (c *Config) toTFVars(projectName string) TFVars {
 	vars := TFVars{
 		Region:                 c.Region,
@@ -49,7 +67,7 @@ func (c *Config) toTFVars(projectName string) TFVars {
 		EndpointPublicAccess:   c.EndpointPublicAccess,
 		ClusterEnabledLogTypes: c.EnabledLogTypes,
 		CreateIAMRoles:         c.ExistingClusterRoleArn == "" && c.ExistingNodeRoleArn == "",
-		NodeGroups:             c.NodeGroups,
+		NodeGroups:             resolveNodeGroupAMIs(c.NodeGroups),
 	}
 
 	// Set pointer fields only when values are provided, so omitempty excludes them from JSON.
