@@ -89,6 +89,9 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 		current := releases[0]
 		if current.Chart != nil && current.Chart.Metadata != nil &&
 			current.Chart.Metadata.Version == config.Version {
+			// Note: This comparison only checks the chart version. Changes to DefaultConfig() values
+			// (like Helm configuration parameters) will NOT trigger an upgrade unless the version is bumped.
+			// To apply updated values, increment the version in DefaultConfig().
 			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already up to date, skipping").
 				WithResource("argocd").
 				WithAction("up-to-date").
@@ -97,7 +100,9 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 		}
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already installed, upgrading").
 			WithResource("argocd").
-			WithAction("upgrading"))
+			WithAction("upgrading").
+			WithMetadata("current_version", current.Chart.Metadata.Version).
+			WithMetadata("target_version", config.Version))
 		return upgradeHelm(ctx, actionConfig, config)
 	}
 
@@ -114,6 +119,8 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	client.CreateNamespace = true
 	client.Wait = true
 	client.Timeout = config.Timeout
+	// Pin the chart version to ensure we install the requested version
+	client.ChartPathOptions.Version = config.Version
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Argo CD Helm chart").
 		WithResource("argocd").
@@ -154,10 +161,23 @@ func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config
 	_, span := tracer.Start(ctx, "argocd.upgradeHelm")
 	defer span.End()
 
+	// Refresh Helm repo index to ensure we have the latest charts available
+	if err := addHelmRepo(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to refresh Argo CD Helm repository: %w", err)
+	}
+
 	client := action.NewUpgrade(actionConfig)
 	client.Namespace = config.Namespace
 	client.Wait = true
 	client.Timeout = config.Timeout
+	// Pin the chart version to ensure we upgrade to the requested version
+	client.ChartPathOptions.Version = config.Version
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Upgrading Argo CD Helm chart").
+		WithResource("argocd").
+		WithAction("upgrading").
+		WithMetadata("chart_version", config.Version))
 
 	// Locate and load the chart
 	chart, err := loadArgoCDChart(client.ChartPathOptions)
