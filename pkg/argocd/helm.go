@@ -120,7 +120,7 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	client.Wait = true
 	client.Timeout = config.Timeout
 	// Pin the chart version to ensure we install the requested version
-	client.ChartPathOptions.Version = config.Version
+	client.Version = config.Version
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Argo CD Helm chart").
 		WithResource("argocd").
@@ -172,7 +172,7 @@ func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config
 	client.Wait = true
 	client.Timeout = config.Timeout
 	// Pin the chart version to ensure we upgrade to the requested version
-	client.ChartPathOptions.Version = config.Version
+	client.Version = config.Version
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Upgrading Argo CD Helm chart").
 		WithResource("argocd").

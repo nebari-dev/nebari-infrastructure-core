@@ -85,21 +85,21 @@ func TestSkipLogicWithVersionMatch(t *testing.T) {
 // TestVersionMetadataLogging tests that version metadata is properly included in status messages
 func TestVersionMetadataLogging(t *testing.T) {
 	tests := []struct {
-		name             string
-		currentVersion   string
-		targetVersion    string
+		name               string
+		currentVersion     string
+		targetVersion      string
 		shouldHaveMetadata bool
 	}{
 		{
-			name:             "version mismatch includes metadata",
-			currentVersion:   "9.4.0",
-			targetVersion:    "9.4.1",
+			name:               "version mismatch includes metadata",
+			currentVersion:     "9.4.0",
+			targetVersion:      "9.4.1",
 			shouldHaveMetadata: true,
 		},
 		{
-			name:             "version match does not trigger upgrade",
-			currentVersion:   "9.4.1",
-			targetVersion:    "9.4.1",
+			name:               "version match does not trigger upgrade",
+			currentVersion:     "9.4.1",
+			targetVersion:      "9.4.1",
 			shouldHaveMetadata: false,
 		},
 	}
@@ -115,11 +115,9 @@ func TestVersionMetadataLogging(t *testing.T) {
 				if tt.currentVersion == "" || tt.targetVersion == "" {
 					t.Error("version metadata should not be empty")
 				}
-			} else {
+			} else if tt.shouldHaveMetadata {
 				// When versions match, we skip and don't log upgrade metadata
-				if tt.shouldHaveMetadata {
-					t.Error("expected no upgrade metadata when versions match")
-				}
+				t.Error("expected no upgrade metadata when versions match")
 			}
 		})
 	}
@@ -177,10 +175,10 @@ func TestChartMetadataExtraction(t *testing.T) {
 // TestVersionComparisonLogic tests the core version comparison logic
 func TestVersionComparisonLogic(t *testing.T) {
 	tests := []struct {
-		name          string
+		name           string
 		currentVersion string
-		targetVersion string
-		shouldUpgrade bool
+		targetVersion  string
+		shouldUpgrade  bool
 	}{
 		{
 			name:           "exact match - no upgrade",
