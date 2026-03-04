@@ -541,13 +541,14 @@ func setupLocalGitRepo(t *testing.T, branch string) (string, func()) {
 	// Cleanup work dir, keep bare
 	_ = os.RemoveAll(workDir)
 
-	repoURL := "file://" + bareDir
-
+	// Return the bare dir path directly (not file:// URL).
+	// file:// URLs are now treated as local development paths by IsLocalPath(),
+	// but these tests simulate remote repos that need clone/push behavior.
 	cleanup := func() {
 		_ = os.RemoveAll(bareDir)
 	}
 
-	return repoURL, cleanup
+	return bareDir, cleanup
 }
 
 // createClientWithLocalRepo creates a ClientImpl configured to use a local file:// repo.
@@ -678,7 +679,7 @@ func TestClientInitPullsWhenRepoExists(t *testing.T) {
 }
 
 func TestClientInitInvalidURL(t *testing.T) {
-	client := createClientWithLocalRepo(t, "file:///nonexistent/path", "main", "")
+	client := createClientWithLocalRepo(t, "/nonexistent/path/to/repo", "main", "")
 	defer func() { _ = client.Cleanup() }()
 
 	err := client.Init(context.Background())
@@ -828,7 +829,7 @@ func TestClientValidateAuthWithLocalRepo(t *testing.T) {
 }
 
 func TestClientValidateAuthInvalidURL(t *testing.T) {
-	client := createClientWithLocalRepo(t, "file:///nonexistent/path/to/repo", "main", "")
+	client := createClientWithLocalRepo(t, "/nonexistent/path/to/repo", "main", "")
 	defer func() { _ = client.Cleanup() }()
 
 	err := client.ValidateAuth(context.Background())
