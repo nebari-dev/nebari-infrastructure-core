@@ -54,13 +54,17 @@ type DNSConfig struct {
 	Providers map[string]any `yaml:",inline"`
 }
 
-// Validate checks that exactly one DNS provider is configured.
+// Validate checks that exactly one valid DNS provider is configured.
 func (d *DNSConfig) Validate() error {
 	if len(d.Providers) == 0 {
 		return fmt.Errorf("dns block is present but no provider is configured")
 	}
 	if len(d.Providers) > 1 {
 		return fmt.Errorf("only one DNS provider can be configured at a time")
+	}
+	name := d.ProviderName()
+	if !IsValidDNSProvider(name) {
+		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, ValidDNSProviders)
 	}
 	return nil
 }
@@ -108,9 +112,22 @@ type ACMEConfig struct {
 // ValidProviders lists the supported providers
 var ValidProviders = []string{"aws", "gcp", "azure", "local"}
 
+// ValidDNSProviders lists the supported DNS providers
+var ValidDNSProviders = []string{"cloudflare"}
+
 // IsValidProvider checks if the provider string is valid
 func IsValidProvider(provider string) bool {
 	for _, p := range ValidProviders {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidDNSProvider checks if the DNS provider string is valid
+func IsValidDNSProvider(provider string) bool {
+	for _, p := range ValidDNSProviders {
 		if p == provider {
 			return true
 		}

@@ -63,6 +63,44 @@ func TestIsValidProvider(t *testing.T) {
 	}
 }
 
+func TestIsValidDNSProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		want     bool
+	}{
+		{
+			name:     "cloudflare is valid",
+			provider: "cloudflare",
+			want:     true,
+		},
+		{
+			name:     "empty string is invalid",
+			provider: "",
+			want:     false,
+		},
+		{
+			name:     "unknown provider is invalid",
+			provider: "notreal",
+			want:     false,
+		},
+		{
+			name:     "Cloudflare uppercase is invalid",
+			provider: "Cloudflare",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidDNSProvider(tt.provider)
+			if got != tt.want {
+				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderConfig_NilMapAccess(t *testing.T) {
 	// Verify that accessing a nil ProviderConfig map returns nil (Go behavior)
 	cfg := &NebariConfig{
@@ -323,6 +361,32 @@ dns:
 			errContains: "dns_provider",
 		},
 		{
+			name: "bare dns block treated as no DNS configured",
+			yaml: `
+project_name: test-project
+provider: aws
+dns:
+`,
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.DNS != nil {
+					t.Errorf("DNS should be nil for bare dns: block, got %+v", cfg.DNS)
+				}
+			},
+		},
+		{
+			name: "invalid DNS provider name rejected",
+			yaml: `
+project_name: test-project
+provider: aws
+dns:
+  notreal:
+    zone_name: example.com
+`,
+			wantErr:     true,
+			errContains: "invalid DNS provider",
+		},
+		{
 			name:        "invalid YAML syntax",
 			yaml:        "invalid: yaml: content: [",
 			wantErr:     true,
@@ -473,6 +537,19 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid dns",
 		},
 		{
+			name: "invalid DNS provider name",
+			config: NebariConfig{
+				Provider: "aws",
+				DNS: &DNSConfig{
+					Providers: map[string]any{
+						"notreal": map[string]any{"zone_name": "example.com"},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid DNS provider",
+		},
+		{
 			name: "old format dns_provider rejected",
 			config: NebariConfig{
 				Provider: "aws",
@@ -561,6 +638,16 @@ func TestDNSConfigValidate(t *testing.T) {
 			},
 			wantErr:     true,
 			errContains: "only one DNS provider",
+		},
+		{
+			name: "invalid provider name",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"notreal": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid DNS provider",
 		},
 	}
 
