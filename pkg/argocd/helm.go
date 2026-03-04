@@ -98,10 +98,14 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 				WithMetadata("version", config.Version))
 			return nil
 		}
+		currentVersion := "unknown"
+		if current.Chart != nil && current.Chart.Metadata != nil {
+			currentVersion = current.Chart.Metadata.Version
+		}
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already installed, upgrading").
 			WithResource("argocd").
 			WithAction("upgrading").
-			WithMetadata("current_version", current.Chart.Metadata.Version).
+			WithMetadata("current_version", currentVersion).
 			WithMetadata("target_version", config.Version))
 		return upgradeHelm(ctx, actionConfig, config)
 	}
