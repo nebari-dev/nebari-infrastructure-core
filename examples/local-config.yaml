@@ -20,11 +20,11 @@ local:
 # Simply omit the git_repository section and NIC will auto-create /tmp/nebari-gitops-{project_name}
 #
 # OPTION 2: Explicit local directory (full control over location)
-git_repository:
+# git_repository:
 # Local path to git repository (must be an absolute path)
-  url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
-  branch: main
-  path: "clusters/local"  # Optional subdirectory within the repo
+  # url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
+  # branch: main
+  # path: "clusters/local"  # Optional subdirectory within the repo
   # No auth configuration needed for local paths
 
 # OPTION 3: Remote git repository (production setup)

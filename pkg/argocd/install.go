@@ -13,13 +13,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider) error {
+// gitConfig is the resolved git configuration (may be auto-generated for local dev).
+func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -78,8 +80,8 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 	argoCDCfg := DefaultConfig()
 
 	// If using a local file:// git repo, mount it into the repo-server pod
-	if cfg.GitRepository != nil && cfg.GitRepository.IsLocalPath() {
-		localPath := cfg.GitRepository.GetLocalPath()
+	if gitConfig != nil && gitConfig.IsLocalPath() {
+		localPath := gitConfig.GetLocalPath()
 		addLocalGitopsMount(argoCDCfg.Values, localPath)
 
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
