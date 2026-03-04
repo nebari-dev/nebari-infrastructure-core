@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -376,6 +377,23 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 	} else {
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
+
+	// Write the NIC config to the repository
+	configBytes, err := os.ReadFile(deployConfigFile) //nolint:gosec // G304: path is from CLI flag
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+	configDest := filepath.Join(gitClient.WorkDir(), "nic-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to write config to repository: %w", err)
+	}
+	slog.Info("Wrote NIC config to repository", "path", configDest)
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")

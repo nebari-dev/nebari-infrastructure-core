@@ -104,3 +104,60 @@ type nopWriteCloser struct {
 func (n *nopWriteCloser) Close() error {
 	return nil
 }
+
+func TestSyncWaveOrdering(t *testing.T) {
+	ctx := context.Background()
+
+	// Read cert-manager and envoy-gateway templates
+	tests := []struct {
+		appName      string
+		expectedWave string
+	}{
+		{"envoy-gateway", `sync-wave: "1"`},
+		{"cert-manager", `sync-wave: "2"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.appName, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := WriteApplication(ctx, &buf, tt.appName)
+			if err != nil {
+				t.Fatalf("WriteApplication(%s) error: %v", tt.appName, err)
+			}
+
+			content := buf.String()
+			if !strings.Contains(content, tt.expectedWave) {
+				t.Errorf("%s should have %s, got:\n%s", tt.appName, tt.expectedWave, content)
+			}
+		})
+	}
+}
+
+func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
+	ctx := context.Background()
+
+	// Extract sync waves
+	getSyncWave := func(appName string) string {
+		var buf bytes.Buffer
+		if err := WriteApplication(ctx, &buf, appName); err != nil {
+			t.Fatalf("WriteApplication(%s) error: %v", appName, err)
+		}
+		content := buf.String()
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, "sync-wave") {
+				return strings.TrimSpace(line)
+			}
+		}
+		t.Fatalf("%s has no sync-wave annotation", appName)
+		return ""
+	}
+
+	envoyWave := getSyncWave("envoy-gateway")
+	certWave := getSyncWave("cert-manager")
+
+	// envoy-gateway must come before cert-manager (lower wave number)
+	// because cert-manager needs Gateway API CRDs that envoy-gateway installs
+	if envoyWave >= certWave {
+		t.Errorf("envoy-gateway (%s) must have a lower sync-wave than cert-manager (%s)", envoyWave, certWave)
+	}
+}
