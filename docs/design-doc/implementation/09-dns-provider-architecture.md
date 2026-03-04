@@ -131,10 +131,9 @@ amazon_web_services:
   # ...
 
 # DNS configuration (optional)
-dns_provider: cloudflare
 dns:
-  zone_name: example.com              # Your Cloudflare zone/domain
-  email: admin@example.com            # Email for Let's Encrypt notifications
+  cloudflare:
+    zone_name: example.com              # Your Cloudflare zone/domain
 ```
 
 ### Environment Variables
@@ -146,14 +145,18 @@ CLOUDFLARE_API_TOKEN=your_token_here
 
 ### Dynamic Config Parsing
 
-DNS-specific config is stored as `map[string]any` and parsed by each provider:
+DNS config uses a nested format where the provider name is the key:
 
 ```go
 // In NebariConfig
 type NebariConfig struct {
-    DNSProvider string         `yaml:"dns_provider,omitempty"`
-    DNS         map[string]any `yaml:"dns,omitempty"` // Parsed by specific provider
+    DNS *DNSConfig `yaml:"dns,omitempty"`
     // ...
+}
+
+// DNSConfig uses yaml:",inline" to capture the provider name as the map key
+type DNSConfig struct {
+    Providers map[string]any `yaml:",inline"`
 }
 ```
 
@@ -173,10 +176,9 @@ type Config struct {
 
 **Configuration:**
 ```yaml
-dns_provider: cloudflare
 dns:
-  zone_name: example.com
-  email: admin@example.com
+  cloudflare:
+    zone_name: example.com
 ```
 
 **Environment Variables:**
@@ -195,26 +197,26 @@ Returns configuration for Cloudflare DNS-01 solver:
 
 **AWS Route53:**
 ```yaml
-dns_provider: route53
 dns:
-  hosted_zone_id: Z1234567890ABC  # Optional
-  zone_name: example.com
+  route53:
+    hosted_zone_id: Z1234567890ABC  # Optional
+    zone_name: example.com
 ```
 
 **Azure DNS:**
 ```yaml
-dns_provider: azure-dns
 dns:
-  resource_group: my-rg
-  zone_name: example.com
+  azure-dns:
+    resource_group: my-rg
+    zone_name: example.com
 ```
 
 **Google Cloud DNS:**
 ```yaml
-dns_provider: google-dns
 dns:
-  project: my-project
-  zone_name: example.com
+  google-dns:
+    project: my-project
+    zone_name: example.com
 ```
 
 ## Use Cases
@@ -228,8 +230,7 @@ When cloud provider deploys infrastructure:
 lbIP := "203.0.113.42"
 
 // Initialize DNS provider
-dnsProvider, _ := dnsRegistry.Get(ctx, cfg.DNSProvider)
-dnsProvider.Initialize(ctx, cfg)
+dnsProvider, _ := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
 
 // Ensure A record points to load balancer
 dnsProvider.EnsureRecord(ctx, dnsprovider.DNSRecord{
@@ -254,8 +255,7 @@ When deploying cert-manager to cluster:
 
 ```go
 // Get cert-manager configuration
-dnsProvider, _ := dnsRegistry.Get(ctx, cfg.DNSProvider)
-dnsProvider.Initialize(ctx, cfg)
+dnsProvider, _ := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
 
 certConfig, _ := dnsProvider.GetCertManagerConfig(ctx)
 

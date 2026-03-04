@@ -240,8 +240,7 @@ type NebariConfig struct {
     Provider       string         `yaml:"provider"`         // Required: "aws", "gcp", "azure", "local"
     ProjectName    string         `yaml:"project_name"`     // Required: cluster name
     Domain         string         `yaml:"domain,omitempty"` // Optional: domain for ingress
-    DNSProvider    string         `yaml:"dns_provider,omitempty"`
-    DNS            map[string]any `yaml:"dns,omitempty"`
+    DNS            *DNSConfig     `yaml:"dns,omitempty"` // Nested: dns.cloudflare.zone_name
 
     // Provider-specific config captured via inline YAML
     // Access via: cfg.ProviderConfig["amazon_web_services"], etc.
