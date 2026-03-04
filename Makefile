@@ -114,14 +114,34 @@ localstack-logs: ## Show LocalStack logs
 		docker compose -f docker-compose.test.yml logs -f localstack; \
 	fi
 
-localkind-up: build ## Create local kind cluster and deploy Nebari
+LOCAL_CONFIG?=./examples/local-config.yaml
+
+localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:// gitops repos automatically)
 	@echo "Setting up local kind cluster..."
 	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
 	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
-	-kind create cluster --name nebari-local
+	@GITOPS_URL=$$(awk '/^[^#]*url:/ { gsub(/.*url:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' $(LOCAL_CONFIG)); \
+	if echo "$$GITOPS_URL" | grep -q '^file:///'; then \
+		LOCAL_PATH=$$(echo "$$GITOPS_URL" | sed 's|^file://||'); \
+		echo "Local gitops repo detected: $$LOCAL_PATH"; \
+		mkdir -p "$$LOCAL_PATH"; \
+		echo 'kind: Cluster' > /tmp/kind-config.yaml; \
+		echo 'apiVersion: kind.x-k8s.io/v1alpha4' >> /tmp/kind-config.yaml; \
+		echo 'name: nebari-local' >> /tmp/kind-config.yaml; \
+		echo 'nodes:' >> /tmp/kind-config.yaml; \
+		echo '- role: control-plane' >> /tmp/kind-config.yaml; \
+		echo '  extraMounts:' >> /tmp/kind-config.yaml; \
+		echo "  - hostPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
+		echo "    containerPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
+		echo '    readOnly: false' >> /tmp/kind-config.yaml; \
+		kind create cluster --config /tmp/kind-config.yaml || true; \
+	else \
+		echo "No local gitops repo detected, creating cluster without mount"; \
+		kind create cluster --name nebari-local || true; \
+	fi
 	@echo "Deploying Nebari to local cluster..."
-	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml --regen-apps
+	time ./$(BINARY_NAME) deploy -f $(LOCAL_CONFIG) --regen-apps
 	@echo "Local kind cluster is ready!"
 
 localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster

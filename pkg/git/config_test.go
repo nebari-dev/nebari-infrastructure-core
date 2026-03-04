@@ -98,17 +98,17 @@ func TestConfigValidate(t *testing.T) {
 			errContains: "only one of",
 		},
 		{
-			name: "invalid argocd_auth",
+			name: "invalid argocd_auth - missing auth method",
 			config: Config{
 				URL:    "git@github.com:org/repo.git",
 				Branch: "main",
 				Auth: AuthConfig{
 					SSHKeyEnv: "TEST_SSH_KEY",
 				},
-				ArgoCDAuth: &AuthConfig{},
+				ArgoCDAuth: &AuthConfig{}, // Empty auth should error
 			},
 			wantErr:     true,
-			errContains: "argocd_auth",
+			errContains: "ssh_key_env or token_env is required",
 		},
 	}
 
@@ -476,5 +476,177 @@ func TestCredentialProviderInterface(t *testing.T) {
 	}
 	if auth != nil {
 		t.Errorf("mock.GetAuth() expected nil auth from mock")
+	}
+}
+
+func TestConfigIsLocalPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   bool
+	}{
+		{
+			name:   "file:// URL is local path",
+			config: Config{URL: "file:///tmp/repo"},
+			want:   true,
+		},
+		{
+			name:   "git@ URL is not local path",
+			config: Config{URL: "git@github.com:org/repo.git"},
+			want:   false,
+		},
+		{
+			name:   "https URL is not local path",
+			config: Config{URL: "https://github.com/org/repo.git"},
+			want:   false,
+		},
+		{
+			name:   "empty URL is not local path",
+			config: Config{URL: ""},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.IsLocalPath()
+			if got != tt.want {
+				t.Errorf("IsLocalPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigGetLocalPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   string
+	}{
+		{
+			name:   "extracts path from file:// URL",
+			config: Config{URL: "file:///tmp/repo"},
+			want:   "/tmp/repo",
+		},
+		{
+			name:   "returns empty string for non-file URL",
+			config: Config{URL: "git@github.com:org/repo.git"},
+			want:   "",
+		},
+		{
+			name:   "handles file:// with relative path",
+			config: Config{URL: "file://./local/repo"},
+			want:   "./local/repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.GetLocalPath()
+			if got != tt.want {
+				t.Errorf("GetLocalPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigValidateLocalPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      Config
+		setup       func(t *testing.T) (path string, cleanup func())
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid local path",
+			config: Config{
+				URL:    "file://TMPDIR",
+				Branch: "main",
+				Auth:   AuthConfig{}, // Empty auth is OK for local paths
+			},
+			setup: func(t *testing.T) (string, func()) {
+				tmpDir := t.TempDir()
+				return tmpDir, func() {}
+			},
+			wantErr: false,
+		},
+		{
+			name: "non-existent local path",
+			config: Config{
+				URL:    "file:///tmp/nonexistent-path-12345",
+				Branch: "main",
+			},
+			setup: func(t *testing.T) (string, func()) {
+				return "", func() {}
+			},
+			wantErr:     true,
+			errContains: "does not exist",
+		},
+		{
+			name: "local path is a file not directory",
+			config: Config{
+				URL:    "file://TMPDIR",
+				Branch: "main",
+			},
+			setup: func(t *testing.T) (string, func()) {
+				tmpFile, err := os.CreateTemp("", "test-file-*")
+				if err != nil {
+					t.Fatalf("failed to create temp file: %v", err)
+				}
+				tmpFile.Close()
+				return tmpFile.Name(), func() { _ = os.Remove(tmpFile.Name()) }
+			},
+			wantErr:     true,
+			errContains: "must be a directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, cleanup := tt.setup(t)
+			defer cleanup()
+
+			// Replace TMPDIR placeholder with actual path
+			if strings.Contains(tt.config.URL, "TMPDIR") {
+				tt.config.URL = "file://" + path
+			}
+
+			err := tt.config.Validate()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestAuthConfigValidateRequiresAuth(t *testing.T) {
+	// Empty auth should return an error
+	auth := AuthConfig{}
+	err := auth.Validate()
+	if err == nil {
+		t.Errorf("Validate() with empty auth expected error, got nil")
+	}
+}
+
+func TestConfigValidateRemoteRequiresAuth(t *testing.T) {
+	// Remote URLs should still require auth
+	config := Config{
+		URL:    "git@github.com:org/repo.git",
+		Branch: "main",
+		Auth:   AuthConfig{}, // Empty auth should fail for remote
+	}
+	err := config.Validate()
+	if err == nil {
+		t.Errorf("Validate() for remote URL with empty auth expected error, got nil")
 	}
 }

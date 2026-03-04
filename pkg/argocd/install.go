@@ -77,6 +77,16 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 	// Get Argo CD configuration
 	argoCDCfg := DefaultConfig()
 
+	// If using a local file:// git repo, mount it into the repo-server pod
+	if cfg.GitRepository != nil && cfg.GitRepository.IsLocalPath() {
+		localPath := cfg.GitRepository.GetLocalPath()
+		addLocalGitopsMount(argoCDCfg.Values, localPath)
+
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
+			WithResource("argocd").
+			WithAction("configuring"))
+	}
+
 	// Create namespace
 	if err := createNamespace(ctx, k8sClient, argoCDCfg.Namespace); err != nil {
 		span.RecordError(err)
@@ -314,4 +324,31 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	}
 
 	return waitForArgoCDReadyWithLister(ctx, listDeployments, requiredDeployments, timeout)
+}
+
+// addLocalGitopsMount adds a hostPath volume and volumeMount to the ArgoCD
+// repo-server Helm values so it can access a local file:// git repository.
+func addLocalGitopsMount(values map[string]any, localPath string) {
+	repoServer, ok := values["repoServer"].(map[string]any)
+	if !ok {
+		repoServer = map[string]any{}
+		values["repoServer"] = repoServer
+	}
+
+	repoServer["volumes"] = []map[string]any{
+		{
+			"name": "local-gitops",
+			"hostPath": map[string]any{
+				"path": localPath,
+				"type": "Directory",
+			},
+		},
+	}
+
+	repoServer["volumeMounts"] = []map[string]any{
+		{
+			"name":      "local-gitops",
+			"mountPath": localPath,
+		},
+	}
 }

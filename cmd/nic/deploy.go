@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -50,6 +51,33 @@ func init() {
 	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
 	if err := deployCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
+	}
+}
+
+// getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
+// For development workflows without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
+func getOrCreateGitConfig(cfg *config.NebariConfig) *git.Config {
+	if cfg.GitRepository != nil {
+		return cfg.GitRepository
+	}
+
+	// Auto-create local directory in /tmp for development
+	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", cfg.ProjectName)
+	slog.Info("No git_repository configured, using auto-generated local directory",
+		"path", localPath)
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(localPath, 0750); err != nil {
+		slog.Warn("Failed to create auto-generated directory",
+			"path", localPath, "error", err)
+		return nil
+	}
+
+	return &git.Config{
+		URL:    fmt.Sprintf("file://%s", localPath),
+		Branch: "main",
+		Path:   "",
+		Auth:   git.AuthConfig{}, // Empty auth for local paths
 	}
 }
 
@@ -137,9 +165,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
-	// Bootstrap GitOps repository if configured
-	if cfg.GitRepository != nil && !deployDryRun {
-		if err := bootstrapGitOps(ctx, cfg, deployRegenApps); err != nil {
+	// Bootstrap GitOps (auto-create local directory if needed)
+	gitConfig := getOrCreateGitConfig(cfg)
+	if gitConfig != nil && !deployDryRun {
+		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps); err != nil {
 			span.RecordError(err)
 			slog.Error("GitOps bootstrap failed", "error", err)
 			return err
@@ -183,7 +212,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				},
 			}
 
-			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
+			// Pass gitConfig from the auto-create helper (or explicit config)
+			gitConfig := getOrCreateGitConfig(cfg)
+			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, gitConfig, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				slog.Warn("Failed to install foundational services", "error", err)
 				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
@@ -289,27 +320,33 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
-func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool) error {
+// gitConfig can be either a remote repository or a local file:// path.
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("git.url", cfg.GitRepository.URL),
+		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
+	isLocal := gitConfig.IsLocalPath()
+	if isLocal {
+		slog.Info("Initializing local GitOps directory", "path", gitConfig.GetLocalPath())
+	} else {
+		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
+	}
 
 	// Create git client
-	gitClient, err := git.NewClient(cfg.GitRepository)
+	gitClient, err := git.NewClient(gitConfig)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create git client: %w", err)
 	}
 	defer func() { _ = gitClient.Cleanup() }()
 
-	// Validate authentication before proceeding
+	// Validate authentication before proceeding (skipped for local paths)
 	if err := gitClient.ValidateAuth(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("git authentication failed: %w", err)
@@ -353,17 +390,24 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
 
-	// Commit and push
+	// Commit (and push for remote repos)
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
 	}
 	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
 		span.RecordError(err)
+		if isLocal {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	slog.Info("GitOps repository bootstrapped successfully")
+	if isLocal {
+		slog.Info("Local GitOps directory bootstrapped successfully", "path", gitConfig.GetLocalPath())
+	} else {
+		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
+	}
 	return nil
 }
 
