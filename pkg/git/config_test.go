@@ -594,8 +594,11 @@ func TestConfigValidateLocalPath(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to create temp file: %v", err)
 				}
-				tmpFile.Close()
-				return tmpFile.Name(), func() { _ = os.Remove(tmpFile.Name()) }
+				if err := tmpFile.Close(); err != nil {
+					t.Fatalf("failed to close temp file: %v", err)
+				}
+				name := tmpFile.Name()
+				return name, func() { _ = os.Remove(name) }
 			},
 			wantErr:     true,
 			errContains: "must be a directory",
