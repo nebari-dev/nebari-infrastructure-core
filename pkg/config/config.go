@@ -1,11 +1,9 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
@@ -45,40 +43,47 @@ type NebariConfig struct {
 }
 
 // DNSConfig holds typed DNS provider configuration.
-// Only one provider field should be set at a time.
+// The provider name is the map key, the provider config is the map value.
+// Example YAML:
+//
+//	dns:
+//	  cloudflare:
+//	    zone_name: example.com
 type DNSConfig struct {
-	Cloudflare *cloudflare.Config `yaml:"cloudflare,omitempty"`
+	// Providers captures the provider name as key and its config as value.
+	Providers map[string]any `yaml:",inline"`
+}
+
+// Validate checks that exactly one DNS provider is configured.
+func (d *DNSConfig) Validate() error {
+	if len(d.Providers) == 0 {
+		return fmt.Errorf("dns block is present but no provider is configured")
+	}
+	if len(d.Providers) > 1 {
+		return fmt.Errorf("only one DNS provider can be configured at a time")
+	}
+	return nil
 }
 
 // ProviderName returns the name of the configured DNS provider,
 // or an empty string if none is configured.
 func (d *DNSConfig) ProviderName() string {
-	if d.Cloudflare != nil {
-		return "cloudflare"
+	for name := range d.Providers {
+		return name
 	}
 	return ""
 }
 
-// ProviderConfig returns the DNS provider config as a map for use with the provider
-// interface.
+// ProviderConfig returns the DNS provider config as a map.
+// Returns nil if no provider is configured or the value is not a map.
 func (d *DNSConfig) ProviderConfig() map[string]any {
-	var v any
-	switch {
-	case d.Cloudflare != nil:
-		v = d.Cloudflare
-	default:
+	for _, v := range d.Providers {
+		if m, ok := v.(map[string]any); ok {
+			return m
+		}
 		return nil
 	}
-
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil
-	}
-	return m
+	return nil
 }
 
 // CertificateConfig holds TLS certificate configuration
@@ -113,23 +118,6 @@ func IsValidProvider(provider string) bool {
 	return false
 }
 
-// Validate checks that exactly one DNS provider is configured.
-func (d *DNSConfig) Validate() error {
-	count := 0
-	if d.Cloudflare != nil {
-		count++
-	}
-	// Add future providers here: if d.Route53 != nil { count++ }
-
-	if count == 0 {
-		return fmt.Errorf("dns block is present but no provider is configured")
-	}
-	if count > 1 {
-		return fmt.Errorf("only one DNS provider can be configured at a time")
-	}
-	return nil
-}
-
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate() error {
@@ -139,6 +127,11 @@ func (c *NebariConfig) Validate() error {
 
 	if !IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
+	}
+
+	// Check for old-format dns_provider field
+	if _, ok := c.ProviderConfig["dns_provider"]; ok {
+		return fmt.Errorf("'dns_provider' is no longer supported; use nested dns block format instead:\n  dns:\n    cloudflare:\n      zone_name: example.com")
 	}
 
 	if c.DNS != nil {
