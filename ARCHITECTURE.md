@@ -205,21 +205,27 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Defines `DNSProvider` interface with Initialize(), EnsureRecord(), GetCertManagerConfig() |
+| `provider.go` | Defines stateless `DNSProvider` interface: `ProvisionRecords()`, `DestroyRecords()` |
 | `registry.go` | Thread-safe DNS provider registry |
 
-### Cloudflare Provider (pkg/dnsprovider/cloudflare/) - **Stub**
+### Cloudflare Provider (pkg/dnsprovider/cloudflare/)
 
 **Location:** `pkg/dnsprovider/cloudflare/`
 
-**Status:** Stub implementation - prints operations
+**Status:** Implemented using `cloudflare-go/v4` SDK
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Stub DNS provider that prints method calls |
+| `provider.go` | ProvisionRecords/DestroyRecords with idempotent ensure-record logic |
+| `client.go` | `CloudflareClient` interface for testability |
+| `sdk_client.go` | Real cloudflare-go v4 SDK adapter |
+| `config.go` | Cloudflare-specific config (zone_name) |
+| `provider_test.go` | 18 table-driven tests with mock client |
 
 **Environment Variables:**
 - `CLOUDFLARE_API_TOKEN` - Cloudflare API token (never in config files)
+
+**Known limitation:** Changing the `domain` in config and redeploying creates new records but does not clean up the old domain's records. See [DNS Provider Architecture](docs/design-doc/implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change).
 
 ## Configuration System (pkg/config/)
 

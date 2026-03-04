@@ -655,7 +655,7 @@ DNS provider configuration for managing DNS records and Let's Encrypt integratio
 
 ### Cloudflare DNS Provider
 
-Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-9).
+Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-8).
 
 ```yaml
 dns:
@@ -672,15 +672,10 @@ dns:
 Cloudflare API credentials must be provided via environment variables:
 
 ```bash
-# REQUIRED: Cloudflare API Token (recommended)
+# REQUIRED: Cloudflare API Token
 # Create at: https://dash.cloudflare.com/profile/api-tokens
-# Required permissions: Zone.DNS (Edit)
+# Required permissions: Zone:Read, DNS:Edit
 CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
-
-# ALTERNATIVE: Cloudflare Global API Key (legacy, not recommended)
-# Less secure than API tokens
-CLOUDFLARE_API_KEY=your-cloudflare-api-key
-CLOUDFLARE_EMAIL=your-cloudflare-email
 ```
 
 **How to Create Cloudflare API Token:**
@@ -697,10 +692,11 @@ CLOUDFLARE_EMAIL=your-cloudflare-email
 **DNS Provider Integration:**
 
 When a `dns` block is configured, NIC will:
-- Create DNS records pointing to your Nebari ingress
-- Configure cert-manager with DNS-01 ACME challenge provider
-- Enable automatic TLS certificate provisioning via Let's Encrypt
-- Provide cert-manager configuration via `GetCertManagerConfig()` method
+- On deploy: create root domain and wildcard (`*.domain`) DNS records pointing to the load balancer endpoint
+- On destroy: remove those DNS records before tearing down infrastructure
+- DNS errors are treated as warnings and never block deploy or destroy
+
+**Known limitation:** If you change the `domain` field and redeploy, records for the old domain are not automatically removed. You must manually delete them from Cloudflare. See [DNS Provider Architecture](../implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change) for details.
 
 ---
 
