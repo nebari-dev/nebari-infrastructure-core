@@ -138,6 +138,20 @@ func TestConfigValidate(t *testing.T) {
 			errMsg:  "max_instances",
 		},
 		{
+			name: "duplicate worker pool names rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools: []WorkerNodePool{
+					{Name: "workers", InstanceType: "cpx31", InstanceCount: 1},
+					{Name: "workers", InstanceType: "cpx41", InstanceCount: 2},
+				},
+			},
+			wantErr: true,
+			errMsg:  "duplicated",
+		},
+		{
 			name: "custom network config is valid",
 			cfg: Config{
 				Location:          "ash",
@@ -198,6 +212,48 @@ func TestAllowedNetworksDefaults(t *testing.T) {
 			t.Errorf("SSHAllowedNetworks() = %v, want [0.0.0.0/0]", got)
 		}
 	})
+}
+
+func TestNetworkWarnings(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          Config
+		wantWarnings int
+	}{
+		{
+			name:         "no network config produces 2 warnings",
+			cfg:          Config{},
+			wantWarnings: 2,
+		},
+		{
+			name:         "empty network config produces 2 warnings",
+			cfg:          Config{Network: &NetworkConfig{}},
+			wantWarnings: 2,
+		},
+		{
+			name: "configured CIDRs produce no warnings",
+			cfg: Config{Network: &NetworkConfig{
+				SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+				APIAllowedCIDRs: []string{"10.0.0.0/8"},
+			}},
+			wantWarnings: 0,
+		},
+		{
+			name: "only SSH configured produces 1 warning",
+			cfg: Config{Network: &NetworkConfig{
+				SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+			}},
+			wantWarnings: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := tt.cfg.NetworkWarnings()
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("NetworkWarnings() returned %d warnings, want %d: %v", len(warnings), tt.wantWarnings, warnings)
+			}
+		})
+	}
 }
 
 func TestIsExplicitK3sVersion(t *testing.T) {

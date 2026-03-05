@@ -22,9 +22,9 @@ type clusterParams struct {
 	Config         Config
 }
 
-const clusterTemplate = `cluster_name: {{ .ClusterName }}
+const clusterTemplate = `cluster_name: "{{ .ClusterName }}"
 kubeconfig_path: "{{ .KubeconfigPath }}"
-k3s_version: {{ .K3sVersion }}
+k3s_version: "{{ .K3sVersion }}"
 
 networking:
   ssh:
@@ -54,17 +54,17 @@ networking:
 schedule_workloads_on_masters: false
 
 masters_pool:
-  instance_type: {{ .Config.MastersPool.InstanceType }}
+  instance_type: "{{ .Config.MastersPool.InstanceType }}"
   instance_count: {{ .Config.MastersPool.InstanceCount }}
   locations:
-    - {{ .Config.Location }}
+    - "{{ .Config.Location }}"
 
 worker_node_pools:
 {{- range .Config.WorkerNodePools }}
-  - name: {{ .Name }}
-    instance_type: {{ .InstanceType }}
+  - name: "{{ .Name }}"
+    instance_type: "{{ .InstanceType }}"
     instance_count: {{ .InstanceCount }}
-    location: {{ workerLocation . $.Config.Location }}
+    location: "{{ workerLocation . $.Config.Location }}"
 {{- if and .Autoscaling .Autoscaling.Enabled }}
     autoscaling:
       enabled: true
@@ -132,17 +132,32 @@ func generateClusterYAML(params clusterParams) (string, error) {
 
 // runHetznerK3s executes the hetzner-k3s binary with the given subcommand and cluster config.
 // The HETZNER_TOKEN env var is mapped to HCLOUD_TOKEN, which is what hetzner-k3s reads.
-// This follows the same pattern as other providers where credentials come from env vars.
+// A minimal environment is constructed to avoid leaking unrelated secrets (e.g.,
+// AWS_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN) to the third-party binary.
 func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath string) error {
 	cmd := exec.CommandContext(ctx, binaryPath, subcommand, "--config", clusterYAMLPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "HCLOUD_TOKEN="+os.Getenv("HETZNER_TOKEN"))
+	cmd.Env = minimalEnv()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hetzner-k3s %s failed: %w", subcommand, err)
 	}
 	return nil
+}
+
+// minimalEnv constructs a minimal set of environment variables for the hetzner-k3s subprocess.
+// Only variables required for the binary to function are included, preventing credential leakage.
+func minimalEnv() []string {
+	env := []string{
+		"HCLOUD_TOKEN=" + os.Getenv("HETZNER_TOKEN"),
+	}
+	for _, key := range []string{"HOME", "PATH", "USER", "TERM", "LANG", "TMPDIR", "SSH_AUTH_SOCK"} {
+		if val := os.Getenv(key); val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
 }
 
 // writeClusterYAML writes the generated cluster.yaml to a directory and returns its path.

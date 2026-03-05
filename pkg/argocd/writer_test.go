@@ -170,6 +170,71 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 	}
 }
 
+func TestGatewayTemplate_WithAnnotations(t *testing.T) {
+	data := TemplateData{
+		Domain:   "test.example.com",
+		Provider: "hetzner",
+		LoadBalancerAnnotations: map[string]string{
+			"load-balancer.hetzner.cloud/location": "ash",
+		},
+		CertificateIssuer: "selfsigned-issuer",
+	}
+
+	// Read the gateway template
+	content, err := templates.ReadFile("templates/manifests/networking/gateway.yaml")
+	if err != nil {
+		t.Fatalf("failed to read gateway template: %v", err)
+	}
+
+	processed, err := processTemplate("manifests/networking/gateway.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	// Verify the annotations block is present and well-formed
+	if !strings.Contains(output, "infrastructure:") {
+		t.Error("expected 'infrastructure:' block in rendered gateway")
+	}
+	if !strings.Contains(output, "annotations:") {
+		t.Error("expected 'annotations:' block in rendered gateway")
+	}
+	if !strings.Contains(output, `load-balancer.hetzner.cloud/location: "ash"`) {
+		t.Errorf("expected annotation in rendered gateway, got:\n%s", output)
+	}
+	if !strings.Contains(output, "kind: Gateway") {
+		t.Error("expected 'kind: Gateway' in rendered output")
+	}
+}
+
+func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
+	data := TemplateData{
+		Domain:            "test.example.com",
+		Provider:          "aws",
+		CertificateIssuer: "selfsigned-issuer",
+	}
+
+	content, err := templates.ReadFile("templates/manifests/networking/gateway.yaml")
+	if err != nil {
+		t.Fatalf("failed to read gateway template: %v", err)
+	}
+
+	processed, err := processTemplate("manifests/networking/gateway.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	if strings.Contains(output, "infrastructure:") {
+		t.Error("should NOT contain 'infrastructure:' block when no annotations")
+	}
+	if !strings.Contains(output, "kind: Gateway") {
+		t.Error("expected 'kind: Gateway' in rendered output")
+	}
+}
+
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
 	*bytes.Buffer

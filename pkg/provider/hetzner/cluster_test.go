@@ -32,15 +32,15 @@ func TestGenerateClusterYAML(t *testing.T) {
 		t.Fatalf("generateClusterYAML() error = %v", err)
 	}
 
-	// Verify key fields are present
+	// Verify key fields are present (string values are quoted in the template)
 	checks := []string{
-		"cluster_name: test-cluster",
-		"k3s_version: v1.32.12+k3s1",
-		"instance_type: cpx21",
+		`cluster_name: "test-cluster"`,
+		`k3s_version: "v1.32.12+k3s1"`,
+		`instance_type: "cpx21"`,
 		"instance_count: 1",
-		"instance_type: cpx31",
+		`instance_type: "cpx31"`,
 		"instance_count: 2",
-		"location: ash",
+		`location: "ash"`,
 		"kubeconfig_path:",
 		"traefik:",
 		"enabled: false",
@@ -160,10 +160,10 @@ func TestGenerateClusterYAML_WorkerLocationFallback(t *testing.T) {
 	}
 
 	// w1 should use top-level location "ash", w2 should use "fsn1"
-	if !strings.Contains(yaml, "location: ash") {
+	if !strings.Contains(yaml, `location: "ash"`) {
 		t.Error("expected fallback location 'ash'")
 	}
-	if !strings.Contains(yaml, "location: fsn1") {
+	if !strings.Contains(yaml, `location: "fsn1"`) {
 		t.Error("expected explicit location 'fsn1'")
 	}
 }

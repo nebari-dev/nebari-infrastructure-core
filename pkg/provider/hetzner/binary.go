@@ -140,8 +140,14 @@ func ensureBinary(ctx context.Context, cacheDir, version string, downloader bina
 		return "", err
 	}
 
-	if err := os.WriteFile(execPath, binary, 0755); err != nil { //nolint:gosec // Binary must be executable
+	// Write to a temp file first, then atomically rename to avoid TOCTOU races
+	// where a concurrent process could observe a partially-written binary.
+	tmpPath := execPath + ".tmp"
+	if err := os.WriteFile(tmpPath, binary, 0755); err != nil { //nolint:gosec // Binary must be executable
 		return "", fmt.Errorf("failed to write hetzner-k3s binary: %w", err)
+	}
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		return "", fmt.Errorf("failed to finalize hetzner-k3s binary: %w", err)
 	}
 
 	return execPath, nil

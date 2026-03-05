@@ -94,10 +94,15 @@ func (c *Config) Validate() error {
 	if len(c.WorkerNodePools) == 0 {
 		return fmt.Errorf("hetzner_cloud.worker_node_pools must have at least one pool")
 	}
+	seenPoolNames := make(map[string]bool)
 	for i, pool := range c.WorkerNodePools {
 		if pool.Name == "" {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].name is required", i)
 		}
+		if seenPoolNames[pool.Name] {
+			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].name %q is duplicated", i, pool.Name)
+		}
+		seenPoolNames[pool.Name] = true
 		if pool.InstanceType == "" {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].instance_type is required", i)
 		}
@@ -118,4 +123,17 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// NetworkWarnings returns warnings about network configuration that are not errors
+// but should be communicated to the user (e.g., open-to-internet defaults).
+func (c *Config) NetworkWarnings() []string {
+	var warnings []string
+	if c.Network == nil || len(c.Network.SSHAllowedCIDRs) == 0 {
+		warnings = append(warnings, "SSH access defaults to 0.0.0.0/0 (open to all) - restrict with hetzner_cloud.network.ssh_allowed_cidrs for production")
+	}
+	if c.Network == nil || len(c.Network.APIAllowedCIDRs) == 0 {
+		warnings = append(warnings, "Kubernetes API access defaults to 0.0.0.0/0 (open to all) - restrict with hetzner_cloud.network.api_allowed_cidrs for production")
+	}
+	return warnings
 }

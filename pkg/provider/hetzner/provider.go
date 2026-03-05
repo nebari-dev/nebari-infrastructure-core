@@ -74,6 +74,12 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 		return err
 	}
 
+	// Warn about open network defaults
+	for _, warning := range hCfg.NetworkWarnings() {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, warning).
+			WithResource("provider").WithAction("validate"))
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner configuration validated successfully").
 		WithResource("provider").WithAction("validate"))
 
@@ -90,8 +96,20 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
+	// Defensive validation in case Deploy is called without Validate
+	if os.Getenv("HETZNER_TOKEN") == "" {
+		err := fmt.Errorf("HETZNER_TOKEN environment variable is required")
+		span.RecordError(err)
+		return err
+	}
+
 	hCfg, err := p.parseConfig(ctx, cfg)
 	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if err := hCfg.Validate(); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -196,6 +214,12 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		attribute.String("provider", providerName),
 		attribute.String("project_name", cfg.ProjectName),
 	)
+
+	if os.Getenv("HETZNER_TOKEN") == "" {
+		err := fmt.Errorf("HETZNER_TOKEN environment variable is required for destroy")
+		span.RecordError(err)
+		return err
+	}
 
 	cacheDir, err := getHetznerCacheDir()
 	if err != nil {
