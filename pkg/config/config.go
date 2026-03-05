@@ -20,9 +20,9 @@ type NebariConfig struct {
 	// the provider field. This allows deploying to pre-existing clusters.
 	KubeContext string `yaml:"kube_context,omitempty"`
 
-	// DNS provider configuration (optional)
-	DNSProvider string         `yaml:"dns_provider,omitempty"`
-	DNS         map[string]any `yaml:"dns,omitempty"` // Dynamic DNS config parsed by specific provider
+	// DNS provider configuration (optional).
+	// Only one provider can be configured at a time.
+	DNS *DNSConfig `yaml:"dns,omitempty"`
 
 	// GitRepository configures the GitOps repository for ArgoCD bootstrap (optional)
 	GitRepository *git.Config `yaml:"git_repository,omitempty"`
@@ -40,6 +40,65 @@ type NebariConfig struct {
 	DryRun  bool          `yaml:"-"` // Preview changes without applying them
 	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
 	Timeout time.Duration `yaml:"-"` // Override default operation timeout
+}
+
+// DNSConfig holds typed DNS provider configuration.
+// The provider name is the map key, the provider config is the map value.
+// Example YAML:
+//
+//	dns:
+//	  cloudflare:
+//	    zone_name: example.com
+type DNSConfig struct {
+	// Providers captures the provider name as key and its config as value.
+	Providers map[string]any `yaml:",inline"`
+}
+
+// Validate checks that exactly one valid DNS provider is configured.
+func (d *DNSConfig) Validate() error {
+	if len(d.Providers) == 0 {
+		return fmt.Errorf("dns block is present but no provider is configured")
+	}
+	if len(d.Providers) > 1 {
+		return fmt.Errorf("only one DNS provider can be configured at a time")
+	}
+	name := d.ProviderName()
+	if !IsValidDNSProvider(name) {
+		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, ValidDNSProviders)
+	}
+	if d.ProviderConfig() == nil {
+		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
+	}
+	return nil
+}
+
+// ProviderName returns the name of the configured DNS provider,
+// or an empty string if none is configured.
+// Precondition: Validate() ensures exactly one entry in the map.
+func (d *DNSConfig) ProviderName() string {
+	if d == nil {
+		return ""
+	}
+	for name := range d.Providers {
+		return name
+	}
+	return ""
+}
+
+// ProviderConfig returns the DNS provider config as a map.
+// Returns nil if no provider is configured or the value is not a map.
+// Precondition: Validate() ensures exactly one entry in the map.
+func (d *DNSConfig) ProviderConfig() map[string]any {
+	if d == nil {
+		return nil
+	}
+	for _, v := range d.Providers {
+		if m, ok := v.(map[string]any); ok {
+			return m
+		}
+		return nil
+	}
+	return nil
 }
 
 // CertificateConfig holds TLS certificate configuration
@@ -64,9 +123,22 @@ type ACMEConfig struct {
 // ValidProviders lists the supported providers
 var ValidProviders = []string{"aws", "gcp", "azure", "local"}
 
+// ValidDNSProviders lists the supported DNS providers
+var ValidDNSProviders = []string{"cloudflare"}
+
 // IsValidProvider checks if the provider string is valid
 func IsValidProvider(provider string) bool {
 	for _, p := range ValidProviders {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidDNSProvider checks if the DNS provider string is valid
+func IsValidDNSProvider(provider string) bool {
+	for _, p := range ValidDNSProviders {
 		if p == provider {
 			return true
 		}
@@ -83,6 +155,17 @@ func (c *NebariConfig) Validate() error {
 
 	if !IsValidProvider(c.Provider) {
 		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
+	}
+
+	// Check for old-format dns_provider field
+	if _, ok := c.ProviderConfig["dns_provider"]; ok {
+		return fmt.Errorf("'dns_provider' is no longer supported; use nested dns block format instead:\n  dns:\n    cloudflare:\n      zone_name: example.com")
+	}
+
+	if c.DNS != nil {
+		if err := c.DNS.Validate(); err != nil {
+			return fmt.Errorf("invalid dns: %w", err)
+		}
 	}
 
 	if c.GitRepository != nil {
