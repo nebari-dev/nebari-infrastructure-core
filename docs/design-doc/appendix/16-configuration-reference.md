@@ -32,16 +32,13 @@ provider: aws
 # Example: nebari.example.com
 domain: nebari.example.com
 
-# OPTIONAL: DNS provider for managing DNS records
-# Valid values: cloudflare (more providers in future)
-# Requires corresponding dns configuration section below
-dns_provider: cloudflare
-
-# OPTIONAL: DNS provider-specific configuration
-# Structure depends on dns_provider selected
+# OPTIONAL: DNS provider configuration
+# The provider name is the key, its config is the value
+# Only one DNS provider can be configured at a time
 # See "DNS Provider Configuration" section for details
 dns:
-  zone_name: example.com
+  cloudflare:
+    zone_name: example.com
 ```
 
 **Field Descriptions:**
@@ -49,8 +46,7 @@ dns:
 - **project_name** (string, required): Unique identifier for your Nebari deployment. Used in resource naming and tagging across all cloud resources.
 - **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`, `local`.
 - **domain** (string, optional): Fully qualified domain name for accessing Nebari services. Required for TLS/Let's Encrypt integration.
-- **dns_provider** (string, optional): DNS provider to manage DNS records. Currently supports `cloudflare`. Requires `dns` section.
-- **dns** (map, optional): DNS provider-specific configuration. Structure varies by provider. See DNS Provider Configuration section.
+- **dns** (object, optional): DNS provider configuration. The provider name is the key (e.g., `cloudflare`), and its config is the value. Only one provider can be configured. See DNS Provider Configuration section.
 
 ---
 
@@ -662,15 +658,13 @@ DNS provider configuration for managing DNS records and Let's Encrypt integratio
 Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-8).
 
 ```yaml
-# REQUIRED: Specify Cloudflare as DNS provider
-dns_provider: cloudflare
-
 dns:
-  # REQUIRED: Cloudflare zone name (your domain)
-  # This is the domain you manage in Cloudflare
-  # Example: example.com, mycompany.com
-  # NIC will create DNS records under this zone
-  zone_name: example.com
+  cloudflare:
+    # REQUIRED: Cloudflare zone name (your domain)
+    # This is the domain you manage in Cloudflare
+    # Example: example.com, mycompany.com
+    # NIC will create DNS records under this zone
+    zone_name: example.com
 ```
 
 **Cloudflare Environment Variables (Secrets):**
@@ -697,7 +691,7 @@ CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 
 **DNS Provider Integration:**
 
-When `dns_provider` is configured, NIC will:
+When a `dns` block is configured, NIC will:
 - On deploy: create root domain and wildcard (`*.domain`) DNS records pointing to the load balancer endpoint
 - On destroy: remove those DNS records before tearing down infrastructure
 - DNS errors are treated as warnings and never block deploy or destroy
@@ -799,9 +793,9 @@ amazon_web_services:
           value: "true"
           effect: NoSchedule
 
-dns_provider: cloudflare
 dns:
-  zone_name: company.com
+  cloudflare:
+    zone_name: company.com
 ```
 
 ### Minimal GCP Configuration
@@ -920,9 +914,9 @@ google_cloud_platform:
           value: "true"
           effect: NoSchedule
 
-dns_provider: cloudflare
 dns:
-  zone_name: company.com
+  cloudflare:
+    zone_name: company.com
 ```
 
 ### Minimal Azure Configuration
@@ -1024,9 +1018,9 @@ azure:
           value: gpu
           effect: NoSchedule
 
-dns_provider: cloudflare
 dns:
-  zone_name: company.com
+  cloudflare:
+    zone_name: company.com
 ```
 
 ### Local Development Configuration
@@ -1121,7 +1115,7 @@ nic validate -f config.yaml
 #   Provider: AWS (us-west-2)
 #   Project: nebari-prod
 #   Domain: nebari.example.com
-#   DNS Provider: cloudflare
+#   DNS: cloudflare
 #   Node Groups: 4 (general, user, worker, gpu)
 ```
 
