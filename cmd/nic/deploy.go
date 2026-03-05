@@ -215,7 +215,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print DNS guidance only if no DNS provider is configured
-	if cfg.DNSProvider == "" && cfg.Domain != "" && !deployDryRun {
+	if cfg.DNS == nil && cfg.Domain != "" && !deployDryRun {
 		printDNSGuidance(cfg, lbEndpoint)
 	}
 
@@ -252,7 +252,7 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	// Provision DNS records if a provider is configured
-	if cfg.DNSProvider == "" {
+	if cfg.DNS == nil {
 		return lbEndpoint
 	}
 
@@ -270,14 +270,14 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 		return lbEndpoint
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNSProvider)
+	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
-		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNSProvider, "error", err)
+		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
 		return lbEndpoint
 	}
 
-	slog.Info("Provisioning DNS records", "provider", cfg.DNSProvider, "domain", cfg.Domain)
-	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS, lbEndpointStr); err != nil {
+	slog.Info("Provisioning DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig(), lbEndpointStr); err != nil {
 		slog.Warn("Failed to provision DNS records", "error", err)
 		slog.Warn("You can configure DNS manually - see instructions below")
 	} else {
@@ -411,11 +411,11 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 	}
 
 	fmt.Println()
-	fmt.Println("  To automate DNS management, add a dns_provider to your configuration:")
+	fmt.Println("  To automate DNS management, add a dns block to your configuration:")
 	fmt.Println()
-	fmt.Println("    dns_provider: cloudflare")
 	fmt.Println("    dns:")
-	fmt.Println("      zone_name: example.com")
+	fmt.Println("      cloudflare:")
+	fmt.Println("        zone_name: example.com")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
