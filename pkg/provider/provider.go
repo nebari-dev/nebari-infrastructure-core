@@ -23,6 +23,10 @@ type InfraSettings struct {
 	// (e.g., {"load-balancer.hetzner.cloud/location": "ash"}).
 	LoadBalancerAnnotations map[string]string
 
+	// MetalLBAddressPool is the IP range for MetalLB's IPAddressPool.
+	// Only used when NeedsMetalLB is true (e.g., "192.168.1.100-192.168.1.110").
+	MetalLBAddressPool string
+
 	// KeycloakBasePath is appended to the Keycloak service URL for the operator.
 	// Most providers leave this empty. Providers using the Keycloak legacy chart
 	// (keycloakx) need "/auth" because that chart serves under the /auth context path,

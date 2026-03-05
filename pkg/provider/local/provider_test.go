@@ -26,6 +26,7 @@ func TestInfraSettings(t *testing.T) {
 	}{
 		{"StorageClass", settings.StorageClass, "standard"},
 		{"NeedsMetalLB", settings.NeedsMetalLB, true},
+		{"MetalLBAddressPool", settings.MetalLBAddressPool, "192.168.1.100-192.168.1.110"},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
 	}

@@ -106,6 +106,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		wantSC   string
 		wantLBA  int
 		wantKBP  string
+		wantMLBA string
 	}{
 		{
 			name:     "aws defaults",
@@ -127,10 +128,12 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		{
 			name: "local with MetalLB",
 			settings: provider.InfraSettings{
-				StorageClass: "standard",
-				NeedsMetalLB: true,
+				StorageClass:       "standard",
+				NeedsMetalLB:       true,
+				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
 			},
-			wantSC: "standard",
+			wantSC:   "standard",
+			wantMLBA: "192.168.1.100-192.168.1.110",
 		},
 	}
 	for _, tt := range tests {
@@ -145,6 +148,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			}
 			if data.KeycloakBasePath != tt.wantKBP {
 				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKBP)
+			}
+			if data.MetalLBAddressRange != tt.wantMLBA {
+				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMLBA)
 			}
 		})
 	}

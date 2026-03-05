@@ -182,7 +182,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
 					Enabled:     infraSettings.NeedsMetalLB,
-					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
+					AddressPool: infraSettings.MetalLBAddressPool,
 				},
 			}
 

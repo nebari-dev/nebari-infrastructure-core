@@ -71,7 +71,7 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		Domain:                  cfg.Domain,
 		Provider:                cfg.Provider,
 		StorageClass:            settings.StorageClass,
-		MetalLBAddressRange:     "192.168.1.100-192.168.1.110",
+		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 
