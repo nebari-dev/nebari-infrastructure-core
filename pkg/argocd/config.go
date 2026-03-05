@@ -4,7 +4,11 @@ import "time"
 
 // Config holds configuration for Argo CD installation
 type Config struct {
-	// Version is the Argo CD chart version to install
+	// Version is the Argo CD chart version to install.
+	// IMPORTANT: The upgrade-skip logic only compares chart versions. If you modify
+	// Values (e.g., Helm configuration parameters) without changing Version, those
+	// changes will NOT be applied to existing installations. Bump Version to force
+	// an upgrade when Values change.
 	Version string
 
 	// Namespace is the Kubernetes namespace to install Argo CD into
