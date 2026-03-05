@@ -66,6 +66,9 @@ func (d *DNSConfig) Validate() error {
 	if !IsValidDNSProvider(name) {
 		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, ValidDNSProviders)
 	}
+	if d.ProviderConfig() == nil {
+		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
+	}
 	return nil
 }
 

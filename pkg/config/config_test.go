@@ -649,6 +649,16 @@ func TestDNSConfigValidate(t *testing.T) {
 			wantErr:     true,
 			errContains: "invalid DNS provider",
 		},
+		{
+			name: "scalar provider value rejected",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": "not-a-map",
+				},
+			},
+			wantErr:     true,
+			errContains: "must be a mapping",
+		},
 	}
 
 	for _, tt := range tests {
