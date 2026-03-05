@@ -499,14 +499,16 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "valid minimal config",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid config with git_repository",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					Auth: git.AuthConfig{
@@ -515,6 +517,28 @@ func TestNebariConfigValidate(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name:        "missing project_name",
+			config:      NebariConfig{},
+			wantErr:     true,
+			errContains: "project_name field is required",
+		},
+		{
+			name: "invalid project_name with path traversal",
+			config: NebariConfig{
+				ProjectName: "../../etc",
+			},
+			wantErr:     true,
+			errContains: "project_name",
+		},
+		{
+			name: "invalid project_name with dots",
+			config: NebariConfig{
+				ProjectName: "..sneaky",
+			},
+			wantErr:     true,
+			errContains: "project_name",
 		},
 		{
 			name: "missing provider",
@@ -527,7 +551,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid provider name rejected",
 			config: NebariConfig{
-				Provider: "any-provider-name",
+				ProjectName: "test",
+				Provider:    "any-provider-name",
 			},
 			wantErr:     true,
 			errContains: "invalid provider",
@@ -535,7 +560,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "valid config with DNS",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"cloudflare": map[string]any{"zone_name": "example.com"},
@@ -547,7 +573,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid DNS - no provider",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{},
 				},
@@ -558,7 +585,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid DNS provider name",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"notreal": map[string]any{"zone_name": "example.com"},
@@ -571,7 +599,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "old format dns_provider rejected",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				ProviderConfig: map[string]any{
 					"dns_provider": "cloudflare",
 				},
@@ -582,7 +611,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid git_repository",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					// missing auth

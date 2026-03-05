@@ -3,6 +3,7 @@ package hetzner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -86,5 +87,43 @@ func TestEnsureSSHKeys_UserOverrideMissing(t *testing.T) {
 	_, _, err := ensureSSHKeys(dir, sshCfg)
 	if err == nil {
 		t.Error("expected error for missing user SSH keys")
+	}
+}
+
+func TestEnsureSSHKeys_IncompleteKeyPair(t *testing.T) {
+	tests := []struct {
+		name       string
+		createPriv bool
+		createPub  bool
+	}{
+		{"private exists but public missing", true, false},
+		{"public exists but private missing", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			sshDir := filepath.Join(dir, "ssh")
+			if err := os.MkdirAll(sshDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if tt.createPriv {
+				if err := os.WriteFile(filepath.Join(sshDir, "hetzner_ed25519"), []byte("key"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.createPub {
+				if err := os.WriteFile(filepath.Join(sshDir, "hetzner_ed25519.pub"), []byte("key"), 0644); err != nil { //nolint:gosec // Test file
+					t.Fatal(err)
+				}
+			}
+
+			_, _, err := ensureSSHKeys(dir, nil)
+			if err == nil {
+				t.Fatal("expected error for incomplete key pair")
+			}
+			if !strings.Contains(err.Error(), "incomplete") {
+				t.Errorf("error should mention 'incomplete', got: %v", err)
+			}
+		})
 	}
 }

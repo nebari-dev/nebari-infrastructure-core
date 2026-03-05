@@ -164,6 +164,77 @@ func TestConfigValidate(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "location with invalid characters rejected",
+			cfg: Config{
+				Location:          "ash\"; malicious",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "invalid characters",
+		},
+		{
+			name: "pool name with invalid characters rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "workers\"\nmalicious", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "invalid characters",
+		},
+		{
+			name: "instance type with spaces rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx 21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "invalid characters",
+		},
+		{
+			name: "invalid SSH CIDR rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				Network: &NetworkConfig{
+					SSHAllowedCIDRs: []string{"not-a-cidr"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid CIDR",
+		},
+		{
+			name: "invalid API CIDR rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				Network: &NetworkConfig{
+					SSHAllowedCIDRs: []string{"10.0.0.0/8"},
+					APIAllowedCIDRs: []string{"192.168.0.0/16", "bad"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "invalid CIDR",
+		},
+		{
+			name: "identifiers with dots and hyphens are valid",
+			cfg: Config{
+				Location:          "eu-central",
+				KubernetesVersion: "1.32",
+				MastersPool:       MastersPool{InstanceType: "cx22.metal", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "gpu-workers_v2", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

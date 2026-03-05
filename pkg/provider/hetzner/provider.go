@@ -45,7 +45,7 @@ func (p *Provider) parseConfig(ctx context.Context, cfg *config.NebariConfig) (*
 
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "hetzner.Validate")
+	ctx, span := tracer.Start(ctx, "hetzner.Validate")
 	defer span.End()
 
 	span.SetAttributes(

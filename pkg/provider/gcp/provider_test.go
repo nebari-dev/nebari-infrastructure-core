@@ -4,7 +4,11 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
+
+// Compile-time interface compliance check
+var _ provider.Provider = (*Provider)(nil)
 
 func TestInfraSettings(t *testing.T) {
 	p := NewProvider()

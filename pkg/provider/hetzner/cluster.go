@@ -35,11 +35,11 @@ networking:
   allowed_networks:
     ssh:
 {{- range sshAllowedNetworks .Config }}
-      - {{ . }}
+      - "{{ . }}"
 {{- end }}
     api:
 {{- range apiAllowedNetworks .Config }}
-      - {{ . }}
+      - "{{ . }}"
 {{- end }}
   public_network:
     ipv4: true

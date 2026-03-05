@@ -2,6 +2,8 @@ package hetzner
 
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"strings"
 )
 
@@ -74,16 +76,26 @@ func (c *Config) IsExplicitK3sVersion() bool {
 	return strings.Contains(c.KubernetesVersion, "+k3s")
 }
 
+// safeIdentifier matches alphanumeric strings with dots, hyphens, and underscores.
+// Used to validate values interpolated into the cluster YAML template.
+var safeIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
 // Validate checks that all required fields are present and valid.
 func (c *Config) Validate() error {
 	if c.Location == "" {
 		return fmt.Errorf("hetzner_cloud.location is required")
+	}
+	if !safeIdentifier.MatchString(c.Location) {
+		return fmt.Errorf("hetzner_cloud.location %q contains invalid characters (must match %s)", c.Location, safeIdentifier.String())
 	}
 	if c.KubernetesVersion == "" {
 		return fmt.Errorf("hetzner_cloud.kubernetes_version is required")
 	}
 	if c.MastersPool.InstanceType == "" {
 		return fmt.Errorf("hetzner_cloud.masters_pool.instance_type is required")
+	}
+	if !safeIdentifier.MatchString(c.MastersPool.InstanceType) {
+		return fmt.Errorf("hetzner_cloud.masters_pool.instance_type %q contains invalid characters", c.MastersPool.InstanceType)
 	}
 	if c.MastersPool.InstanceCount < 1 {
 		return fmt.Errorf("hetzner_cloud.masters_pool.instance_count must be at least 1")
@@ -99,12 +111,21 @@ func (c *Config) Validate() error {
 		if pool.Name == "" {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].name is required", i)
 		}
+		if !safeIdentifier.MatchString(pool.Name) {
+			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].name %q contains invalid characters", i, pool.Name)
+		}
 		if seenPoolNames[pool.Name] {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].name %q is duplicated", i, pool.Name)
 		}
 		seenPoolNames[pool.Name] = true
 		if pool.InstanceType == "" {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].instance_type is required", i)
+		}
+		if !safeIdentifier.MatchString(pool.InstanceType) {
+			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].instance_type %q contains invalid characters", i, pool.InstanceType)
+		}
+		if pool.Location != "" && !safeIdentifier.MatchString(pool.Location) {
+			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].location %q contains invalid characters", i, pool.Location)
 		}
 		if pool.InstanceCount < 1 && (pool.Autoscaling == nil || !pool.Autoscaling.Enabled) {
 			return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].instance_count must be at least 1 (or enable autoscaling)", i)
@@ -120,6 +141,27 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("hetzner_cloud.worker_node_pools[%d].autoscaling.min_instances (%d) must not exceed max_instances (%d)",
 					i, pool.Autoscaling.MinInstances, pool.Autoscaling.MaxInstances)
 			}
+		}
+	}
+	if err := c.validateNetworkCIDRs(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateNetworkCIDRs checks that user-provided CIDR values are syntactically valid.
+func (c *Config) validateNetworkCIDRs() error {
+	if c.Network == nil {
+		return nil
+	}
+	for i, cidr := range c.Network.SSHAllowedCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("hetzner_cloud.network.ssh_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
+		}
+	}
+	for i, cidr := range c.Network.APIAllowedCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("hetzner_cloud.network.api_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
 		}
 	}
 	return nil

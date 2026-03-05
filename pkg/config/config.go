@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
@@ -120,6 +121,10 @@ type ACMEConfig struct {
 	Server string `yaml:"server,omitempty"`
 }
 
+// safeProjectName matches alphanumeric strings with hyphens and underscores.
+// Used to validate ProjectName before it is used as a filesystem path component.
+var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
 // ValidProviders lists the supported providers for config validation.
 // This must be kept in sync with the providers registered in cmd/nic/main.go.
 // TODO: Remove this list and delegate provider name validation to the registry.
@@ -151,6 +156,13 @@ func IsValidDNSProvider(provider string) bool {
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate() error {
+	if c.ProjectName == "" {
+		return fmt.Errorf("project_name field is required")
+	}
+	if !safeProjectName.MatchString(c.ProjectName) {
+		return fmt.Errorf("project_name %q contains invalid characters (must start with alphanumeric and contain only alphanumeric, hyphens, or underscores)", c.ProjectName)
+	}
+
 	if c.Provider == "" {
 		return fmt.Errorf("provider field is required")
 	}

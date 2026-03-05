@@ -56,9 +56,9 @@ func TestGenerateClusterYAML(t *testing.T) {
 		t.Error("cluster.yaml should not contain hetzner_token - token is passed via env var")
 	}
 
-	// Default network config should use 0.0.0.0/0
-	if !strings.Contains(yaml, "0.0.0.0/0") {
-		t.Error("expected default 0.0.0.0/0 in allowed_networks")
+	// Default network config should use quoted 0.0.0.0/0
+	if !strings.Contains(yaml, `"0.0.0.0/0"`) {
+		t.Error("expected quoted default 0.0.0.0/0 in allowed_networks")
 	}
 }
 
@@ -91,11 +91,11 @@ func TestGenerateClusterYAML_CustomNetwork(t *testing.T) {
 	if strings.Contains(yaml, "0.0.0.0/0") {
 		t.Error("custom network config should NOT contain 0.0.0.0/0")
 	}
-	if !strings.Contains(yaml, "10.0.0.0/8") {
-		t.Error("expected custom SSH CIDR 10.0.0.0/8")
+	if !strings.Contains(yaml, `"10.0.0.0/8"`) {
+		t.Error("expected quoted custom SSH CIDR 10.0.0.0/8")
 	}
-	if !strings.Contains(yaml, "192.168.0.0/16") {
-		t.Error("expected custom API CIDR 192.168.0.0/16")
+	if !strings.Contains(yaml, `"192.168.0.0/16"`) {
+		t.Error("expected quoted custom API CIDR 192.168.0.0/16")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -67,8 +68,9 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
+	const maxAPIResponseSize = 10 * 1024 * 1024 // 10 MB
 	var releases []ghRelease
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIResponseSize)).Decode(&releases); err != nil {
 		return "", fmt.Errorf("failed to decode k3s releases: %w", err)
 	}
 

@@ -36,11 +36,14 @@ func ensureSSHKeys(cacheDir string, sshCfg *SSHConfig) (pubPath, privPath string
 	privPath = filepath.Join(sshDir, "hetzner_ed25519")
 	pubPath = filepath.Join(sshDir, "hetzner_ed25519.pub")
 
-	// Reuse existing keys
-	if _, err := os.Stat(privPath); err == nil {
-		if _, err := os.Stat(pubPath); err == nil {
-			return pubPath, privPath, nil
-		}
+	// Reuse existing keys, but error if the pair is incomplete
+	privExists := fileExists(privPath)
+	pubExists := fileExists(pubPath)
+	if privExists && pubExists {
+		return pubPath, privPath, nil
+	}
+	if privExists != pubExists {
+		return "", "", fmt.Errorf("SSH key pair is incomplete (private=%v, public=%v) at %s - delete both files to regenerate", privExists, pubExists, sshDir)
 	}
 
 	// Generate new ed25519 key pair
@@ -73,4 +76,10 @@ func ensureSSHKeys(cacheDir string, sshCfg *SSHConfig) (pubPath, privPath string
 	}
 
 	return pubPath, privPath, nil
+}
+
+// fileExists returns true if the path exists and is accessible.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

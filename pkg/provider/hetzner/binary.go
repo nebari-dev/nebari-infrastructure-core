@@ -146,6 +146,9 @@ func ensureBinary(ctx context.Context, cacheDir, version string, downloader bina
 	if err := os.WriteFile(tmpPath, binary, 0755); err != nil { //nolint:gosec // Binary must be executable
 		return "", fmt.Errorf("failed to write hetzner-k3s binary: %w", err)
 	}
+	// Clean up temp file on rename failure. After a successful rename the
+	// original path no longer exists, so Remove is a harmless no-op.
+	defer os.Remove(tmpPath) //nolint:errcheck // Best-effort cleanup
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		return "", fmt.Errorf("failed to finalize hetzner-k3s binary: %w", err)
 	}
