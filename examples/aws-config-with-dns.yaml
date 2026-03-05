@@ -51,6 +51,6 @@ amazon_web_services:
 
 # DNS configuration (optional)
 # Secrets like API tokens are read from environment variables (see .env.example)
-dns_provider: cloudflare
 dns:
-  zone_name: example.com # Your Cloudflare zone/domain
+  cloudflare:
+    zone_name: example.com # Your Cloudflare zone/domain

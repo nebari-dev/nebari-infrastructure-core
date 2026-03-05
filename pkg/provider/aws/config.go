@@ -25,7 +25,7 @@ type NodeGroup struct {
 	Instance string            `yaml:"instance" json:"instance"`
 	MinNodes int               `yaml:"min_nodes,omitempty" json:"min_nodes"`
 	MaxNodes int               `yaml:"max_nodes,omitempty" json:"max_nodes"`
-	GPU      bool              `yaml:"gpu,omitempty" json:"gpu"`
+	GPU      bool              `yaml:"gpu,omitempty" json:"-"`
 	AMIType  *string           `yaml:"ami_type,omitempty" json:"ami_type,omitempty"`
 	Spot     bool              `yaml:"spot,omitempty" json:"spot"`
 	DiskSize *int              `yaml:"disk_size,omitempty" json:"disk_size,omitempty"`
