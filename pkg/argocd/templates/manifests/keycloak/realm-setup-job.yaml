@@ -29,7 +29,7 @@ spec:
                   name: nebari-realm-admin-credentials
                   key: password
             - name: KEYCLOAK_URL
-              value: {{ .KeycloakServiceURL }}/auth
+              value: {{ .KeycloakAuthURL }}
           command:
             - /bin/bash
             - -c

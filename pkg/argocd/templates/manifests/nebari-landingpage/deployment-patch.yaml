@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapi
+  namespace: nebari-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: webapi
+      app.kubernetes.io/name: nebari-operator
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            # JWT validation
+            - name: ENABLE_AUTH
+              value: "true"
+            - name: KEYCLOAK_URL
+              value: "{{ .KeycloakAuthURL }}"
+            - name: KEYCLOAK_ISSUER_URL
+              value: "{{ .KeycloakIssuerURL }}"
+            - name: KEYCLOAK_REALM
+              value: "{{ .KeycloakRealm }}"
+            # Keycloak admin credentials — the webapi reads the Secret directly
+            # via the k8s API (cross-namespace), same as the operator does.
+            # A Role + RoleBinding in the Keycloak namespace grants access.
+            - name: KEYCLOAK_ADMIN_SECRET_NAME
+              value: "{{ .KeycloakAdminSecretName }}"
+            - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
+              value: "{{ .KeycloakAdminSecretNamespace }}"
+            # Admin access-control
+            - name: ADMIN_GROUP
+              value: admin
+            # Persistent stores (bbolt)
+            - name: ACCESS_REQUESTS_DB_PATH
+              value: /data/access_requests.db
+            - name: NOTIFICATIONS_DB_PATH
+              value: /data/notifications.db
+            - name: PINS_DB_PATH
+              value: /data/pins.db
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi

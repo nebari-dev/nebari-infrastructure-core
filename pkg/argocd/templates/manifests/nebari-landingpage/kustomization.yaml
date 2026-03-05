@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nebari-system
+
+resources:
+  - https://raw.githubusercontent.com/nebari-dev/nebari-operator/feature/landing-page-service-discovery/deploy/webapi/manifest.yaml
+
+images:
+  - name: quay.io/nebari/nebari-webapi
+    newTag: feature-landing-page-service-discovery
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: webapi

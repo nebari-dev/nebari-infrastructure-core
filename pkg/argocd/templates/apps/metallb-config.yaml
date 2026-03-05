@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/metallb
+    path: "{{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/metallb"
 
   destination:
     server: https://kubernetes.default.svc
