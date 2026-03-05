@@ -74,7 +74,11 @@ func (d *DNSConfig) Validate() error {
 
 // ProviderName returns the name of the configured DNS provider,
 // or an empty string if none is configured.
+// Precondition: Validate() ensures exactly one entry in the map.
 func (d *DNSConfig) ProviderName() string {
+	if d == nil {
+		return ""
+	}
 	for name := range d.Providers {
 		return name
 	}
@@ -83,7 +87,11 @@ func (d *DNSConfig) ProviderName() string {
 
 // ProviderConfig returns the DNS provider config as a map.
 // Returns nil if no provider is configured or the value is not a map.
+// Precondition: Validate() ensures exactly one entry in the map.
 func (d *DNSConfig) ProviderConfig() map[string]any {
+	if d == nil {
+		return nil
+	}
 	for _, v := range d.Providers {
 		if m, ok := v.(map[string]any); ok {
 			return m

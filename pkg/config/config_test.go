@@ -774,6 +774,17 @@ func TestDNSConfigProviderConfig(t *testing.T) {
 	}
 }
 
+func TestDNSConfigNilReceiver(t *testing.T) {
+	var dns *DNSConfig
+
+	if got := dns.ProviderName(); got != "" {
+		t.Errorf("nil.ProviderName() = %q, want empty string", got)
+	}
+	if got := dns.ProviderConfig(); got != nil {
+		t.Errorf("nil.ProviderConfig() = %v, want nil", got)
+	}
+}
+
 func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	// Test that the git.Config type works correctly when embedded in NebariConfig
 	cfg := &NebariConfig{
