@@ -161,7 +161,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 
 	// Set up working directory
 	projectDir := filepath.Join(cacheDir, cfg.ProjectName)
-	if err := os.MkdirAll(projectDir, 0755); err != nil { //nolint:gosec // Cache directory, not sensitive
+	if err := os.MkdirAll(projectDir, 0750); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create project directory: %w", err)
 	}

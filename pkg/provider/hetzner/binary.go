@@ -151,6 +151,16 @@ func ensureBinary(ctx context.Context, cacheDir, version string, downloader bina
 		return "", err
 	}
 
+	// Record whether the platform had a known checksum for observability.
+	// verifyChecksum silently passes for unknown platforms (forward compatibility),
+	// so trace consumers can detect unverified binaries.
+	osName := runtime.GOOS
+	if osName == "darwin" {
+		osName = "macos"
+	}
+	_, hasChecksum := knownChecksums[osName+"-"+runtime.GOARCH]
+	span.SetAttributes(attribute.Bool("checksum_verified", hasChecksum))
+
 	// Write to a temp file first, then atomically rename to avoid TOCTOU races
 	// where a concurrent process could observe a partially-written binary.
 	tmpPath := execPath + ".tmp"

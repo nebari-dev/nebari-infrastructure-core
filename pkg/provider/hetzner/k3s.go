@@ -96,7 +96,7 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 		}
 	}
 
-	err = fmt.Errorf("no stable k3s release found for kubernetes version %q", version)
+	err = fmt.Errorf("no stable k3s release found for kubernetes version %q (try an explicit k3s version like 'v1.32.0+k3s1')", version)
 	span.RecordError(err)
 	return "", err
 }
