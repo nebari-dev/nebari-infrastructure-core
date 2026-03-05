@@ -44,7 +44,7 @@ func TestProvider_InfraSettings(t *testing.T) {
 			},
 			wantSC:  "hcloud-volumes",
 			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
-			wantKBP: "/auth",
+			wantKBP: "",
 			wantMLB: false,
 		},
 		{
@@ -53,7 +53,7 @@ func TestProvider_InfraSettings(t *testing.T) {
 				Provider: "hetzner",
 			},
 			wantSC:  "hcloud-volumes",
-			wantKBP: "/auth",
+			wantKBP: "",
 			wantMLB: false,
 		},
 	}
