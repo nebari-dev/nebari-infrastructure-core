@@ -10,6 +10,102 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
+func TestIsValidProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		want     bool
+	}{
+		{
+			name:     "aws is valid",
+			provider: "aws",
+			want:     true,
+		},
+		{
+			name:     "gcp is valid",
+			provider: "gcp",
+			want:     true,
+		},
+		{
+			name:     "azure is valid",
+			provider: "azure",
+			want:     true,
+		},
+		{
+			name:     "local is valid",
+			provider: "local",
+			want:     true,
+		},
+		{
+			name:     "hetzner is valid",
+			provider: "hetzner",
+			want:     true,
+		},
+		{
+			name:     "empty string is invalid",
+			provider: "",
+			want:     false,
+		},
+		{
+			name:     "unknown provider is invalid",
+			provider: "unknown",
+			want:     false,
+		},
+		{
+			name:     "AWS uppercase is invalid",
+			provider: "AWS",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidProvider(tt.provider)
+			if got != tt.want {
+				t.Errorf("IsValidProvider(%q) = %v, want %v", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValidDNSProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		want     bool
+	}{
+		{
+			name:     "cloudflare is valid",
+			provider: "cloudflare",
+			want:     true,
+		},
+		{
+			name:     "empty string is invalid",
+			provider: "",
+			want:     false,
+		},
+		{
+			name:     "unknown provider is invalid",
+			provider: "notreal",
+			want:     false,
+		},
+		{
+			name:     "Cloudflare uppercase is invalid",
+			provider: "Cloudflare",
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidDNSProvider(tt.provider)
+			if got != tt.want {
+				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderConfig_NilMapAccess(t *testing.T) {
 	// Verify that accessing a nil ProviderConfig map returns nil (Go behavior)
 	cfg := &NebariConfig{
@@ -185,7 +281,7 @@ project_name: test-project
 			errContains: "provider field is required",
 		},
 		{
-			name: "any provider string is accepted by config parser",
+			name: "hetzner provider is accepted",
 			yaml: `
 project_name: test-project
 provider: hetzner
@@ -196,6 +292,15 @@ provider: hetzner
 					t.Errorf("Provider = %q, want %q", cfg.Provider, "hetzner")
 				}
 			},
+		},
+		{
+			name: "unknown provider is rejected",
+			yaml: `
+project_name: test-project
+provider: unknown-provider
+`,
+			wantErr:     true,
+			errContains: "invalid provider",
 		},
 		{
 			name: "invalid git_repository - missing url",
@@ -234,6 +339,70 @@ git_repository:
 `,
 			wantErr:     true,
 			errContains: "only one of",
+		},
+		{
+			name: "new DNS format with nested provider",
+			yaml: `
+project_name: test-project
+provider: aws
+dns:
+  cloudflare:
+    zone_name: example.com
+`,
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.DNS == nil {
+					t.Fatal("DNS is nil")
+				}
+				if cfg.DNS.ProviderName() != "cloudflare" {
+					t.Errorf("DNS.ProviderName() = %q, want %q", cfg.DNS.ProviderName(), "cloudflare")
+				}
+				pc := cfg.DNS.ProviderConfig()
+				if pc == nil {
+					t.Fatal("DNS.ProviderConfig() is nil")
+				}
+				if pc["zone_name"] != "example.com" {
+					t.Errorf("DNS.ProviderConfig()[zone_name] = %v, want %q", pc["zone_name"], "example.com")
+				}
+			},
+		},
+		{
+			name: "old DNS format rejected",
+			yaml: `
+project_name: test-project
+provider: aws
+dns_provider: cloudflare
+dns:
+  zone_name: example.com
+`,
+			wantErr:     true,
+			errContains: "dns_provider",
+		},
+		{
+			name: "bare dns block treated as no DNS configured",
+			yaml: `
+project_name: test-project
+provider: aws
+dns:
+`,
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.DNS != nil {
+					t.Errorf("DNS should be nil for bare dns: block, got %+v", cfg.DNS)
+				}
+			},
+		},
+		{
+			name: "invalid DNS provider name rejected",
+			yaml: `
+project_name: test-project
+provider: aws
+dns:
+  notreal:
+    zone_name: example.com
+`,
+			wantErr:     true,
+			errContains: "invalid DNS provider",
 		},
 		{
 			name:        "invalid YAML syntax",
@@ -356,11 +525,59 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name: "provider name validation deferred to registry",
+			name: "invalid provider name rejected",
 			config: NebariConfig{
 				Provider: "any-provider-name",
 			},
+			wantErr:     true,
+			errContains: "invalid provider",
+		},
+		{
+			name: "valid config with DNS",
+			config: NebariConfig{
+				Provider: "aws",
+				DNS: &DNSConfig{
+					Providers: map[string]any{
+						"cloudflare": map[string]any{"zone_name": "example.com"},
+					},
+				},
+			},
 			wantErr: false,
+		},
+		{
+			name: "invalid DNS - no provider",
+			config: NebariConfig{
+				Provider: "aws",
+				DNS: &DNSConfig{
+					Providers: map[string]any{},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid dns",
+		},
+		{
+			name: "invalid DNS provider name",
+			config: NebariConfig{
+				Provider: "aws",
+				DNS: &DNSConfig{
+					Providers: map[string]any{
+						"notreal": map[string]any{"zone_name": "example.com"},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid DNS provider",
+		},
+		{
+			name: "old format dns_provider rejected",
+			config: NebariConfig{
+				Provider: "aws",
+				ProviderConfig: map[string]any{
+					"dns_provider": "cloudflare",
+				},
+			},
+			wantErr:     true,
+			errContains: "dns_provider",
 		},
 		{
 			name: "invalid git_repository",
@@ -395,6 +612,195 @@ func TestNebariConfigValidate(t *testing.T) {
 				t.Errorf("Validate() unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestDNSConfigValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		dns         DNSConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid single provider",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "no provider configured",
+			dns: DNSConfig{
+				Providers: map[string]any{},
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "nil providers map",
+			dns: DNSConfig{
+				Providers: nil,
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "multiple providers",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+					"route53":    map[string]any{"hosted_zone_id": "Z123"},
+				},
+			},
+			wantErr:     true,
+			errContains: "only one DNS provider",
+		},
+		{
+			name: "invalid provider name",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"notreal": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid DNS provider",
+		},
+		{
+			name: "scalar provider value rejected",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": "not-a-map",
+				},
+			},
+			wantErr:     true,
+			errContains: "must be a mapping",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.dns.Validate()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDNSConfigProviderName(t *testing.T) {
+	tests := []struct {
+		name string
+		dns  DNSConfig
+		want string
+	}{
+		{
+			name: "cloudflare provider",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			want: "cloudflare",
+		},
+		{
+			name: "empty config",
+			dns:  DNSConfig{},
+			want: "",
+		},
+		{
+			name: "nil providers",
+			dns:  DNSConfig{Providers: nil},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.dns.ProviderName()
+			if got != tt.want {
+				t.Errorf("ProviderName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDNSConfigProviderConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		dns     DNSConfig
+		wantNil bool
+		wantKey string
+		wantVal string
+	}{
+		{
+			name: "returns provider config map",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			wantNil: false,
+			wantKey: "zone_name",
+			wantVal: "example.com",
+		},
+		{
+			name:    "nil when empty",
+			dns:     DNSConfig{},
+			wantNil: true,
+		},
+		{
+			name: "nil when value is not a map",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": "not-a-map",
+				},
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.dns.ProviderConfig()
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("ProviderConfig() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("ProviderConfig() = nil, want non-nil")
+			}
+			if got[tt.wantKey] != tt.wantVal {
+				t.Errorf("ProviderConfig()[%q] = %v, want %q", tt.wantKey, got[tt.wantKey], tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestDNSConfigNilReceiver(t *testing.T) {
+	var dns *DNSConfig
+
+	if got := dns.ProviderName(); got != "" {
+		t.Errorf("nil.ProviderName() = %q, want empty string", got)
+	}
+	if got := dns.ProviderConfig(); got != nil {
+		t.Errorf("nil.ProviderConfig() = %v, want nil", got)
 	}
 }
 

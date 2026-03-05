@@ -47,3 +47,15 @@ linters:
         linters:
           - gosec
         text: "G703"
+
+      # Hetzner provider: HTTP requests use hardcoded GitHub URLs or test-injected URLs
+      - path: pkg/provider/hetzner/
+        linters:
+          - gosec
+        text: "G704"
+
+      # Hetzner provider: subprocess uses controlled binary path from our download cache
+      - path: pkg/provider/hetzner/cluster\.go
+        linters:
+          - gosec
+        text: "G204"
