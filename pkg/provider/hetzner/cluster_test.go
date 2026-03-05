@@ -21,7 +21,6 @@ func TestGenerateClusterYAML(t *testing.T) {
 	params := clusterParams{
 		ClusterName:    "test-cluster",
 		K3sVersion:     "v1.32.12+k3s1",
-		HetznerToken:   "test-token",
 		SSHPublicKey:   "/tmp/key.pub",
 		SSHPrivateKey:  "/tmp/key",
 		KubeconfigPath: "/tmp/kubeconfig",
@@ -52,9 +51,9 @@ func TestGenerateClusterYAML(t *testing.T) {
 		}
 	}
 
-	// Should contain the token
-	if !strings.Contains(yaml, "test-token") {
-		t.Error("expected hetzner_token in generated YAML")
+	// Token should NOT be in the generated YAML (passed via HCLOUD_TOKEN env var)
+	if strings.Contains(yaml, "hetzner_token") {
+		t.Error("cluster.yaml should not contain hetzner_token - token is passed via env var")
 	}
 
 	// Default network config should use 0.0.0.0/0
@@ -78,7 +77,6 @@ func TestGenerateClusterYAML_CustomNetwork(t *testing.T) {
 	params := clusterParams{
 		ClusterName:    "test",
 		K3sVersion:     "v1.32.12+k3s1",
-		HetznerToken:   "tok",
 		SSHPublicKey:   "/tmp/key.pub",
 		SSHPrivateKey:  "/tmp/key",
 		KubeconfigPath: "/tmp/kubeconfig",
@@ -117,7 +115,6 @@ func TestGenerateClusterYAML_WithAutoscaling(t *testing.T) {
 	params := clusterParams{
 		ClusterName:    "test",
 		K3sVersion:     "v1.32.12+k3s1",
-		HetznerToken:   "tok",
 		SSHPublicKey:   "/tmp/key.pub",
 		SSHPrivateKey:  "/tmp/key",
 		KubeconfigPath: "/tmp/kubeconfig",
@@ -151,7 +148,6 @@ func TestGenerateClusterYAML_WorkerLocationFallback(t *testing.T) {
 	params := clusterParams{
 		ClusterName:    "test",
 		K3sVersion:     "v1.32.12+k3s1",
-		HetznerToken:   "tok",
 		SSHPublicKey:   "/tmp/key.pub",
 		SSHPrivateKey:  "/tmp/key",
 		KubeconfigPath: "/tmp/kubeconfig",

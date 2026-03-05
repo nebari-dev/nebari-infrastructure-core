@@ -120,7 +120,9 @@ type ACMEConfig struct {
 	Server string `yaml:"server,omitempty"`
 }
 
-// ValidProviders lists the supported providers
+// ValidProviders lists the supported providers for config validation.
+// This must be kept in sync with the providers registered in cmd/nic/main.go.
+// TODO: Remove this list and delegate provider name validation to the registry.
 var ValidProviders = []string{"aws", "gcp", "azure", "local", "hetzner"}
 
 // ValidDNSProviders lists the supported DNS providers

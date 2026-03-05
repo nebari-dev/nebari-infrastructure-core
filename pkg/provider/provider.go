@@ -24,7 +24,9 @@ type InfraSettings struct {
 	LoadBalancerAnnotations map[string]string
 
 	// KeycloakBasePath is appended to the Keycloak service URL for the operator.
-	// Most providers leave this empty; Hetzner requires "/auth".
+	// Most providers leave this empty. Providers using the Keycloak legacy chart
+	// (keycloakx) need "/auth" because that chart serves under the /auth context path,
+	// while the modern Bitnami chart serves at the root.
 	KeycloakBasePath string
 }
 

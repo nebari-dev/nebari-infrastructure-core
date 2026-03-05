@@ -2,6 +2,8 @@ package hetzner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,22 @@ import (
 	"runtime"
 	"time"
 )
+
+// verifyChecksum validates a SHA256 checksum if a known digest is available.
+// Returns nil if the digest matches or if no known digest exists for this platform.
+func verifyChecksum(data []byte, osName, arch string) error {
+	key := osName + "-" + arch
+	expected, ok := knownChecksums[key]
+	if !ok {
+		return nil
+	}
+	actual := sha256.Sum256(data)
+	actualHex := hex.EncodeToString(actual[:])
+	if actualHex != expected {
+		return fmt.Errorf("SHA256 checksum mismatch for hetzner-k3s %s-%s: expected %s, got %s", osName, arch, expected, actualHex)
+	}
+	return nil
+}
 
 const (
 	// DefaultHetznerK3sVersion is the pinned hetzner-k3s release version.
@@ -20,7 +38,18 @@ const (
 
 	// maxBinarySize limits the download to 100 MB to prevent OOM from rogue servers.
 	maxBinarySize = 100 * 1024 * 1024
+
+	userAgent = "nic/hetzner-provider"
 )
+
+// knownChecksums maps "os-arch" to the expected SHA256 hex digest for the pinned version.
+// Update these when bumping DefaultHetznerK3sVersion.
+var knownChecksums = map[string]string{
+	"linux-amd64": "18bbfe3d066539a967419d052ac0f8b4ad4691f2f76f9f22d7433c10ef28fea5",
+	"linux-arm64": "0b60c018842fd7f6c53116e439f5e25ec8b0c5d7d04710c81f7d50549e6fb194",
+	"macos-amd64": "803b2503a9bad0f9dbeadcc8f7ab23844e1d027da6ab27dd627ccd53a6000818",
+	"macos-arm64": "31d69c5666c3e4a96309ca770c80e03d846d1c83754f49679765b1588806c1bd",
+}
 
 // binaryDownloader abstracts binary fetching for testability.
 type binaryDownloader interface {
@@ -58,6 +87,7 @@ func (d *hetznerK3sDownloader) download(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create download request: %w", err)
 	}
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -69,13 +99,20 @@ func (d *hetznerK3sDownloader) download(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("download returned status %d for %s", resp.StatusCode, url)
 	}
 
-	// TODO: Add SHA256 checksum verification against a known digest for each release.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read download response: %w", err)
 	}
 	if int64(len(body)) > maxBinarySize {
 		return nil, fmt.Errorf("downloaded binary exceeds maximum size of %d bytes", maxBinarySize)
+	}
+
+	// Only verify checksum when downloading from the official release URL.
+	// Test servers use fake binaries that won't match real checksums.
+	if d.baseURL == "" {
+		if err := verifyChecksum(body, osName, arch); err != nil {
+			return nil, err
+		}
 	}
 
 	return body, nil

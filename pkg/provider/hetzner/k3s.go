@@ -21,6 +21,10 @@ type ghRelease struct {
 // to a full k3s release tag (e.g., "v1.32.12+k3s1") by querying the GitHub API.
 // If version already contains "+k3s", it's returned as-is.
 // apiURL allows injecting a test server URL; pass "" to use the default GitHub API.
+//
+// Note: only the 100 most recent releases are fetched (no pagination).
+// Older Kubernetes versions may not resolve if there are 100+ newer releases.
+// Use an explicit k3s version string (e.g., "v1.28.5+k3s1") for older versions.
 func resolveK3sVersion(ctx context.Context, version string, apiURL string) (string, error) {
 	if strings.Contains(version, "+k3s") {
 		return version, nil
@@ -51,6 +55,7 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

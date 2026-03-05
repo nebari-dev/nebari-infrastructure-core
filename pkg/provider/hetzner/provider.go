@@ -147,7 +147,6 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	params := clusterParams{
 		ClusterName:    cfg.ProjectName,
 		K3sVersion:     k3sVersion,
-		HetznerToken:   os.Getenv("HETZNER_TOKEN"),
 		SSHPublicKey:   pubKey,
 		SSHPrivateKey:  privKey,
 		KubeconfigPath: kubeconfigPath,
@@ -267,7 +266,10 @@ func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSetting
 		KeycloakBasePath: "/auth",
 	}
 
-	// Derive LB annotations from location
+	// Derive LB annotations from location.
+	// Parse errors are intentionally ignored here: InfraSettings is called after
+	// Validate() has already confirmed the config is parseable. If it somehow
+	// fails (e.g., nil config in tests), we return valid defaults without annotations.
 	rawCfg := cfg.ProviderConfig[configKey]
 	if rawCfg != nil {
 		var hCfg Config

@@ -11,10 +11,11 @@ import (
 )
 
 // clusterParams holds all parameters needed to generate a hetzner-k3s cluster.yaml.
+// The Hetzner API token is NOT included here - it is passed to the hetzner-k3s
+// subprocess via the HCLOUD_TOKEN environment variable to avoid writing it to disk.
 type clusterParams struct {
 	ClusterName    string
 	K3sVersion     string
-	HetznerToken   string
 	SSHPublicKey   string
 	SSHPrivateKey  string
 	KubeconfigPath string
@@ -24,7 +25,6 @@ type clusterParams struct {
 const clusterTemplate = `cluster_name: {{ .ClusterName }}
 kubeconfig_path: "{{ .KubeconfigPath }}"
 k3s_version: {{ .K3sVersion }}
-hetzner_token: {{ .HetznerToken }}
 
 networking:
   ssh:
@@ -131,10 +131,13 @@ func generateClusterYAML(params clusterParams) (string, error) {
 }
 
 // runHetznerK3s executes the hetzner-k3s binary with the given subcommand and cluster config.
+// The HETZNER_TOKEN env var is mapped to HCLOUD_TOKEN, which is what hetzner-k3s reads.
+// This follows the same pattern as other providers where credentials come from env vars.
 func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath string) error {
 	cmd := exec.CommandContext(ctx, binaryPath, subcommand, "--config", clusterYAMLPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "HCLOUD_TOKEN="+os.Getenv("HETZNER_TOKEN"))
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hetzner-k3s %s failed: %w", subcommand, err)
