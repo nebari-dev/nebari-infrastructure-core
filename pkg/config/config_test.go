@@ -10,64 +10,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-func TestIsValidProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{
-			name:     "aws is valid",
-			provider: "aws",
-			want:     true,
-		},
-		{
-			name:     "gcp is valid",
-			provider: "gcp",
-			want:     true,
-		},
-		{
-			name:     "azure is valid",
-			provider: "azure",
-			want:     true,
-		},
-		{
-			name:     "local is valid",
-			provider: "local",
-			want:     true,
-		},
-		{
-			name:     "hetzner is valid",
-			provider: "hetzner",
-			want:     true,
-		},
-		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
-		},
-		{
-			name:     "unknown provider is invalid",
-			provider: "unknown",
-			want:     false,
-		},
-		{
-			name:     "AWS uppercase is invalid",
-			provider: "AWS",
-			want:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidProvider(%q) = %v, want %v", tt.provider, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsValidDNSProvider(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -294,13 +236,17 @@ provider: hetzner
 			},
 		},
 		{
-			name: "unknown provider is rejected",
+			name: "unknown provider passes config validation",
 			yaml: `
 project_name: test-project
 provider: unknown-provider
 `,
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Provider != "unknown-provider" {
+					t.Errorf("Provider = %q, want %q", cfg.Provider, "unknown-provider")
+				}
+			},
 		},
 		{
 			name: "invalid git_repository - missing url",
@@ -549,13 +495,12 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name: "invalid provider name rejected",
+			name: "any provider name passes config validation",
 			config: NebariConfig{
 				ProjectName: "test",
 				Provider:    "any-provider-name",
 			},
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
 		},
 		{
 			name: "valid config with DNS",

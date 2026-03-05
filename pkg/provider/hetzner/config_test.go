@@ -198,6 +198,28 @@ func TestConfigValidate(t *testing.T) {
 			errMsg:  "invalid characters",
 		},
 		{
+			name: "kubernetes_version with injection rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32\"\nmalicious: true",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "invalid",
+		},
+		{
+			name: "kubernetes_version with arbitrary text rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "latest",
+				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
+				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+			},
+			wantErr: true,
+			errMsg:  "invalid",
+		},
+		{
 			name: "invalid SSH CIDR rejected",
 			cfg: Config{
 				Location:          "ash",

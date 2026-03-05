@@ -125,23 +125,8 @@ type ACMEConfig struct {
 // Used to validate ProjectName before it is used as a filesystem path component.
 var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
-// ValidProviders lists the supported providers for config validation.
-// This must be kept in sync with the providers registered in cmd/nic/main.go.
-// TODO: Remove this list and delegate provider name validation to the registry.
-var ValidProviders = []string{"aws", "gcp", "azure", "local", "hetzner"}
-
 // ValidDNSProviders lists the supported DNS providers
 var ValidDNSProviders = []string{"cloudflare"}
-
-// IsValidProvider checks if the provider string is valid
-func IsValidProvider(provider string) bool {
-	for _, p := range ValidProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
 
 // IsValidDNSProvider checks if the DNS provider string is valid
 func IsValidDNSProvider(provider string) bool {
@@ -167,9 +152,9 @@ func (c *NebariConfig) Validate() error {
 		return fmt.Errorf("provider field is required")
 	}
 
-	if !IsValidProvider(c.Provider) {
-		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
-	}
+	// Provider name validation is handled by the registry in CLI commands
+	// (registry.Get returns an error for unknown providers). Config.Validate
+	// only checks that the field is non-empty.
 
 	// Check for old-format dns_provider field
 	if _, ok := c.ProviderConfig["dns_provider"]; ok {

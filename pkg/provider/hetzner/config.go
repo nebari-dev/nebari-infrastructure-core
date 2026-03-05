@@ -80,6 +80,11 @@ func (c *Config) IsExplicitK3sVersion() bool {
 // Used to validate values interpolated into the cluster YAML template.
 var safeIdentifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// safeK8sVersion matches Kubernetes version strings:
+//   - "1.32", "1.32.0" (short forms resolved via GitHub API)
+//   - "v1.32.0+k3s1" (explicit k3s release tags)
+var safeK8sVersion = regexp.MustCompile(`^v?\d+\.\d+(\.\d+)?(\+k3s\d+)?$`)
+
 // Validate checks that all required fields are present and valid.
 func (c *Config) Validate() error {
 	if c.Location == "" {
@@ -90,6 +95,9 @@ func (c *Config) Validate() error {
 	}
 	if c.KubernetesVersion == "" {
 		return fmt.Errorf("hetzner_cloud.kubernetes_version is required")
+	}
+	if !safeK8sVersion.MatchString(c.KubernetesVersion) {
+		return fmt.Errorf("hetzner_cloud.kubernetes_version %q is invalid (expected MAJOR.MINOR, MAJOR.MINOR.PATCH, or vMAJOR.MINOR.PATCH+k3sN)", c.KubernetesVersion)
 	}
 	if c.MastersPool.InstanceType == "" {
 		return fmt.Errorf("hetzner_cloud.masters_pool.instance_type is required")
