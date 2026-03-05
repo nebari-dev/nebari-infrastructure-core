@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const k3sReleasesURL = "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100"
@@ -27,7 +30,14 @@ type ghRelease struct {
 // Older Kubernetes versions may not resolve if there are 100+ newer releases.
 // Use an explicit k3s version string (e.g., "v1.28.5+k3s1") for older versions.
 func resolveK3sVersion(ctx context.Context, version string, apiURL string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("requested_version", version))
+
 	if strings.Contains(version, "+k3s") {
+		span.SetAttributes(attribute.String("resolved_version", version))
 		return version, nil
 	}
 
@@ -65,7 +75,9 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 	defer resp.Body.Close() //nolint:errcheck // Best-effort close on read-only response
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		err := fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		span.RecordError(err)
+		return "", err
 	}
 
 	const maxAPIResponseSize = 10 * 1024 * 1024 // 10 MB
@@ -79,9 +91,12 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 			continue
 		}
 		if strings.HasPrefix(r.TagName, matchPrefix) {
+			span.SetAttributes(attribute.String("resolved_version", r.TagName))
 			return r.TagName, nil
 		}
 	}
 
-	return "", fmt.Errorf("no stable k3s release found for kubernetes version %q", version)
+	err = fmt.Errorf("no stable k3s release found for kubernetes version %q", version)
+	span.RecordError(err)
+	return "", err
 }

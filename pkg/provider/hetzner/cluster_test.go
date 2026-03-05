@@ -1,6 +1,7 @@
 package hetzner
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -165,5 +166,84 @@ func TestGenerateClusterYAML_WorkerLocationFallback(t *testing.T) {
 	}
 	if !strings.Contains(yaml, `location: "fsn1"`) {
 		t.Error("expected explicit location 'fsn1'")
+	}
+}
+
+func TestMinimalEnv(t *testing.T) {
+	// Set a known HETZNER_TOKEN and an unrelated secret
+	t.Setenv("HETZNER_TOKEN", "test-token-123")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "should-not-leak")
+	t.Setenv("CLOUDFLARE_API_TOKEN", "should-not-leak-either")
+
+	env := minimalEnv()
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// HCLOUD_TOKEN should be set from HETZNER_TOKEN
+	if envMap["HCLOUD_TOKEN"] != "test-token-123" {
+		t.Errorf("HCLOUD_TOKEN = %q, want %q", envMap["HCLOUD_TOKEN"], "test-token-123")
+	}
+
+	// PATH should be forwarded
+	if _, ok := envMap["PATH"]; !ok {
+		t.Error("PATH should be present in minimal env")
+	}
+
+	// Unrelated secrets must NOT be present
+	if _, ok := envMap["AWS_SECRET_ACCESS_KEY"]; ok {
+		t.Error("AWS_SECRET_ACCESS_KEY should not leak into subprocess env")
+	}
+	if _, ok := envMap["CLOUDFLARE_API_TOKEN"]; ok {
+		t.Error("CLOUDFLARE_API_TOKEN should not leak into subprocess env")
+	}
+}
+
+func TestMinimalEnv_MissingToken(t *testing.T) {
+	// Unset HETZNER_TOKEN to verify HCLOUD_TOKEN is set but empty
+	t.Setenv("HETZNER_TOKEN", "")
+
+	env := minimalEnv()
+
+	found := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "HCLOUD_TOKEN=") {
+			found = true
+			if e != "HCLOUD_TOKEN=" {
+				t.Errorf("expected empty HCLOUD_TOKEN, got %q", e)
+			}
+		}
+	}
+	if !found {
+		t.Error("HCLOUD_TOKEN should always be present in env")
+	}
+}
+
+func TestWriteClusterYAML(t *testing.T) {
+	dir := t.TempDir()
+	content := "test: content"
+
+	path, err := writeClusterYAML(dir, content)
+	if err != nil {
+		t.Fatalf("writeClusterYAML() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path) //nolint:gosec // Test file, path from t.TempDir()
+	if err != nil {
+		t.Fatalf("failed to read written file: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("content = %q, want %q", string(data), content)
+	}
+
+	// Verify restrictive permissions
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("permissions = %o, want 0600", info.Mode().Perm())
 	}
 }

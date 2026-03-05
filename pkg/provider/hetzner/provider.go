@@ -96,6 +96,13 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
+	// Apply deployment timeout if configured
+	if cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
+
 	// Defensive validation in case Deploy is called without Validate
 	if os.Getenv("HETZNER_TOKEN") == "" {
 		err := fmt.Errorf("HETZNER_TOKEN environment variable is required")
@@ -214,6 +221,13 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		attribute.String("provider", providerName),
 		attribute.String("project_name", cfg.ProjectName),
 	)
+
+	// Apply timeout if configured
+	if cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
 
 	if os.Getenv("HETZNER_TOKEN") == "" {
 		err := fmt.Errorf("HETZNER_TOKEN environment variable is required for destroy")

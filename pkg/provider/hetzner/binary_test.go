@@ -2,9 +2,12 @@ package hetzner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +78,72 @@ func TestDownloadBinary_CachesResult(t *testing.T) {
 	}
 	if callCount != 1 {
 		t.Errorf("expected no additional download, got %d total", callCount)
+	}
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	data := []byte("test binary content")
+	hash := sha256.Sum256(data)
+	goodChecksum := hex.EncodeToString(hash[:])
+
+	tests := []struct {
+		name    string
+		data    []byte
+		osName  string
+		arch    string
+		setup   func()
+		cleanup func()
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:   "matching checksum passes",
+			data:   data,
+			osName: "test-os",
+			arch:   "test-arch",
+			setup: func() {
+				knownChecksums["test-os-test-arch"] = goodChecksum
+			},
+			cleanup: func() {
+				delete(knownChecksums, "test-os-test-arch")
+			},
+		},
+		{
+			name:   "mismatched checksum fails",
+			data:   []byte("wrong content"),
+			osName: "test-os",
+			arch:   "test-arch",
+			setup: func() {
+				knownChecksums["test-os-test-arch"] = goodChecksum
+			},
+			cleanup: func() {
+				delete(knownChecksums, "test-os-test-arch")
+			},
+			wantErr: true,
+			errMsg:  "checksum mismatch",
+		},
+		{
+			name:   "unknown platform skips verification",
+			data:   []byte("anything"),
+			osName: "unknown-os",
+			arch:   "unknown-arch",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup()
+			}
+			if tt.cleanup != nil {
+				defer tt.cleanup()
+			}
+			err := verifyChecksum(tt.data, tt.osName, tt.arch)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("verifyChecksum() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error should contain %q, got: %v", tt.errMsg, err)
+			}
+		})
 	}
 }

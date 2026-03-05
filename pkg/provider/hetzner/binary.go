@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // verifyChecksum validates a SHA256 checksum if a known digest is available.
@@ -122,14 +125,22 @@ func (d *hetznerK3sDownloader) download(ctx context.Context) ([]byte, error) {
 // The binary is cached with its version in the filename to avoid reusing stale binaries
 // after version bumps.
 func ensureBinary(ctx context.Context, cacheDir, version string, downloader binaryDownloader) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "hetzner.ensureBinary")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("version", version))
+
 	execPath := filepath.Join(cacheDir, fmt.Sprintf("hetzner-k3s-%s", version))
 	if runtime.GOOS == "windows" {
 		execPath += ".exe"
 	}
 
 	if _, err := os.Stat(execPath); err == nil {
+		span.SetAttributes(attribute.Bool("cached", true))
 		return execPath, nil
 	}
+	span.SetAttributes(attribute.Bool("cached", false))
 
 	if err := os.MkdirAll(cacheDir, 0750); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +68,34 @@ func TestResolveK3sVersion(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("resolveK3sVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveK3sVersion_APIError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		errMsg     string
+	}{
+		{"server error", http.StatusInternalServerError, "status 500"},
+		{"rate limited", http.StatusForbidden, "status 403"},
+		{"not found", http.StatusNotFound, "status 404"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			_, err := resolveK3sVersion(context.Background(), "1.32", server.URL)
+			if err == nil {
+				t.Fatal("expected error for non-200 response")
+			}
+			if !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error should contain %q, got: %v", tt.errMsg, err)
 			}
 		})
 	}
