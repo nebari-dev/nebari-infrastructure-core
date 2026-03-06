@@ -22,6 +22,12 @@ type Config struct {
 	// least one non-master node group is required.
 	ScheduleWorkloadsOnMasters *bool `yaml:"schedule_workloads_on_masters,omitempty"`
 
+	// PersistData controls whether CSI volumes survive cluster destruction.
+	// When true, volumes are labeled persist=true during deploy, and destroy
+	// skips them. When false (the default), destroy deletes all CSI volumes
+	// that are not attached to a running server.
+	PersistData bool `yaml:"persist_data,omitempty"`
+
 	SSH     *SSHConfig     `yaml:"ssh,omitempty"`
 	Network *NetworkConfig `yaml:"network,omitempty"`
 }

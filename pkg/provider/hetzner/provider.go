@@ -209,6 +209,18 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner k3s cluster created successfully").
 		WithResource("provider").WithAction("deploy"))
 
+	// Label volumes for persistence if configured
+	if hCfg.PersistData {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Labeling CSI volumes with persist=true").
+			WithResource("provider").WithAction("deploy"))
+
+		if err := labelPersistVolumes(ctx); err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to label volumes for persistence: %v", err)).
+				WithResource("provider").WithAction("deploy"))
+		}
+	}
+
 	return nil
 }
 
@@ -268,6 +280,34 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	if err := runHetznerK3s(ctx, binaryPath, "delete", clusterYAMLPath); err != nil {
 		span.RecordError(err)
 		return err
+	}
+
+	// Clean up CSI volumes that aren't marked persist=true
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cleaning up orphaned CSI volumes").
+		WithResource("provider").WithAction("destroy"))
+
+	deleted, err := cleanupVolumes(ctx)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up some volumes: %v", err)).
+			WithResource("provider").WithAction("destroy"))
+	} else if deleted > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted %d orphaned CSI volume(s)", deleted)).
+			WithResource("provider").WithAction("destroy"))
+	}
+
+	// Clean up orphaned CCM load balancers (no targets remaining)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Cleaning up orphaned load balancers").
+		WithResource("provider").WithAction("destroy"))
+
+	deletedLBs, err := cleanupLoadBalancers(ctx)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up some load balancers: %v", err)).
+			WithResource("provider").WithAction("destroy"))
+	} else if deletedLBs > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted %d orphaned load balancer(s)", deletedLBs)).
+			WithResource("provider").WithAction("destroy"))
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner k3s cluster destroyed successfully").
