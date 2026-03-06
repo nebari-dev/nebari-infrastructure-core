@@ -55,6 +55,18 @@ func init() {
 	}
 }
 
+// defaultGitConfig returns a default local git configuration for development workflows.
+// This is a pure function with no side effects — directory creation happens separately.
+func defaultGitConfig(projectName string) *git.Config {
+	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", projectName)
+	return &git.Config{
+		URL:    fmt.Sprintf("file://%s", localPath),
+		Branch: "main",
+		Path:   "",
+		Auth:   git.AuthConfig{},
+	}
+}
+
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For development workflows without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
 func getOrCreateGitConfig(cfg *config.NebariConfig) *git.Config {
@@ -62,24 +74,19 @@ func getOrCreateGitConfig(cfg *config.NebariConfig) *git.Config {
 		return cfg.GitRepository
 	}
 
-	// Auto-create local directory in /tmp for development
-	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", cfg.ProjectName)
+	gitCfg := defaultGitConfig(cfg.ProjectName)
+	localPath := gitCfg.GetLocalPath()
+
 	slog.Info("No git_repository configured, using auto-generated local directory",
 		"path", localPath)
 
-	// Create directory if it doesn't exist
 	if err := os.MkdirAll(localPath, 0750); err != nil {
 		slog.Warn("Failed to create auto-generated directory",
 			"path", localPath, "error", err)
 		return nil
 	}
 
-	return &git.Config{
-		URL:    fmt.Sprintf("file://%s", localPath),
-		Branch: "main",
-		Path:   "",
-		Auth:   git.AuthConfig{}, // Empty auth for local paths
-	}
+	return gitCfg
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -376,22 +383,10 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	// Write the NIC config to the repository
-	configBytes, err := os.ReadFile(deployConfigFile) //nolint:gosec // G304: path is from CLI flag
-	if err != nil {
+	if err := writeConfigToRepo(deployConfigFile, gitClient.WorkDir()); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to read config file: %w", err)
+		return err
 	}
-	configDest := filepath.Join(gitClient.WorkDir(), "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to write config to repository: %w", err)
-	}
-	slog.Info("Wrote NIC config to repository", "path", configDest)
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
@@ -424,6 +419,23 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 	} else {
 		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
 	}
+	return nil
+}
+
+// writeConfigToRepo copies the NIC config file into the git working directory.
+func writeConfigToRepo(configFile, workDir string) error {
+	configBytes, err := os.ReadFile(configFile) //nolint:gosec // G304: path is from CLI flag
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+	configDest := filepath.Join(workDir, "nic-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write config to repository: %w", err)
+	}
+	slog.Info("Wrote NIC config to repository", "path", configDest)
 	return nil
 }
 

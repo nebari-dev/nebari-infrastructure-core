@@ -115,6 +115,7 @@ localstack-logs: ## Show LocalStack logs
 	fi
 
 LOCAL_CONFIG?=./examples/local-config.yaml
+REGEN_APPS?=
 
 localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:// gitops repos automatically)
 	@echo "Setting up local kind cluster..."
@@ -149,7 +150,7 @@ localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:
 		kind create cluster --name nebari-local || true; \
 	fi
 	@echo "Deploying Nebari to local cluster..."
-	time ./$(BINARY_NAME) deploy -f $(LOCAL_CONFIG) --regen-apps
+	time ./$(BINARY_NAME) deploy -f $(LOCAL_CONFIG) $(REGEN_APPS)
 	@echo "Local kind cluster is ready!"
 
 localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster

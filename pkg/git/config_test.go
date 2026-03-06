@@ -534,9 +534,14 @@ func TestConfigGetLocalPath(t *testing.T) {
 			want:   "",
 		},
 		{
-			name:   "handles file:// with relative path",
+			name:   "rejects file:// with relative path",
 			config: Config{URL: "file://./local/repo"},
-			want:   "./local/repo",
+			want:   "",
+		},
+		{
+			name:   "cleans path traversal attempts",
+			config: Config{URL: "file:///tmp/nebari/../etc/shadow"},
+			want:   "/tmp/etc/shadow",
 		},
 	}
 

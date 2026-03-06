@@ -21,11 +21,11 @@ local:
 #
 # OPTION 2: Explicit local directory (full control over location)
 # git_repository:
-# Local path to git repository (must be an absolute path)
-  # url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
-  # branch: main
-  # path: "clusters/local"  # Optional subdirectory within the repo
-  # No auth configuration needed for local paths
+#   # Local path to git repository (must be an absolute path)
+#   url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
+#   branch: main
+#   path: "clusters/local"  # Optional subdirectory within the repo
+#   # No auth configuration needed for local paths
 
 # OPTION 3: Remote git repository (production setup)
 # git_repository:
