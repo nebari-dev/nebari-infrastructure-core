@@ -145,6 +145,12 @@ func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config
 	_, span := tracer.Start(ctx, "argocd.upgradeHelm")
 	defer span.End()
 
+	// Ensure Helm repo is available (may not exist on fresh CI runners)
+	if err := addHelmRepo(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to add Argo CD Helm repository: %w", err)
+	}
+
 	client := action.NewUpgrade(actionConfig)
 	client.Namespace = config.Namespace
 	client.Wait = true

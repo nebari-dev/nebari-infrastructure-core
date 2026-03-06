@@ -1,0 +1,188 @@
+package hetzner
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"text/template"
+)
+
+// clusterParams holds all parameters needed to generate a hetzner-k3s cluster.yaml.
+// The Hetzner API token is NOT included here - it is passed to the hetzner-k3s
+// subprocess via the HCLOUD_TOKEN environment variable to avoid writing it to disk.
+type clusterParams struct {
+	ClusterName    string
+	K3sVersion     string
+	SSHPublicKey   string
+	SSHPrivateKey  string
+	KubeconfigPath string
+	Config         Config
+}
+
+const clusterTemplate = `cluster_name: "{{ .ClusterName }}"
+kubeconfig_path: "{{ .KubeconfigPath }}"
+k3s_version: "{{ .K3sVersion }}"
+
+networking:
+  ssh:
+    port: 22
+    use_agent: false
+    public_key_path: "{{ .SSHPublicKey }}"
+    private_key_path: "{{ .SSHPrivateKey }}"
+  allowed_networks:
+    ssh:
+{{- range sshAllowedNetworks .Config }}
+      - "{{ . }}"
+{{- end }}
+    api:
+{{- range apiAllowedNetworks .Config }}
+      - "{{ . }}"
+{{- end }}
+  public_network:
+    ipv4: true
+    ipv6: true
+  private_network:
+    enabled: true
+    subnet: 10.0.0.0/16
+  cni:
+    enabled: true
+    mode: flannel
+
+schedule_workloads_on_masters: {{ scheduleOnMasters .Config }}
+
+masters_pool:
+  instance_type: "{{ masterInstanceType .Config }}"
+  instance_count: {{ masterCount .Config }}
+  locations:
+    - "{{ .Config.Location }}"
+
+worker_node_pools:
+{{- range workerGroups .Config }}
+  - name: "{{ .Name }}"
+    instance_type: "{{ .NodeGroup.InstanceType }}"
+    instance_count: {{ .NodeGroup.Count }}
+    location: "{{ workerLocation .NodeGroup $.Config.Location }}"
+{{- if and .NodeGroup.Autoscaling .NodeGroup.Autoscaling.Enabled }}
+    autoscaling:
+      enabled: true
+      min_instances: {{ .NodeGroup.Autoscaling.MinInstances }}
+      max_instances: {{ .NodeGroup.Autoscaling.MaxInstances }}
+{{- end }}
+{{- end }}
+
+addons:
+  traefik:
+    enabled: false
+  servicelb:
+    enabled: false
+  metrics_server:
+    enabled: true
+  csi_driver:
+    enabled: true
+  cloud_controller_manager:
+    enabled: true
+  system_upgrade_controller:
+    enabled: true
+  cluster_autoscaler:
+    enabled: {{ hasAutoscaling .Config }}
+  embedded_registry_mirror:
+    enabled: true
+`
+
+// generateClusterYAML renders the hetzner-k3s cluster.yaml from parameters.
+func generateClusterYAML(params clusterParams) (string, error) {
+	funcMap := template.FuncMap{
+		"workerLocation": func(ng NodeGroup, defaultLoc string) string {
+			if ng.Location != "" {
+				return ng.Location
+			}
+			return defaultLoc
+		},
+		"hasAutoscaling": func(cfg Config) bool {
+			for _, w := range cfg.WorkerGroups() {
+				if w.NodeGroup.Autoscaling != nil && w.NodeGroup.Autoscaling.Enabled {
+					return true
+				}
+			}
+			return false
+		},
+		"sshAllowedNetworks": func(cfg Config) []string {
+			return cfg.SSHAllowedNetworks()
+		},
+		"apiAllowedNetworks": func(cfg Config) []string {
+			return cfg.APIAllowedNetworks()
+		},
+		"scheduleOnMasters": func(cfg Config) bool {
+			return cfg.ScheduleOnMasters()
+		},
+		"masterInstanceType": func(cfg Config) string {
+			_, mg := cfg.MasterGroup()
+			return mg.InstanceType
+		},
+		"masterCount": func(cfg Config) int {
+			_, mg := cfg.MasterGroup()
+			return mg.Count
+		},
+		"workerGroups": func(cfg Config) []workerEntry {
+			return cfg.WorkerGroups()
+		},
+	}
+
+	tmpl, err := template.New("cluster").Funcs(funcMap).Parse(clusterTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse cluster template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, params); err != nil {
+		return "", fmt.Errorf("failed to render cluster template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// runHetznerK3s executes the hetzner-k3s binary with the given subcommand and cluster config.
+// The HETZNER_TOKEN env var is mapped to HCLOUD_TOKEN, which is what hetzner-k3s reads.
+// A minimal environment is constructed to avoid leaking unrelated secrets (e.g.,
+// AWS_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN) to the third-party binary.
+func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath string) error {
+	args := []string{subcommand, "--config", clusterYAMLPath}
+	if subcommand == "delete" {
+		args = append(args, "--force")
+	}
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = minimalEnv()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("hetzner-k3s %s failed: %w", subcommand, err)
+	}
+	return nil
+}
+
+// minimalEnv constructs a minimal set of environment variables for the hetzner-k3s subprocess.
+// Only variables required for the binary to function are included, preventing credential leakage.
+func minimalEnv() []string {
+	env := []string{
+		"HCLOUD_TOKEN=" + os.Getenv("HETZNER_TOKEN"),
+	}
+	for _, key := range []string{"HOME", "PATH", "USER", "TERM", "LANG", "TMPDIR", "SSH_AUTH_SOCK"} {
+		if val := os.Getenv(key); val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
+}
+
+// writeClusterYAML writes the generated cluster.yaml to a directory and returns its path.
+func writeClusterYAML(workDir string, content string) (string, error) {
+	path := filepath.Join(workDir, "cluster.yaml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return "", fmt.Errorf("failed to write cluster.yaml: %w", err)
+	}
+	return path, nil
+}
