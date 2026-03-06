@@ -351,6 +351,7 @@ func addLocalGitopsMount(values map[string]any, localPath string) {
 		{
 			"name":      "local-gitops",
 			"mountPath": localPath,
+			"readOnly":  true,
 		},
 	}
 }

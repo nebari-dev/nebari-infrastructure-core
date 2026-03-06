@@ -213,8 +213,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				},
 			}
 
-			// Pass gitConfig from the auto-create helper (or explicit config)
-			gitConfig := getOrCreateGitConfig(cfg)
 			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, gitConfig, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				slog.Warn("Failed to install foundational services", "error", err)

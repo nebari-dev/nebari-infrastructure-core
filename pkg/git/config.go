@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -99,11 +100,19 @@ func (c *Config) IsLocalPath() bool {
 
 // GetLocalPath returns the filesystem path from a file:// URL.
 // Returns empty string if not a local path.
+// The path is cleaned to prevent directory traversal attacks.
 func (c *Config) GetLocalPath() string {
 	if !c.IsLocalPath() {
 		return ""
 	}
-	return strings.TrimPrefix(c.URL, "file://")
+	path := strings.TrimPrefix(c.URL, "file://")
+	// Clean the path to resolve ".." and other traversal attempts
+	path = filepath.Clean(path)
+	// Ensure the path is absolute to prevent relative path attacks
+	if !filepath.IsAbs(path) {
+		return ""
+	}
+	return path
 }
 
 // GetBranch returns the configured branch or DefaultBranch as default.
