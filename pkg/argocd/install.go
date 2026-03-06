@@ -13,13 +13,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider) error {
+// gitConfig is the resolved git configuration (may be auto-generated for local dev).
+func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -76,6 +78,16 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 
 	// Get Argo CD configuration
 	argoCDCfg := DefaultConfig()
+
+	// If using a local file:// git repo, mount it into the repo-server pod
+	if gitConfig != nil && gitConfig.IsLocalPath() {
+		localPath := gitConfig.GetLocalPath()
+		addLocalGitopsMount(argoCDCfg.Values, localPath)
+
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
+			WithResource("argocd").
+			WithAction("configuring"))
+	}
 
 	// Create namespace
 	if err := createNamespace(ctx, k8sClient, argoCDCfg.Namespace); err != nil {
@@ -314,4 +326,32 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	}
 
 	return waitForArgoCDReadyWithLister(ctx, listDeployments, requiredDeployments, timeout)
+}
+
+// addLocalGitopsMount adds a hostPath volume and volumeMount to the ArgoCD
+// repo-server Helm values so it can access a local file:// git repository.
+func addLocalGitopsMount(values map[string]any, localPath string) {
+	repoServer, ok := values["repoServer"].(map[string]any)
+	if !ok {
+		repoServer = map[string]any{}
+		values["repoServer"] = repoServer
+	}
+
+	repoServer["volumes"] = []map[string]any{
+		{
+			"name": "local-gitops",
+			"hostPath": map[string]any{
+				"path": localPath,
+				"type": "Directory",
+			},
+		},
+	}
+
+	repoServer["volumeMounts"] = []map[string]any{
+		{
+			"name":      "local-gitops",
+			"mountPath": localPath,
+			"readOnly":  true,
+		},
+	}
 }

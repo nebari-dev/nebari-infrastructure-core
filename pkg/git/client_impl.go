@@ -40,6 +40,9 @@ type ClientImpl struct {
 // NewClient creates a new git client from the provided configuration.
 // The client must be cleaned up with Cleanup() when done.
 //
+// For local file:// paths, uses the path directly without creating a temp directory.
+// For remote repositories, creates a temporary directory for the clone.
+//
 // Note: ClientImpl is NOT safe for concurrent use. Each goroutine should
 // create its own client instance.
 func NewClient(cfg *Config) (*ClientImpl, error) {
@@ -47,23 +50,41 @@ func NewClient(cfg *Config) (*ClientImpl, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	tempDir, err := os.MkdirTemp("", tempDirPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
-	}
+	var tempDir string
+	var repoPath string
+	var workDir string
+	var auth transport.AuthMethod
 
-	// Build auth after creating tempDir so we can clean up on failure
-	auth, err := cfg.Auth.GetAuth()
-	if err != nil {
-		// Clean up tempDir on auth failure to prevent resource leak
-		_ = os.RemoveAll(tempDir)
-		return nil, fmt.Errorf("failed to build auth: %w", err)
-	}
+	if cfg.IsLocalPath() {
+		// For local paths, use the path directly without temp directory
+		repoPath = cfg.GetLocalPath()
+		workDir = repoPath
+		if cfg.Path != "" {
+			workDir = filepath.Join(repoPath, cfg.Path)
+		}
+		// No auth needed for local paths
+		auth = nil
+	} else {
+		// For remote paths, create a temp directory and set up authentication
+		var err error
+		tempDir, err = os.MkdirTemp("", tempDirPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		}
 
-	repoPath := tempDir
-	workDir := tempDir
-	if cfg.Path != "" {
-		workDir = filepath.Join(tempDir, cfg.Path)
+		// Build auth after creating tempDir so we can clean up on failure
+		auth, err = cfg.Auth.GetAuth()
+		if err != nil {
+			// Clean up tempDir on auth failure to prevent resource leak
+			_ = os.RemoveAll(tempDir)
+			return nil, fmt.Errorf("failed to build auth: %w", err)
+		}
+
+		repoPath = tempDir
+		workDir = tempDir
+		if cfg.Path != "" {
+			workDir = filepath.Join(tempDir, cfg.Path)
+		}
 	}
 
 	return &ClientImpl{
@@ -76,6 +97,7 @@ func NewClient(cfg *Config) (*ClientImpl, error) {
 }
 
 // ValidateAuth checks that credentials can access the repository.
+// For local file:// paths, this is a no-op as no authentication is needed.
 func (c *ClientImpl) ValidateAuth(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "git.ValidateAuth")
@@ -85,6 +107,12 @@ func (c *ClientImpl) ValidateAuth(ctx context.Context) error {
 		attribute.String("git.url", c.cfg.URL),
 		attribute.String("git.auth_type", c.cfg.Auth.AuthType()),
 	)
+
+	// Skip validation for local paths
+	if c.cfg.IsLocalPath() {
+		span.SetAttributes(attribute.Bool("git.local_path", true))
+		return nil
+	}
 
 	// Create a remote to test access without cloning
 	remote := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
@@ -122,7 +150,8 @@ func isEmptyRepoError(err error) bool {
 }
 
 // Init clones the repository or pulls latest if already cloned.
-// For empty repositories, it initializes a new local repo with the remote configured.
+// For local file:// paths, initializes/opens the local directory as a git repository.
+// For empty remote repositories, it initializes a new local repo with the remote configured.
 func (c *ClientImpl) Init(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "git.Init")
@@ -137,8 +166,18 @@ func (c *ClientImpl) Init(ctx context.Context) error {
 
 	// Check if repo already exists
 	if c.repo != nil {
-		// Pull latest
-		return c.pull(ctx)
+		// For local paths, nothing more to do
+		// For remote paths, pull latest
+		if !c.cfg.IsLocalPath() {
+			return c.pull(ctx)
+		}
+		return nil
+	}
+
+	// Handle local file:// paths
+	if c.cfg.IsLocalPath() {
+		span.SetAttributes(attribute.Bool("git.local_path", true))
+		return c.initLocalPath(ctx)
 	}
 
 	// Clone the repository (shallow clone - we only need latest for push)
@@ -210,6 +249,67 @@ func (c *ClientImpl) Init(ctx context.Context) error {
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
 		}
 	}
+
+	return nil
+}
+
+// initLocalPath initializes/opens a local git repository at the configured path.
+func (c *ClientImpl) initLocalPath(ctx context.Context) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.initLocalPath")
+	defer span.End()
+
+	// Ensure working directory exists
+	if c.cfg.Path != "" {
+		if err := os.MkdirAll(c.workDir, 0750); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
+		}
+	}
+
+	// Check if .git directory exists
+	gitDir := filepath.Join(c.repoPath, ".git")
+	gitDirInfo, err := os.Stat(gitDir)
+
+	if os.IsNotExist(err) {
+		// Initialize a new repository
+		span.SetAttributes(attribute.Bool("git.initialized_new_repo", true))
+		repo, err := git.PlainInit(c.repoPath, false)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to initialize git repository: %w", err)
+		}
+		c.repo = repo
+
+		// Set HEAD to configured branch
+		branchName := c.cfg.GetBranch()
+		headRef := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName(branchName))
+		if err := repo.Storer.SetReference(headRef); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to set HEAD to branch %s: %w", branchName, err)
+		}
+
+		return nil
+	}
+
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to check git directory: %w", err)
+	}
+
+	if !gitDirInfo.IsDir() {
+		span.RecordError(fmt.Errorf(".git exists but is not a directory"))
+		return fmt.Errorf(".git exists but is not a directory at %s", c.repoPath)
+	}
+
+	// Open existing repository
+	span.SetAttributes(attribute.Bool("git.opened_existing_repo", true))
+	repo, err := git.PlainOpen(c.repoPath)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to open git repository: %w", err)
+	}
+	c.repo = repo
 
 	return nil
 }
@@ -290,6 +390,7 @@ func (c *ClientImpl) WorkDir() string {
 }
 
 // CommitAndPush stages all changes, commits, and pushes to remote.
+// For local file:// paths, only commits without pushing.
 // No-op if there are no changes.
 func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	tracer := otel.Tracer(tracerName)
@@ -304,6 +405,13 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 		return err
 	}
 
+	// For local paths, only commit (no push)
+	if c.cfg.IsLocalPath() {
+		span.SetAttributes(attribute.Bool("git.local_path", true))
+		return c.commitLocal(ctx, message)
+	}
+
+	// For remote paths, commit and push
 	worktree, err := c.repo.Worktree()
 	if err != nil {
 		span.RecordError(err)
@@ -356,6 +464,59 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	return nil
 }
 
+// commitLocal commits changes to a local repository without pushing.
+func (c *ClientImpl) commitLocal(ctx context.Context, message string) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.commitLocal")
+	defer span.End()
+
+	if c.repo == nil {
+		err := fmt.Errorf("repository not initialized, call Init first")
+		span.RecordError(err)
+		return err
+	}
+
+	worktree, err := c.repo.Worktree()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Check for changes
+	status, err := worktree.Status()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get status: %w", err)
+	}
+
+	if status.IsClean() {
+		span.SetAttributes(attribute.Bool("git.no_changes", true))
+		return nil
+	}
+
+	// Stage all changes
+	if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to stage changes: %w", err)
+	}
+
+	// Commit
+	_, err = worktree.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  commitAuthorName,
+			Email: commitAuthorEmail,
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	span.SetAttributes(attribute.Bool("git.committed", true))
+	return nil
+}
+
 // IsBootstrapped checks if the .bootstrapped marker file exists.
 func (c *ClientImpl) IsBootstrapped(ctx context.Context) (bool, error) {
 	tracer := otel.Tracer(tracerName)
@@ -396,6 +557,8 @@ func (c *ClientImpl) WriteBootstrapMarker(ctx context.Context) error {
 }
 
 // Cleanup removes temporary resources.
+// Only removes temp directories created for remote repositories.
+// Local file:// paths are never removed.
 func (c *ClientImpl) Cleanup() error {
 	if c.tempDir != "" {
 		return os.RemoveAll(c.tempDir)

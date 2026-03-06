@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -61,14 +62,14 @@ spec:
 `
 
 // ApplyRootAppOfApps applies the root App-of-Apps Application which triggers
-// ArgoCD to sync all child applications from the git repository.
-func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
+// ArgoCD to sync all child applications from the git repository or local path.
+func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig, gitConfig *git.Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ApplyRootAppOfApps")
 	defer span.End()
 
-	if cfg.GitRepository == nil {
-		return fmt.Errorf("git repository configuration is required for root App-of-Apps")
+	if gitConfig == nil {
+		return fmt.Errorf("git configuration is required for root App-of-Apps")
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Applying root App-of-Apps").
@@ -81,9 +82,9 @@ func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, cfg *config
 		GitBranch  string
 		GitPath    string
 	}{
-		GitRepoURL: cfg.GitRepository.URL,
-		GitBranch:  cfg.GitRepository.GetBranch(),
-		GitPath:    cfg.GitRepository.Path,
+		GitRepoURL: gitConfig.URL,
+		GitBranch:  gitConfig.GetBranch(),
+		GitPath:    gitConfig.Path,
 	}
 
 	// Parse and execute template

@@ -114,14 +114,44 @@ localstack-logs: ## Show LocalStack logs
 		docker compose -f docker-compose.test.yml logs -f localstack; \
 	fi
 
-localkind-up: build ## Create local kind cluster and deploy Nebari
+LOCAL_CONFIG?=./examples/local-config.yaml
+REGEN_APPS?=
+
+localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:// gitops repos automatically)
 	@echo "Setting up local kind cluster..."
 	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
+	@which yq > /dev/null || (echo "Error: yq is not installed. Please install and try again" && exit 1)
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
 	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
-	-kind create cluster --name nebari-local
+	@GITOPS_URL=$$(yq '.git_repository.url // ""' $(LOCAL_CONFIG)); \
+	PROJECT_NAME=$$(awk '/^project_name:/ { gsub(/.*project_name:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' $(LOCAL_CONFIG)); \
+	if echo "$$GITOPS_URL" | grep -q '^file:///'; then \
+		LOCAL_PATH=$$(echo "$$GITOPS_URL" | sed 's|^file://||'); \
+		echo "Mounting explicit gitops repo: $$LOCAL_PATH"; \
+	elif [ -z "$$GITOPS_URL" ]; then \
+		LOCAL_PATH="/tmp/nebari-gitops-$$PROJECT_NAME"; \
+		echo "No git_repository configured, mounting auto-generated dir: $$LOCAL_PATH"; \
+	else \
+		LOCAL_PATH=""; \
+		echo "Remote git repo detected ($$GITOPS_URL), no mount needed"; \
+	fi; \
+	if [ -n "$$LOCAL_PATH" ]; then \
+		mkdir -p "$$LOCAL_PATH"; \
+		echo 'kind: Cluster' > /tmp/kind-config.yaml; \
+		echo 'apiVersion: kind.x-k8s.io/v1alpha4' >> /tmp/kind-config.yaml; \
+		echo 'name: nebari-local' >> /tmp/kind-config.yaml; \
+		echo 'nodes:' >> /tmp/kind-config.yaml; \
+		echo '- role: control-plane' >> /tmp/kind-config.yaml; \
+		echo '  extraMounts:' >> /tmp/kind-config.yaml; \
+		echo "  - hostPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
+		echo "    containerPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
+		echo '    readOnly: true' >> /tmp/kind-config.yaml; \
+		kind create cluster --config /tmp/kind-config.yaml || true; \
+	else \
+		kind create cluster --name nebari-local || true; \
+	fi
 	@echo "Deploying Nebari to local cluster..."
-	time ./$(BINARY_NAME) deploy -f ./examples/local-config.yaml --regen-apps
+	time ./$(BINARY_NAME) deploy -f $(LOCAL_CONFIG) $(REGEN_APPS)
 	@echo "Local kind cluster is ready!"
 
 localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster

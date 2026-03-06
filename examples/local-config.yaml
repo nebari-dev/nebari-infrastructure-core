@@ -15,9 +15,22 @@ local:
 
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
-git_repository:
-  url: "git@github.com:my-org/my-gitops-repo.git"
-  branch: main
-  path: "clusters/test1"  # Optional subdirectory within the repo
-  auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
+#
+# OPTION 1: Auto-generated local directory (zero configuration for development)
+# Simply omit the git_repository section and NIC will auto-create /tmp/nebari-gitops-{project_name}
+#
+# OPTION 2: Explicit local directory (full control over location)
+# git_repository:
+#   # Local path to git repository (must be an absolute path)
+#   url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
+#   branch: main
+#   path: "clusters/local"  # Optional subdirectory within the repo
+#   # No auth configuration needed for local paths
+
+# OPTION 3: Remote git repository (production setup)
+# git_repository:
+#   url: "git@github.com:my-org/my-gitops-repo.git"
+#   branch: main
+#   path: "clusters/test1"  # Optional subdirectory within the repo
+#   auth:
+#     ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key

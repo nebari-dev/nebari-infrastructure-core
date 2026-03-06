@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +53,40 @@ func init() {
 	if err := deployCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
 	}
+}
+
+// defaultGitConfig returns a default local git configuration for development workflows.
+// This is a pure function with no side effects — directory creation happens separately.
+func defaultGitConfig(projectName string) *git.Config {
+	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", projectName)
+	return &git.Config{
+		URL:    fmt.Sprintf("file://%s", localPath),
+		Branch: "main",
+		Path:   "",
+		Auth:   git.AuthConfig{},
+	}
+}
+
+// getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
+// For development workflows without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
+func getOrCreateGitConfig(cfg *config.NebariConfig) *git.Config {
+	if cfg.GitRepository != nil {
+		return cfg.GitRepository
+	}
+
+	gitCfg := defaultGitConfig(cfg.ProjectName)
+	localPath := gitCfg.GetLocalPath()
+
+	slog.Info("No git_repository configured, using auto-generated local directory",
+		"path", localPath)
+
+	if err := os.MkdirAll(localPath, 0750); err != nil {
+		slog.Warn("Failed to create auto-generated directory",
+			"path", localPath, "error", err)
+		return nil
+	}
+
+	return gitCfg
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -137,9 +173,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
-	// Bootstrap GitOps repository if configured
-	if cfg.GitRepository != nil && !deployDryRun {
-		if err := bootstrapGitOps(ctx, cfg, deployRegenApps); err != nil {
+	// Bootstrap GitOps (auto-create local directory if needed)
+	gitConfig := getOrCreateGitConfig(cfg)
+	if gitConfig != nil && !deployDryRun {
+		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps); err != nil {
 			span.RecordError(err)
 			slog.Error("GitOps bootstrap failed", "error", err)
 			return err
@@ -154,7 +191,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !cfg.DryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider); err != nil {
+		if err := argocd.Install(ctx, cfg, provider, gitConfig); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -183,7 +220,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				},
 			}
 
-			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
+			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, gitConfig, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				slog.Warn("Failed to install foundational services", "error", err)
 				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
@@ -289,27 +326,33 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
-func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool) error {
+// gitConfig can be either a remote repository or a local file:// path.
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("git.url", cfg.GitRepository.URL),
+		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
+	isLocal := gitConfig.IsLocalPath()
+	if isLocal {
+		slog.Info("Initializing local GitOps directory", "path", gitConfig.GetLocalPath())
+	} else {
+		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
+	}
 
 	// Create git client
-	gitClient, err := git.NewClient(cfg.GitRepository)
+	gitClient, err := git.NewClient(gitConfig)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create git client: %w", err)
 	}
 	defer func() { _ = gitClient.Cleanup() }()
 
-	// Validate authentication before proceeding
+	// Validate authentication before proceeding (skipped for local paths)
 	if err := gitClient.ValidateAuth(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("git authentication failed: %w", err)
@@ -340,6 +383,11 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
+	if err := writeConfigToRepo(deployConfigFile, gitClient.WorkDir()); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
 	if err := argocd.WriteAllToGit(ctx, gitClient, cfg); err != nil {
@@ -353,17 +401,41 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
 
-	// Commit and push
+	// Commit (and push for remote repos)
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
 	}
 	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
 		span.RecordError(err)
+		if isLocal {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	slog.Info("GitOps repository bootstrapped successfully")
+	if isLocal {
+		slog.Info("Local GitOps directory bootstrapped successfully", "path", gitConfig.GetLocalPath())
+	} else {
+		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
+	}
+	return nil
+}
+
+// writeConfigToRepo copies the NIC config file into the git working directory.
+func writeConfigToRepo(configFile, workDir string) error {
+	configBytes, err := os.ReadFile(configFile) //nolint:gosec // G304: path is from CLI flag
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+	configDest := filepath.Join(workDir, "nic-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write config to repository: %w", err)
+	}
+	slog.Info("Wrote NIC config to repository", "path", configDest)
 	return nil
 }
 
