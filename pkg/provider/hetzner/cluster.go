@@ -51,25 +51,25 @@ networking:
     enabled: true
     mode: flannel
 
-schedule_workloads_on_masters: false
+schedule_workloads_on_masters: {{ scheduleOnMasters .Config }}
 
 masters_pool:
-  instance_type: "{{ .Config.MastersPool.InstanceType }}"
-  instance_count: {{ .Config.MastersPool.InstanceCount }}
+  instance_type: "{{ masterInstanceType .Config }}"
+  instance_count: {{ masterCount .Config }}
   locations:
     - "{{ .Config.Location }}"
 
 worker_node_pools:
-{{- range .Config.WorkerNodePools }}
+{{- range workerGroups .Config }}
   - name: "{{ .Name }}"
-    instance_type: "{{ .InstanceType }}"
-    instance_count: {{ .InstanceCount }}
-    location: "{{ workerLocation . $.Config.Location }}"
-{{- if and .Autoscaling .Autoscaling.Enabled }}
+    instance_type: "{{ .NodeGroup.InstanceType }}"
+    instance_count: {{ .NodeGroup.Count }}
+    location: "{{ workerLocation .NodeGroup $.Config.Location }}"
+{{- if and .NodeGroup.Autoscaling .NodeGroup.Autoscaling.Enabled }}
     autoscaling:
       enabled: true
-      min_instances: {{ .Autoscaling.MinInstances }}
-      max_instances: {{ .Autoscaling.MaxInstances }}
+      min_instances: {{ .NodeGroup.Autoscaling.MinInstances }}
+      max_instances: {{ .NodeGroup.Autoscaling.MaxInstances }}
 {{- end }}
 {{- end }}
 
@@ -87,7 +87,7 @@ addons:
   system_upgrade_controller:
     enabled: true
   cluster_autoscaler:
-    enabled: {{ hasAutoscaling .Config.WorkerNodePools }}
+    enabled: {{ hasAutoscaling .Config }}
   embedded_registry_mirror:
     enabled: true
 `
@@ -95,15 +95,15 @@ addons:
 // generateClusterYAML renders the hetzner-k3s cluster.yaml from parameters.
 func generateClusterYAML(params clusterParams) (string, error) {
 	funcMap := template.FuncMap{
-		"workerLocation": func(pool WorkerNodePool, defaultLoc string) string {
-			if pool.Location != "" {
-				return pool.Location
+		"workerLocation": func(ng NodeGroup, defaultLoc string) string {
+			if ng.Location != "" {
+				return ng.Location
 			}
 			return defaultLoc
 		},
-		"hasAutoscaling": func(pools []WorkerNodePool) bool {
-			for _, p := range pools {
-				if p.Autoscaling != nil && p.Autoscaling.Enabled {
+		"hasAutoscaling": func(cfg Config) bool {
+			for _, w := range cfg.WorkerGroups() {
+				if w.NodeGroup.Autoscaling != nil && w.NodeGroup.Autoscaling.Enabled {
 					return true
 				}
 			}
@@ -114,6 +114,20 @@ func generateClusterYAML(params clusterParams) (string, error) {
 		},
 		"apiAllowedNetworks": func(cfg Config) []string {
 			return cfg.APIAllowedNetworks()
+		},
+		"scheduleOnMasters": func(cfg Config) bool {
+			return cfg.ScheduleOnMasters()
+		},
+		"masterInstanceType": func(cfg Config) string {
+			_, mg := cfg.MasterGroup()
+			return mg.InstanceType
+		},
+		"masterCount": func(cfg Config) int {
+			_, mg := cfg.MasterGroup()
+			return mg.Count
+		},
+		"workerGroups": func(cfg Config) []workerEntry {
+			return cfg.WorkerGroups()
 		},
 	}
 
@@ -135,7 +149,11 @@ func generateClusterYAML(params clusterParams) (string, error) {
 // A minimal environment is constructed to avoid leaking unrelated secrets (e.g.,
 // AWS_SECRET_ACCESS_KEY, CLOUDFLARE_API_TOKEN) to the third-party binary.
 func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath string) error {
-	cmd := exec.CommandContext(ctx, binaryPath, subcommand, "--config", clusterYAMLPath)
+	args := []string{subcommand, "--config", clusterYAMLPath}
+	if subcommand == "delete" {
+		args = append(args, "--force")
+	}
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = minimalEnv()

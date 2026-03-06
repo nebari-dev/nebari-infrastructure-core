@@ -5,13 +5,19 @@ domain: nebari.example.com
 hetzner_cloud:
   location: ash
   kubernetes_version: "1.32"
-  masters_pool:
-    instance_type: cpx21
-    instance_count: 1
-  worker_node_pools:
-    - name: workers
+  # Optional: prevent application pods from running on control-plane nodes.
+  # Defaults to true, which enables single-node clusters and makes better use
+  # of small Hetzner instances. Set to false for production clusters where you
+  # want dedicated masters that only run etcd and the Kubernetes API server.
+  # schedule_workloads_on_masters: false
+  node_groups:
+    master:
       instance_type: cpx31
-      instance_count: 2
+      count: 1
+      master: true
+    workers:
+      instance_type: cpx31
+      count: 2
   # Optional: restrict SSH and API access (defaults to 0.0.0.0/0 if omitted)
   # network:
   #   ssh_allowed_cidrs:

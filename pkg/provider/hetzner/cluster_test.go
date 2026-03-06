@@ -10,12 +10,9 @@ func TestGenerateClusterYAML(t *testing.T) {
 	cfg := Config{
 		Location:          "ash",
 		KubernetesVersion: "1.32",
-		MastersPool: MastersPool{
-			InstanceType:  "cpx21",
-			InstanceCount: 1,
-		},
-		WorkerNodePools: []WorkerNodePool{
-			{Name: "workers", InstanceType: "cpx31", InstanceCount: 2},
+		NodeGroups: map[string]NodeGroup{
+			"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+			"workers": {InstanceType: "cpx31", Count: 2},
 		},
 	}
 
@@ -61,14 +58,51 @@ func TestGenerateClusterYAML(t *testing.T) {
 	if !strings.Contains(yaml, `"0.0.0.0/0"`) {
 		t.Error("expected quoted default 0.0.0.0/0 in allowed_networks")
 	}
+
+	// Default: schedule_workloads_on_masters should be true (new default)
+	if !strings.Contains(yaml, "schedule_workloads_on_masters: true") {
+		t.Error("expected schedule_workloads_on_masters: true by default")
+	}
+}
+
+func TestGenerateClusterYAML_ScheduleOnMasters(t *testing.T) {
+	cfg := Config{
+		Location:                   "ash",
+		KubernetesVersion:          "1.32",
+		ScheduleWorkloadsOnMasters: boolPtr(false),
+		NodeGroups: map[string]NodeGroup{
+			"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+			"workers": {InstanceType: "cpx31", Count: 1},
+		},
+	}
+
+	params := clusterParams{
+		ClusterName:    "prod-cluster",
+		K3sVersion:     "v1.32.12+k3s1",
+		SSHPublicKey:   "/tmp/key.pub",
+		SSHPrivateKey:  "/tmp/key",
+		KubeconfigPath: "/tmp/kubeconfig",
+		Config:         cfg,
+	}
+
+	yaml, err := generateClusterYAML(params)
+	if err != nil {
+		t.Fatalf("generateClusterYAML() error = %v", err)
+	}
+
+	if !strings.Contains(yaml, "schedule_workloads_on_masters: false") {
+		t.Error("expected schedule_workloads_on_masters: false")
+	}
 }
 
 func TestGenerateClusterYAML_CustomNetwork(t *testing.T) {
 	cfg := Config{
 		Location:          "ash",
 		KubernetesVersion: "1.32",
-		MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-		WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+		NodeGroups: map[string]NodeGroup{
+			"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+			"workers": {InstanceType: "cpx31", Count: 1},
+		},
 		Network: &NetworkConfig{
 			SSHAllowedCIDRs: []string{"10.0.0.0/8"},
 			APIAllowedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
@@ -104,12 +138,10 @@ func TestGenerateClusterYAML_WithAutoscaling(t *testing.T) {
 	cfg := Config{
 		Location:          "ash",
 		KubernetesVersion: "1.32",
-		MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-		WorkerNodePools: []WorkerNodePool{
-			{
-				Name: "gpu", InstanceType: "ccx33", InstanceCount: 1,
-				Autoscaling: &Autoscaling{Enabled: true, MinInstances: 1, MaxInstances: 5},
-			},
+		NodeGroups: map[string]NodeGroup{
+			"master": {InstanceType: "cpx21", Count: 1, Master: true},
+			"gpu": {InstanceType: "ccx33", Count: 1,
+				Autoscaling: &Autoscaling{Enabled: true, MinInstances: 1, MaxInstances: 5}},
 		},
 	}
 
@@ -139,10 +171,10 @@ func TestGenerateClusterYAML_WorkerLocationFallback(t *testing.T) {
 	cfg := Config{
 		Location:          "ash",
 		KubernetesVersion: "1.32",
-		MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-		WorkerNodePools: []WorkerNodePool{
-			{Name: "w1", InstanceType: "cpx31", InstanceCount: 1},
-			{Name: "w2", InstanceType: "cpx31", InstanceCount: 1, Location: "fsn1"},
+		NodeGroups: map[string]NodeGroup{
+			"master": {InstanceType: "cpx21", Count: 1, Master: true},
+			"w1":     {InstanceType: "cpx31", Count: 1},
+			"w2":     {InstanceType: "cpx31", Count: 1, Location: "fsn1"},
 		},
 	}
 
@@ -166,6 +198,37 @@ func TestGenerateClusterYAML_WorkerLocationFallback(t *testing.T) {
 	}
 	if !strings.Contains(yaml, `location: "fsn1"`) {
 		t.Error("expected explicit location 'fsn1'")
+	}
+}
+
+func TestGenerateClusterYAML_SingleNode(t *testing.T) {
+	cfg := Config{
+		Location:          "ash",
+		KubernetesVersion: "1.32",
+		NodeGroups: map[string]NodeGroup{
+			"master": {InstanceType: "cpx21", Count: 1, Master: true},
+		},
+	}
+
+	params := clusterParams{
+		ClusterName:    "single-node",
+		K3sVersion:     "v1.32.12+k3s1",
+		SSHPublicKey:   "/tmp/key.pub",
+		SSHPrivateKey:  "/tmp/key",
+		KubeconfigPath: "/tmp/kubeconfig",
+		Config:         cfg,
+	}
+
+	yaml, err := generateClusterYAML(params)
+	if err != nil {
+		t.Fatalf("generateClusterYAML() error = %v", err)
+	}
+
+	if !strings.Contains(yaml, "schedule_workloads_on_masters: true") {
+		t.Error("single-node cluster should schedule workloads on masters")
+	}
+	if !strings.Contains(yaml, `instance_type: "cpx21"`) {
+		t.Error("expected master instance type in output")
 	}
 }
 

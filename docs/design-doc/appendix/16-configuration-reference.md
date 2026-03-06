@@ -8,9 +8,10 @@ This document provides a complete reference for all configuration options in NIC
 2. [AWS Provider Configuration](#aws-provider-configuration)
 3. [GCP Provider Configuration](#gcp-provider-configuration)
 4. [Azure Provider Configuration](#azure-provider-configuration)
-5. [Local Provider Configuration](#local-provider-configuration)
-6. [DNS Provider Configuration](#dns-provider-configuration)
-7. [Complete Examples](#complete-examples)
+5. [Hetzner Provider Configuration](#hetzner-provider-configuration)
+6. [Local Provider Configuration](#local-provider-configuration)
+7. [DNS Provider Configuration](#dns-provider-configuration)
+8. [Complete Examples](#complete-examples)
 
 ---
 
@@ -24,7 +25,7 @@ These fields apply to all providers and are defined in `NebariConfig` (pkg/confi
 project_name: my-nebari
 
 # REQUIRED: Cloud provider to use
-# Valid values: aws, gcp, azure, local
+# Valid values: aws, gcp, azure, hetzner, local
 provider: aws
 
 # OPTIONAL: Domain name for your Nebari deployment
@@ -44,7 +45,7 @@ dns:
 **Field Descriptions:**
 
 - **project_name** (string, required): Unique identifier for your Nebari deployment. Used in resource naming and tagging across all cloud resources.
-- **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`, `local`.
+- **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`, `hetzner`, `local`.
 - **domain** (string, optional): Fully qualified domain name for accessing Nebari services. Required for TLS/Let's Encrypt integration.
 - **dns** (object, optional): DNS provider configuration. The provider name is the key (e.g., `cloudflare`), and its config is the value. Only one provider can be configured. See DNS Provider Configuration section.
 
@@ -591,6 +592,127 @@ AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111
 
 ---
 
+## Hetzner Provider Configuration
+
+Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on Hetzner Cloud using the hetzner-k3s CLI tool.
+
+```yaml
+provider: hetzner
+
+hetzner_cloud:
+  # REQUIRED: Hetzner datacenter location
+  # Examples: ash (Ashburn), fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki)
+  location: ash
+
+  # REQUIRED: Kubernetes version for the k3s cluster
+  # Short form ("1.32", "1.32.0") is resolved to the latest k3s release via GitHub API
+  # Explicit form ("v1.32.0+k3s1") is used as-is (useful for air-gapped or pinned scenarios)
+  kubernetes_version: "1.32"
+
+  # OPTIONAL: Allow application pods on control-plane nodes
+  # Default: true (enables single-node clusters and better utilization of small instances)
+  # Set to false for production clusters where you want dedicated masters that
+  # only run etcd and the Kubernetes API server. When false, at least one
+  # non-master node group is required.
+  schedule_workloads_on_masters: true
+
+  # REQUIRED: Node groups - at least one group must have master: true
+  # Uses the same map[string]NodeGroup pattern as AWS, GCP, and Azure providers.
+  # Exactly one group must be marked as the master (k3s control plane).
+  node_groups:
+    # Control plane node group - exactly one group must have master: true
+    master:
+      # REQUIRED: Hetzner server type
+      # Examples: cpx11, cpx21, cpx31, cpx41, cpx51, cx22, cax11 (ARM)
+      instance_type: cpx31
+
+      # REQUIRED: Number of control-plane nodes
+      # Must be odd (1, 3, 5) for k3s HA with embedded etcd
+      count: 1
+
+      # REQUIRED for one group: marks this as the k3s control plane
+      master: true
+
+    # Worker node groups (zero or more)
+    workers:
+      instance_type: cpx31
+      count: 2
+
+      # OPTIONAL: Override location for this worker group
+      # Only valid for worker (non-master) groups
+      # location: fsn1
+
+      # OPTIONAL: Autoscaling configuration
+      # autoscaling:
+      #   enabled: true
+      #   min_instances: 1
+      #   max_instances: 10
+
+  # OPTIONAL: Provide your own SSH keys instead of auto-generated ones
+  # If omitted, NIC generates an ed25519 key pair in ~/.cache/nic/hetzner-k3s/ssh/
+  # ssh:
+  #   public_key_path: "~/.ssh/id_ed25519.pub"
+  #   private_key_path: "~/.ssh/id_ed25519"
+
+  # OPTIONAL: Restrict SSH and Kubernetes API access
+  # Defaults to 0.0.0.0/0 (open to all) if omitted - restrict these in production
+  # network:
+  #   ssh_allowed_cidrs:
+  #     - 203.0.113.0/24
+  #   api_allowed_cidrs:
+  #     - 203.0.113.0/24
+```
+
+**Hetzner Environment Variables (Secrets):**
+
+```bash
+# REQUIRED: Hetzner Cloud API token
+# Create at: https://console.hetzner.cloud/ -> Project -> Security -> API Tokens
+# Needs Read & Write permissions
+HETZNER_TOKEN=your-hetzner-api-token
+```
+
+**Accessing the cluster after deploy:**
+
+The kubeconfig is written to `~/.cache/nic/hetzner-k3s/<project_name>/kubeconfig`:
+
+```bash
+export KUBECONFIG=~/.cache/nic/hetzner-k3s/my-nebari/kubeconfig
+kubectl get nodes
+```
+
+**SSH access to nodes:**
+
+NIC auto-generates an ed25519 key pair in `~/.cache/nic/hetzner-k3s/ssh/` (or uses your custom keys if configured via `ssh:` in the config). To SSH into a node:
+
+```bash
+# Get node IPs
+kubectl get nodes -o wide
+
+# SSH as root using the auto-generated key
+ssh -i ~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519 root@<node-ip>
+```
+
+**Known limitations:**
+
+- **Volumes are not deleted on destroy.** hetzner-k3s does not clean up Hetzner Cloud volumes when deleting a cluster. You must delete them manually via the Hetzner console or the `hcloud` CLI:
+  ```bash
+  export HCLOUD_TOKEN=$HETZNER_TOKEN
+  hcloud volume list
+  hcloud volume delete <volume-id>
+  ```
+
+**Key differences from managed Kubernetes providers (AWS/GCP/Azure):**
+
+- Uses k3s instead of a managed Kubernetes service (EKS/GKE/AKS)
+- Requires exactly one `master: true` node group for the k3s control plane
+- Master count must be odd (1, 3, 5) for etcd quorum
+- `schedule_workloads_on_masters` controls whether app pods run on masters (defaults to true)
+- Worker groups can override the top-level location for multi-region deployments
+- SSH and API access CIDRs default to 0.0.0.0/0 if not restricted
+
+---
+
 ## Local Provider Configuration
 
 Local K3s provider configuration defined in `LocalConfig` (pkg/config/config.go:78-83).
@@ -1023,6 +1145,62 @@ dns:
     zone_name: company.com
 ```
 
+### Minimal Hetzner Configuration
+
+```yaml
+# Single-node Hetzner cluster (dev/testing)
+project_name: nebari-dev
+provider: hetzner
+domain: nebari.example.com
+
+hetzner_cloud:
+  location: ash
+  kubernetes_version: "1.32"
+  node_groups:
+    master:
+      instance_type: cpx31
+      count: 1
+      master: true
+```
+
+### Production Hetzner Configuration
+
+```yaml
+# Multi-node Hetzner cluster with dedicated masters
+project_name: nebari-prod
+provider: hetzner
+domain: nebari.example.com
+
+hetzner_cloud:
+  location: fsn1
+  kubernetes_version: "1.32"
+  schedule_workloads_on_masters: false
+  node_groups:
+    master:
+      instance_type: cpx31
+      count: 3
+      master: true
+    general:
+      instance_type: cpx41
+      count: 3
+    gpu:
+      instance_type: ccx33
+      count: 1
+      autoscaling:
+        enabled: true
+        min_instances: 0
+        max_instances: 5
+  network:
+    ssh_allowed_cidrs:
+      - 203.0.113.0/24
+    api_allowed_cidrs:
+      - 203.0.113.0/24
+
+dns:
+  cloudflare:
+    zone_name: example.com
+```
+
 ### Local Development Configuration
 
 ```yaml
@@ -1145,6 +1323,11 @@ AZURE_CLIENT_ID=<client-id>
 AZURE_CLIENT_SECRET=<client-secret>
 AZURE_TENANT_ID=<tenant-id>
 AZURE_SUBSCRIPTION_ID=<subscription-id>
+```
+
+### Hetzner Provider
+```bash
+HETZNER_TOKEN=<api-token>                  # Required, Hetzner Cloud API token
 ```
 
 ### Cloudflare DNS Provider

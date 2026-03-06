@@ -337,10 +337,14 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 	result["Location"] = hCfg.Location
 	result["Kubernetes Version"] = hCfg.KubernetesVersion
-	result["Masters"] = fmt.Sprintf("%dx %s", hCfg.MastersPool.InstanceCount, hCfg.MastersPool.InstanceType)
 
-	for _, pool := range hCfg.WorkerNodePools {
-		result[fmt.Sprintf("Workers (%s)", pool.Name)] = fmt.Sprintf("%dx %s", pool.InstanceCount, pool.InstanceType)
+	masterName, masterGroup := hCfg.MasterGroup()
+	if masterName != "" {
+		result["Masters"] = fmt.Sprintf("%dx %s", masterGroup.Count, masterGroup.InstanceType)
+	}
+
+	for _, w := range hCfg.WorkerGroups() {
+		result[fmt.Sprintf("Workers (%s)", w.Name)] = fmt.Sprintf("%dx %s", w.NodeGroup.Count, w.NodeGroup.InstanceType)
 	}
 
 	return result

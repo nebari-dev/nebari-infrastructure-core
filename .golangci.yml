@@ -52,7 +52,7 @@ linters:
       - path: pkg/provider/hetzner/
         linters:
           - gosec
-        text: "G107"
+        text: "G107|G704"
 
       # Hetzner provider: subprocess uses controlled binary path from our download cache
       - path: pkg/provider/hetzner/cluster\.go

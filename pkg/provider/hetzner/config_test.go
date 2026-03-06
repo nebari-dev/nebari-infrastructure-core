@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -17,12 +19,9 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool: MastersPool{
-					InstanceType:  "cpx21",
-					InstanceCount: 1,
-				},
-				WorkerNodePools: []WorkerNodePool{
-					{Name: "workers", InstanceType: "cpx31", InstanceCount: 2},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 2},
 				},
 			},
 		},
@@ -30,8 +29,10 @@ func TestConfigValidate(t *testing.T) {
 			name: "missing location",
 			cfg: Config{
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "location",
@@ -39,42 +40,71 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "missing kubernetes_version",
 			cfg: Config{
-				Location:        "ash",
-				MastersPool:     MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools: []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				Location: "ash",
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "kubernetes_version",
 		},
 		{
-			name: "zero masters",
+			name: "zero master count",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 0},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 0, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
-			errMsg:  "instance_count",
+			errMsg:  "count",
 		},
 		{
-			name: "no worker pools",
+			name: "no worker pools without schedule on masters",
+			cfg: Config{
+				Location:                   "ash",
+				KubernetesVersion:          "1.32",
+				ScheduleWorkloadsOnMasters: boolPtr(false),
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+				},
+			},
+			wantErr: true,
+			errMsg:  "non-master group",
+		},
+		{
+			name: "no worker pools with schedule on masters is valid",
+			cfg: Config{
+				Location:                   "ash",
+				KubernetesVersion:          "1.32",
+				ScheduleWorkloadsOnMasters: boolPtr(true),
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+				},
+			},
+		},
+		{
+			name: "single node cluster defaults to schedule on masters",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{},
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+				},
 			},
-			wantErr: true,
-			errMsg:  "worker_node_pools",
 		},
 		{
 			name: "explicit k3s version passes through",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "v1.32.0+k3s1",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 		},
 		{
@@ -82,11 +112,11 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools: []WorkerNodePool{{
-					Name: "w", InstanceType: "cpx31", InstanceCount: 0,
-					Autoscaling: &Autoscaling{Enabled: true, MinInstances: 1, MaxInstances: 5},
-				}},
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 0,
+						Autoscaling: &Autoscaling{Enabled: true, MinInstances: 1, MaxInstances: 5}},
+				},
 			},
 		},
 		{
@@ -94,8 +124,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 2},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 2, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "odd",
@@ -105,20 +137,48 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 3},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 3, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
+		},
+		{
+			name: "no master group",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				NodeGroups: map[string]NodeGroup{
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
+			},
+			wantErr: true,
+			errMsg:  "master: true",
+		},
+		{
+			name: "multiple master groups rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				NodeGroups: map[string]NodeGroup{
+					"master1": {InstanceType: "cpx21", Count: 1, Master: true},
+					"master2": {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
+			},
+			wantErr: true,
+			errMsg:  "only one",
 		},
 		{
 			name: "autoscaling min exceeds max",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools: []WorkerNodePool{{
-					Name: "w", InstanceType: "cpx31", InstanceCount: 0,
-					Autoscaling: &Autoscaling{Enabled: true, MinInstances: 10, MaxInstances: 5},
-				}},
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 0,
+						Autoscaling: &Autoscaling{Enabled: true, MinInstances: 10, MaxInstances: 5}},
+				},
 			},
 			wantErr: true,
 			errMsg:  "min_instances",
@@ -128,36 +188,51 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools: []WorkerNodePool{{
-					Name: "w", InstanceType: "cpx31", InstanceCount: 0,
-					Autoscaling: &Autoscaling{Enabled: true, MinInstances: 0, MaxInstances: 0},
-				}},
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 0,
+						Autoscaling: &Autoscaling{Enabled: true, MinInstances: 0, MaxInstances: 0}},
+				},
 			},
 			wantErr: true,
 			errMsg:  "max_instances",
 		},
 		{
-			name: "duplicate worker pool names rejected",
+			name: "master autoscaling rejected",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools: []WorkerNodePool{
-					{Name: "workers", InstanceType: "cpx31", InstanceCount: 1},
-					{Name: "workers", InstanceType: "cpx41", InstanceCount: 2},
+				NodeGroups: map[string]NodeGroup{
+					"master": {InstanceType: "cpx21", Count: 1, Master: true,
+						Autoscaling: &Autoscaling{Enabled: true, MinInstances: 1, MaxInstances: 3}},
+					"workers": {InstanceType: "cpx31", Count: 1},
 				},
 			},
 			wantErr: true,
-			errMsg:  "duplicated",
+			errMsg:  "autoscaling",
+		},
+		{
+			name: "master location override rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true, Location: "fsn1"},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
+			},
+			wantErr: true,
+			errMsg:  "location",
 		},
 		{
 			name: "custom network config is valid",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 				Network: &NetworkConfig{
 					SSHAllowedCIDRs: []string{"10.0.0.0/8"},
 					APIAllowedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
@@ -169,19 +244,23 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash\"; malicious",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid characters",
 		},
 		{
-			name: "pool name with invalid characters rejected",
+			name: "node group name with invalid characters rejected",
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "workers\"\nmalicious", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":               {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers\"\nmalicious": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid characters",
@@ -191,8 +270,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx 21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx 21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid characters",
@@ -202,8 +283,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32\"\nmalicious: true",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid",
@@ -213,8 +296,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "latest",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid",
@@ -224,8 +309,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 				Network: &NetworkConfig{
 					SSHAllowedCIDRs: []string{"not-a-cidr"},
 				},
@@ -238,8 +325,10 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "ash",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cpx21", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "w", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":  {InstanceType: "cpx21", Count: 1, Master: true},
+					"workers": {InstanceType: "cpx31", Count: 1},
+				},
 				Network: &NetworkConfig{
 					SSHAllowedCIDRs: []string{"10.0.0.0/8"},
 					APIAllowedCIDRs: []string{"192.168.0.0/16", "bad"},
@@ -253,9 +342,21 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Location:          "eu-central",
 				KubernetesVersion: "1.32",
-				MastersPool:       MastersPool{InstanceType: "cx22.metal", InstanceCount: 1},
-				WorkerNodePools:   []WorkerNodePool{{Name: "gpu-workers_v2", InstanceType: "cpx31", InstanceCount: 1}},
+				NodeGroups: map[string]NodeGroup{
+					"master":         {InstanceType: "cx22.metal", Count: 1, Master: true},
+					"gpu-workers_v2": {InstanceType: "cpx31", Count: 1},
+				},
 			},
+		},
+		{
+			name: "empty node_groups rejected",
+			cfg: Config{
+				Location:          "ash",
+				KubernetesVersion: "1.32",
+				NodeGroups:        map[string]NodeGroup{},
+			},
+			wantErr: true,
+			errMsg:  "at least one",
 		},
 	}
 	for _, tt := range tests {
@@ -366,5 +467,69 @@ func TestIsExplicitK3sVersion(t *testing.T) {
 				t.Errorf("IsExplicitK3sVersion() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestScheduleOnMasters(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{
+			name: "nil defaults to true",
+			cfg:  Config{},
+			want: true,
+		},
+		{
+			name: "explicit true",
+			cfg:  Config{ScheduleWorkloadsOnMasters: boolPtr(true)},
+			want: true,
+		},
+		{
+			name: "explicit false",
+			cfg:  Config{ScheduleWorkloadsOnMasters: boolPtr(false)},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ScheduleOnMasters(); got != tt.want {
+				t.Errorf("ScheduleOnMasters() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMasterGroup(t *testing.T) {
+	cfg := &Config{
+		NodeGroups: map[string]NodeGroup{
+			"ctrl":    {InstanceType: "cpx21", Count: 1, Master: true},
+			"workers": {InstanceType: "cpx31", Count: 2},
+		},
+	}
+	name, mg := cfg.MasterGroup()
+	if name != "ctrl" {
+		t.Errorf("MasterGroup() name = %q, want %q", name, "ctrl")
+	}
+	if mg.InstanceType != "cpx21" {
+		t.Errorf("MasterGroup() instance_type = %q, want %q", mg.InstanceType, "cpx21")
+	}
+}
+
+func TestWorkerGroups(t *testing.T) {
+	cfg := &Config{
+		NodeGroups: map[string]NodeGroup{
+			"master": {InstanceType: "cpx21", Count: 1, Master: true},
+			"b":      {InstanceType: "cpx31", Count: 1},
+			"a":      {InstanceType: "cpx41", Count: 2},
+		},
+	}
+	workers := cfg.WorkerGroups()
+	if len(workers) != 2 {
+		t.Fatalf("WorkerGroups() returned %d entries, want 2", len(workers))
+	}
+	if workers[0].Name != "a" || workers[1].Name != "b" {
+		t.Errorf("WorkerGroups() not sorted: got [%s, %s], want [a, b]", workers[0].Name, workers[1].Name)
 	}
 }

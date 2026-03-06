@@ -96,15 +96,15 @@ func validHetznerConfig() *config.NebariConfig {
 			"hetzner_cloud": map[string]any{
 				"location":           "ash",
 				"kubernetes_version": "1.32",
-				"masters_pool": map[string]any{
-					"instance_type":  "cpx21",
-					"instance_count": 1,
-				},
-				"worker_node_pools": []any{
-					map[string]any{
-						"name":           "workers",
-						"instance_type":  "cpx31",
-						"instance_count": 2,
+				"node_groups": map[string]any{
+					"master": map[string]any{
+						"instance_type": "cpx21",
+						"count":         1,
+						"master":        true,
+					},
+					"workers": map[string]any{
+						"instance_type": "cpx31",
+						"count":         2,
 					},
 				},
 			},
