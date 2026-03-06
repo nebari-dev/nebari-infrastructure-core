@@ -120,6 +120,7 @@ REGEN_APPS?=
 localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:// gitops repos automatically)
 	@echo "Setting up local kind cluster..."
 	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
+	@which yq > /dev/null || (echo "Error: yq is not installed. Please install and try again" && exit 1)
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
 	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
 	@GITOPS_URL=$$(yq '.git_repository.url // ""' $(LOCAL_CONFIG)); \
