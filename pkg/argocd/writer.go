@@ -56,14 +56,16 @@ type TemplateData struct {
 	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
 }
 
-// NewTemplateData creates TemplateData from NebariConfig
-func NewTemplateData(cfg *config.NebariConfig) TemplateData {
+// NewTemplateData creates TemplateData from NebariConfig.
+// storageClass is the provider-appropriate Kubernetes StorageClass name
+// for persistent volumes (e.g., "gp2", "longhorn", "standard-rwo").
+func NewTemplateData(cfg *config.NebariConfig, storageClass string) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	data := TemplateData{
 		Domain:              cfg.Domain,
 		Provider:            cfg.Provider,
-		StorageClass:        storageClassForProvider(cfg.Provider),
+		StorageClass:        storageClass,
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
 
 		KeycloakNamespace:       KeycloakDefaultNamespace,
@@ -203,13 +205,14 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig) error {
+// storageClass is the provider-appropriate Kubernetes StorageClass name.
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, storageClass string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	workDir := gitClient.WorkDir()
-	data := NewTemplateData(cfg)
+	data := NewTemplateData(cfg, storageClass)
 
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),
@@ -285,22 +288,6 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	}
 
 	return nil
-}
-
-// storageClassForProvider returns the appropriate storage class for the given provider.
-func storageClassForProvider(provider string) string {
-	switch provider {
-	case "aws":
-		return "gp2"
-	case "gcp":
-		return "standard-rwo"
-	case "azure":
-		return "managed-csi"
-	case "local":
-		return "standard"
-	default:
-		return "standard"
-	}
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
