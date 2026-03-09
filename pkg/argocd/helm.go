@@ -10,6 +10,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/release"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/helm"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -20,6 +21,30 @@ const (
 	repoURL   = "https://argoproj.github.io/argo-helm"
 	chartName = "argo/argo-cd"
 )
+
+// shouldSkipUpgrade determines if a Helm upgrade can be skipped because
+// the installed release already matches the target version and is healthy.
+// Returns false if the release is in a failed or pending state, even if versions match.
+func shouldSkipUpgrade(current *release.Release, targetVersion string) bool {
+	if current == nil || current.Chart == nil || current.Chart.Metadata == nil {
+		return false
+	}
+	// Only skip if the release is deployed successfully - if it's in a failed
+	// or pending state, we should retry even if the version matches
+	if current.Info == nil || current.Info.Status != release.StatusDeployed {
+		return false
+	}
+	return current.Chart.Metadata.Version == targetVersion
+}
+
+// getCurrentVersion safely extracts the chart version from a Helm release.
+// Returns "unknown" if the release, chart, or metadata is nil.
+func getCurrentVersion(current *release.Release) string {
+	if current == nil || current.Chart == nil || current.Chart.Metadata == nil {
+		return "unknown"
+	}
+	return current.Chart.Metadata.Version
+}
 
 // loadArgoCDChart locates and loads the Argo CD Helm chart.
 // This is extracted to avoid duplication between install and upgrade operations.
@@ -65,10 +90,24 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	// Check if release already exists (idempotency)
 	histClient := action.NewHistory(actionConfig)
 	histClient.Max = 1
-	if _, err := histClient.Run(config.ReleaseName); err == nil {
+	if releases, err := histClient.Run(config.ReleaseName); err == nil && len(releases) > 0 {
+		// Release exists - check if upgrade is actually needed
+		current := releases[0]
+		if shouldSkipUpgrade(current, config.Version) {
+			// Note: This comparison only checks the chart version. Changes to DefaultConfig() values
+			// (like Helm configuration parameters) will NOT trigger an upgrade unless the version is bumped.
+			// To apply updated values, increment the version in DefaultConfig().
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already up to date, skipping").
+				WithResource("argocd").
+				WithAction("up-to-date").
+				WithMetadata("version", config.Version))
+			return nil
+		}
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD already installed, upgrading").
 			WithResource("argocd").
-			WithAction("upgrading"))
+			WithAction("upgrading").
+			WithMetadata("current_version", getCurrentVersion(current)).
+			WithMetadata("target_version", config.Version))
 		return upgradeHelm(ctx, actionConfig, config)
 	}
 
@@ -83,6 +122,8 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	client.CreateNamespace = true
 	client.Wait = true
 	client.Timeout = config.Timeout
+	// Pin the chart version to ensure we install the requested version
+	client.Version = config.Version
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing Argo CD Helm chart").
 		WithResource("argocd").
@@ -121,10 +162,23 @@ func upgradeHelm(ctx context.Context, actionConfig *action.Configuration, config
 	_, span := tracer.Start(ctx, "argocd.upgradeHelm")
 	defer span.End()
 
+	// Refresh Helm repo index to ensure we have the latest charts available
+	if err := helm.AddRepo(ctx, repoName, repoURL); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to refresh Argo CD Helm repository: %w", err)
+	}
+
 	client := action.NewUpgrade(actionConfig)
 	client.Namespace = config.Namespace
 	client.Wait = true
 	client.Timeout = config.Timeout
+	// Pin the chart version to ensure we upgrade to the requested version
+	client.Version = config.Version
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Upgrading Argo CD Helm chart").
+		WithResource("argocd").
+		WithAction("upgrading").
+		WithMetadata("chart_version", config.Version))
 
 	// Locate and load the chart
 	chart, err := loadArgoCDChart(client.ChartPathOptions)
