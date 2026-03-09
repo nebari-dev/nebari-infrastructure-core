@@ -51,4 +51,9 @@ type Provider interface {
 	// the correct infrastructure (e.g., distinguishing clusters with the same
 	// name in different regions).
 	Summary(config *config.NebariConfig) map[string]string
+
+	// StorageClass returns the name of the default Kubernetes StorageClass for
+	// persistent volumes on this provider. CLI commands use this to configure
+	// ArgoCD application templates without importing provider packages.
+	StorageClass(config *config.NebariConfig) string
 }
