@@ -115,9 +115,9 @@ type mockGitClient struct {
 	workDir string
 }
 
-func (m *mockGitClient) ValidateAuth(_ context.Context) error          { return nil }
-func (m *mockGitClient) Init(_ context.Context) error                  { return nil }
-func (m *mockGitClient) WorkDir() string                               { return m.workDir }
+func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
+func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
+func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
 func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
 func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
 func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
@@ -141,14 +141,14 @@ func TestWriteAllToGit_NoOverwriteCreatesFile(t *testing.T) {
 	ctx := context.Background()
 
 	// First call should create the _nooverwrite_ file
-	err := WriteAllToGit(ctx, client, cfg)
+	err := WriteAllToGit(ctx, client, cfg, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
 	// The _nooverwrite_overrides.yaml should have been written as overrides.yaml
 	overridesPath := filepath.Join(tmpDir, "manifests", "opentelemetry-collector", "overrides.yaml")
-	content, err := os.ReadFile(overridesPath)
+	content, err := os.ReadFile(filepath.Clean(overridesPath))
 	if err != nil {
 		t.Fatalf("overrides.yaml should exist after first WriteAllToGit, got error: %v", err)
 	}
@@ -185,13 +185,13 @@ func TestWriteAllToGit_NoOverwritePreservesExisting(t *testing.T) {
 	}
 
 	// WriteAllToGit should NOT overwrite the existing file
-	err := WriteAllToGit(ctx, client, cfg)
+	err := WriteAllToGit(ctx, client, cfg, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
 	// Verify the file still has the custom content
-	content, err := os.ReadFile(overridesPath)
+	content, err := os.ReadFile(filepath.Clean(overridesPath))
 	if err != nil {
 		t.Fatalf("failed to read overrides.yaml: %v", err)
 	}
@@ -216,14 +216,14 @@ func TestWriteAllToGit_RendersOtelTemplate(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := WriteAllToGit(ctx, client, cfg)
+	err := WriteAllToGit(ctx, client, cfg, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
 	// Verify the OTel app template was rendered with multi-source config
 	otelAppPath := filepath.Join(tmpDir, "apps", "opentelemetry-collector.yaml")
-	content, err := os.ReadFile(otelAppPath)
+	content, err := os.ReadFile(filepath.Clean(otelAppPath))
 	if err != nil {
 		t.Fatalf("failed to read opentelemetry-collector.yaml: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestWriteAllToGit_RendersOtelTemplate(t *testing.T) {
 
 	// Verify base values.yaml was written to manifests
 	baseValuesPath := filepath.Join(tmpDir, "manifests", "opentelemetry-collector", "values.yaml")
-	baseContent, err := os.ReadFile(baseValuesPath)
+	baseContent, err := os.ReadFile(filepath.Clean(baseValuesPath))
 	if err != nil {
 		t.Fatalf("values.yaml should exist in manifests: %v", err)
 	}
