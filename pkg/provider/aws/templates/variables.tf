@@ -117,3 +117,8 @@ variable "efs_kms_key_arn" {
   type    = string
   default = null
 }
+
+variable "node_security_group_additional_rules" {
+  type    = any
+  default = {}
+}
