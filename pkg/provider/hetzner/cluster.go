@@ -166,11 +166,18 @@ func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath 
 
 // minimalEnv constructs a minimal set of environment variables for the hetzner-k3s subprocess.
 // Only variables required for the binary to function are included, preventing credential leakage.
+//
+// SSH_AUTH_SOCK is intentionally excluded: the cluster.yaml is always generated with
+// use_agent: false, meaning hetzner-k3s passes -i <private_key_path> to the ssh binary.
+// Forwarding SSH_AUTH_SOCK would cause the ssh binary to offer every key loaded in the
+// agent before the specified identity key, quickly exceeding sshd's MaxAuthTries (default 6)
+// on the freshly-created node. Repeated MaxAuthTries violations are then banned by fail2ban,
+// making the node permanently unreachable for the rest of the deployment.
 func minimalEnv() []string {
 	env := []string{
 		"HCLOUD_TOKEN=" + os.Getenv("HETZNER_TOKEN"),
 	}
-	for _, key := range []string{"HOME", "PATH", "USER", "TERM", "LANG", "TMPDIR", "SSH_AUTH_SOCK"} {
+	for _, key := range []string{"HOME", "PATH", "USER", "TERM", "LANG", "TMPDIR"} {
 		if val := os.Getenv(key); val != "" {
 			env = append(env, key+"="+val)
 		}
