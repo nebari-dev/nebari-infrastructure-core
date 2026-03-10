@@ -40,7 +40,7 @@ func TestInfraSettings(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"StorageClass", settings.StorageClass, "gp2"},
+		{"StorageClass", settings.StorageClass, "longhorn"},
 		{"NeedsMetalLB", settings.NeedsMetalLB, false},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
