@@ -137,10 +137,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
+	// Get provider infrastructure settings for GitOps and foundational services
+	infraSettings := provider.InfraSettings(cfg)
+
 	// Bootstrap GitOps repository if configured
 	if cfg.GitRepository != nil && !deployDryRun {
-		sc := provider.StorageClass(cfg)
-		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, sc); err != nil {
+		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, infraSettings); err != nil {
 			span.RecordError(err)
 			slog.Error("GitOps bootstrap failed", "error", err)
 			return err
@@ -177,10 +179,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
-				// Enable MetalLB only for local deployments
+				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
-					Enabled:     cfg.Provider == "local",
-					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
+					Enabled:     infraSettings.NeedsMetalLB,
+					AddressPool: infraSettings.MetalLBAddressPool,
 				},
 			}
 
@@ -290,8 +292,7 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
-// storageClass is the provider-appropriate Kubernetes StorageClass name for templates.
-func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, storageClass string) error {
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings providerPkg.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
@@ -344,7 +345,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, storageClass); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}

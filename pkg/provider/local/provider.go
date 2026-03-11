@@ -12,6 +12,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -248,11 +249,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return kubeconfigBytes, nil
 }
 
-// StorageClass returns the default StorageClass for the local provider.
-func (p *Provider) StorageClass(_ *config.NebariConfig) string {
-	return "standard"
-}
-
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
@@ -278,4 +274,13 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 		result["Kube Context"] = localCfg.KubeContext
 	}
 	return result
+}
+
+// InfraSettings returns local provider Kubernetes infrastructure settings.
+func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
+	return provider.InfraSettings{
+		StorageClass:       "standard",
+		NeedsMetalLB:       true,
+		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+	}
 }
