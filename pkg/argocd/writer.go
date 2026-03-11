@@ -49,11 +49,11 @@ type TemplateData struct {
 	MetalLBAddressRange string
 
 	// Keycloak configuration
-	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
-	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
-	KeycloakServiceURL      string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
-	KeycloakAuthURL         string // Keycloak application root including context path (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth")
-	KeycloakIssuerURL       string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com/auth")
+	KeycloakNamespace            string // Namespace where Keycloak is deployed (e.g., "keycloak")
+	KeycloakServiceName          string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
+	KeycloakServiceURL           string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakAuthURL              string // Keycloak application root including context path (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth")
+	KeycloakIssuerURL            string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com/auth")
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
@@ -71,11 +71,11 @@ func NewTemplateData(cfg *config.NebariConfig, storageClass string) TemplateData
 		StorageClass:        storageClass,
 		MetalLBAddressRange: "192.168.1.100-192.168.1.110", // Default, can be overridden
 
-		KeycloakNamespace:       KeycloakDefaultNamespace,
-		KeycloakServiceName:     keycloakServiceName,
-		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
-		KeycloakAuthURL:         fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/auth", keycloakServiceName, KeycloakDefaultNamespace),
-		KeycloakIssuerURL:       "", // set after Domain is resolved below
+		KeycloakNamespace:            KeycloakDefaultNamespace,
+		KeycloakServiceName:          keycloakServiceName,
+		KeycloakServiceURL:           fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakAuthURL:              fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/auth", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakIssuerURL:            "", // set after Domain is resolved below
 		KeycloakRealm:                "nebari",
 		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
 		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
