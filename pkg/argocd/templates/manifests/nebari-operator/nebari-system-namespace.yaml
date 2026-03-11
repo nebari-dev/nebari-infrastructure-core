@@ -1,0 +1,15 @@
+# Namespace for the Nebari landing page stack and future Nebari applications.
+#
+# The nebari.dev/managed=true label opts this namespace into nebari-operator
+# management. The operator's ValidateNamespaceOptIn check rejects NebariApp
+# reconciliation in any namespace missing this label.
+#
+# Applied as part of the nebari-operator kustomization (wave 5) so the label
+# is present before the nebari-landingpage and foundational-nebari-apps
+# applications (wave 6) create NebariApp resources in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nebari-system
+  labels:
+    nebari.dev/managed: "true"
