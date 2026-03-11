@@ -113,6 +113,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			settings: provider.InfraSettings{StorageClass: "gp2"},
 			wantSC:   "gp2",
 			wantLBA:  0,
+			wantKBP:  "/auth", // defaults to /auth when not set by provider
 		},
 		{
 			name: "hetzner with annotations and keycloak path",
@@ -134,6 +135,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			},
 			wantSC:   "standard",
 			wantMLBA: "192.168.1.100-192.168.1.110",
+			wantKBP:  "/auth", // defaults to /auth when not set by provider
 		},
 	}
 	for _, tt := range tests {
@@ -156,23 +158,25 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}
 }
 
-func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
+func TestNewTemplateData_KeycloakAuthURL(t *testing.T) {
 	cfg := &config.NebariConfig{Provider: "hetzner", Domain: "test.example.com"}
+
+	// When KeycloakBasePath is explicitly set, it should be honoured.
 	settings := provider.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
 	data := NewTemplateData(cfg, settings)
-
-	if !strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
-		t.Errorf("KeycloakServiceURL = %q, should end with /auth", data.KeycloakServiceURL)
+	if !strings.HasSuffix(data.KeycloakAuthURL, "/auth") {
+		t.Errorf("KeycloakAuthURL = %q, should end with /auth", data.KeycloakAuthURL)
 	}
 
-	// Without base path
+	// When KeycloakBasePath is empty (provider omits it), we default to /auth
+	// because all NIC-managed Keycloak deployments use --http-relative-path=/auth.
 	settings.KeycloakBasePath = ""
 	data = NewTemplateData(cfg, settings)
-	if strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
-		t.Errorf("KeycloakServiceURL = %q, should NOT end with /auth", data.KeycloakServiceURL)
+	if !strings.HasSuffix(data.KeycloakAuthURL, "/auth") {
+		t.Errorf("KeycloakAuthURL = %q, should end with /auth (default)", data.KeycloakAuthURL)
 	}
 }
 

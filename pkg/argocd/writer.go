@@ -56,16 +56,27 @@ type TemplateData struct {
 	KeycloakBasePath string
 
 	// Keycloak configuration
-	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
-	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
-	KeycloakServiceURL      string // In-cluster URL for Keycloak (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
-	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
-	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakNamespace            string // Namespace where Keycloak is deployed (e.g., "keycloak")
+	KeycloakServiceName          string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
+	KeycloakServiceURL           string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakAuthURL              string // Keycloak application root including context path (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth")
+	KeycloakIssuerURL            string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com/auth")
+	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
+	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
 }
 
 // NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
 func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
+
+	// All Keycloak deployments managed by NIC use --http-relative-path=/auth
+	// (Keycloak X with context path). Default to "/auth" when the provider does
+	// not set an explicit base path so URLs are always well-formed.
+	keycloakBasePath := settings.KeycloakBasePath
+	if keycloakBasePath == "" {
+		keycloakBasePath = "/auth"
+	}
 
 	data := TemplateData{
 		Domain:                  cfg.Domain,
@@ -73,13 +84,16 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		StorageClass:            settings.StorageClass,
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
-		KeycloakBasePath:        settings.KeycloakBasePath,
+		KeycloakBasePath:        keycloakBasePath,
 
-		KeycloakNamespace:       KeycloakDefaultNamespace,
-		KeycloakServiceName:     keycloakServiceName,
-		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080%s", keycloakServiceName, KeycloakDefaultNamespace, settings.KeycloakBasePath),
-		KeycloakRealm:           "nebari",
-		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
+		KeycloakNamespace:            KeycloakDefaultNamespace,
+		KeycloakServiceName:          keycloakServiceName,
+		KeycloakServiceURL:           fmt.Sprintf("http://%s.%s.svc.cluster.local:8080", keycloakServiceName, KeycloakDefaultNamespace),
+		KeycloakAuthURL:              fmt.Sprintf("http://%s.%s.svc.cluster.local:8080%s", keycloakServiceName, KeycloakDefaultNamespace, keycloakBasePath),
+		KeycloakIssuerURL:            "", // set after Domain is resolved below
+		KeycloakRealm:                "nebari",
+		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
+		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
 	}
 
 	// Set git repository info
@@ -110,6 +124,17 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	// Default domain if not set
 	if data.Domain == "" {
 		data.Domain = "nebari.local"
+	}
+
+	// External Keycloak URL — what Keycloak embeds in the iss claim of tokens.
+	// Clients inside the cluster fetch JWKs via KeycloakAuthURL; they validate
+	// the iss claim against this public URL.
+	// Only set when a real domain is configured. When no domain is provided
+	// (e.g. cloud deployments using a bare LoadBalancer IP), KeycloakIssuerURL
+	// is left empty so KEYCLOAK_ISSUER_URL is not injected and the webapi falls
+	// back to using KEYCLOAK_URL for issuer validation.
+	if cfg.Domain != "" {
+		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, keycloakBasePath)
 	}
 
 	return data
