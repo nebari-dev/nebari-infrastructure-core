@@ -115,15 +115,13 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			wantLBA:  0,
 		},
 		{
-			name: "hetzner with annotations and keycloak path",
+			name: "hetzner with annotations",
 			settings: provider.InfraSettings{
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
-				KeycloakBasePath:        "/auth",
 			},
 			wantSC:  "hcloud-volumes",
 			wantLBA: 1,
-			wantKBP: "/auth",
 		},
 		{
 			name: "local with MetalLB",
