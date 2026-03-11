@@ -24,7 +24,7 @@ spec:
           args:
             - start
           replicas: 1
-          httpRelativePath: "{{ if .KeycloakBasePath }}{{ .KeycloakBasePath }}/{{ else }}/{{ end }}"
+          httpRelativePath: "{{ .KeycloakBasePath }}/"
           extraEnv: |
             - name: KEYCLOAK_ADMIN
               value: admin
