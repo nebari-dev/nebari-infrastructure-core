@@ -115,15 +115,13 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			wantLBA:  0,
 		},
 		{
-			name: "hetzner with annotations and keycloak path",
+			name: "hetzner with annotations",
 			settings: provider.InfraSettings{
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
-				KeycloakBasePath:        "/auth",
 			},
 			wantSC:  "hcloud-volumes",
 			wantLBA: 1,
-			wantKBP: "/auth",
 		},
 		{
 			name: "local with MetalLB",
@@ -238,6 +236,70 @@ func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	}
 	if !strings.Contains(output, "kind: Gateway") {
 		t.Error("expected 'kind: Gateway' in rendered output")
+	}
+}
+
+func TestKeycloakTemplate_HealthProbes(t *testing.T) {
+	tests := []struct {
+		name             string
+		keycloakBasePath string
+		wantProbe        string
+		wantHostname     string
+		wantRelPath      string
+	}{
+		{
+			name:             "empty base path serves at root",
+			keycloakBasePath: "",
+			wantProbe:        "/health/live",
+			wantHostname:     "https://keycloak.test.example.com",
+			wantRelPath:      `httpRelativePath: "/"`,
+		},
+		{
+			name:             "auth base path preserves legacy behavior",
+			keycloakBasePath: "/auth",
+			wantProbe:        "/auth/health/live",
+			wantHostname:     "https://keycloak.test.example.com/auth",
+			wantRelPath:      `httpRelativePath: "/auth/"`,
+		},
+	}
+
+	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak template: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				Domain:                  "test.example.com",
+				Provider:                "hetzner",
+				KeycloakBasePath:        tt.keycloakBasePath,
+				KeycloakNamespace:       "keycloak",
+				KeycloakAdminSecretName: "keycloak-admin",
+				GitRepoURL:              "https://github.com/example/repo",
+				GitBranch:               "main",
+			}
+
+			processed, err := processTemplate("apps/keycloak.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, tt.wantProbe) {
+				t.Errorf("expected health probe path %q in rendered template, got:\n%s", tt.wantProbe, output)
+			}
+			if !strings.Contains(output, tt.wantHostname) {
+				t.Errorf("expected KC_HOSTNAME to contain %q, got:\n%s", tt.wantHostname, output)
+			}
+			if !strings.Contains(output, tt.wantRelPath) {
+				t.Errorf("expected %q in rendered template, got:\n%s", tt.wantRelPath, output)
+			}
+			if strings.Contains(output, "//health") {
+				t.Error("rendered template contains '//health' - double slash in health probe path")
+			}
+		})
 	}
 }
 
