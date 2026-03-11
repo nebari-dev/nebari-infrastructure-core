@@ -58,6 +58,13 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      # The NebariApp CRD is installed by the nebari-operator (wave 5).
+      # ArgoCD dry-runs all resources before syncing, so it reports NebariApp
+      # as missing even though wave ordering guarantees the CRD will exist by
+      # the time this app (wave 6) actually applies. Skip the dry-run for any
+      # resource whose CRD isn't registered yet so the sync doesn't fail on the
+      # preflight check.
+      - SkipDryRunOnMissingResource=true
     retry:
       limit: 5
       backoff:
