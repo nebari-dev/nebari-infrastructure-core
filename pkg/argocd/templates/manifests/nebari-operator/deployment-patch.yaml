@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: manager
-          image: quay.io/nebari/nebari-operator:v0.1.0-alpha.1
+          image: "quay.io/nebari/nebari-operator:0.1.0-alpha.10"
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED

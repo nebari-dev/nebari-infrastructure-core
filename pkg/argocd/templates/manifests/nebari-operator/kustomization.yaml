@@ -4,11 +4,14 @@ kind: Kustomization
 namespace: nebari-operator-system
 
 resources:
-  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=v0.1.0-alpha.5
+  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=v0.1.0-alpha.10
+  # Namespace nebari-system with the managed label — required before wave-6
+  # NebariApp CRs land (operator rejects reconciliation without it).
+  - nebari-system-namespace.yaml
 
 images:
   - name: quay.io/nebari/nebari-operator
-    newTag: 0.1.0-alpha.5
+    newTag: 0.1.0-alpha.10
 
 patches:
   - path: deployment-patch.yaml
