@@ -3,6 +3,7 @@ package argocd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -252,14 +253,14 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 			keycloakBasePath: "",
 			wantProbe:        "/health/live",
 			wantHostname:     "https://keycloak.test.example.com",
-			wantRelPath:      `httpRelativePath: "/"`,
+			wantRelPath:      `relativePath: "/"`,
 		},
 		{
 			name:             "auth base path preserves legacy behavior",
 			keycloakBasePath: "/auth",
 			wantProbe:        "/auth/health/live",
 			wantHostname:     "https://keycloak.test.example.com/auth",
-			wantRelPath:      `httpRelativePath: "/auth/"`,
+			wantRelPath:      `relativePath: "/auth/"`,
 		},
 	}
 
@@ -298,6 +299,62 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 			}
 			if strings.Contains(output, "//health") {
 				t.Error("rendered template contains '//health' - double slash in health probe path")
+			}
+		})
+	}
+}
+
+func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
+	tests := []struct {
+		name             string
+		keycloakBasePath string
+		wantContextPath  string
+		wantServiceURL   string
+	}{
+		{
+			name:             "empty base path passes empty context path",
+			keycloakBasePath: "",
+			wantContextPath:  `value: ""`,
+			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+		},
+		{
+			name:             "auth base path passes /auth context path",
+			keycloakBasePath: "/auth",
+			wantContextPath:  `value: "/auth"`,
+			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth",
+		},
+	}
+
+	content, err := templates.ReadFile("templates/manifests/nebari-operator/deployment-patch.yaml")
+	if err != nil {
+		t.Fatalf("failed to read operator deployment patch: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				KeycloakBasePath:        tt.keycloakBasePath,
+				KeycloakServiceURL:      fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
+				KeycloakNamespace:       "keycloak",
+				KeycloakRealm:           "nebari",
+				KeycloakAdminSecretName: "keycloak-admin-credentials",
+			}
+
+			processed, err := processTemplate("manifests/nebari-operator/deployment-patch.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, "KEYCLOAK_ISSUER_CONTEXT_PATH") {
+				t.Error("expected KEYCLOAK_ISSUER_CONTEXT_PATH env var in rendered template")
+			}
+			if !strings.Contains(output, tt.wantContextPath) {
+				t.Errorf("expected context path %q in rendered template, got:\n%s", tt.wantContextPath, output)
+			}
+			if !strings.Contains(output, tt.wantServiceURL) {
+				t.Errorf("expected service URL %q in rendered template, got:\n%s", tt.wantServiceURL, output)
 			}
 		})
 	}
