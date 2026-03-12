@@ -11,7 +11,8 @@ resources:
   - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=fix/keycloak-context-path-default
 
 images:
-  - name: quay.io/nebari/nebari-operator
+  - name: controller
+    newName: quay.io/nebari/nebari-operator
     newTag: fix-keycloak-context-path-default
 
 patches:
