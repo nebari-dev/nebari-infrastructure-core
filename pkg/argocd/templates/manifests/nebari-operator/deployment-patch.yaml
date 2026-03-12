@@ -20,6 +20,8 @@ spec:
               value: "{{ .KeycloakAdminSecretName }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
               value: "{{ .KeycloakNamespace }}"
+            - name: TLS_CLUSTER_ISSUER_NAME
+              value: "{{ .CertificateIssuer }}"
           resources:
             requests:
               cpu: 100m
