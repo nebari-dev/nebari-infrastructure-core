@@ -339,9 +339,8 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
-		StorageClass:     "hcloud-volumes",
-		NeedsMetalLB:     false,
-		KeycloakBasePath: "/auth",
+		StorageClass: "hcloud-volumes",
+		NeedsMetalLB: false,
 	}
 
 	// Derive LB annotations from location.
