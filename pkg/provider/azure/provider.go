@@ -118,6 +118,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
 
+// StorageClass returns the default StorageClass for the Azure provider.
+func (p *Provider) StorageClass(_ *config.NebariConfig) string {
+	return "managed-csi"
+}
+
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)

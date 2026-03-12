@@ -176,7 +176,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Bootstrap GitOps (auto-create local directory if needed)
 	gitConfig := getOrCreateGitConfig(cfg)
 	if gitConfig != nil && !deployDryRun {
-		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps); err != nil {
+		sc := provider.StorageClass(cfg)
+		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps, sc); err != nil {
 			span.RecordError(err)
 			slog.Error("GitOps bootstrap failed", "error", err)
 			return err
@@ -327,7 +328,8 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
 // gitConfig can be either a remote repository or a local file:// path.
-func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool) error {
+// storageClass is the provider-appropriate Kubernetes StorageClass name for templates.
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, storageClass string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
@@ -390,7 +392,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, storageClass); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
