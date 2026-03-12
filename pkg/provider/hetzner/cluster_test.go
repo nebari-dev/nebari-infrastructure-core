@@ -267,6 +267,31 @@ func TestMinimalEnv(t *testing.T) {
 	}
 }
 
+// TestMinimalEnv_NoSSHAuthSock verifies that SSH_AUTH_SOCK is never forwarded to
+// the hetzner-k3s subprocess, even when it is set in the caller's environment.
+//
+// Rationale: cluster.yaml is always generated with use_agent: false, so hetzner-k3s
+// invokes the ssh binary with -i <private_key_path>. However, when SSH_AUTH_SOCK is
+// present in the environment the ssh binary still contacts the agent and offers every
+// loaded key before the explicitly specified identity key. On a freshly created Hetzner
+// node sshd's default MaxAuthTries=6 is exhausted by those agent keys, causing sshd to
+// log "Too many authentication failures" from the deployer's IP. fail2ban then bans the
+// IP via nftables, making the node permanently unreachable for the rest of the deploy.
+func TestMinimalEnv_NoSSHAuthSock(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "/run/user/1000/gnupg/S.gpg-agent.ssh")
+
+	env := minimalEnv()
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "SSH_AUTH_SOCK=") {
+			t.Errorf("SSH_AUTH_SOCK must not be forwarded to hetzner-k3s: "+
+				"when set, the ssh binary offers all agent keys before the identity key (-i), "+
+				"exhausting sshd MaxAuthTries and triggering a fail2ban ban on the deployer IP. "+
+				"Got: %q", e)
+		}
+	}
+}
+
 func TestMinimalEnv_MissingToken(t *testing.T) {
 	// Unset HETZNER_TOKEN to verify HCLOUD_TOKEN is set but empty
 	t.Setenv("HETZNER_TOKEN", "")
