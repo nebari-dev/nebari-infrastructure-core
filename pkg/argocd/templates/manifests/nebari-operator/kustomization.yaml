@@ -3,17 +3,13 @@ kind: Kustomization
 
 namespace: nebari-operator-system
 
-# TODO: Pinned to PR commit for testing. DO NOT MERGE until
-# https://github.com/nebari-dev/nebari-operator/pull/71 is merged,
-# a new release is cut, and both ref and newTag below are updated
-# to point at that release.
 resources:
-  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=fix/keycloak-context-path-default
+  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=v0.1.0-alpha.13
 
 images:
   - name: nebari-operator
     newName: quay.io/nebari/nebari-operator
-    newTag: fix-keycloak-context-path-default
+    newTag: 0.1.0-alpha.13
 
 patches:
   - path: deployment-patch.yaml
