@@ -432,7 +432,7 @@ func writeConfigToRepo(configFile, workDir string) error {
 	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+	if err := os.WriteFile(configDest, configBytes, 0600); err != nil { //nolint:gosec // G703: configDest is built from application-controlled workDir
 		return fmt.Errorf("failed to write config to repository: %w", err)
 	}
 	slog.Info("Wrote NIC config to repository", "path", configDest)
