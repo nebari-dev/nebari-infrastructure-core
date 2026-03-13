@@ -24,6 +24,8 @@ spec:
           args:
             - start
           replicas: 1
+          http:
+            relativePath: "{{ .KeycloakBasePath }}/"
           extraEnv: |
             - name: KEYCLOAK_ADMIN
               value: admin
@@ -46,12 +48,12 @@ spec:
                   name: keycloak-postgresql-credentials
                   key: password
             - name: KC_HOSTNAME
-              value: "https://keycloak.{{ .Domain }}/auth"
+              value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
           proxy:
             mode: xforwarded
           livenessProbe: |
             httpGet:
-              path: /auth/health/live
+              path: {{ .KeycloakBasePath }}/health/live
               port: 9000
             initialDelaySeconds: 60
             periodSeconds: 10
@@ -59,7 +61,7 @@ spec:
             failureThreshold: 3
           readinessProbe: |
             httpGet:
-              path: /auth/health/ready
+              path: {{ .KeycloakBasePath }}/health/ready
               port: 9000
             initialDelaySeconds: 30
             periodSeconds: 10
@@ -67,7 +69,7 @@ spec:
             failureThreshold: 3
           startupProbe: |
             httpGet:
-              path: /auth/health
+              path: {{ .KeycloakBasePath }}/health
               port: 9000
             initialDelaySeconds: 30
             periodSeconds: 10
