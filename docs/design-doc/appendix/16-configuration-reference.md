@@ -693,14 +693,19 @@ kubectl get nodes -o wide
 ssh -i ~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519 root@<node-ip>
 ```
 
-**Known limitations:**
+**Important: SSH key portability**
 
-- **Volumes are not deleted on destroy.** hetzner-k3s does not clean up Hetzner Cloud volumes when deleting a cluster. You must delete them manually via the Hetzner console or the `hcloud` CLI:
-  ```bash
-  export HCLOUD_TOKEN=$HETZNER_TOKEN
-  hcloud volume list
-  hcloud volume delete <volume-id>
-  ```
+Unlike managed Kubernetes providers (EKS, GKE, AKS) where authentication is handled by cloud IAM, Hetzner uses hetzner-k3s which provisions clusters over SSH. The SSH key pair used during `nic deploy` is required for all subsequent cluster operations (redeploy, destroy, scale) from any machine.
+
+If you auto-generate keys (the default), they are stored in `~/.cache/nic/hetzner-k3s/ssh/`. To manage the cluster from a different computer, you must copy these files:
+
+```bash
+# On the original machine, copy both files:
+~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519
+~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519.pub
+```
+
+Alternatively, use your own SSH keys by configuring the `ssh:` block in your config, so the same key is available on all machines without manual copying.
 
 **Key differences from managed Kubernetes providers (AWS/GCP/Azure):**
 
