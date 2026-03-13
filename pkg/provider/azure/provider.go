@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -118,11 +119,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
 
-// StorageClass returns the default StorageClass for the Azure provider.
-func (p *Provider) StorageClass(_ *config.NebariConfig) string {
-	return "managed-csi"
-}
-
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
@@ -139,4 +135,12 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 	result["Region"] = azureCfg.Region
 	return result
+}
+
+// InfraSettings returns Azure-specific Kubernetes infrastructure settings.
+func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
+	return provider.InfraSettings{
+		StorageClass: "managed-csi",
+		NeedsMetalLB: false,
+	}
 }

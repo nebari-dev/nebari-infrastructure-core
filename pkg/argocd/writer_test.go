@@ -3,9 +3,13 @@ package argocd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 func TestApplications(t *testing.T) {
@@ -93,6 +97,266 @@ func TestWriteAll(t *testing.T) {
 		if !strings.Contains(content, appName) {
 			t.Errorf("Application %q content doesn't contain app name", appName)
 		}
+	}
+}
+
+func TestNewTemplateData_WithInfraSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings provider.InfraSettings
+		wantSC   string
+		wantLBA  int
+		wantKBP  string
+		wantMLBA string
+	}{
+		{
+			name:     "aws defaults",
+			settings: provider.InfraSettings{StorageClass: "gp2"},
+			wantSC:   "gp2",
+			wantLBA:  0,
+		},
+		{
+			name: "hetzner with annotations",
+			settings: provider.InfraSettings{
+				StorageClass:            "hcloud-volumes",
+				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
+			},
+			wantSC:  "hcloud-volumes",
+			wantLBA: 1,
+		},
+		{
+			name: "local with MetalLB",
+			settings: provider.InfraSettings{
+				StorageClass:       "standard",
+				NeedsMetalLB:       true,
+				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+			},
+			wantSC:   "standard",
+			wantMLBA: "192.168.1.100-192.168.1.110",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
+			data := NewTemplateData(cfg, tt.settings)
+			if data.StorageClass != tt.wantSC {
+				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantSC)
+			}
+			if len(data.LoadBalancerAnnotations) != tt.wantLBA {
+				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBA)
+			}
+			if data.KeycloakBasePath != tt.wantKBP {
+				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKBP)
+			}
+			if data.MetalLBAddressRange != tt.wantMLBA {
+				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMLBA)
+			}
+		})
+	}
+}
+
+func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
+	cfg := &config.NebariConfig{Provider: "hetzner", Domain: "test.example.com"}
+	settings := provider.InfraSettings{
+		StorageClass:     "hcloud-volumes",
+		KeycloakBasePath: "/auth",
+	}
+	data := NewTemplateData(cfg, settings)
+
+	if !strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
+		t.Errorf("KeycloakServiceURL = %q, should end with /auth", data.KeycloakServiceURL)
+	}
+
+	// Without base path
+	settings.KeycloakBasePath = ""
+	data = NewTemplateData(cfg, settings)
+	if strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
+		t.Errorf("KeycloakServiceURL = %q, should NOT end with /auth", data.KeycloakServiceURL)
+	}
+}
+
+func TestGatewayTemplate_WithAnnotations(t *testing.T) {
+	data := TemplateData{
+		Domain:   "test.example.com",
+		Provider: "hetzner",
+		LoadBalancerAnnotations: map[string]string{
+			"load-balancer.hetzner.cloud/location": "ash",
+		},
+		CertificateIssuer: "selfsigned-issuer",
+	}
+
+	// Read the gateway template
+	content, err := templates.ReadFile("templates/manifests/networking/gateway.yaml")
+	if err != nil {
+		t.Fatalf("failed to read gateway template: %v", err)
+	}
+
+	processed, err := processTemplate("manifests/networking/gateway.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	// Verify the annotations block is present and well-formed
+	if !strings.Contains(output, "infrastructure:") {
+		t.Error("expected 'infrastructure:' block in rendered gateway")
+	}
+	if !strings.Contains(output, "annotations:") {
+		t.Error("expected 'annotations:' block in rendered gateway")
+	}
+	if !strings.Contains(output, `load-balancer.hetzner.cloud/location: "ash"`) {
+		t.Errorf("expected annotation in rendered gateway, got:\n%s", output)
+	}
+	if !strings.Contains(output, "kind: Gateway") {
+		t.Error("expected 'kind: Gateway' in rendered output")
+	}
+}
+
+func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
+	data := TemplateData{
+		Domain:            "test.example.com",
+		Provider:          "aws",
+		CertificateIssuer: "selfsigned-issuer",
+	}
+
+	content, err := templates.ReadFile("templates/manifests/networking/gateway.yaml")
+	if err != nil {
+		t.Fatalf("failed to read gateway template: %v", err)
+	}
+
+	processed, err := processTemplate("manifests/networking/gateway.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	if strings.Contains(output, "infrastructure:") {
+		t.Error("should NOT contain 'infrastructure:' block when no annotations")
+	}
+	if !strings.Contains(output, "kind: Gateway") {
+		t.Error("expected 'kind: Gateway' in rendered output")
+	}
+}
+
+func TestKeycloakTemplate_HealthProbes(t *testing.T) {
+	tests := []struct {
+		name             string
+		keycloakBasePath string
+		wantProbe        string
+		wantHostname     string
+		wantRelPath      string
+	}{
+		{
+			name:             "empty base path serves at root",
+			keycloakBasePath: "",
+			wantProbe:        "/health/live",
+			wantHostname:     "https://keycloak.test.example.com",
+			wantRelPath:      `relativePath: "/"`,
+		},
+		{
+			name:             "auth base path preserves legacy behavior",
+			keycloakBasePath: "/auth",
+			wantProbe:        "/auth/health/live",
+			wantHostname:     "https://keycloak.test.example.com/auth",
+			wantRelPath:      `relativePath: "/auth/"`,
+		},
+	}
+
+	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak template: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				Domain:                  "test.example.com",
+				Provider:                "hetzner",
+				KeycloakBasePath:        tt.keycloakBasePath,
+				KeycloakNamespace:       "keycloak",
+				KeycloakAdminSecretName: "keycloak-admin",
+				GitRepoURL:              "https://github.com/example/repo",
+				GitBranch:               "main",
+			}
+
+			processed, err := processTemplate("apps/keycloak.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, tt.wantProbe) {
+				t.Errorf("expected health probe path %q in rendered template, got:\n%s", tt.wantProbe, output)
+			}
+			if !strings.Contains(output, tt.wantHostname) {
+				t.Errorf("expected KC_HOSTNAME to contain %q, got:\n%s", tt.wantHostname, output)
+			}
+			if !strings.Contains(output, tt.wantRelPath) {
+				t.Errorf("expected %q in rendered template, got:\n%s", tt.wantRelPath, output)
+			}
+			if strings.Contains(output, "//health") {
+				t.Error("rendered template contains '//health' - double slash in health probe path")
+			}
+		})
+	}
+}
+
+func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
+	tests := []struct {
+		name             string
+		keycloakBasePath string
+		wantContextPath  string
+		wantServiceURL   string
+	}{
+		{
+			name:             "empty base path passes empty context path",
+			keycloakBasePath: "",
+			wantContextPath:  `value: ""`,
+			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+		},
+		{
+			name:             "auth base path passes /auth context path",
+			keycloakBasePath: "/auth",
+			wantContextPath:  `value: "/auth"`,
+			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth",
+		},
+	}
+
+	content, err := templates.ReadFile("templates/manifests/nebari-operator/deployment-patch.yaml")
+	if err != nil {
+		t.Fatalf("failed to read operator deployment patch: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				KeycloakBasePath:        tt.keycloakBasePath,
+				KeycloakServiceURL:      fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
+				KeycloakNamespace:       "keycloak",
+				KeycloakRealm:           "nebari",
+				KeycloakAdminSecretName: "keycloak-admin-credentials",
+			}
+
+			processed, err := processTemplate("manifests/nebari-operator/deployment-patch.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, "KEYCLOAK_ISSUER_CONTEXT_PATH") {
+				t.Error("expected KEYCLOAK_ISSUER_CONTEXT_PATH env var in rendered template")
+			}
+			if !strings.Contains(output, tt.wantContextPath) {
+				t.Errorf("expected context path %q in rendered template, got:\n%s", tt.wantContextPath, output)
+			}
+			if !strings.Contains(output, tt.wantServiceURL) {
+				t.Errorf("expected service URL %q in rendered template, got:\n%s", tt.wantServiceURL, output)
+			}
+		})
 	}
 }
 

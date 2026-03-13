@@ -22,6 +22,8 @@ spec:
               value: "{{ .KeycloakNamespace }}"
             - name: TLS_CLUSTER_ISSUER_NAME
               value: "{{ .CertificateIssuer }}"
+            - name: KEYCLOAK_ISSUER_CONTEXT_PATH
+              value: "{{ .KeycloakBasePath }}"
           resources:
             requests:
               cpu: 100m

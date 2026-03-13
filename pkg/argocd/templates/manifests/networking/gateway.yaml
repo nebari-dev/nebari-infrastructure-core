@@ -8,6 +8,13 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   gatewayClassName: envoy-gateway
+{{- if .LoadBalancerAnnotations }}
+  infrastructure:
+    annotations:
+      {{- range $k, $v := .LoadBalancerAnnotations }}
+      {{ $k }}: "{{ $v }}"
+      {{- end }}
+{{- end }}
   listeners:
     - name: http
       protocol: HTTP

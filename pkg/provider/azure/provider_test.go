@@ -1,4 +1,4 @@
-package aws
+package azure
 
 import (
 	"testing"
@@ -10,26 +10,10 @@ import (
 // Compile-time interface compliance check
 var _ provider.Provider = (*Provider)(nil)
 
-// TestProviderName tests the Name method
-func TestProviderName(t *testing.T) {
-	provider := NewProvider()
-	if provider.Name() != "aws" {
-		t.Errorf("expected provider name to be 'aws', got %s", provider.Name())
-	}
-}
-
-// TestNewProvider tests provider creation
-func TestNewProvider(t *testing.T) {
-	provider := NewProvider()
-	if provider == nil {
-		t.Fatal("expected provider to be non-nil")
-	}
-}
-
 func TestInfraSettings(t *testing.T) {
 	p := NewProvider()
 	cfg := &config.NebariConfig{
-		Provider:    "aws",
+		Provider:    "azure",
 		ProjectName: "test",
 	}
 
@@ -40,7 +24,7 @@ func TestInfraSettings(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"StorageClass", settings.StorageClass, "longhorn"},
+		{"StorageClass", settings.StorageClass, "managed-csi"},
 		{"NeedsMetalLB", settings.NeedsMetalLB, false},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
