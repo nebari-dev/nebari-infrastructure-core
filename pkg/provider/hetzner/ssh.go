@@ -3,7 +3,6 @@ package hetzner
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -52,15 +51,14 @@ func ensureSSHKeys(cacheDir string, sshCfg *SSHConfig) (pubPath, privPath string
 		return "", "", fmt.Errorf("failed to generate SSH key: %w", err)
 	}
 
-	// Marshal private key to PEM
-	privKeyBytes, err := x509.MarshalPKCS8PrivateKey(privKey)
+	// Marshal private key to OpenSSH format (BEGIN OPENSSH PRIVATE KEY)
+	// PKCS#8 format is not universally supported by SSH clients and tools,
+	// especially hetzner-k3s which requires OpenSSH format keys.
+	privBlock, err := ssh.MarshalPrivateKey(privKey, "")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal private key: %w", err)
 	}
-	privPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "PRIVATE KEY",
-		Bytes: privKeyBytes,
-	})
+	privPEM := pem.EncodeToMemory(privBlock)
 	if err := os.WriteFile(privPath, privPEM, 0600); err != nil {
 		return "", "", fmt.Errorf("failed to write private key: %w", err)
 	}

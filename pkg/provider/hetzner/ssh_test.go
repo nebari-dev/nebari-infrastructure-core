@@ -26,6 +26,16 @@ func TestEnsureSSHKeys_GeneratesKeys(t *testing.T) {
 	if info.Mode().Perm() != 0600 {
 		t.Errorf("private key permissions = %o, want 0600", info.Mode().Perm())
 	}
+
+	// Verify private key is in OpenSSH format, not PKCS#8.
+	// hetzner-k3s and many SSH tools require OpenSSH format keys.
+	privContent, err := os.ReadFile(privPath) //nolint:gosec // Test file, path from t.TempDir()
+	if err != nil {
+		t.Fatalf("failed to read private key: %v", err)
+	}
+	if !strings.Contains(string(privContent), "BEGIN OPENSSH PRIVATE KEY") {
+		t.Errorf("private key should be in OpenSSH format, got: %s", string(privContent[:60]))
+	}
 }
 
 func TestEnsureSSHKeys_ReusesExisting(t *testing.T) {
