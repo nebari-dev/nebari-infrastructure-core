@@ -138,18 +138,17 @@ localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:
 	if [ -n "$$LOCAL_PATH" ]; then \
 		mkdir -p "$$LOCAL_PATH"; \
 		KIND_CONFIG=$$(mktemp); \
-		cat > "$$KIND_CONFIG" <<'KINDEOF'
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-name: nebari-local
-nodes:
-- role: control-plane
-  extraMounts:
-  - hostPath: "LOCALPATH_PLACEHOLDER"
-    containerPath: "LOCALPATH_PLACEHOLDER"
-    readOnly: true
-KINDEOF
-		sed -i.bak "s|LOCALPATH_PLACEHOLDER|$$LOCAL_PATH|g" "$$KIND_CONFIG" && rm -f "$$KIND_CONFIG.bak"; \
+		printf '%s\n' \
+			'kind: Cluster' \
+			'apiVersion: kind.x-k8s.io/v1alpha4' \
+			'name: nebari-local' \
+			'nodes:' \
+			'- role: control-plane' \
+			'  extraMounts:' \
+			"  - hostPath: \"$$LOCAL_PATH\"" \
+			"    containerPath: \"$$LOCAL_PATH\"" \
+			'    readOnly: true' \
+			> "$$KIND_CONFIG"; \
 		kind create cluster --config "$$KIND_CONFIG" || true; \
 		rm -f "$$KIND_CONFIG"; \
 	else \
