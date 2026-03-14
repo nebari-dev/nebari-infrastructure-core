@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -57,7 +58,11 @@ func NewClient(cfg *Config) (*ClientImpl, error) {
 
 	if cfg.IsLocalPath() {
 		// For local paths, use the path directly without temp directory
-		repoPath = cfg.GetLocalPath()
+		var err error
+		repoPath, err = cfg.GetLocalPath()
+		if err != nil {
+			return nil, fmt.Errorf("invalid local path: %w", err)
+		}
 		workDir = repoPath
 		if cfg.Path != "" {
 			workDir = filepath.Join(repoPath, cfg.Path)
@@ -411,42 +416,13 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 		return c.commitLocal(ctx, message)
 	}
 
-	// For remote paths, commit and push
-	worktree, err := c.repo.Worktree()
+	// Stage and commit changes
+	committed, err := c.stageAndCommit(ctx, span, message)
 	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to get worktree: %w", err)
+		return err
 	}
-
-	// Check for changes
-	status, err := worktree.Status()
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to get status: %w", err)
-	}
-
-	if status.IsClean() {
-		span.SetAttributes(attribute.Bool("git.no_changes", true))
-		return nil
-	}
-
-	// Stage all changes
-	if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to stage changes: %w", err)
-	}
-
-	// Commit
-	_, err = worktree.Commit(message, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  commitAuthorName,
-			Email: commitAuthorEmail,
-			When:  time.Now(),
-		},
-	})
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to commit: %w", err)
+	if !committed {
+		return nil // No changes to commit
 	}
 
 	// Push to the configured branch
@@ -476,28 +452,35 @@ func (c *ClientImpl) commitLocal(ctx context.Context, message string) error {
 		return err
 	}
 
+	_, err := c.stageAndCommit(ctx, span, message)
+	return err
+}
+
+// stageAndCommit stages all changes and commits them. Returns true if a commit was made,
+// false if there were no changes to commit.
+func (c *ClientImpl) stageAndCommit(ctx context.Context, span trace.Span, message string) (bool, error) {
 	worktree, err := c.repo.Worktree()
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to get worktree: %w", err)
+		return false, fmt.Errorf("failed to get worktree: %w", err)
 	}
 
 	// Check for changes
 	status, err := worktree.Status()
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to get status: %w", err)
+		return false, fmt.Errorf("failed to get status: %w", err)
 	}
 
 	if status.IsClean() {
 		span.SetAttributes(attribute.Bool("git.no_changes", true))
-		return nil
+		return false, nil
 	}
 
 	// Stage all changes
 	if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to stage changes: %w", err)
+		return false, fmt.Errorf("failed to stage changes: %w", err)
 	}
 
 	// Commit
@@ -510,11 +493,11 @@ func (c *ClientImpl) commitLocal(ctx context.Context, message string) error {
 	})
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to commit: %w", err)
+		return false, fmt.Errorf("failed to commit: %w", err)
 	}
 
 	span.SetAttributes(attribute.Bool("git.committed", true))
-	return nil
+	return true, nil
 }
 
 // IsBootstrapped checks if the .bootstrapped marker file exists.

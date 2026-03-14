@@ -81,7 +81,10 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 
 	// If using a local file:// git repo, mount it into the repo-server pod
 	if gitConfig != nil && gitConfig.IsLocalPath() {
-		localPath := gitConfig.GetLocalPath()
+		localPath, err := gitConfig.GetLocalPath()
+		if err != nil {
+			return fmt.Errorf("invalid local git path: %w", err)
+		}
 		addLocalGitopsMount(argoCDCfg.Values, localPath)
 
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
@@ -337,21 +340,48 @@ func addLocalGitopsMount(values map[string]any, localPath string) {
 		values["repoServer"] = repoServer
 	}
 
-	repoServer["volumes"] = []map[string]any{
-		{
-			"name": "local-gitops",
-			"hostPath": map[string]any{
-				"path": localPath,
-				"type": "Directory",
-			},
+	// Append to existing volumes (handle both []map[string]any and []any from YAML parsing)
+	newVolume := map[string]any{
+		"name": "local-gitops",
+		"hostPath": map[string]any{
+			"path": localPath,
+			"type": "Directory",
 		},
+	}
+	repoServer["volumes"] = appendToSlice(repoServer["volumes"], newVolume)
+
+	// Append to existing volumeMounts
+	newMount := map[string]any{
+		"name":      "local-gitops",
+		"mountPath": localPath,
+		"readOnly":  true,
+	}
+	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], newMount)
+}
+
+// appendToSlice appends a new item to an existing slice, handling both
+// []map[string]any and []any types that may come from YAML parsing.
+func appendToSlice(existing any, newItem map[string]any) []map[string]any {
+	if existing == nil {
+		return []map[string]any{newItem}
 	}
 
-	repoServer["volumeMounts"] = []map[string]any{
-		{
-			"name":      "local-gitops",
-			"mountPath": localPath,
-			"readOnly":  true,
-		},
+	// Handle []map[string]any (typed slice)
+	if typed, ok := existing.([]map[string]any); ok {
+		return append(typed, newItem)
 	}
+
+	// Handle []any (untyped slice from YAML parsing)
+	if untyped, ok := existing.([]any); ok {
+		result := make([]map[string]any, 0, len(untyped)+1)
+		for _, item := range untyped {
+			if m, ok := item.(map[string]any); ok {
+				result = append(result, m)
+			}
+		}
+		return append(result, newItem)
+	}
+
+	// Fallback: just return new item
+	return []map[string]any{newItem}
 }

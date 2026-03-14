@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -136,8 +137,9 @@ func TestSyncWaveOrdering(t *testing.T) {
 func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	ctx := context.Background()
 
-	// Extract sync waves
-	getSyncWave := func(appName string) string {
+	// Extract sync wave number as int for robust comparison
+	// (lexicographic comparison would fail for multi-digit numbers: "9" > "10")
+	getSyncWave := func(appName string) int {
 		var buf bytes.Buffer
 		if err := WriteApplication(ctx, &buf, appName); err != nil {
 			t.Fatalf("WriteApplication(%s) error: %v", appName, err)
@@ -145,19 +147,31 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		content := buf.String()
 		for _, line := range strings.Split(content, "\n") {
 			if strings.Contains(line, "sync-wave") {
-				return strings.TrimSpace(line)
+				// Extract number from line like: argocd.argoproj.io/sync-wave: "1"
+				line = strings.TrimSpace(line)
+				// Find the quoted number
+				start := strings.Index(line, `"`)
+				end := strings.LastIndex(line, `"`)
+				if start != -1 && end > start {
+					numStr := line[start+1 : end]
+					num, err := strconv.Atoi(numStr)
+					if err != nil {
+						t.Fatalf("%s has invalid sync-wave value %q: %v", appName, numStr, err)
+					}
+					return num
+				}
 			}
 		}
 		t.Fatalf("%s has no sync-wave annotation", appName)
-		return ""
+		return 0
 	}
 
-	envoyWave := getSyncWave("envoy-gateway")
-	certWave := getSyncWave("cert-manager")
+	envoyWaveNum := getSyncWave("envoy-gateway")
+	certWaveNum := getSyncWave("cert-manager")
 
 	// envoy-gateway must come before cert-manager (lower wave number)
 	// because cert-manager needs Gateway API CRDs that envoy-gateway installs
-	if envoyWave >= certWave {
-		t.Errorf("envoy-gateway (%s) must have a lower sync-wave than cert-manager (%s)", envoyWave, certWave)
+	if envoyWaveNum >= certWaveNum {
+		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }

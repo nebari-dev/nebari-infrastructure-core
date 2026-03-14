@@ -22,7 +22,7 @@ local:
 # OPTION 2: Explicit local directory (full control over location)
 # git_repository:
 #   # Local path to git repository (must be an absolute path)
-#   url: "file:///Users/tylerman/gh/NIC-local-gitops-repo.git"
+#   url: "file:///home/user/my-gitops-repo"
 #   branch: main
 #   path: "clusters/local"  # Optional subdirectory within the repo
 #   # No auth configuration needed for local paths

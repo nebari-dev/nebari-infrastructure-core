@@ -68,7 +68,10 @@ func (c *Config) Validate() error {
 
 	// For local file paths, validate directory exists but skip auth validation
 	if c.IsLocalPath() {
-		path := c.GetLocalPath()
+		path, err := c.GetLocalPath()
+		if err != nil {
+			return err
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return fmt.Errorf("local path does not exist: %w", err)
@@ -99,20 +102,20 @@ func (c *Config) IsLocalPath() bool {
 }
 
 // GetLocalPath returns the filesystem path from a file:// URL.
-// Returns empty string if not a local path.
+// Returns an error if not a local path or if the path is invalid.
 // The path is cleaned to prevent directory traversal attacks.
-func (c *Config) GetLocalPath() string {
+func (c *Config) GetLocalPath() (string, error) {
 	if !c.IsLocalPath() {
-		return ""
+		return "", fmt.Errorf("not a local file:// URL: %s", c.URL)
 	}
 	path := strings.TrimPrefix(c.URL, "file://")
 	// Clean the path to resolve ".." and other traversal attempts
 	path = filepath.Clean(path)
 	// Ensure the path is absolute to prevent relative path attacks
 	if !filepath.IsAbs(path) {
-		return ""
+		return "", fmt.Errorf("file:// URL must use absolute path, got: %s", path)
 	}
-	return path
+	return path, nil
 }
 
 // GetBranch returns the configured branch or DefaultBranch as default.

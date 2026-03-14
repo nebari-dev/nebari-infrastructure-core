@@ -60,3 +60,103 @@ func TestGenerateSecurePasswordFallback(t *testing.T) {
 		t.Errorf("generateSecurePassword() fallback = %q, want prefix 'nebari-'", result)
 	}
 }
+
+func TestScrubSensitiveFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains []string // strings that should be in output
+		excludes []string // strings that should NOT be in output
+	}{
+		{
+			name: "scrubs auth block from git_repository",
+			input: `project_name: test
+git_repository:
+  url: "git@github.com:org/repo.git"
+  branch: main
+  auth:
+    ssh_key_env: MY_SSH_KEY
+    token_env: MY_TOKEN
+provider: aws`,
+			contains: []string{
+				"project_name: test",
+				"url: \"git@github.com:org/repo.git\"",
+				"branch: main",
+				"provider: aws",
+				"# auth: <scrubbed for security>",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"MY_SSH_KEY",
+				"token_env",
+				"MY_TOKEN",
+			},
+		},
+		{
+			name: "preserves config without auth block",
+			input: `project_name: test
+git_repository:
+  url: "file:///tmp/repo"
+  branch: main
+provider: local`,
+			contains: []string{
+				"project_name: test",
+				"url: \"file:///tmp/repo\"",
+				"branch: main",
+				"provider: local",
+			},
+			excludes: []string{},
+		},
+		{
+			name: "handles nested auth with multiple fields",
+			input: `git_repository:
+  url: test
+  auth:
+    ssh_key_env: KEY
+    token_env: TOKEN
+    other_field: value
+  path: clusters/prod`,
+			contains: []string{
+				"url: test",
+				"path: clusters/prod",
+				"# auth: <scrubbed for security>",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"token_env",
+				"other_field",
+				"KEY",
+				"TOKEN",
+				"value",
+			},
+		},
+		{
+			name:     "handles empty config",
+			input:    "",
+			contains: []string{},
+			excludes: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := string(scrubSensitiveFields([]byte(tt.input)))
+
+			for _, s := range tt.contains {
+				if !containsString(result, s) {
+					t.Errorf("scrubSensitiveFields() should contain %q, got:\n%s", s, result)
+				}
+			}
+
+			for _, s := range tt.excludes {
+				if containsString(result, s) {
+					t.Errorf("scrubSensitiveFields() should NOT contain %q, got:\n%s", s, result)
+				}
+			}
+		})
+	}
+}
+
+func containsString(haystack, needle string) bool {
+	return bytes.Contains([]byte(haystack), []byte(needle))
+}

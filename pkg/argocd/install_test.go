@@ -114,6 +114,109 @@ func TestAddLocalGitopsMountPreservesExistingKeys(t *testing.T) {
 	}
 }
 
+func TestAppendToSlice(t *testing.T) {
+	newItem := map[string]any{"name": "new-volume"}
+
+	tests := []struct {
+		name     string
+		existing any
+		wantLen  int
+	}{
+		{
+			name:     "nil existing",
+			existing: nil,
+			wantLen:  1,
+		},
+		{
+			name:     "empty typed slice",
+			existing: []map[string]any{},
+			wantLen:  1,
+		},
+		{
+			name: "typed slice with one item",
+			existing: []map[string]any{
+				{"name": "existing-volume"},
+			},
+			wantLen: 2,
+		},
+		{
+			name: "untyped slice (from YAML parsing)",
+			existing: []any{
+				map[string]any{"name": "existing-volume"},
+			},
+			wantLen: 2,
+		},
+		{
+			name: "untyped slice with multiple items",
+			existing: []any{
+				map[string]any{"name": "vol1"},
+				map[string]any{"name": "vol2"},
+			},
+			wantLen: 3,
+		},
+		{
+			name:     "invalid type returns just new item",
+			existing: "not-a-slice",
+			wantLen:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendToSlice(tt.existing, newItem)
+			if len(result) != tt.wantLen {
+				t.Errorf("appendToSlice() len = %d, want %d", len(result), tt.wantLen)
+			}
+			// Last item should always be our new item
+			if result[len(result)-1]["name"] != "new-volume" {
+				t.Errorf("appendToSlice() last item = %v, want new-volume", result[len(result)-1])
+			}
+		})
+	}
+}
+
+func TestAddLocalGitopsMountAppendsToExistingVolumes(t *testing.T) {
+	// Test that existing volumes are preserved (not replaced)
+	values := map[string]any{
+		"repoServer": map[string]any{
+			"volumes": []map[string]any{
+				{
+					"name":     "existing-vol",
+					"emptyDir": map[string]any{},
+				},
+			},
+			"volumeMounts": []map[string]any{
+				{
+					"name":      "existing-vol",
+					"mountPath": "/existing",
+				},
+			},
+		},
+	}
+
+	addLocalGitopsMount(values, "/tmp/test-repo")
+
+	repoServer := values["repoServer"].(map[string]any)
+	volumes := repoServer["volumes"].([]map[string]any)
+	volumeMounts := repoServer["volumeMounts"].([]map[string]any)
+
+	if len(volumes) != 2 {
+		t.Errorf("expected 2 volumes (existing + new), got %d", len(volumes))
+	}
+	if len(volumeMounts) != 2 {
+		t.Errorf("expected 2 volumeMounts (existing + new), got %d", len(volumeMounts))
+	}
+
+	// Check that existing volume is preserved
+	if volumes[0]["name"] != "existing-vol" {
+		t.Errorf("existing volume was not preserved, got %v", volumes[0]["name"])
+	}
+	// Check that new volume was appended
+	if volumes[1]["name"] != "local-gitops" {
+		t.Errorf("new volume name = %v, want local-gitops", volumes[1]["name"])
+	}
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

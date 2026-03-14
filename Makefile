@@ -124,7 +124,7 @@ localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
 	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
 	@GITOPS_URL=$$(yq '.git_repository.url // ""' $(LOCAL_CONFIG)); \
-	PROJECT_NAME=$$(awk '/^project_name:/ { gsub(/.*project_name:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }' $(LOCAL_CONFIG)); \
+	PROJECT_NAME=$$(yq '.project_name // ""' $(LOCAL_CONFIG)); \
 	if echo "$$GITOPS_URL" | grep -q '^file:///'; then \
 		LOCAL_PATH=$$(echo "$$GITOPS_URL" | sed 's|^file://||'); \
 		echo "Mounting explicit gitops repo: $$LOCAL_PATH"; \
@@ -137,16 +137,21 @@ localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:
 	fi; \
 	if [ -n "$$LOCAL_PATH" ]; then \
 		mkdir -p "$$LOCAL_PATH"; \
-		echo 'kind: Cluster' > /tmp/kind-config.yaml; \
-		echo 'apiVersion: kind.x-k8s.io/v1alpha4' >> /tmp/kind-config.yaml; \
-		echo 'name: nebari-local' >> /tmp/kind-config.yaml; \
-		echo 'nodes:' >> /tmp/kind-config.yaml; \
-		echo '- role: control-plane' >> /tmp/kind-config.yaml; \
-		echo '  extraMounts:' >> /tmp/kind-config.yaml; \
-		echo "  - hostPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
-		echo "    containerPath: $$LOCAL_PATH" >> /tmp/kind-config.yaml; \
-		echo '    readOnly: true' >> /tmp/kind-config.yaml; \
-		kind create cluster --config /tmp/kind-config.yaml || true; \
+		KIND_CONFIG=$$(mktemp); \
+		cat > "$$KIND_CONFIG" <<'KINDEOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: nebari-local
+nodes:
+- role: control-plane
+  extraMounts:
+  - hostPath: "LOCALPATH_PLACEHOLDER"
+    containerPath: "LOCALPATH_PLACEHOLDER"
+    readOnly: true
+KINDEOF
+		sed -i.bak "s|LOCALPATH_PLACEHOLDER|$$LOCAL_PATH|g" "$$KIND_CONFIG" && rm -f "$$KIND_CONFIG.bak"; \
+		kind create cluster --config "$$KIND_CONFIG" || true; \
+		rm -f "$$KIND_CONFIG"; \
 	else \
 		kind create cluster --name nebari-local || true; \
 	fi

@@ -30,6 +30,8 @@ The Makefile reads `examples/local-config.yaml` and automatically handles three 
 
 For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod so ArgoCD can read manifests directly from your filesystem.
 
+> **Note:** `file://` repos only work when the cluster nodes can access the local path (Kind, k3s, bare metal). For cloud providers (AWS, GCP, Azure), use a remote git repository since Kubernetes nodes don't have access to your local filesystem.
+
 ## Using a Custom Config
 
 ```bash

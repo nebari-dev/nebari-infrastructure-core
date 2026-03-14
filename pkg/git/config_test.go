@@ -519,35 +519,44 @@ func TestConfigIsLocalPath(t *testing.T) {
 
 func TestConfigGetLocalPath(t *testing.T) {
 	tests := []struct {
-		name   string
-		config Config
-		want   string
+		name    string
+		config  Config
+		want    string
+		wantErr bool
 	}{
 		{
-			name:   "extracts path from file:// URL",
-			config: Config{URL: "file:///tmp/repo"},
-			want:   "/tmp/repo",
+			name:    "extracts path from file:// URL",
+			config:  Config{URL: "file:///tmp/repo"},
+			want:    "/tmp/repo",
+			wantErr: false,
 		},
 		{
-			name:   "returns empty string for non-file URL",
-			config: Config{URL: "git@github.com:org/repo.git"},
-			want:   "",
+			name:    "returns error for non-file URL",
+			config:  Config{URL: "git@github.com:org/repo.git"},
+			want:    "",
+			wantErr: true,
 		},
 		{
-			name:   "rejects file:// with relative path",
-			config: Config{URL: "file://./local/repo"},
-			want:   "",
+			name:    "rejects file:// with relative path",
+			config:  Config{URL: "file://./local/repo"},
+			want:    "",
+			wantErr: true,
 		},
 		{
-			name:   "cleans path traversal attempts",
-			config: Config{URL: "file:///tmp/nebari/../etc/shadow"},
-			want:   "/tmp/etc/shadow",
+			name:    "cleans path traversal attempts",
+			config:  Config{URL: "file:///tmp/nebari/../etc/shadow"},
+			want:    "/tmp/etc/shadow",
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.GetLocalPath()
+			got, err := tt.config.GetLocalPath()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetLocalPath() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 			if got != tt.want {
 				t.Errorf("GetLocalPath() = %v, want %v", got, tt.want)
 			}

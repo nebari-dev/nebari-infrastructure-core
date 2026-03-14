@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -68,25 +69,33 @@ func defaultGitConfig(projectName string) *git.Config {
 }
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
-// For development workflows without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
-func getOrCreateGitConfig(cfg *config.NebariConfig) *git.Config {
+// For local provider without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
+// For cloud providers, explicit git_repository config is required (returns error if not configured).
+func getOrCreateGitConfig(cfg *config.NebariConfig) (*git.Config, error) {
 	if cfg.GitRepository != nil {
-		return cfg.GitRepository
+		return cfg.GitRepository, nil
+	}
+
+	// Only auto-create local gitops for the local provider
+	// Cloud providers require explicit git_repository configuration
+	if cfg.Provider != "local" {
+		return nil, fmt.Errorf("git_repository configuration is required for cloud provider %q; local gitops auto-creation is only supported for provider: local", cfg.Provider)
 	}
 
 	gitCfg := defaultGitConfig(cfg.ProjectName)
-	localPath := gitCfg.GetLocalPath()
+	localPath, err := gitCfg.GetLocalPath()
+	if err != nil {
+		return nil, fmt.Errorf("invalid local path in auto-generated git config: %w", err)
+	}
 
 	slog.Info("No git_repository configured, using auto-generated local directory",
 		"path", localPath)
 
 	if err := os.MkdirAll(localPath, 0750); err != nil {
-		slog.Warn("Failed to create auto-generated directory",
-			"path", localPath, "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
 	}
 
-	return gitCfg
+	return gitCfg, nil
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -174,7 +183,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
 	// Bootstrap GitOps (auto-create local directory if needed)
-	gitConfig := getOrCreateGitConfig(cfg)
+	gitConfig, err := getOrCreateGitConfig(cfg)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("GitOps configuration failed", "error", err)
+		return err
+	}
 	if gitConfig != nil && !deployDryRun {
 		sc := provider.StorageClass(cfg)
 		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps, sc); err != nil {
@@ -341,7 +355,8 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 
 	isLocal := gitConfig.IsLocalPath()
 	if isLocal {
-		slog.Info("Initializing local GitOps directory", "path", gitConfig.GetLocalPath())
+		localPath, _ := gitConfig.GetLocalPath() // Already validated in getOrCreateGitConfig
+		slog.Info("Initializing local GitOps directory", "path", localPath)
 	} else {
 		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
 	}
@@ -417,28 +432,69 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 	}
 
 	if isLocal {
-		slog.Info("Local GitOps directory bootstrapped successfully", "path", gitConfig.GetLocalPath())
+		localPath, _ := gitConfig.GetLocalPath() // Already validated earlier
+		slog.Info("Local GitOps directory bootstrapped successfully", "path", localPath)
 	} else {
 		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
 	}
 	return nil
 }
 
-// writeConfigToRepo copies the NIC config file into the git working directory.
+// writeConfigToRepo copies the NIC config file into the git working directory,
+// scrubbing sensitive fields (auth block) before writing.
 func writeConfigToRepo(configFile, workDir string) error {
 	configBytes, err := os.ReadFile(configFile) //nolint:gosec // G304: path is from CLI flag
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
+
+	// Scrub sensitive fields from the config before writing to the repo
+	scrubbedBytes := scrubSensitiveFields(configBytes)
+
 	configDest := filepath.Join(workDir, "nic-config.yaml")
 	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil { //nolint:gosec // G703: configDest is built from application-controlled workDir
+	if err := os.WriteFile(configDest, scrubbedBytes, 0600); err != nil {
 		return fmt.Errorf("failed to write config to repository: %w", err)
 	}
-	slog.Info("Wrote NIC config to repository", "path", configDest)
+	slog.Info("Wrote NIC config to repository (auth fields scrubbed)", "path", configDest)
 	return nil
+}
+
+// scrubSensitiveFields removes the auth block from git_repository config to prevent
+// accidentally committing credentials. Only env var names should be in configs,
+// but this provides defense in depth.
+func scrubSensitiveFields(configBytes []byte) []byte {
+	lines := strings.Split(string(configBytes), "\n")
+	var result []string
+	inAuthBlock := false
+	authIndent := 0
+
+	for _, line := range lines {
+		// Check if we're entering an auth block under git_repository
+		trimmed := strings.TrimLeft(line, " \t")
+		currentIndent := len(line) - len(trimmed)
+
+		if strings.HasPrefix(trimmed, "auth:") {
+			inAuthBlock = true
+			authIndent = currentIndent
+			result = append(result, strings.Repeat(" ", currentIndent)+"# auth: <scrubbed for security>")
+			continue
+		}
+
+		// If we're in an auth block, skip lines that are indented more
+		if inAuthBlock {
+			if trimmed == "" || currentIndent > authIndent {
+				continue // Skip auth block contents
+			}
+			inAuthBlock = false // Exited auth block
+		}
+
+		result = append(result, line)
+	}
+
+	return []byte(strings.Join(result, "\n"))
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration
