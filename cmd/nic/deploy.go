@@ -182,16 +182,22 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
-	// Bootstrap GitOps (auto-create local directory if needed)
+	// Get provider infrastructure settings for GitOps and foundational services
+	infraSettings := provider.InfraSettings(cfg)
+
+	// Bootstrap GitOps (auto-create local directory for local provider if needed)
 	gitConfig, err := getOrCreateGitConfig(cfg)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("GitOps configuration failed", "error", err)
 		return err
 	}
-	if gitConfig != nil && !deployDryRun {
-		sc := provider.StorageClass(cfg)
-		if err := bootstrapGitOps(ctx, cfg, gitConfig, deployRegenApps, sc); err != nil {
+	if gitConfig != nil {
+		// Set on cfg so downstream code (Install, InstallFoundationalServices) can use cfg.GitRepository
+		cfg.GitRepository = gitConfig
+	}
+	if cfg.GitRepository != nil && !deployDryRun {
+		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, infraSettings); err != nil {
 			span.RecordError(err)
 			slog.Error("GitOps bootstrap failed", "error", err)
 			return err
@@ -206,7 +212,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !cfg.DryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider, gitConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, provider); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -228,14 +234,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
-				// Enable MetalLB only for local deployments
+				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
-					Enabled:     cfg.Provider == "local",
-					AddressPool: "192.168.1.100-192.168.1.110", // Default range for local dev
+					Enabled:     infraSettings.NeedsMetalLB,
+					AddressPool: infraSettings.MetalLBAddressPool,
 				},
 			}
 
-			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, gitConfig, foundationalCfg); err != nil {
+			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				slog.Warn("Failed to install foundational services", "error", err)
 				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
@@ -341,13 +347,13 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
-// gitConfig can be either a remote repository or a local file:// path.
-// storageClass is the provider-appropriate Kubernetes StorageClass name for templates.
-func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, storageClass string) error {
+// cfg.GitRepository must be set before calling this function.
+func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings providerPkg.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
 
+	gitConfig := cfg.GitRepository
 	span.SetAttributes(
 		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
@@ -407,7 +413,7 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *g
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, storageClass); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}

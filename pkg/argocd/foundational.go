@@ -12,7 +12,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -60,8 +59,8 @@ type MetalLBConfig struct {
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
-// via ArgoCD from the git repository. gitConfig may be either remote or local file:// path.
-func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config, foundationalCfg FoundationalConfig) error {
+// via ArgoCD from the git repository. cfg.GitRepository may be either remote or local file:// path.
+func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
 	defer span.End()
@@ -116,8 +115,8 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	// 3. Apply root App-of-Apps if git configuration is available
-	if gitConfig != nil {
-		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, cfg, gitConfig); err != nil {
+	if cfg.GitRepository != nil {
+		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, cfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to apply root App-of-Apps: %w", err)
 		}

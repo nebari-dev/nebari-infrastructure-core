@@ -79,7 +79,7 @@ func TestLonghornReplicaCount(t *testing.T) {
 	}
 }
 
-func TestProviderStorageClass(t *testing.T) {
+func TestProviderInfraSettingsStorageClass(t *testing.T) {
 	tests := []struct {
 		name     string
 		config   map[string]any
@@ -122,9 +122,9 @@ func TestProviderStorageClass(t *testing.T) {
 				cfg.ProviderConfig["amazon_web_services"] = tt.config
 			}
 
-			got := p.StorageClass(cfg)
+			got := p.InfraSettings(cfg).StorageClass
 			if got != tt.expected {
-				t.Errorf("StorageClass() = %q, want %q", got, tt.expected)
+				t.Errorf("InfraSettings().StorageClass = %q, want %q", got, tt.expected)
 			}
 		})
 	}

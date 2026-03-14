@@ -6,6 +6,34 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
+// InfraSettings describes provider-specific Kubernetes infrastructure settings.
+// The ArgoCD writer and deploy command use these to configure templates
+// without importing provider packages or switching on provider names.
+type InfraSettings struct {
+	// StorageClass is the default Kubernetes StorageClass for persistent volumes.
+	// Examples: "gp2" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
+	StorageClass string
+
+	// NeedsMetalLB indicates whether this provider requires MetalLB for load balancing.
+	// Cloud providers with native LBs return false; local provider returns true.
+	NeedsMetalLB bool
+
+	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
+	// Used by providers whose cloud controller manager requires annotations
+	// (e.g., {"load-balancer.hetzner.cloud/location": "ash"}).
+	LoadBalancerAnnotations map[string]string
+
+	// MetalLBAddressPool is the IP range for MetalLB's IPAddressPool.
+	// Only used when NeedsMetalLB is true (e.g., "192.168.1.100-192.168.1.110").
+	MetalLBAddressPool string
+
+	// KeycloakBasePath is appended to the Keycloak service URL for the operator.
+	// Most providers leave this empty. Providers using the Keycloak legacy chart
+	// (keycloakx) need "/auth" because that chart serves under the /auth context path,
+	// while the modern Bitnami chart serves at the root.
+	KeycloakBasePath string
+}
+
 // Provider defines the interface that all cloud providers must implement.
 //
 // This interface establishes the abstraction boundary between CLI commands and
@@ -52,8 +80,8 @@ type Provider interface {
 	// name in different regions).
 	Summary(config *config.NebariConfig) map[string]string
 
-	// StorageClass returns the name of the default Kubernetes StorageClass for
-	// persistent volumes on this provider. CLI commands use this to configure
-	// ArgoCD application templates without importing provider packages.
-	StorageClass(config *config.NebariConfig) string
+	// InfraSettings returns provider-specific Kubernetes infrastructure settings.
+	// CLI commands and the ArgoCD writer use these to configure templates
+	// without importing provider packages or switching on provider names.
+	InfraSettings(config *config.NebariConfig) InfraSettings
 }
