@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +54,48 @@ func init() {
 	if err := deployCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
 	}
+}
+
+// defaultGitConfig returns a default local git configuration for development workflows.
+// This is a pure function with no side effects — directory creation happens separately.
+func defaultGitConfig(projectName string) *git.Config {
+	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", projectName)
+	return &git.Config{
+		URL:    fmt.Sprintf("file://%s", localPath),
+		Branch: "main",
+		Path:   "",
+		Auth:   git.AuthConfig{},
+	}
+}
+
+// getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
+// For local provider without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
+// For cloud providers, explicit git_repository config is required (returns error if not configured).
+func getOrCreateGitConfig(cfg *config.NebariConfig) (*git.Config, error) {
+	if cfg.GitRepository != nil {
+		return cfg.GitRepository, nil
+	}
+
+	// Only auto-create local gitops for the local provider
+	// Cloud providers require explicit git_repository configuration
+	if cfg.Provider != "local" {
+		return nil, fmt.Errorf("git_repository configuration is required for cloud provider %q; local gitops auto-creation is only supported for provider: local", cfg.Provider)
+	}
+
+	gitCfg := defaultGitConfig(cfg.ProjectName)
+	localPath, err := gitCfg.GetLocalPath()
+	if err != nil {
+		return nil, fmt.Errorf("invalid local path in auto-generated git config: %w", err)
+	}
+
+	slog.Info("No git_repository configured, using auto-generated local directory",
+		"path", localPath)
+
+	if err := os.MkdirAll(localPath, 0750); err != nil {
+		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
+	}
+
+	return gitCfg, nil
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -140,7 +185,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Get provider infrastructure settings for GitOps and foundational services
 	infraSettings := provider.InfraSettings(cfg)
 
-	// Bootstrap GitOps repository if configured
+	// Bootstrap GitOps (auto-create local directory for local provider if needed)
+	gitConfig, err := getOrCreateGitConfig(cfg)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("GitOps configuration failed", "error", err)
+		return err
+	}
+	if gitConfig != nil {
+		// Set on cfg so downstream code (Install, InstallFoundationalServices) can use cfg.GitRepository
+		cfg.GitRepository = gitConfig
+	}
 	if cfg.GitRepository != nil && !deployDryRun {
 		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, infraSettings); err != nil {
 			span.RecordError(err)
@@ -292,27 +347,35 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
+// cfg.GitRepository must be set before calling this function.
 func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings providerPkg.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
 
+	gitConfig := cfg.GitRepository
 	span.SetAttributes(
-		attribute.String("git.url", cfg.GitRepository.URL),
+		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
+	isLocal := gitConfig.IsLocalPath()
+	if isLocal {
+		localPath, _ := gitConfig.GetLocalPath() // Already validated in getOrCreateGitConfig
+		slog.Info("Initializing local GitOps directory", "path", localPath)
+	} else {
+		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
+	}
 
 	// Create git client
-	gitClient, err := git.NewClient(cfg.GitRepository)
+	gitClient, err := git.NewClient(gitConfig)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create git client: %w", err)
 	}
 	defer func() { _ = gitClient.Cleanup() }()
 
-	// Validate authentication before proceeding
+	// Validate authentication before proceeding (skipped for local paths)
 	if err := gitClient.ValidateAuth(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("git authentication failed: %w", err)
@@ -343,6 +406,11 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
+	if err := writeConfigToRepo(deployConfigFile, gitClient.WorkDir()); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
 	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
@@ -356,18 +424,83 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
 
-	// Commit and push
+	// Commit (and push for remote repos)
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
 	}
 	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
 		span.RecordError(err)
+		if isLocal {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	slog.Info("GitOps repository bootstrapped successfully")
+	if isLocal {
+		localPath, _ := gitConfig.GetLocalPath() // Already validated earlier
+		slog.Info("Local GitOps directory bootstrapped successfully", "path", localPath)
+	} else {
+		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
+	}
 	return nil
+}
+
+// writeConfigToRepo copies the NIC config file into the git working directory,
+// scrubbing sensitive fields (auth block) before writing.
+func writeConfigToRepo(configFile, workDir string) error {
+	configBytes, err := os.ReadFile(configFile) //nolint:gosec // G304: path is from CLI flag
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Scrub sensitive fields from the config before writing to the repo
+	scrubbedBytes := scrubSensitiveFields(configBytes)
+
+	configDest := filepath.Join(workDir, "nic-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(configDest, scrubbedBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write config to repository: %w", err)
+	}
+	slog.Info("Wrote NIC config to repository (auth fields scrubbed)", "path", configDest)
+	return nil
+}
+
+// scrubSensitiveFields removes the auth block from git_repository config to prevent
+// accidentally committing credentials. Only env var names should be in configs,
+// but this provides defense in depth.
+func scrubSensitiveFields(configBytes []byte) []byte {
+	lines := strings.Split(string(configBytes), "\n")
+	var result []string
+	inAuthBlock := false
+	authIndent := 0
+
+	for _, line := range lines {
+		// Check if we're entering an auth block under git_repository
+		trimmed := strings.TrimLeft(line, " \t")
+		currentIndent := len(line) - len(trimmed)
+
+		if strings.HasPrefix(trimmed, "auth:") {
+			inAuthBlock = true
+			authIndent = currentIndent
+			result = append(result, strings.Repeat(" ", currentIndent)+"# auth: <scrubbed for security>")
+			continue
+		}
+
+		// If we're in an auth block, skip lines that are indented more
+		if inAuthBlock {
+			if trimmed == "" || currentIndent > authIndent {
+				continue // Skip auth block contents
+			}
+			inAuthBlock = false // Exited auth block
+		}
+
+		result = append(result, line)
+	}
+
+	return []byte(strings.Join(result, "\n"))
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration
