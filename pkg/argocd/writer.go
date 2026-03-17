@@ -59,7 +59,7 @@ type TemplateData struct {
 	KeycloakNamespace            string // Namespace where Keycloak is deployed (e.g., "keycloak")
 	KeycloakServiceName          string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
 	KeycloakServiceURL           string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
-	KeycloakIssuerURL            string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com/auth")
+	KeycloakIssuerURL            string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com")
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
@@ -117,12 +117,11 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	}
 
 	// External Keycloak URL — what Keycloak embeds in the iss claim of tokens.
-	// Clients inside the cluster fetch JWKs via KeycloakAuthURL; they validate
-	// the iss claim against this public URL.
+	// Clients inside the cluster fetch JWKs via KeycloakServiceURL (in-cluster)
+	// and validate the iss claim against this public URL.
 	// Only set when a real domain is configured. When no domain is provided
 	// (e.g. cloud deployments using a bare LoadBalancer IP), KeycloakIssuerURL
-	// is left empty so KEYCLOAK_ISSUER_URL is not injected and the webapi falls
-	// back to using KEYCLOAK_URL for issuer validation.
+	// is left empty and KEYCLOAK_ISSUER_URL is not injected into workloads.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s", data.Domain)
 	}
