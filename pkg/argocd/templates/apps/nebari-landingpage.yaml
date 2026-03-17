@@ -31,7 +31,7 @@ spec:
         webapi:
           keycloak:
             # In-cluster URL for JWK fetching (fast, no TLS hop).
-            url: "{{ .KeycloakAuthURL }}"
+            url: "{{ .KeycloakServiceURL }}"
             realm: "{{ .KeycloakRealm }}"
             # External public URL for validating the iss claim in tokens.
             issuerUrl: "{{ .KeycloakIssuerURL }}"
