@@ -360,6 +360,116 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	}
 }
 
+func TestLandingPageTemplate(t *testing.T) {
+	tests := []struct {
+		name              string
+		keycloakBasePath  string
+		wantIssuerURL     string
+		wantOIDCIssuerURL string
+	}{
+		{
+			name:              "no base path",
+			keycloakBasePath:  "",
+			wantIssuerURL:     "https://keycloak.test.example.com",
+			wantOIDCIssuerURL: "https://keycloak.test.example.com/realms/nebari",
+		},
+		{
+			name:              "auth base path included in issuer URL",
+			keycloakBasePath:  "/auth",
+			wantIssuerURL:     "https://keycloak.test.example.com/auth",
+			wantOIDCIssuerURL: "https://keycloak.test.example.com/auth/realms/nebari",
+		},
+	}
+
+	content, err := templates.ReadFile("templates/apps/nebari-landingpage.yaml")
+	if err != nil {
+		t.Fatalf("failed to read nebari-landingpage template: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				Domain:                       "test.example.com",
+				KeycloakServiceURL:           fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
+				KeycloakIssuerURL:            tt.wantIssuerURL,
+				KeycloakRealm:                "nebari",
+				KeycloakAdminSecretName:      "keycloak-admin-credentials",
+				KeycloakAdminSecretNamespace: "keycloak",
+				GitRepoURL:                   "https://github.com/example/repo",
+				GitBranch:                    "main",
+			}
+
+			processed, err := processTemplate("apps/nebari-landingpage.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, "kind: Application") {
+				t.Error("expected 'kind: Application' in rendered output")
+			}
+			if !strings.Contains(output, tt.wantIssuerURL) {
+				t.Errorf("expected issuer URL %q in rendered output, got:\n%s", tt.wantIssuerURL, output)
+			}
+			if !strings.Contains(output, tt.wantOIDCIssuerURL) {
+				t.Errorf("expected OIDC issuer URL %q in rendered output, got:\n%s", tt.wantOIDCIssuerURL, output)
+			}
+			if !strings.Contains(output, data.KeycloakServiceURL) {
+				t.Errorf("expected in-cluster service URL %q in rendered output, got:\n%s", data.KeycloakServiceURL, output)
+			}
+			if !strings.Contains(output, "realm: \"nebari\"") {
+				t.Error("expected realm 'nebari' in rendered output")
+			}
+			if !strings.Contains(output, "hostname: \"test.example.com\"") {
+				t.Error("expected hostname in rendered output")
+			}
+			// Ensure no unresolved template placeholders remain
+			if strings.Contains(output, "{{") {
+				t.Errorf("rendered template still contains unresolved placeholders:\n%s", output)
+			}
+		})
+	}
+}
+
+func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
+	tests := []struct {
+		name             string
+		domain           string
+		keycloakBasePath string
+		wantIssuerURL    string
+	}{
+		{
+			name:          "no domain - issuer URL left empty",
+			domain:        "",
+			wantIssuerURL: "",
+		},
+		{
+			name:          "domain without base path",
+			domain:        "test.example.com",
+			wantIssuerURL: "https://keycloak.test.example.com",
+		},
+		{
+			name:             "domain with /auth base path",
+			domain:           "test.example.com",
+			keycloakBasePath: "/auth",
+			wantIssuerURL:    "https://keycloak.test.example.com/auth",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.NebariConfig{Provider: "test", Domain: tt.domain}
+			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
+			data := NewTemplateData(cfg, settings)
+
+			if data.KeycloakIssuerURL != tt.wantIssuerURL {
+				t.Errorf("KeycloakIssuerURL = %q, want %q", data.KeycloakIssuerURL, tt.wantIssuerURL)
+			}
+		})
+	}
+}
+
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
 	*bytes.Buffer

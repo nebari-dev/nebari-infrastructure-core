@@ -22,7 +22,7 @@ spec:
       values: |
         frontend:
           keycloak:
-            # External public Keycloak URL — used by the browser for OIDC login.
+            # External public Keycloak URL - used by the browser for OIDC login.
             url: "{{ .KeycloakIssuerURL }}"
             realm: "{{ .KeycloakRealm }}"
           oauth2Proxy:
