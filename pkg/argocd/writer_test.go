@@ -360,6 +360,83 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	}
 }
 
+func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/networking/routes/http-to-https-redirect.yaml")
+	if err != nil {
+		t.Fatalf("failed to read redirect route template: %v", err)
+	}
+
+	data := TemplateData{
+		Domain:   "test.example.com",
+		Provider: "aws",
+	}
+
+	processed, err := processTemplate("manifests/networking/routes/http-to-https-redirect.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	tests := []struct {
+		name     string
+		contains string
+	}{
+		{"kind", "kind: HTTPRoute"},
+		{"targets http listener", "sectionName: http"},
+		{"redirect filter type", "type: RequestRedirect"},
+		{"redirect to https", "scheme: https"},
+		{"301 status code", "statusCode: 301"},
+		{"targets nebari-gateway", "name: nebari-gateway"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(output, tt.contains) {
+				t.Errorf("expected %q in rendered redirect route, got:\n%s", tt.contains, output)
+			}
+		})
+	}
+}
+
+func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+	}{
+		{"argocd", "templates/manifests/networking/routes/argocd-httproute.yaml"},
+		{"keycloak", "templates/manifests/networking/routes/keycloak-httproute.yaml"},
+	}
+
+	data := TemplateData{
+		Domain:              "test.example.com",
+		Provider:            "aws",
+		KeycloakServiceName: "keycloak-keycloakx-http",
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.template)
+			if err != nil {
+				t.Fatalf("failed to read %s template: %v", tt.name, err)
+			}
+
+			processed, err := processTemplate(tt.template, content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, "sectionName: https") {
+				t.Errorf("%s HTTPRoute should target sectionName: https, got:\n%s", tt.name, output)
+			}
+			if strings.Contains(output, "sectionName: http\n") {
+				t.Errorf("%s HTTPRoute should NOT target the http listener", tt.name)
+			}
+		})
+	}
+}
+
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
 	*bytes.Buffer
