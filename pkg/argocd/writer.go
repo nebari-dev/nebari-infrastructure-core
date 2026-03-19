@@ -49,6 +49,9 @@ type TemplateData struct {
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
+	// HTTPSPort is the port used for HTTPS redirects (default: 443).
+	HTTPSPort int
+
 	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
 	LoadBalancerAnnotations map[string]string
 
@@ -71,6 +74,7 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		Domain:                  cfg.Domain,
 		Provider:                cfg.Provider,
 		StorageClass:            settings.StorageClass,
+		HTTPSPort:               443,
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,

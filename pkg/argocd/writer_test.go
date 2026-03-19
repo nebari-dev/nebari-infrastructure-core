@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,6 +152,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			}
 			if data.MetalLBAddressRange != tt.wantMLBA {
 				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMLBA)
+			}
+			if data.HTTPSPort != 443 {
+				t.Errorf("HTTPSPort = %d, want 443", data.HTTPSPort)
 			}
 		})
 	}
@@ -366,33 +371,46 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 		t.Fatalf("failed to read redirect route template: %v", err)
 	}
 
-	data := TemplateData{
-		Domain:   "test.example.com",
-		Provider: "aws",
-	}
-
-	processed, err := processTemplate("manifests/networking/routes/http-to-https-redirect.yaml", content, data)
-	if err != nil {
-		t.Fatalf("processTemplate() error: %v", err)
-	}
-
-	output := string(processed)
-
 	tests := []struct {
-		name     string
-		contains string
+		name      string
+		httpsPort int
+		wantPort  string
 	}{
-		{"kind", "kind: HTTPRoute"},
-		{"targets http listener", "sectionName: http"},
-		{"redirect filter type", "type: RequestRedirect"},
-		{"redirect to https", "scheme: https"},
-		{"301 status code", "statusCode: 301"},
-		{"targets nebari-gateway", "name: nebari-gateway"},
+		{"default port 443", 443, "port: 443"},
+		{"custom port", 8443, "port: 8443"},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(output, tt.contains) {
-				t.Errorf("expected %q in rendered redirect route, got:\n%s", tt.contains, output)
+			data := TemplateData{
+				Domain:    "test.example.com",
+				Provider:  "aws",
+				HTTPSPort: tt.httpsPort,
+			}
+
+			processed, err := processTemplate("manifests/networking/routes/http-to-https-redirect.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			checks := []struct {
+				name     string
+				contains string
+			}{
+				{"kind", "kind: HTTPRoute"},
+				{"targets http listener", "sectionName: http"},
+				{"redirect filter type", "type: RequestRedirect"},
+				{"redirect to https", "scheme: https"},
+				{"301 status code", "statusCode: 301"},
+				{"targets nebari-gateway", "name: nebari-gateway"},
+				{"redirect port", tt.wantPort},
+			}
+			for _, c := range checks {
+				if !strings.Contains(output, c.contains) {
+					t.Errorf("expected %q in rendered redirect route, got:\n%s", c.contains, output)
+				}
 			}
 		})
 	}
@@ -430,12 +448,62 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 			if !strings.Contains(output, "sectionName: https") {
 				t.Errorf("%s HTTPRoute should target sectionName: https, got:\n%s", tt.name, output)
 			}
+			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
 			if strings.Contains(output, "sectionName: http\n") {
 				t.Errorf("%s HTTPRoute should NOT target the http listener", tt.name)
 			}
 		})
 	}
 }
+
+func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	cfg := &config.NebariConfig{
+		Provider: "aws",
+		Domain:   "test.example.com",
+	}
+	settings := provider.InfraSettings{
+		StorageClass: "gp2",
+	}
+
+	mock := &mockGitClient{workDir: tmpDir}
+	err := WriteAllToGit(ctx, mock, cfg, settings)
+	if err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	redirectPath := filepath.Join(tmpDir, "manifests", "networking", "routes", "http-to-https-redirect.yaml")
+	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
+		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
+	}
+
+	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("failed to read redirect route: %v", err)
+	}
+	output := string(content)
+	if !strings.Contains(output, "statusCode: 301") {
+		t.Errorf("redirect route missing statusCode: 301, got:\n%s", output)
+	}
+	if !strings.Contains(output, "port: 443") {
+		t.Errorf("redirect route missing port: 443, got:\n%s", output)
+	}
+}
+
+// mockGitClient satisfies git.Client for tests that only need WorkDir().
+type mockGitClient struct {
+	workDir string
+}
+
+func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
+func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
+func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
+func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
+func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
+func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
+func (m *mockGitClient) Cleanup() error                                  { return nil }
 
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
