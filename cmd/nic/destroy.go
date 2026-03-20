@@ -186,7 +186,11 @@ func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error 
 
 	// Show provider-specific details
 	for key, value := range prov.Summary(cfg) {
-		fmt.Printf("   %s:%s%s\n", key, strings.Repeat(" ", 13-len(key)), value)
+		pad := 13 - len(key)
+		if pad < 1 {
+			pad = 1
+		}
+		fmt.Printf("   %s:%s%s\n", key, strings.Repeat(" ", pad), value)
 	}
 
 	fmt.Println("\n❌ This will permanently delete all resources and data.")

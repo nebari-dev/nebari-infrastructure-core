@@ -1,0 +1,40 @@
+project_name: my-nebari
+provider: hetzner
+domain: nebari.example.com
+
+hetzner_cloud:
+  location: ash
+  kubernetes_version: "1.32"
+  # Optional: prevent application pods from running on control-plane nodes.
+  # Defaults to true, which enables single-node clusters and makes better use
+  # of small Hetzner instances. Set to false for production clusters where you
+  # want dedicated masters that only run etcd and the Kubernetes API server.
+  # schedule_workloads_on_masters: false
+  node_groups:
+    master:
+      instance_type: cpx31
+      count: 1
+      master: true
+    workers:
+      instance_type: cpx31
+      count: 2
+  # Optional: provide your own SSH keys instead of auto-generated ones.
+  # If omitted, NIC generates an ed25519 key pair in ~/.cache/nic/hetzner-k3s/ssh/.
+  #
+  # IMPORTANT: The SSH key is required for all cluster operations (redeploy,
+  # destroy, scale). If you manage the cluster from multiple computers, either
+  # copy the auto-generated keys or configure your own keys here so the same
+  # key is available everywhere.
+  # ssh:
+  #   public_key_path: "~/.ssh/id_ed25519.pub"
+  #   private_key_path: "~/.ssh/id_ed25519"
+
+  # Optional: restrict SSH and API access (defaults to 0.0.0.0/0 if omitted)
+  # network:
+  #   ssh_allowed_cidrs:
+  #     - 203.0.113.0/24
+  #   api_allowed_cidrs:
+  #     - 203.0.113.0/24
+
+certificate:
+  type: selfsigned

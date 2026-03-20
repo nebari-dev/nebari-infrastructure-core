@@ -20,6 +20,8 @@ spec:
               value: "{{ .KeycloakAdminSecretName }}"
             - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
               value: "{{ .KeycloakNamespace }}"
+            - name: KEYCLOAK_ISSUER_CONTEXT_PATH
+              value: "{{ .KeycloakBasePath }}"
           resources:
             requests:
               cpu: 100m

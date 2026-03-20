@@ -48,6 +48,18 @@ linters:
           - gosec
         text: "G703"
 
+      # Hetzner provider: HTTP requests use hardcoded GitHub URLs or test-injected URLs
+      - path: pkg/provider/hetzner/
+        linters:
+          - gosec
+        text: "G107|G704"
+
+      # Hetzner provider: subprocess uses controlled binary path from our download cache
+      - path: pkg/provider/hetzner/cluster\.go
+        linters:
+          - gosec
+        text: "G204"
+
       # Temp file cleanup uses os.CreateTemp paths, not user input
       - path: pkg/helm/helm\.go
         linters:

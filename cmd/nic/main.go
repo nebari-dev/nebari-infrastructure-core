@@ -17,6 +17,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/hetzner"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/telemetry"
 )
@@ -69,6 +70,10 @@ func init() {
 
 	if err := registry.Register(ctx, "local", local.NewProvider()); err != nil {
 		log.Fatalf("Failed to register local provider: %v", err)
+	}
+
+	if err := registry.Register(ctx, "hetzner", hetzner.NewProvider()); err != nil {
+		log.Fatalf("Failed to register Hetzner provider: %v", err)
 	}
 
 	// Initialize DNS provider registry
