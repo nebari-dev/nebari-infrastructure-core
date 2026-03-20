@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -138,4 +139,12 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result["Project"] = gcpCfg.Project
 	result["Region"] = gcpCfg.Region
 	return result
+}
+
+// InfraSettings returns GCP-specific Kubernetes infrastructure settings.
+func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
+	return provider.InfraSettings{
+		StorageClass: "standard-rwo",
+		NeedsMetalLB: false,
+	}
 }

@@ -1,0 +1,102 @@
+package hetzner
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+const k3sReleasesURL = "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100"
+
+// ghRelease is the subset of GitHub release API response we need.
+type ghRelease struct {
+	TagName    string `json:"tag_name"`
+	Prerelease bool   `json:"prerelease"`
+}
+
+// resolveK3sVersion resolves a Kubernetes version (e.g., "1.32" or "1.32.0")
+// to a full k3s release tag (e.g., "v1.32.12+k3s1") by querying the GitHub API.
+// If version already contains "+k3s", it's returned as-is.
+// apiURL allows injecting a test server URL; pass "" to use the default GitHub API.
+//
+// Note: only the 100 most recent releases are fetched (no pagination).
+// Older Kubernetes versions may not resolve if there are 100+ newer releases.
+// Use an explicit k3s version string (e.g., "v1.28.5+k3s1") for older versions.
+func resolveK3sVersion(ctx context.Context, version string, apiURL string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("requested_version", version))
+
+	if strings.Contains(version, "+k3s") {
+		span.SetAttributes(attribute.String("resolved_version", version))
+		return version, nil
+	}
+
+	if apiURL == "" {
+		apiURL = k3sReleasesURL
+	}
+
+	normalized := strings.TrimPrefix(version, "v")
+	parts := strings.Split(normalized, ".")
+
+	var matchPrefix string
+	switch len(parts) {
+	case 2:
+		matchPrefix = fmt.Sprintf("v%s.%s.", parts[0], parts[1])
+	case 3:
+		matchPrefix = fmt.Sprintf("v%s.%s.%s+", parts[0], parts[1], parts[2])
+	default:
+		return "", fmt.Errorf("invalid kubernetes version format: %q (expected MAJOR.MINOR or MAJOR.MINOR.PATCH)", version)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch k3s releases: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // Best-effort close on read-only response
+
+	if resp.StatusCode != http.StatusOK {
+		err := fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		span.RecordError(err)
+		return "", err
+	}
+
+	const maxAPIResponseSize = 10 * 1024 * 1024 // 10 MB
+	var releases []ghRelease
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIResponseSize)).Decode(&releases); err != nil {
+		return "", fmt.Errorf("failed to decode k3s releases: %w", err)
+	}
+
+	for _, r := range releases {
+		if r.Prerelease {
+			continue
+		}
+		if strings.HasPrefix(r.TagName, matchPrefix) {
+			span.SetAttributes(attribute.String("resolved_version", r.TagName))
+			return r.TagName, nil
+		}
+	}
+
+	err = fmt.Errorf("no stable k3s release found for kubernetes version %q (try an explicit k3s version like 'v1.32.0+k3s1')", version)
+	span.RecordError(err)
+	return "", err
+}

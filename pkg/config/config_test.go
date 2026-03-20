@@ -10,59 +10,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-func TestIsValidProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{
-			name:     "aws is valid",
-			provider: "aws",
-			want:     true,
-		},
-		{
-			name:     "gcp is valid",
-			provider: "gcp",
-			want:     true,
-		},
-		{
-			name:     "azure is valid",
-			provider: "azure",
-			want:     true,
-		},
-		{
-			name:     "local is valid",
-			provider: "local",
-			want:     true,
-		},
-		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
-		},
-		{
-			name:     "unknown provider is invalid",
-			provider: "unknown",
-			want:     false,
-		},
-		{
-			name:     "AWS uppercase is invalid",
-			provider: "AWS",
-			want:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidProvider(%q) = %v, want %v", tt.provider, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsValidDNSProvider(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -276,13 +223,30 @@ project_name: test-project
 			errContains: "provider field is required",
 		},
 		{
-			name: "invalid provider",
+			name: "hetzner provider is accepted",
 			yaml: `
 project_name: test-project
-provider: invalid
+provider: hetzner
 `,
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Provider != "hetzner" {
+					t.Errorf("Provider = %q, want %q", cfg.Provider, "hetzner")
+				}
+			},
+		},
+		{
+			name: "unknown provider passes config validation",
+			yaml: `
+project_name: test-project
+provider: unknown-provider
+`,
+			wantErr: false,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Provider != "unknown-provider" {
+					t.Errorf("Provider = %q, want %q", cfg.Provider, "unknown-provider")
+				}
+			},
 		},
 		{
 			name: "invalid git_repository - missing url",
@@ -456,7 +420,8 @@ provider: aws
 	t.Run("wraps parsing errors with filename", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
-		if err := os.WriteFile(configFile, []byte("provider: invalid"), 0600); err != nil {
+		// Missing provider field triggers validation error
+		if err := os.WriteFile(configFile, []byte("project_name: test"), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
@@ -480,14 +445,16 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "valid minimal config",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid config with git_repository",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					Auth: git.AuthConfig{
@@ -498,6 +465,28 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:        "missing project_name",
+			config:      NebariConfig{},
+			wantErr:     true,
+			errContains: "project_name field is required",
+		},
+		{
+			name: "invalid project_name with path traversal",
+			config: NebariConfig{
+				ProjectName: "../../etc",
+			},
+			wantErr:     true,
+			errContains: "project_name",
+		},
+		{
+			name: "invalid project_name with dots",
+			config: NebariConfig{
+				ProjectName: "..sneaky",
+			},
+			wantErr:     true,
+			errContains: "project_name",
+		},
+		{
 			name: "missing provider",
 			config: NebariConfig{
 				ProjectName: "test",
@@ -506,17 +495,18 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name: "invalid provider",
+			name: "any provider name passes config validation",
 			config: NebariConfig{
-				Provider: "invalid",
+				ProjectName: "test",
+				Provider:    "any-provider-name",
 			},
-			wantErr:     true,
-			errContains: "invalid provider",
+			wantErr: false,
 		},
 		{
 			name: "valid config with DNS",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"cloudflare": map[string]any{"zone_name": "example.com"},
@@ -528,7 +518,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid DNS - no provider",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{},
 				},
@@ -539,7 +530,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid DNS provider name",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"notreal": map[string]any{"zone_name": "example.com"},
@@ -552,7 +544,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "old format dns_provider rejected",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				ProviderConfig: map[string]any{
 					"dns_provider": "cloudflare",
 				},
@@ -563,7 +556,8 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "invalid git_repository",
 			config: NebariConfig{
-				Provider: "aws",
+				ProjectName: "test-project",
+				Provider:    "aws",
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					// missing auth

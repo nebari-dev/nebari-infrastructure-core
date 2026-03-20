@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"time"
 
@@ -121,16 +122,12 @@ type ACMEConfig struct {
 	Server string `yaml:"server,omitempty"`
 }
 
-// ValidProviders lists the supported providers
-var ValidProviders = []string{"aws", "gcp", "azure", "local"}
+// safeProjectName matches alphanumeric strings with hyphens and underscores.
+// Used to validate ProjectName before it is used as a filesystem path component.
+var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // ValidDNSProviders lists the supported DNS providers
 var ValidDNSProviders = []string{"cloudflare"}
-
-// IsValidProvider checks if the provider string is valid
-func IsValidProvider(provider string) bool {
-	return slices.Contains(ValidProviders, provider)
-}
 
 // IsValidDNSProvider checks if the DNS provider string is valid
 func IsValidDNSProvider(provider string) bool {
@@ -145,13 +142,20 @@ func IsValidDNSProvider(provider string) bool {
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate() error {
+	if c.ProjectName == "" {
+		return fmt.Errorf("project_name field is required")
+	}
+	if !safeProjectName.MatchString(c.ProjectName) {
+		return fmt.Errorf("project_name %q contains invalid characters (must start with alphanumeric and contain only alphanumeric, hyphens, or underscores)", c.ProjectName)
+	}
+
 	if c.Provider == "" {
 		return fmt.Errorf("provider field is required")
 	}
 
-	if !IsValidProvider(c.Provider) {
-		return fmt.Errorf("invalid provider %q, must be one of: %v", c.Provider, ValidProviders)
-	}
+	// Provider name validation is handled by the registry in CLI commands
+	// (registry.Get returns an error for unknown providers). Config.Validate
+	// only checks that the field is non-empty.
 
 	// Check for old-format dns_provider field
 	if _, ok := c.ProviderConfig["dns_provider"]; ok {
