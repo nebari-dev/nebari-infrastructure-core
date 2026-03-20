@@ -424,6 +424,12 @@ func TestLandingPageTemplate(t *testing.T) {
 			if !strings.Contains(output, "hostname: \"test.example.com\"") {
 				t.Error("expected hostname in rendered output")
 			}
+			// KeycloakAdminSecretNamespace is a new field; verify it renders to the
+			// expected value and not an empty string (which a typo in the template
+			// field name would silently produce).
+			if !strings.Contains(output, "adminSecretNamespace: \"keycloak\"") {
+				t.Error("expected adminSecretNamespace 'keycloak' in rendered output")
+			}
 			// Ensure no unresolved template placeholders remain
 			if strings.Contains(output, "{{") {
 				t.Errorf("rendered template still contains unresolved placeholders:\n%s", output)

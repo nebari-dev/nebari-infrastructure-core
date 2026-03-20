@@ -122,6 +122,15 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	// Only set when a real domain is configured. When no domain is provided
 	// (e.g. cloud deployments using a bare LoadBalancer IP), KeycloakIssuerURL
 	// is left empty and KEYCLOAK_ISSUER_URL is not injected into workloads.
+	//
+	// NOTE: The nebari-landingpage template uses KeycloakIssuerURL to construct
+	// oidcIssuerUrl for oauth2-proxy (rendered as "<KeycloakIssuerURL>/realms/<realm>").
+	// If KeycloakIssuerURL is empty this collapses to a relative path like
+	// "/realms/nebari", which oauth2-proxy would reject. In practice this
+	// function defaults Domain to "nebari.local" (see above), so
+	// KeycloakIssuerURL is always populated through normal code paths. However,
+	// if bare-LB-IP deployments (cfg.Domain == "") are ever supported, the
+	// template will need a guard or a separate value for the OIDC issuer URL.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
 	}
