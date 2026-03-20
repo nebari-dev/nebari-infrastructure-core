@@ -75,7 +75,7 @@ flowchart TD
 
   subgraph CP["Cloud Provider"]
     direction LR
-    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ k3s["Local K3s"]
+    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ hz["Hetzner K3s"] ~~~ k3s["Local K3s"]
   end
 
   SP --> NO --> FS --> K8 --> CP
@@ -116,7 +116,7 @@ Every NIC deployment includes a landing page where users discover and access all
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | **Opinionated Defaults**      | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices               |
 | **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing                       |
-| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), and local (K3s) from the same config format                               |
+| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), Hetzner (K3s), and local (K3s) from the same config format                |
 | **GitOps Native**             | ArgoCD manages all foundational software with dependency ordering and health checks                          |
 | **OpenTelemetry Native**      | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
 | **SSO Everywhere**            | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically                  |
@@ -242,6 +242,7 @@ NIC uses a YAML configuration file. See the `examples/` directory for sample con
 - `examples/aws-existing.yaml` - Deploy to an existing EKS cluster
 - `examples/gcp-config.yaml` - GCP/GKE configuration
 - `examples/azure-config.yaml` - Azure/AKS configuration
+- `examples/hetzner-config.yaml` - Hetzner Cloud/K3s configuration
 - `examples/local-config.yaml` - Local Kind/K3s configuration
 
 ### Environment Variables
@@ -329,6 +330,7 @@ pkg/
   │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
   │   ├── gcp/        GCP provider
   │   ├── azure/      Azure provider
+  │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
   │   └── local/      Local Kind/K3s provider
   ├── telemetry/      OpenTelemetry setup
   └── tofu/           OpenTofu binary management and execution

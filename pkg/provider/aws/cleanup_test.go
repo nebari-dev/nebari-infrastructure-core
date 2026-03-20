@@ -514,6 +514,7 @@ func TestDeleteSecurityGroupWithRetry(t *testing.T) {
 
 	t.Run("respects context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		attempts := 0
 		mock := &mockEC2Client{
 			DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
