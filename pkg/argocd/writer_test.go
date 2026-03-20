@@ -104,18 +104,19 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name     string
-		settings provider.InfraSettings
-		wantSC   string
-		wantLBA  int
-		wantKBP  string
-		wantMLBA string
+		name                    string
+		settings                provider.InfraSettings
+		wantStorageClass        string
+		wantLBAnnotationCount   int
+		wantKeycloakBasePath    string
+		wantMetalLBAddressRange string
+		wantHTTPSPort           int
 	}{
 		{
-			name:     "aws defaults",
-			settings: provider.InfraSettings{StorageClass: "gp2"},
-			wantSC:   "gp2",
-			wantLBA:  0,
+			name:             "aws defaults",
+			settings:         provider.InfraSettings{StorageClass: "gp2"},
+			wantStorageClass: "gp2",
+			wantHTTPSPort:    443,
 		},
 		{
 			name: "hetzner with annotations",
@@ -123,8 +124,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			},
-			wantSC:  "hcloud-volumes",
-			wantLBA: 1,
+			wantStorageClass:      "hcloud-volumes",
+			wantLBAnnotationCount: 1,
+			wantHTTPSPort:         443,
 		},
 		{
 			name: "local with MetalLB",
@@ -133,28 +135,38 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 				NeedsMetalLB:       true,
 				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
 			},
-			wantSC:   "standard",
-			wantMLBA: "192.168.1.100-192.168.1.110",
+			wantStorageClass:        "standard",
+			wantMetalLBAddressRange: "192.168.1.100-192.168.1.110",
+			wantHTTPSPort:           443,
+		},
+		{
+			name: "custom HTTPS port",
+			settings: provider.InfraSettings{
+				StorageClass: "standard",
+				HTTPSPort:    8443,
+			},
+			wantStorageClass: "standard",
+			wantHTTPSPort:    8443,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
 			data := NewTemplateData(cfg, tt.settings)
-			if data.StorageClass != tt.wantSC {
-				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantSC)
+			if data.StorageClass != tt.wantStorageClass {
+				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantStorageClass)
 			}
-			if len(data.LoadBalancerAnnotations) != tt.wantLBA {
-				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBA)
+			if len(data.LoadBalancerAnnotations) != tt.wantLBAnnotationCount {
+				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBAnnotationCount)
 			}
-			if data.KeycloakBasePath != tt.wantKBP {
-				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKBP)
+			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
+				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.MetalLBAddressRange != tt.wantMLBA {
-				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMLBA)
+			if data.MetalLBAddressRange != tt.wantMetalLBAddressRange {
+				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMetalLBAddressRange)
 			}
-			if data.HTTPSPort != 443 {
-				t.Errorf("HTTPSPort = %d, want 443", data.HTTPSPort)
+			if data.HTTPSPort != tt.wantHTTPSPort {
+				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
 			}
 		})
 	}

@@ -70,11 +70,16 @@ type TemplateData struct {
 func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
+	httpsPort := settings.HTTPSPort
+	if httpsPort == 0 {
+		httpsPort = 443
+	}
+
 	data := TemplateData{
 		Domain:                  cfg.Domain,
 		Provider:                cfg.Provider,
 		StorageClass:            settings.StorageClass,
-		HTTPSPort:               443,
+		HTTPSPort:               httpsPort,
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
