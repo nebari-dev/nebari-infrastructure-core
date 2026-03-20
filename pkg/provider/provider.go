@@ -33,9 +33,10 @@ type InfraSettings struct {
 	// while the modern Bitnami chart serves at the root.
 	KeycloakBasePath string
 
-	// HTTPSPort is the port used for HTTPS redirects and the Gateway's HTTPS listener.
-	// Defaults to 443 when zero. Providers running behind a non-standard HTTPS port
-	// (e.g., development setups on 8443) can override this.
+	// HTTPSPort is the port for the Gateway's HTTPS listener and HTTP-to-HTTPS redirects.
+	// Leave as 0 for the standard port 443. NewTemplateData normalizes 0 to 443.
+	// Providers running behind a non-standard HTTPS port (e.g., development on 8443)
+	// can override this.
 	HTTPSPort int
 }
 

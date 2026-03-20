@@ -1,4 +1,6 @@
 # Catch-all redirect from HTTP (port 80) to HTTPS.
+# All Nebari services must be served over HTTPS. This route has no hostnames
+# filter, so it applies to every hostname on the http listener.
 #
 # ACME HTTP-01 challenges (/.well-known/acme-challenge/) are NOT blocked by
 # this redirect. Cert-manager creates a temporary HTTPRoute with a more specific

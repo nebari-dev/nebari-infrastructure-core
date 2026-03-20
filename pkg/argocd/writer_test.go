@@ -434,28 +434,40 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 }
 
 func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
-	tests := []struct {
-		name     string
-		template string
-	}{
-		{"argocd", "templates/manifests/networking/routes/argocd-httproute.yaml"},
-		{"keycloak", "templates/manifests/networking/routes/keycloak-httproute.yaml"},
+	// Dynamically discover all route templates so new routes are automatically covered.
+	routeDir := "templates/manifests/networking/routes"
+	entries, err := templates.ReadDir(routeDir)
+	if err != nil {
+		t.Fatalf("failed to read routes directory: %v", err)
 	}
 
 	data := TemplateData{
 		Domain:              "test.example.com",
 		Provider:            "aws",
+		HTTPSPort:           443,
 		KeycloakServiceName: "keycloak-keycloakx-http",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content, err := templates.ReadFile(tt.template)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		templatePath := routeDir + "/" + entry.Name()
+
+		// The redirect route targets http; all other routes must target https.
+		if entry.Name() == "http-to-https-redirect.yaml" {
+			continue
+		}
+
+		t.Run(name, func(t *testing.T) {
+			content, err := templates.ReadFile(templatePath)
 			if err != nil {
-				t.Fatalf("failed to read %s template: %v", tt.name, err)
+				t.Fatalf("failed to read %s: %v", templatePath, err)
 			}
 
-			processed, err := processTemplate(tt.template, content, data)
+			processed, err := processTemplate(templatePath, content, data)
 			if err != nil {
 				t.Fatalf("processTemplate() error: %v", err)
 			}
@@ -463,11 +475,11 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 			output := string(processed)
 
 			if !strings.Contains(output, "sectionName: https") {
-				t.Errorf("%s HTTPRoute should target sectionName: https, got:\n%s", tt.name, output)
+				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
 			}
 			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
 			if strings.Contains(output, "sectionName: http\n") {
-				t.Errorf("%s HTTPRoute should NOT target the http listener", tt.name)
+				t.Errorf("%s should NOT target the http listener", name)
 			}
 		})
 	}
