@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -113,6 +114,15 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		if err := confirmDestruction(cfg, prov); err != nil {
 			span.RecordError(err)
 			slog.Info("Destruction cancelled by user")
+			return err
+		}
+	}
+
+	// Validate DNS credentials early, before any infrastructure operations
+	if cfg.DNS != nil {
+		if err := validateDNSCredentials(ctx, cfg); err != nil {
+			span.RecordError(err)
+			slog.Error("DNS validation failed", "error", err)
 			return err
 		}
 	}

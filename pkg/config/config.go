@@ -102,6 +102,19 @@ func (d *DNSConfig) ProviderConfig() map[string]any {
 	return nil
 }
 
+// Single returns the sole configured DNS provider name and its config map.
+// Returns an error if DNS is nil or does not contain exactly one provider.
+// This is a convenience helper for use in CLI command handlers.
+func (d *DNSConfig) Single() (string, map[string]any, error) {
+	if d == nil {
+		return "", nil, fmt.Errorf("no DNS configuration present")
+	}
+	if err := d.Validate(); err != nil {
+		return "", nil, err
+	}
+	return d.ProviderName(), d.ProviderConfig(), nil
+}
+
 // CertificateConfig holds TLS certificate configuration
 type CertificateConfig struct {
 	// Type is the certificate type: "selfsigned" or "letsencrypt"
