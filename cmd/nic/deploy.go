@@ -15,6 +15,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	providerPkg "github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
@@ -128,6 +129,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Provider selected", "provider", provider.Name())
 
+	// Validate DNS credentials early, before any infrastructure operations
+	if cfg.DNS != nil {
+		if err := validateDNSCredentials(ctx, cfg); err != nil {
+			span.RecordError(err)
+			slog.Error("DNS validation failed", "error", err)
+			return err
+		}
+	}
+
 	// Deploy infrastructure
 	if err := provider.Deploy(ctx, cfg); err != nil {
 		span.RecordError(err)
@@ -222,6 +232,29 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		printDNSGuidance(cfg, lbEndpoint)
 	}
 
+	return nil
+}
+
+// validateDNSCredentials runs a full credential check for the configured DNS
+// provider. Called early in deploy and destroy to surface errors before any
+// tofu operations begin.
+func validateDNSCredentials(ctx context.Context, cfg *config.NebariConfig) error {
+	providerName, dnsConfig, err := cfg.DNS.Single()
+	if err != nil {
+		return fmt.Errorf("DNS configuration error: %w", err)
+	}
+
+	dp, err := dnsRegistry.Get(ctx, providerName)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("Validating DNS credentials", "dns_provider", providerName)
+	if err := dp.Validate(ctx, cfg.Domain, dnsConfig, dnsprovider.ValidateOptions{CheckCreds: true}); err != nil {
+		return fmt.Errorf("DNS validation failed: %w", err)
+	}
+
+	slog.Info("DNS credentials validated successfully", "dns_provider", providerName)
 	return nil
 }
 

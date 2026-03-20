@@ -22,6 +22,10 @@ func (m *mockDNSProvider) DestroyRecords(ctx context.Context, domain string, dns
 	return nil
 }
 
+func (m *mockDNSProvider) Validate(ctx context.Context, domain string, dnsConfig map[string]any, opts ValidateOptions) error {
+	return nil
+}
+
 func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
 	if registry == nil || registry.providers == nil {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 )
 
 // mockClient implements CloudflareClient for testing.
@@ -424,5 +426,130 @@ func wrapUpdate(original func(context.Context, string, string, string, string, s
 			return original(ctx, zoneID, recordID, name, recordType, content, ttl)
 		}
 		return nil
+	}
+}
+
+func TestValidate(t *testing.T) {
+	baseDNS := map[string]any{"zone_name": "example.com"}
+
+	tests := []struct {
+		name           string
+		domain         string
+		dnsConfig      map[string]any
+		envToken       string
+		checkCreds     bool
+		mock           *mockClient
+		wantErr        bool
+		wantErrContain string
+	}{
+		// --- Config-only phase (checkCreds: false) ---
+		{
+			name:       "valid config, no creds check",
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
+			checkCreds: false,
+			mock:       &mockClient{},
+			wantErr:    false,
+		},
+		{
+			name:           "missing zone_name",
+			domain:         "nebari.example.com",
+			dnsConfig:      map[string]any{},
+			checkCreds:     false,
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "zone_name",
+		},
+		{
+			name:           "nil dns config",
+			domain:         "nebari.example.com",
+			dnsConfig:      nil,
+			checkCreds:     false,
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "dns configuration is missing",
+		},
+		{
+			name:           "domain not within zone",
+			domain:         "nebari.otherdomain.com",
+			dnsConfig:      map[string]any{"zone_name": "example.com"},
+			checkCreds:     false,
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "not within zone",
+		},
+		{
+			name:       "domain equal to zone is valid",
+			domain:     "example.com",
+			dnsConfig:  map[string]any{"zone_name": "example.com"},
+			checkCreds: false,
+			mock:       &mockClient{},
+			wantErr:    false,
+		},
+		// --- Creds phase (checkCreds: true) ---
+		{
+			name:           "missing API token",
+			domain:         "nebari.example.com",
+			dnsConfig:      baseDNS,
+			envToken:       "", // intentionally unset
+			checkCreds:     true,
+			mock:           &mockClient{},
+			wantErr:        true,
+			wantErrContain: "CLOUDFLARE_API_TOKEN",
+		},
+		{
+			name:       "zone not accessible with token",
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
+			envToken:   "bad-token",
+			checkCreds: true,
+			mock: &mockClient{
+				resolveZoneIDFn: func(_ context.Context, _ string) (string, error) {
+					return "", fmt.Errorf("zone not found")
+				},
+			},
+			wantErr:        true,
+			wantErrContain: "not accessible",
+		},
+		{
+			name:       "valid config and credentials",
+			domain:     "nebari.example.com",
+			dnsConfig:  baseDNS,
+			envToken:   "valid-token",
+			checkCreds: true,
+			mock: &mockClient{
+				resolveZoneIDFn: func(_ context.Context, _ string) (string, error) {
+					return "zone-abc123", nil
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.envToken != "" {
+				t.Setenv("CLOUDFLARE_API_TOKEN", tc.envToken)
+			} else {
+				t.Setenv("CLOUDFLARE_API_TOKEN", "")
+			}
+
+			provider := NewProviderForTesting(tc.mock)
+			opts := dnsprovider.ValidateOptions{CheckCreds: tc.checkCreds}
+			err := provider.Validate(context.Background(), tc.domain, tc.dnsConfig, opts)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrContain)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrContain) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrContain, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
