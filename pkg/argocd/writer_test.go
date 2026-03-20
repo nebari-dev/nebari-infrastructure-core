@@ -194,8 +194,9 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 
 func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	data := TemplateData{
-		Domain:   "test.example.com",
-		Provider: "hetzner",
+		Domain:    "test.example.com",
+		Provider:  "hetzner",
+		HTTPSPort: 443,
 		LoadBalancerAnnotations: map[string]string{
 			"load-balancer.hetzner.cloud/location": "ash",
 		},
@@ -228,12 +229,16 @@ func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	if !strings.Contains(output, "kind: Gateway") {
 		t.Error("expected 'kind: Gateway' in rendered output")
 	}
+	if !strings.Contains(output, "port: 443") {
+		t.Errorf("expected HTTPS listener port 443 in rendered gateway, got:\n%s", output)
+	}
 }
 
 func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:            "test.example.com",
 		Provider:          "aws",
+		HTTPSPort:         443,
 		CertificateIssuer: "selfsigned-issuer",
 	}
 
@@ -501,6 +506,9 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 	if !strings.Contains(output, "port: 443") {
 		t.Errorf("redirect route missing port: 443, got:\n%s", output)
+	}
+	if !strings.Contains(output, "sectionName: http") {
+		t.Errorf("redirect route should target sectionName: http, got:\n%s", output)
 	}
 }
 
