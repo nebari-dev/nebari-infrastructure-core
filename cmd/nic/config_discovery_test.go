@@ -161,7 +161,9 @@ func TestFileExists_ExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	if !fileExists(f.Name()) {
 		t.Errorf("fileExists(%q) = false, want true", f.Name())

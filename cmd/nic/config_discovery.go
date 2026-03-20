@@ -48,7 +48,10 @@ func resolveConfigFile(flagValue string) (string, error) {
 // permission errors (or other OS-level access problems) with a clear message
 // before any parsing is attempted.
 func checkReadable(path string) error {
-	f, err := os.Open(path)
+	// G304: path is intentionally user-supplied (CLI flag, env var, or cwd lookup).
+	// The purpose of this function is precisely to open that path as a pre-flight
+	// check, so the variable file inclusion is expected.
+	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("cannot read config file %q: %w", path, err)
 	}
