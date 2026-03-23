@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nebari-landingpage
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: foundational
+
+  source:
+    repoURL: https://github.com/nebari-dev/nebari-landing
+    targetRevision: v0.1.0-alpha.1
+    path: charts/nebari-landing
+    helm:
+      releaseName: nebari-landing
+      values: |
+        frontend:
+          keycloak:
+            # External public Keycloak URL - used by the browser for OIDC login.
+            url: "{{ .KeycloakIssuerURL }}"
+            realm: "{{ .KeycloakRealm }}"
+          oauth2Proxy:
+            oidcIssuerUrl: "{{ .KeycloakIssuerURL }}/realms/{{ .KeycloakRealm }}"
+
+        webapi:
+          keycloak:
+            # In-cluster URL for JWK fetching (fast, no TLS hop).
+            url: "{{ .KeycloakServiceURL }}"
+            realm: "{{ .KeycloakRealm }}"
+            # External public URL for validating the iss claim in tokens.
+            issuerUrl: "{{ .KeycloakIssuerURL }}"
+            adminSecretName: "{{ .KeycloakAdminSecretName }}"
+            adminSecretNamespace: "{{ .KeycloakAdminSecretNamespace }}"
+
+        # Use NebariApp CRs so the nebari-operator manages HTTPRoutes.
+        nebariApp:
+          enabled: true
+
+        httpRoute:
+          hostname: "{{ .Domain }}"
+          tls: true
+
+        # Pin Redis auth to the existing secret so ArgoCD's selfHeal sync does
+        # not regenerate the password. Without this, the Bitnami subchart's
+        # helm lookup() returns nil during ArgoCD template rendering (helm
+        # template has no cluster access), generating a new random password on
+        # every sync. Redis reloads the new password immediately from its
+        # mounted secret file, but the webapi pod keeps the old password from
+        # its startup env var - causing WRONGPASS ~every 30 min.
+        redis:
+          auth:
+            existingSecret: "nebari-landing-redis"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nebari-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # The NebariApp CRD is installed by the nebari-operator (wave 5).
+      # ArgoCD dry-runs all resources before syncing, so it reports NebariApp
+      # as missing even though wave ordering guarantees the CRD will exist by
+      # the time this app (wave 6) actually applies. Skip the dry-run for any
+      # resource whose CRD isn't registered yet so the sync doesn't fail on the
+      # preflight check.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
