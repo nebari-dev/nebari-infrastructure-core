@@ -504,78 +504,72 @@ func (m *mockGitClient) Cleanup() error                                  { retur
 // Verify mockGitClient implements git.Client at compile time.
 var _ git.Client = (*mockGitClient)(nil)
 
-func TestWriteAllToGit_NoOverwriteCreatesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	client := &mockGitClient{workDir: tmpDir}
-	cfg := &config.NebariConfig{
-		Provider: "local",
-		Domain:   "test.local",
-		GitRepository: &git.Config{
-			URL:    "https://github.com/test/repo.git",
-			Branch: "main",
+func TestWriteAllToGit_NoOverwrite(t *testing.T) {
+	tests := []struct {
+		name           string
+		preCreate      bool   // Whether to pre-create the file
+		preContent     string // Content to write if preCreate is true
+		wantContains   string // Expected substring in final content
+		shouldPreserve bool   // If true, original content should be preserved
+	}{
+		{
+			name:         "file absent - should create",
+			preCreate:    false,
+			wantContains: "OpenTelemetry Collector overrides",
+		},
+		{
+			name:           "file present - should preserve",
+			preCreate:      true,
+			preContent:     "# Custom pack overrides\nconfig:\n  exporters:\n    otlphttp/loki:\n      endpoint: http://loki:3100/otlp\n",
+			wantContains:   "Custom pack overrides",
+			shouldPreserve: true,
 		},
 	}
 
-	ctx := context.Background()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			client := &mockGitClient{workDir: tmpDir}
+			cfg := &config.NebariConfig{
+				Provider: "local",
+				Domain:   "test.local",
+				GitRepository: &git.Config{
+					URL:    "https://github.com/test/repo.git",
+					Branch: "main",
+				},
+			}
+			ctx := context.Background()
 
-	// First call should create the _nooverwrite_ file
-	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
-	if err != nil {
-		t.Fatalf("WriteAllToGit() error: %v", err)
-	}
+			overridesDir := filepath.Join(tmpDir, "manifests", "opentelemetry-collector")
+			overridesPath := filepath.Join(overridesDir, "overrides.yaml")
 
-	// The _nooverwrite_overrides.yaml should have been written as overrides.yaml
-	overridesPath := filepath.Join(tmpDir, "manifests", "opentelemetry-collector", "overrides.yaml")
-	content, err := os.ReadFile(filepath.Clean(overridesPath))
-	if err != nil {
-		t.Fatalf("overrides.yaml should exist after first WriteAllToGit, got error: %v", err)
-	}
+			if tt.preCreate {
+				if err := os.MkdirAll(overridesDir, 0750); err != nil {
+					t.Fatalf("failed to create directory: %v", err)
+				}
+				if err := os.WriteFile(overridesPath, []byte(tt.preContent), 0600); err != nil {
+					t.Fatalf("failed to write pre-existing file: %v", err)
+				}
+			}
 
-	if !strings.Contains(string(content), "OpenTelemetry Collector overrides") {
-		t.Error("overrides.yaml should contain the default content")
-	}
-}
+			err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
+			if err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
 
-func TestWriteAllToGit_NoOverwritePreservesExisting(t *testing.T) {
-	tmpDir := t.TempDir()
-	client := &mockGitClient{workDir: tmpDir}
-	cfg := &config.NebariConfig{
-		Provider: "local",
-		Domain:   "test.local",
-		GitRepository: &git.Config{
-			URL:    "https://github.com/test/repo.git",
-			Branch: "main",
-		},
-	}
+			content, err := os.ReadFile(filepath.Clean(overridesPath))
+			if err != nil {
+				t.Fatalf("overrides.yaml should exist: %v", err)
+			}
 
-	ctx := context.Background()
+			if !strings.Contains(string(content), tt.wantContains) {
+				t.Errorf("overrides.yaml should contain %q, got: %q", tt.wantContains, string(content))
+			}
 
-	// Pre-create the overrides file with custom content
-	overridesDir := filepath.Join(tmpDir, "manifests", "opentelemetry-collector")
-	if err := os.MkdirAll(overridesDir, 0750); err != nil {
-		t.Fatalf("failed to create directory: %v", err)
-	}
-
-	customContent := []byte("# Custom pack overrides\nconfig:\n  exporters:\n    otlphttp/loki:\n      endpoint: http://loki:3100/otlp\n")
-	overridesPath := filepath.Join(overridesDir, "overrides.yaml")
-	if err := os.WriteFile(overridesPath, customContent, 0600); err != nil {
-		t.Fatalf("failed to write custom overrides: %v", err)
-	}
-
-	// WriteAllToGit should NOT overwrite the existing file
-	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
-	if err != nil {
-		t.Fatalf("WriteAllToGit() error: %v", err)
-	}
-
-	// Verify the file still has the custom content
-	content, err := os.ReadFile(filepath.Clean(overridesPath))
-	if err != nil {
-		t.Fatalf("failed to read overrides.yaml: %v", err)
-	}
-
-	if string(content) != string(customContent) {
-		t.Errorf("overrides.yaml was overwritten.\ngot:  %q\nwant: %q", string(content), string(customContent))
+			if tt.shouldPreserve && string(content) != tt.preContent {
+				t.Errorf("overrides.yaml was overwritten.\ngot:  %q\nwant: %q", string(content), tt.preContent)
+			}
+		})
 	}
 }
 

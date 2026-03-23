@@ -263,7 +263,10 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		// Get the relative path from templates/
 		relPath := strings.TrimPrefix(path, templateDir+"/")
 
-		// Skip hidden files and underscore-prefixed files (except _nooverwrite_ files)
+		// Skip convention:
+		// - Hidden files/dirs (prefix ".") are always skipped
+		// - Underscore files/dirs (prefix "_") are skipped, EXCEPT "_nooverwrite_" files
+		//   which are written once if absent and preserved thereafter
 		if strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return fs.SkipDir
@@ -287,18 +290,18 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 
 		destPath := filepath.Join(workDir, relPath)
 
-		// Handle _nooverwrite_ prefix: strip prefix for destination, skip if file already exists
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0750)
+		}
+
+		// Handle _nooverwrite_ prefix: strip prefix for destination, skip if file already exists.
+		// This convention applies only to files (directories return above).
 		noOverwrite := false
 		if strings.HasPrefix(d.Name(), "_nooverwrite_") {
 			noOverwrite = true
 			strippedName := strings.TrimPrefix(d.Name(), "_nooverwrite_")
 			destPath = filepath.Join(filepath.Dir(destPath), strippedName)
 			relPath = filepath.Join(filepath.Dir(relPath), strippedName)
-		}
-
-		if d.IsDir() {
-			// Create directory
-			return os.MkdirAll(destPath, 0750)
 		}
 
 		// For _nooverwrite_ files, skip if the destination already exists

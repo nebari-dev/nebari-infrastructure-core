@@ -73,20 +73,24 @@ config:
   exporters:
     debug:
       verbosity: detailed
+    otlp:
+      endpoint: "localhost:4317"
+      tls:
+        insecure: true
   service:
     pipelines:
       metrics:
         receivers: [otlp, prometheus]
         processors: [memory_limiter, batch]
-        exporters: [debug]
+        exporters: [debug, otlp]
       logs:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [debug]
+        exporters: [debug, otlp]
       traces:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [debug]
+        exporters: [debug, otlp]
 ports:
   otlp:
     enabled: true
