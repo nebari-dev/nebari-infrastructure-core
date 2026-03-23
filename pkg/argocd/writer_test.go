@@ -519,7 +519,7 @@ func TestWriteAllToGit_NoOverwriteCreatesFile(t *testing.T) {
 	ctx := context.Background()
 
 	// First call should create the _nooverwrite_ file
-	err := WriteAllToGit(ctx, client, cfg, "")
+	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestWriteAllToGit_NoOverwritePreservesExisting(t *testing.T) {
 	}
 
 	// WriteAllToGit should NOT overwrite the existing file
-	err := WriteAllToGit(ctx, client, cfg, "")
+	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
@@ -594,7 +594,7 @@ func TestWriteAllToGit_RendersOtelTemplate(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := WriteAllToGit(ctx, client, cfg, "")
+	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
