@@ -59,11 +59,13 @@ type TemplateData struct {
 	KeycloakBasePath string
 
 	// Keycloak configuration
-	KeycloakNamespace       string // Namespace where Keycloak is deployed (e.g., "keycloak")
-	KeycloakServiceName     string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
-	KeycloakServiceURL      string // In-cluster URL for Keycloak (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
-	KeycloakRealm           string // Keycloak realm name (e.g., "nebari")
-	KeycloakAdminSecretName string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakNamespace            string // Namespace where Keycloak is deployed (e.g., "keycloak")
+	KeycloakServiceName          string // Kubernetes service name for Keycloak (e.g., "keycloak-keycloakx-http")
+	KeycloakServiceURL           string // In-cluster base URL for the Keycloak service (e.g., "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080")
+	KeycloakIssuerURL            string // External public URL for validating the iss claim in tokens (e.g., "https://keycloak.nebari.example.com" or with base path "https://keycloak.nebari.example.com/auth")
+	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
+	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
 }
 
 // NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
@@ -84,11 +86,13 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 
-		KeycloakNamespace:       KeycloakDefaultNamespace,
-		KeycloakServiceName:     keycloakServiceName,
-		KeycloakServiceURL:      fmt.Sprintf("http://%s.%s.svc.cluster.local:8080%s", keycloakServiceName, KeycloakDefaultNamespace, settings.KeycloakBasePath),
-		KeycloakRealm:           "nebari",
-		KeycloakAdminSecretName: KeycloakDefaultAdminSecretName,
+		KeycloakNamespace:            KeycloakDefaultNamespace,
+		KeycloakServiceName:          keycloakServiceName,
+		KeycloakServiceURL:           fmt.Sprintf("http://%s.%s.svc.cluster.local:8080%s", keycloakServiceName, KeycloakDefaultNamespace, settings.KeycloakBasePath),
+		KeycloakIssuerURL:            "", // set after Domain is resolved below
+		KeycloakRealm:                "nebari",
+		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
+		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
 	}
 
 	// Set git repository info
@@ -119,6 +123,25 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	// Default domain if not set
 	if data.Domain == "" {
 		data.Domain = "nebari.local"
+	}
+
+	// External Keycloak URL - what Keycloak embeds in the iss claim of tokens.
+	// Clients inside the cluster fetch JWKs via KeycloakServiceURL (in-cluster)
+	// and validate the iss claim against this public URL.
+	// Only set when a real domain is configured. When no domain is provided
+	// (e.g. cloud deployments using a bare LoadBalancer IP), KeycloakIssuerURL
+	// is left empty and KEYCLOAK_ISSUER_URL is not injected into workloads.
+	//
+	// NOTE: The nebari-landingpage template uses KeycloakIssuerURL to construct
+	// oidcIssuerUrl for oauth2-proxy (rendered as "<KeycloakIssuerURL>/realms/<realm>").
+	// If KeycloakIssuerURL is empty this collapses to a relative path like
+	// "/realms/nebari", which oauth2-proxy would reject. In practice this
+	// function defaults Domain to "nebari.local" (see above), so
+	// KeycloakIssuerURL is always populated through normal code paths. However,
+	// if bare-LB-IP deployments (cfg.Domain == "") are ever supported, the
+	// template will need a guard or a separate value for the OIDC issuer URL.
+	if cfg.Domain != "" {
+		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
 	}
 
 	return data
