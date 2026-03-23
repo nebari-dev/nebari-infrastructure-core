@@ -1,6 +1,10 @@
 <p align="center">
   <a href="https://nebari.dev">
-    <img src="docs/assets/nebari-logo.svg" alt="Nebari" width="400">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nebari-dev/nebari-design/main/logo-mark/horizontal/standard/Nebari-Logo-Horizontal-Lockup-White-text.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/nebari-dev/nebari-design/main/logo-mark/horizontal/standard/Nebari-Logo-Horizontal-Lockup.png">
+      <img alt="Nebari" src="docs/Nebari-Logo-Horizontal-Lockup.png" width="300">
+    </picture>
   </a>
 </p>
 
