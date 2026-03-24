@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -39,6 +40,60 @@ func NewProviderForTesting(client CloudflareClient) *Provider {
 // Name returns the provider name.
 func (p *Provider) Name() string {
 	return "cloudflare"
+}
+
+// Validate checks the Cloudflare DNS configuration.
+//
+// Config phase (always runs):
+//   - zone_name is present and non-empty
+//   - domain is a subdomain of (or equal to) zone_name
+//
+// Creds phase (only when opts.CheckCreds == true):
+//   - CLOUDFLARE_API_TOKEN environment variable is set
+//   - Token can resolve the zone ID from the Cloudflare API
+func (p *Provider) Validate(ctx context.Context, domain string, dnsConfig map[string]any, opts dnsprovider.ValidateOptions) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cloudflare.Validate")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("domain", domain),
+		attribute.Bool("check_creds", opts.CheckCreds),
+	)
+
+	// --- Config phase ---
+	cfCfg, err := extractCloudflareConfig(domain, dnsConfig)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	span.SetAttributes(attribute.String("zone_name", cfCfg.ZoneName))
+
+	if !opts.CheckCreds {
+		return nil
+	}
+
+	// --- Creds phase ---
+	apiToken, err := getAPIToken()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	client, err := p.getClient(apiToken)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	zoneID, err := client.ResolveZoneID(ctx, cfCfg.ZoneName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("DNS credential check failed: zone %q not accessible with provided token: %w", cfCfg.ZoneName, err)
+	}
+	span.SetAttributes(attribute.String("zone_id", zoneID))
+
+	return nil
 }
 
 // ProvisionRecords creates or updates DNS records for the deployment.
