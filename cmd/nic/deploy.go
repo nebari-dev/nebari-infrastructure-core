@@ -59,7 +59,7 @@ func init() {
 // defaultGitConfig returns a default local git configuration for development workflows.
 // This is a pure function with no side effects — directory creation happens separately.
 func defaultGitConfig(projectName string) *git.Config {
-	localPath := fmt.Sprintf("/tmp/nebari-gitops-%s", projectName)
+	localPath := filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	return &git.Config{
 		URL:    fmt.Sprintf("file://%s", localPath),
 		Branch: "main",
@@ -360,8 +360,13 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 	)
 
 	isLocal := gitConfig.IsLocalPath()
+	var localPath string
 	if isLocal {
-		localPath, _ := gitConfig.GetLocalPath() // Already validated in getOrCreateGitConfig
+		var err error
+		localPath, err = gitConfig.GetLocalPath()
+		if err != nil {
+			return fmt.Errorf("invalid local git path: %w", err)
+		}
 		slog.Info("Initializing local GitOps directory", "path", localPath)
 	} else {
 		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
@@ -438,7 +443,6 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 	}
 
 	if isLocal {
-		localPath, _ := gitConfig.GetLocalPath() // Already validated earlier
 		slog.Info("Local GitOps directory bootstrapped successfully", "path", localPath)
 	} else {
 		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
