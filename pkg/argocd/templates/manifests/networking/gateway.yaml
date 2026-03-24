@@ -24,7 +24,7 @@ spec:
           from: All
     - name: https
       protocol: HTTPS
-      port: 443
+      port: {{ .HTTPSPort }}
       allowedRoutes:
         namespaces:
           from: All
