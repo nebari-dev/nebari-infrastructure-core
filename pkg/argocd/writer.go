@@ -71,7 +71,6 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 
 	data := TemplateData{
 		Domain:                  cfg.Domain,
-		Provider:                cfg.Provider,
 		StorageClass:            settings.StorageClass,
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,

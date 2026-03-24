@@ -137,7 +137,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
+			cfg := &config.NebariConfig{Domain: "test.example.com"}
 			data := NewTemplateData(cfg, tt.settings)
 			if data.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantSC)
@@ -156,7 +156,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 }
 
 func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
-	cfg := &config.NebariConfig{Provider: "hetzner", Domain: "test.example.com"}
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
 	settings := provider.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
@@ -465,7 +465,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.NebariConfig{Provider: "test", Domain: tt.domain}
+			cfg := &config.NebariConfig{Domain: tt.domain}
 			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
 			data := NewTemplateData(cfg, settings)
 
