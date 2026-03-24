@@ -606,8 +606,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.NebariConfig{
-		Provider: "aws",
-		Domain:   "test.example.com",
+		Domain: "test.example.com",
 	}
 	settings := provider.InfraSettings{
 		StorageClass: "gp2",
