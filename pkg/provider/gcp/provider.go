@@ -60,7 +60,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["google_cloud_platform"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		var gcpCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &gcpCfg); err == nil {
 			span.SetAttributes(
@@ -126,7 +126,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
 
-	rawCfg := cfg.ProviderConfig["google_cloud_platform"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}

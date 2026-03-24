@@ -82,7 +82,7 @@ func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, e
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		err := fmt.Errorf("AWS configuration is required")
 		span.RecordError(err)
@@ -632,7 +632,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 		return result
 	}
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -651,7 +651,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {

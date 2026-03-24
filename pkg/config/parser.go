@@ -47,7 +47,7 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 	}
 
 	span.SetAttributes(
-		attribute.String("config.provider", config.Provider),
+		attribute.String("config.provider", config.Cluster.ProviderName()),
 		attribute.String("config.project_name", config.ProjectName),
 	)
 

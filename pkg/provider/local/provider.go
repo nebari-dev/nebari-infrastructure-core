@@ -52,7 +52,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 
 	// Parse local provider config
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to unmarshal local config: %w", err)
@@ -127,7 +127,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		var localCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err == nil {
 			span.SetAttributes(attribute.String("local.kube_context", localCfg.KubeContext))
@@ -181,7 +181,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 	// Parse local provider config to get the kube context
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to unmarshal local config: %w", err)
@@ -260,7 +260,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	}
 
 	// Fall back to provider-specific config
-	rawCfg := cfg.ProviderConfig["local"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}

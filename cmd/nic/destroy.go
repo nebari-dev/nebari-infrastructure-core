@@ -77,7 +77,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
@@ -99,10 +99,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	prov, err := registry.Get(ctx, cfg.Provider)
+	prov, err := registry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
@@ -181,7 +181,7 @@ func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error 
 
 	// Show warning message
 	fmt.Println("\n⚠️  WARNING: You are about to destroy the following infrastructure:")
-	fmt.Printf("   Provider:     %s\n", cfg.Provider)
+	fmt.Printf("   Provider:     %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
 
 	// Show provider-specific details
