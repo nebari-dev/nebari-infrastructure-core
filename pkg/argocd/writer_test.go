@@ -663,19 +663,6 @@ func (n *nopWriteCloser) Close() error {
 	return nil
 }
 
-// mockGitClient is a minimal git.Client implementation for testing WriteAllToGit.
-type mockGitClient struct {
-	workDir string
-}
-
-func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
-func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
-func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
-func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
-func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
-func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
-func (m *mockGitClient) Cleanup() error                                  { return nil }
-
 // Verify mockGitClient implements git.Client at compile time.
 var _ git.Client = (*mockGitClient)(nil)
 
