@@ -40,10 +40,11 @@ func TestProvider_InfraSettings(t *testing.T) {
 		{
 			name: "default settings with location",
 			cfg: &config.NebariConfig{
-				Provider: "hetzner",
-				ProviderConfig: map[string]any{
-					"hetzner_cloud": map[string]any{
-						"location": "ash",
+				Cluster: &config.ClusterConfig{
+					Providers: map[string]any{
+						"hetzner": map[string]any{
+							"location": "ash",
+						},
 					},
 				},
 			},
@@ -55,7 +56,9 @@ func TestProvider_InfraSettings(t *testing.T) {
 		{
 			name: "nil provider config uses defaults",
 			cfg: &config.NebariConfig{
-				Provider: "hetzner",
+				Cluster: &config.ClusterConfig{
+					Providers: map[string]any{"hetzner": map[string]any{}},
+				},
 			},
 			wantSC:  "hcloud-volumes",
 			wantKBP: "",
@@ -91,20 +94,21 @@ var _ provider.Provider = (*Provider)(nil)
 func validHetznerConfig() *config.NebariConfig {
 	return &config.NebariConfig{
 		ProjectName: "test-project",
-		Provider:    "hetzner",
-		ProviderConfig: map[string]any{
-			"hetzner_cloud": map[string]any{
-				"location":           "ash",
-				"kubernetes_version": "1.32",
-				"node_groups": map[string]any{
-					"master": map[string]any{
-						"instance_type": "cpx21",
-						"count":         1,
-						"master":        true,
-					},
-					"workers": map[string]any{
-						"instance_type": "cpx31",
-						"count":         2,
+		Cluster: &config.ClusterConfig{
+			Providers: map[string]any{
+				"hetzner": map[string]any{
+					"location":           "ash",
+					"kubernetes_version": "1.32",
+					"node_groups": map[string]any{
+						"master": map[string]any{
+							"instance_type": "cpx21",
+							"count":         1,
+							"master":        true,
+						},
+						"workers": map[string]any{
+							"instance_type": "cpx31",
+							"count":         2,
+						},
 					},
 				},
 			},
@@ -141,10 +145,11 @@ func TestProvider_Validate_InvalidConfig(t *testing.T) {
 
 	cfg := &config.NebariConfig{
 		ProjectName: "test",
-		Provider:    "hetzner",
-		ProviderConfig: map[string]any{
-			"hetzner_cloud": map[string]any{
-				"location": "", // missing required field
+		Cluster: &config.ClusterConfig{
+			Providers: map[string]any{
+				"hetzner": map[string]any{
+					"location": "", // missing required field
+				},
 			},
 		},
 	}
@@ -161,7 +166,9 @@ func TestProvider_Validate_MissingConfigBlock(t *testing.T) {
 
 	cfg := &config.NebariConfig{
 		ProjectName: "test",
-		Provider:    "hetzner",
+		Cluster: &config.ClusterConfig{
+			Providers: map[string]any{"hetzner": map[string]any{}},
+		},
 	}
 
 	err := p.Validate(context.Background(), cfg)
