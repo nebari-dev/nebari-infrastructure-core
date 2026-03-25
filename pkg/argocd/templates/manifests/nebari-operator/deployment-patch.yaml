@@ -24,6 +24,8 @@ spec:
               value: "{{ .CertificateIssuer }}"
             - name: KEYCLOAK_ISSUER_CONTEXT_PATH
               value: "{{ .KeycloakBasePath }}"
+            - name: KEYCLOAK_EXTERNAL_URL
+              value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
           resources:
             requests:
               cpu: 100m
