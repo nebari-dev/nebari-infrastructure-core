@@ -1,17 +1,18 @@
 project_name: my-nebari-local
-provider: local
 domain: nebari.local
 certificate:
   type: selfsigned
 kube_context: "kind-nebari-local"
-local:
-  node_selectors:
-    general:
-      kubernetes.io/os: linux
-    user:
-      kubernetes.io/os: linux
-    worker:
-      kubernetes.io/os: linux
+
+cluster:
+  local:
+    node_selectors:
+      general:
+        kubernetes.io/os: linux
+      user:
+        kubernetes.io/os: linux
+      worker:
+        kubernetes.io/os: linux
 
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
