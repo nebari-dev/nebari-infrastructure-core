@@ -56,3 +56,6 @@ docs/plans/
 
 # Git worktrees
 .worktrees/
+
+# Test Configs
+test-configs/

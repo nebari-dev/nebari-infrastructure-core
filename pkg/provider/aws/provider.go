@@ -13,6 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
@@ -620,25 +621,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return kubeconfigBytes, nil
 }
 
-// StorageClass returns the default StorageClass for the AWS provider.
-// Returns "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
-func (p *Provider) StorageClass(cfg *config.NebariConfig) string {
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
-	if rawCfg == nil {
-		return storageClassLonghorn
-	}
-
-	var awsCfg Config
-	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err != nil {
-		return storageClassLonghorn
-	}
-
-	if awsCfg.LonghornEnabled() {
-		return storageClassLonghorn
-	}
-	return storageClassGP2
-}
-
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
@@ -662,4 +644,23 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 	result["Region"] = awsCfg.Region
 	return result
+}
+
+// InfraSettings returns AWS-specific Kubernetes infrastructure settings.
+// StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
+func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
+	sc := storageClassLonghorn
+
+	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	if rawCfg != nil {
+		var awsCfg Config
+		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {
+			sc = storageClassGP2
+		}
+	}
+
+	return provider.InfraSettings{
+		StorageClass: sc,
+		NeedsMetalLB: false,
+	}
 }
