@@ -331,20 +331,26 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	tests := []struct {
 		name             string
 		keycloakBasePath string
+		domain           string
 		wantContextPath  string
 		wantServiceURL   string
+		wantExternalURL  string
 	}{
 		{
 			name:             "empty base path passes empty context path",
 			keycloakBasePath: "",
+			domain:           "test.example.com",
 			wantContextPath:  `value: ""`,
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+			wantExternalURL:  "https://keycloak.test.example.com",
 		},
 		{
 			name:             "auth base path passes /auth context path",
 			keycloakBasePath: "/auth",
+			domain:           "test.example.com",
 			wantContextPath:  `value: "/auth"`,
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth",
+			wantExternalURL:  "https://keycloak.test.example.com/auth",
 		},
 	}
 
@@ -356,6 +362,7 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
+				Domain:                  tt.domain,
 				KeycloakBasePath:        tt.keycloakBasePath,
 				KeycloakServiceURL:      fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
 				KeycloakNamespace:       "keycloak",
@@ -378,6 +385,12 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 			}
 			if !strings.Contains(output, tt.wantServiceURL) {
 				t.Errorf("expected service URL %q in rendered template, got:\n%s", tt.wantServiceURL, output)
+			}
+			if !strings.Contains(output, "KEYCLOAK_EXTERNAL_URL") {
+				t.Error("expected KEYCLOAK_EXTERNAL_URL env var in rendered template")
+			}
+			if !strings.Contains(output, tt.wantExternalURL) {
+				t.Errorf("expected external URL %q in rendered template, got:\n%s", tt.wantExternalURL, output)
 			}
 		})
 	}
