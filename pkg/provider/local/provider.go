@@ -259,10 +259,41 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns local provider Kubernetes infrastructure settings.
-func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
-	return provider.InfraSettings{
+// Values are read from the local provider config block, falling back to defaults.
+// Parse errors are intentionally ignored: InfraSettings is called after Validate()
+// has confirmed the config is parseable. If it somehow fails (e.g., nil config in
+// tests), we return valid defaults.
+func (p *Provider) InfraSettings(cfg *config.ClusterConfig) provider.InfraSettings {
+	settings := provider.InfraSettings{
 		StorageClass:       "standard",
 		NeedsMetalLB:       true,
 		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
 	}
+
+	rawCfg := cfg.ProviderConfig()
+	if rawCfg == nil {
+		return settings
+	}
+
+	var localCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &localCfg); err != nil {
+		return settings
+	}
+
+	if localCfg.StorageClass != "" {
+		settings.StorageClass = localCfg.StorageClass
+	}
+	if localCfg.HTTPSPort != 0 {
+		settings.HTTPSPort = localCfg.HTTPSPort
+	}
+	if localCfg.MetalLB != nil {
+		if localCfg.MetalLB.Enabled != nil {
+			settings.NeedsMetalLB = *localCfg.MetalLB.Enabled
+		}
+		if localCfg.MetalLB.AddressPool != "" {
+			settings.MetalLBAddressPool = localCfg.MetalLB.AddressPool
+		}
+	}
+
+	return settings
 }
