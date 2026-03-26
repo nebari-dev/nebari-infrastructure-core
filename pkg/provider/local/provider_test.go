@@ -134,6 +134,13 @@ func TestInfraSettings(t *testing.T) {
 			if settings.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", settings.HTTPSPort, tt.wantHTTPSPort)
 			}
+			// Fields not set by local provider should always be zero values
+			if len(settings.LoadBalancerAnnotations) != 0 {
+				t.Errorf("LoadBalancerAnnotations = %v, want empty", settings.LoadBalancerAnnotations)
+			}
+			if settings.KeycloakBasePath != "" {
+				t.Errorf("KeycloakBasePath = %q, want empty", settings.KeycloakBasePath)
+			}
 		})
 	}
 }
