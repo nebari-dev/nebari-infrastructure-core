@@ -32,6 +32,12 @@ type InfraSettings struct {
 	// (keycloakx) need "/auth" because that chart serves under the /auth context path,
 	// while the modern Bitnami chart serves at the root.
 	KeycloakBasePath string
+
+	// HTTPSPort is the port for the Gateway's HTTPS listener and HTTP-to-HTTPS redirects.
+	// Leave as 0 for the standard port 443. NewTemplateData normalizes 0 to 443.
+	// Providers running behind a non-standard HTTPS port (e.g., development on 8443)
+	// can override this.
+	HTTPSPort int
 }
 
 // Provider defines the interface that all cloud providers must implement.

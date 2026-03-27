@@ -40,21 +40,24 @@ Use --auto-approve to skip the confirmation prompt.`,
 )
 
 func init() {
-	destroyCmd.Flags().StringVarP(&destroyConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
+	destroyCmd.Flags().StringVarP(&destroyConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 	destroyCmd.Flags().BoolVar(&destroyAutoApprove, "auto-approve", false, "Skip confirmation prompt and destroy immediately")
 	destroyCmd.Flags().BoolVar(&destroyForce, "force", false, "Continue destruction even if some resources fail to delete")
 	destroyCmd.Flags().StringVar(&destroyTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	destroyCmd.Flags().BoolVar(&destroyDryRun, "dry-run", false, "Show what would be destroyed without actually deleting")
-
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := destroyCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(destroyConfigFile)
+	if err != nil {
+		return err
+	}
+	destroyConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.destroy")
 	defer span.End()

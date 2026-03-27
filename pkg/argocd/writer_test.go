@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -102,18 +104,19 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name     string
-		settings provider.InfraSettings
-		wantSC   string
-		wantLBA  int
-		wantKBP  string
-		wantMLBA string
+		name                    string
+		settings                provider.InfraSettings
+		wantStorageClass        string
+		wantLBAnnotationCount   int
+		wantKeycloakBasePath    string
+		wantMetalLBAddressRange string
+		wantHTTPSPort           int
 	}{
 		{
-			name:     "aws defaults",
-			settings: provider.InfraSettings{StorageClass: "gp2"},
-			wantSC:   "gp2",
-			wantLBA:  0,
+			name:             "aws defaults",
+			settings:         provider.InfraSettings{StorageClass: "gp2"},
+			wantStorageClass: "gp2",
+			wantHTTPSPort:    443,
 		},
 		{
 			name: "hetzner with annotations",
@@ -121,8 +124,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			},
-			wantSC:  "hcloud-volumes",
-			wantLBA: 1,
+			wantStorageClass:      "hcloud-volumes",
+			wantLBAnnotationCount: 1,
+			wantHTTPSPort:         443,
 		},
 		{
 			name: "local with MetalLB",
@@ -131,25 +135,38 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 				NeedsMetalLB:       true,
 				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
 			},
-			wantSC:   "standard",
-			wantMLBA: "192.168.1.100-192.168.1.110",
+			wantStorageClass:        "standard",
+			wantMetalLBAddressRange: "192.168.1.100-192.168.1.110",
+			wantHTTPSPort:           443,
+		},
+		{
+			name: "custom HTTPS port",
+			settings: provider.InfraSettings{
+				StorageClass: "standard",
+				HTTPSPort:    8443,
+			},
+			wantStorageClass: "standard",
+			wantHTTPSPort:    8443,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
 			data := NewTemplateData(cfg, tt.settings)
-			if data.StorageClass != tt.wantSC {
-				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantSC)
+			if data.StorageClass != tt.wantStorageClass {
+				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantStorageClass)
 			}
-			if len(data.LoadBalancerAnnotations) != tt.wantLBA {
-				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBA)
+			if len(data.LoadBalancerAnnotations) != tt.wantLBAnnotationCount {
+				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(data.LoadBalancerAnnotations), tt.wantLBAnnotationCount)
 			}
-			if data.KeycloakBasePath != tt.wantKBP {
-				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKBP)
+			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
+				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.MetalLBAddressRange != tt.wantMLBA {
-				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMLBA)
+			if data.MetalLBAddressRange != tt.wantMetalLBAddressRange {
+				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMetalLBAddressRange)
+			}
+			if data.HTTPSPort != tt.wantHTTPSPort {
+				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
 			}
 		})
 	}
@@ -177,8 +194,9 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 
 func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	data := TemplateData{
-		Domain:   "test.example.com",
-		Provider: "hetzner",
+		Domain:    "test.example.com",
+		Provider:  "hetzner",
+		HTTPSPort: 443,
 		LoadBalancerAnnotations: map[string]string{
 			"load-balancer.hetzner.cloud/location": "ash",
 		},
@@ -211,12 +229,16 @@ func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	if !strings.Contains(output, "kind: Gateway") {
 		t.Error("expected 'kind: Gateway' in rendered output")
 	}
+	if !strings.Contains(output, "port: 443") {
+		t.Errorf("expected HTTPS listener port 443 in rendered gateway, got:\n%s", output)
+	}
 }
 
 func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:            "test.example.com",
 		Provider:          "aws",
+		HTTPSPort:         443,
 		CertificateIssuer: "selfsigned-issuer",
 	}
 
@@ -308,20 +330,26 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	tests := []struct {
 		name             string
 		keycloakBasePath string
+		domain           string
 		wantContextPath  string
 		wantServiceURL   string
+		wantExternalURL  string
 	}{
 		{
 			name:             "empty base path passes empty context path",
 			keycloakBasePath: "",
+			domain:           "test.example.com",
 			wantContextPath:  `value: ""`,
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+			wantExternalURL:  "https://keycloak.test.example.com",
 		},
 		{
 			name:             "auth base path passes /auth context path",
 			keycloakBasePath: "/auth",
+			domain:           "test.example.com",
 			wantContextPath:  `value: "/auth"`,
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth",
+			wantExternalURL:  "https://keycloak.test.example.com/auth",
 		},
 	}
 
@@ -333,6 +361,7 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
+				Domain:                  tt.domain,
 				KeycloakBasePath:        tt.keycloakBasePath,
 				KeycloakServiceURL:      fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
 				KeycloakNamespace:       "keycloak",
@@ -355,6 +384,63 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 			}
 			if !strings.Contains(output, tt.wantServiceURL) {
 				t.Errorf("expected service URL %q in rendered template, got:\n%s", tt.wantServiceURL, output)
+			}
+			if !strings.Contains(output, "KEYCLOAK_EXTERNAL_URL") {
+				t.Error("expected KEYCLOAK_EXTERNAL_URL env var in rendered template")
+			}
+			if !strings.Contains(output, tt.wantExternalURL) {
+				t.Errorf("expected external URL %q in rendered template, got:\n%s", tt.wantExternalURL, output)
+			}
+		})
+	}
+}
+
+func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/networking/routes/http-to-https-redirect.yaml")
+	if err != nil {
+		t.Fatalf("failed to read redirect route template: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		httpsPort int
+		wantPort  string
+	}{
+		{"default port 443", 443, "port: 443"},
+		{"custom port", 8443, "port: 8443"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := TemplateData{
+				Domain:    "test.example.com",
+				Provider:  "aws",
+				HTTPSPort: tt.httpsPort,
+			}
+
+			processed, err := processTemplate("manifests/networking/routes/http-to-https-redirect.yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			checks := []struct {
+				name     string
+				contains string
+			}{
+				{"kind", "kind: HTTPRoute"},
+				{"targets http listener", "sectionName: http"},
+				{"redirect filter type", "type: RequestRedirect"},
+				{"redirect to https", "scheme: https"},
+				{"301 status code", "statusCode: 301"},
+				{"targets nebari-gateway", "name: nebari-gateway"},
+				{"redirect port", tt.wantPort},
+			}
+			for _, c := range checks {
+				if !strings.Contains(output, c.contains) {
+					t.Errorf("expected %q in rendered redirect route, got:\n%s", c.contains, output)
+				}
 			}
 		})
 	}
@@ -438,6 +524,58 @@ func TestLandingPageTemplate(t *testing.T) {
 	}
 }
 
+func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
+	// Dynamically discover all route templates so new routes are automatically covered.
+	routeDir := "templates/manifests/networking/routes"
+	entries, err := templates.ReadDir(routeDir)
+	if err != nil {
+		t.Fatalf("failed to read routes directory: %v", err)
+	}
+
+	data := TemplateData{
+		Domain:              "test.example.com",
+		Provider:            "aws",
+		HTTPSPort:           443,
+		KeycloakServiceName: "keycloak-keycloakx-http",
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		templatePath := routeDir + "/" + entry.Name()
+
+		// The redirect route targets http; all other routes must target https.
+		if entry.Name() == "http-to-https-redirect.yaml" {
+			continue
+		}
+
+		t.Run(name, func(t *testing.T) {
+			content, err := templates.ReadFile(templatePath)
+			if err != nil {
+				t.Fatalf("failed to read %s: %v", templatePath, err)
+			}
+
+			processed, err := processTemplate(templatePath, content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			output := string(processed)
+
+			if !strings.Contains(output, "sectionName: https") {
+				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
+			}
+			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
+			if strings.Contains(output, "sectionName: http\n") {
+				t.Errorf("%s should NOT target the http listener", name)
+			}
+		})
+	}
+}
+
 func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -475,6 +613,58 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	cfg := &config.NebariConfig{
+		Provider: "aws",
+		Domain:   "test.example.com",
+	}
+	settings := provider.InfraSettings{
+		StorageClass: "gp2",
+	}
+
+	mock := &mockGitClient{workDir: tmpDir}
+	err := WriteAllToGit(ctx, mock, cfg, settings)
+	if err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	redirectPath := filepath.Join(tmpDir, "manifests", "networking", "routes", "http-to-https-redirect.yaml")
+	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
+		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
+	}
+
+	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("failed to read redirect route: %v", err)
+	}
+	output := string(content)
+	if !strings.Contains(output, "statusCode: 301") {
+		t.Errorf("redirect route missing statusCode: 301, got:\n%s", output)
+	}
+	if !strings.Contains(output, "port: 443") {
+		t.Errorf("redirect route missing port: 443, got:\n%s", output)
+	}
+	if !strings.Contains(output, "sectionName: http") {
+		t.Errorf("redirect route should target sectionName: http, got:\n%s", output)
+	}
+}
+
+// mockGitClient satisfies git.Client for tests that only need WorkDir().
+type mockGitClient struct {
+	workDir string
+}
+
+func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
+func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
+func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
+func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
+func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
+func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
+func (m *mockGitClient) Cleanup() error                                  { return nil }
 
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
