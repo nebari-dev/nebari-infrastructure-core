@@ -15,7 +15,7 @@ spec:
 
   source:
     repoURL: https://github.com/nebari-dev/nebari-landing
-    targetRevision: v0.1.0-alpha.1
+    targetRevision: v0.1.0-alpha.2
     path: charts/nebari-landing
     helm:
       releaseName: nebari-landing
