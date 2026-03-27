@@ -56,19 +56,19 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	slog.Info("Configuration is valid",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
 	// Verify provider is registered
-	if _, err := registry.Get(ctx, cfg.Provider); err != nil {
+	if _, err := registry.Get(ctx, cfg.Cluster.ProviderName()); err != nil {
 		span.RecordError(err)
-		slog.Error("Provider not available", "error", err, "provider", cfg.Provider)
+		slog.Error("Provider not available", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
 	fmt.Printf("✓ Configuration file is valid\n")
-	fmt.Printf("  Provider: %s\n", cfg.Provider)
+	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil
