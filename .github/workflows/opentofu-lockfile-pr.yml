@@ -44,7 +44,7 @@ jobs:
             echo "==> $d"
             pushd "$d" >/dev/null
 
-            tofu init -upgrade -backend=false -input=false
+            tofu init -backend=false -input=false
 
             args=()
             for p in "${platforms[@]}"; do
