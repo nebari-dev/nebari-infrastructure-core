@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -673,4 +674,74 @@ type nopWriteCloser struct {
 
 func (n *nopWriteCloser) Close() error {
 	return nil
+}
+
+func TestSyncWaveOrdering(t *testing.T) {
+	ctx := context.Background()
+
+	// Read cert-manager and envoy-gateway templates
+	tests := []struct {
+		appName      string
+		expectedWave string
+	}{
+		{"envoy-gateway", `sync-wave: "1"`},
+		{"cert-manager", `sync-wave: "2"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.appName, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := WriteApplication(ctx, &buf, tt.appName)
+			if err != nil {
+				t.Fatalf("WriteApplication(%s) error: %v", tt.appName, err)
+			}
+
+			content := buf.String()
+			if !strings.Contains(content, tt.expectedWave) {
+				t.Errorf("%s should have %s, got:\n%s", tt.appName, tt.expectedWave, content)
+			}
+		})
+	}
+}
+
+func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
+	ctx := context.Background()
+
+	// Extract sync wave number as int for robust comparison
+	// (lexicographic comparison would fail for multi-digit numbers: "9" > "10")
+	getSyncWave := func(appName string) int {
+		var buf bytes.Buffer
+		if err := WriteApplication(ctx, &buf, appName); err != nil {
+			t.Fatalf("WriteApplication(%s) error: %v", appName, err)
+		}
+		content := buf.String()
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, "sync-wave") {
+				// Extract number from line like: argocd.argoproj.io/sync-wave: "1"
+				line = strings.TrimSpace(line)
+				// Find the quoted number
+				start := strings.Index(line, `"`)
+				end := strings.LastIndex(line, `"`)
+				if start != -1 && end > start {
+					numStr := line[start+1 : end]
+					num, err := strconv.Atoi(numStr)
+					if err != nil {
+						t.Fatalf("%s has invalid sync-wave value %q: %v", appName, numStr, err)
+					}
+					return num
+				}
+			}
+		}
+		t.Fatalf("%s has no sync-wave annotation", appName)
+		return 0
+	}
+
+	envoyWaveNum := getSyncWave("envoy-gateway")
+	certWaveNum := getSyncWave("cert-manager")
+
+	// envoy-gateway must come before cert-manager (lower wave number)
+	// because cert-manager needs Gateway API CRDs that envoy-gateway installs
+	if envoyWaveNum >= certWaveNum {
+		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
+	}
 }
