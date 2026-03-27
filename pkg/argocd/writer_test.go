@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
@@ -673,4 +674,153 @@ type nopWriteCloser struct {
 
 func (n *nopWriteCloser) Close() error {
 	return nil
+}
+
+// Verify mockGitClient implements git.Client at compile time.
+var _ git.Client = (*mockGitClient)(nil)
+
+func TestWriteAllToGit_NoOverwrite(t *testing.T) {
+	tests := []struct {
+		name           string
+		preCreate      bool   // Whether to pre-create the file
+		preContent     string // Content to write if preCreate is true
+		wantContains   string // Expected substring in final content
+		shouldPreserve bool   // If true, original content should be preserved
+	}{
+		{
+			name:         "file absent - should create",
+			preCreate:    false,
+			wantContains: "OpenTelemetry Collector overrides",
+		},
+		{
+			name:           "file present - should preserve",
+			preCreate:      true,
+			preContent:     "# Custom pack overrides\nconfig:\n  exporters:\n    otlphttp/loki:\n      endpoint: http://loki:3100/otlp\n",
+			wantContains:   "Custom pack overrides",
+			shouldPreserve: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			client := &mockGitClient{workDir: tmpDir}
+			cfg := &config.NebariConfig{
+				Provider: "local",
+				Domain:   "test.local",
+				GitRepository: &git.Config{
+					URL:    "https://github.com/test/repo.git",
+					Branch: "main",
+				},
+			}
+			ctx := context.Background()
+
+			overridesDir := filepath.Join(tmpDir, "manifests", "opentelemetry-collector")
+			overridesPath := filepath.Join(overridesDir, "overrides.yaml")
+
+			if tt.preCreate {
+				if err := os.MkdirAll(overridesDir, 0750); err != nil {
+					t.Fatalf("failed to create directory: %v", err)
+				}
+				if err := os.WriteFile(overridesPath, []byte(tt.preContent), 0600); err != nil {
+					t.Fatalf("failed to write pre-existing file: %v", err)
+				}
+			}
+
+			err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
+			if err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Clean(overridesPath))
+			if err != nil {
+				t.Fatalf("overrides.yaml should exist: %v", err)
+			}
+
+			if !strings.Contains(string(content), tt.wantContains) {
+				t.Errorf("overrides.yaml should contain %q, got: %q", tt.wantContains, string(content))
+			}
+
+			if tt.shouldPreserve && string(content) != tt.preContent {
+				t.Errorf("overrides.yaml was overwritten.\ngot:  %q\nwant: %q", string(content), tt.preContent)
+			}
+		})
+	}
+}
+
+func TestWriteAllToGit_RendersOtelTemplate(t *testing.T) {
+	tmpDir := t.TempDir()
+	client := &mockGitClient{workDir: tmpDir}
+	cfg := &config.NebariConfig{
+		Provider: "local",
+		Domain:   "test.local",
+		GitRepository: &git.Config{
+			URL:    "https://github.com/test/repo.git",
+			Branch: "main",
+			Path:   "clusters/prod",
+		},
+	}
+
+	ctx := context.Background()
+
+	err := WriteAllToGit(ctx, client, cfg, provider.InfraSettings{})
+	if err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	// Verify the OTel app template was rendered with multi-source config
+	otelAppPath := filepath.Join(tmpDir, "apps", "opentelemetry-collector.yaml")
+	content, err := os.ReadFile(filepath.Clean(otelAppPath))
+	if err != nil {
+		t.Fatalf("failed to read opentelemetry-collector.yaml: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have multi-source (sources: instead of source:)
+	if !strings.Contains(contentStr, "sources:") {
+		t.Error("opentelemetry-collector.yaml should use multi-source (sources:)")
+	}
+
+	// Should reference the GitOps repo
+	if !strings.Contains(contentStr, "https://github.com/test/repo.git") {
+		t.Error("opentelemetry-collector.yaml should reference the GitOps repo URL")
+	}
+
+	// Should reference the base values file with the correct git path
+	if !strings.Contains(contentStr, "$values/clusters/prod/manifests/opentelemetry-collector/values.yaml") {
+		t.Error("opentelemetry-collector.yaml should reference the base values file with correct git path")
+	}
+
+	// Should reference the overrides file with the correct git path
+	if !strings.Contains(contentStr, "$values/clusters/prod/manifests/opentelemetry-collector/overrides.yaml") {
+		t.Error("opentelemetry-collector.yaml should reference the overrides file with correct git path")
+	}
+
+	// Overrides must come after base values so they take precedence
+	valuesIdx := strings.Index(contentStr, "$values/clusters/prod/manifests/opentelemetry-collector/values.yaml")
+	overridesIdx := strings.Index(contentStr, "$values/clusters/prod/manifests/opentelemetry-collector/overrides.yaml")
+	if valuesIdx >= overridesIdx {
+		t.Error("overrides.yaml must come after values.yaml in valueFiles so it takes precedence")
+	}
+
+	// Should have the ref: values source
+	if !strings.Contains(contentStr, "ref: values") {
+		t.Error("opentelemetry-collector.yaml should have a ref: values source")
+	}
+
+	// Should NOT have inline values (base config is in valueFiles now)
+	if strings.Contains(contentStr, "values: |") {
+		t.Error("opentelemetry-collector.yaml should not have inline values, base config should be in valueFiles")
+	}
+
+	// Verify base values.yaml was written to manifests
+	baseValuesPath := filepath.Join(tmpDir, "manifests", "opentelemetry-collector", "values.yaml")
+	baseContent, err := os.ReadFile(filepath.Clean(baseValuesPath))
+	if err != nil {
+		t.Fatalf("values.yaml should exist in manifests: %v", err)
+	}
+	if !strings.Contains(string(baseContent), "otel/opentelemetry-collector-k8s") {
+		t.Error("base values.yaml should contain the collector image config")
+	}
 }
