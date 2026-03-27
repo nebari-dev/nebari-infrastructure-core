@@ -25,16 +25,20 @@ all required fields.`,
 )
 
 func init() {
-	validateCmd.Flags().StringVarP(&validateConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := validateCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
+	validateCmd.Flags().StringVarP(&validateConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(validateConfigFile)
+	if err != nil {
+		return err
+	}
+	validateConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()

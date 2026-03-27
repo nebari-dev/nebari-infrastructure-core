@@ -27,17 +27,21 @@ or other Kubernetes clients.`,
 )
 
 func init() {
-	kubeconfigCmd.Flags().StringVarP(&kubeconfigConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
+	kubeconfigCmd.Flags().StringVarP(&kubeconfigConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 	kubeconfigCmd.Flags().StringVarP(&kubeconfigOutputFile, "output", "o", "", "Path to output kubeconfig file (defaults to stdout)")
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := kubeconfigCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 }
 
 func runKubeconfig(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(kubeconfigConfigFile)
+	if err != nil {
+		return err
+	}
+	kubeconfigConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
 	defer span.End()
