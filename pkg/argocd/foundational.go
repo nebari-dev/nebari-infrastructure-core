@@ -22,10 +22,6 @@ const (
 
 	// KeycloakDefaultAdminSecretName is the name of the Kubernetes secret containing Keycloak admin credentials.
 	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
-
-	// NebariSystemNamespace is the namespace where nebari-operator-managed apps (e.g. landing page) are deployed.
-	// It must carry the nebari.dev/managed=true label so the nebari-operator will reconcile NebariApp resources.
-	NebariSystemNamespace = "nebari-system"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -96,25 +92,15 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		// Don't fail - project is optional, apps will fall back to default project
 	}
 
-	// 2. Bootstrap namespaces and secrets that must exist before ArgoCD syncs.
-	//    The K8s client is always needed: nebari-system must be pre-created with
-	//    the nebari.dev/managed=true label so the nebari-operator will reconcile
-	//    any NebariApp resources deployed there (e.g. the landing page).
-	k8sClient, err := newK8sClient(kubeconfigBytes)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create Kubernetes client: %w", err)
-	}
-
-	// Ensure nebari-system namespace exists with the managed label.
-	if err := createNamespaceWithLabels(ctx, k8sClient, NebariSystemNamespace, map[string]string{
-		"nebari.dev/managed": "true",
-	}); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create nebari-system namespace: %w", err)
-	}
-
+	// 2. Create secrets if Keycloak is enabled
 	if foundationalCfg.Keycloak.Enabled {
+		// Create Kubernetes client for secret management
+		k8sClient, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Kubernetes client: %w", err)
+		}
+
 		// Create namespace for Keycloak
 		if err := createNamespace(ctx, k8sClient, KeycloakDefaultNamespace); err != nil {
 			span.RecordError(err)
@@ -155,12 +141,6 @@ func newK8sClient(kubeconfigBytes []byte) (*kubernetes.Clientset, error) {
 
 // createNamespace creates a namespace if it doesn't exist
 func createNamespace(ctx context.Context, client kubernetes.Interface, namespace string) error {
-	return createNamespaceWithLabels(ctx, client, namespace, nil)
-}
-
-// createNamespaceWithLabels creates a namespace with the given labels if it doesn't exist.
-// If the namespace already exists the call is a no-op (existing labels are not modified).
-func createNamespaceWithLabels(ctx context.Context, client kubernetes.Interface, namespace string, labels map[string]string) error {
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating namespace: %s", namespace)).
 		WithResource("namespace").
 		WithAction("creating").
@@ -168,8 +148,7 @@ func createNamespaceWithLabels(ctx context.Context, client kubernetes.Interface,
 
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   namespace,
-			Labels: labels,
+			Name: namespace,
 		},
 	}
 

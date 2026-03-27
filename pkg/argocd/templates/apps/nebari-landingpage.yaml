@@ -62,6 +62,9 @@ spec:
     namespace: nebari-system
 
   syncPolicy:
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
     automated:
       prune: true
       selfHeal: true
