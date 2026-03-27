@@ -19,13 +19,6 @@ func TestProvider_Name(t *testing.T) {
 	}
 }
 
-func TestProvider_ConfigKey(t *testing.T) {
-	p := NewProvider()
-	if p.ConfigKey() != "hetzner_cloud" {
-		t.Errorf("ConfigKey() = %q, want %q", p.ConfigKey(), "hetzner_cloud")
-	}
-}
-
 func TestProvider_InfraSettings(t *testing.T) {
 	p := NewProvider()
 

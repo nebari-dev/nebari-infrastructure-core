@@ -71,11 +71,6 @@ func containsSubstring(slice []string, substr string) bool {
 	return false
 }
 
-// ConfigKey returns the YAML configuration key for AWS
-func (p *Provider) ConfigKey() string {
-	return "amazon_web_services"
-}
-
 // extractAWSConfig converts the any provider config to AWS Config type
 func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")

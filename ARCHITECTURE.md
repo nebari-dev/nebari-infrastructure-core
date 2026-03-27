@@ -64,7 +64,7 @@ nebari-infrastructure-core/
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Defines `Provider` interface with Name(), ConfigKey(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
+| `provider.go` | Defines `Provider` interface with Name(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
 | `registry.go` | Thread-safe provider registry with registration and lookup |
 
 ### AWS Provider (pkg/provider/aws/) - **Fully Implemented**

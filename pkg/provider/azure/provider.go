@@ -26,11 +26,6 @@ func (p *Provider) Name() string {
 	return "azure"
 }
 
-// ConfigKey returns the YAML configuration key for Azure
-func (p *Provider) ConfigKey() string {
-	return "azure"
-}
-
 // Validate validates the Azure configuration (stub implementation)
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")

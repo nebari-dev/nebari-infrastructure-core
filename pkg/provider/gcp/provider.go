@@ -26,11 +26,6 @@ func (p *Provider) Name() string {
 	return "gcp"
 }
 
-// ConfigKey returns the YAML configuration key for GCP
-func (p *Provider) ConfigKey() string {
-	return "google_cloud_platform"
-}
-
 // Validate validates the GCP configuration (stub implementation)
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")

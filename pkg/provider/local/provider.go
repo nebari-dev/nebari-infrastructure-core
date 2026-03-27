@@ -29,11 +29,6 @@ func (p *Provider) Name() string {
 	return "local"
 }
 
-// ConfigKey returns the YAML key for this provider's configuration
-func (p *Provider) ConfigKey() string {
-	return "local"
-}
-
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
