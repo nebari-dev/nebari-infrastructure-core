@@ -91,7 +91,7 @@ amazon_web_services:
   endpoint_private_access: false
 
   # OPTIONAL: Enable public EKS API endpoint (accessible from internet)
-  # Default: true
+  # Default: false
   endpoint_public_access: true
 
   # OPTIONAL: ARN of KMS key for EKS secrets encryption
@@ -1382,5 +1382,6 @@ KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 
 
 
-**Last Updated**: 2025-01-14 **NIC Version**: v0.1.0 **Source**: Generated from pkg/config/config.go and
-pkg/dnsprovider/*/config.go
+**Last Updated**: 2026-03-27
+**NIC Version**: v0.1.0
+**Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
