@@ -195,7 +195,6 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:    "test.example.com",
-		Provider:  "hetzner",
 		HTTPSPort: 443,
 		LoadBalancerAnnotations: map[string]string{
 			"load-balancer.hetzner.cloud/location": "ash",
@@ -237,7 +236,6 @@ func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:            "test.example.com",
-		Provider:          "aws",
 		HTTPSPort:         443,
 		CertificateIssuer: "selfsigned-issuer",
 	}
@@ -295,7 +293,6 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
 				Domain:                  "test.example.com",
-				Provider:                "hetzner",
 				KeycloakBasePath:        tt.keycloakBasePath,
 				KeycloakNamespace:       "keycloak",
 				KeycloakAdminSecretName: "keycloak-admin",
@@ -414,7 +411,6 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
 				Domain:    "test.example.com",
-				Provider:  "aws",
 				HTTPSPort: tt.httpsPort,
 			}
 
@@ -534,7 +530,6 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 	data := TemplateData{
 		Domain:              "test.example.com",
-		Provider:            "aws",
 		HTTPSPort:           443,
 		KeycloakServiceName: "keycloak-keycloakx-http",
 	}
