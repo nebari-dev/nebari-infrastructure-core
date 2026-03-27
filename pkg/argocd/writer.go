@@ -37,8 +37,6 @@ type TemplateData struct {
 	// Domain configuration
 	Domain string
 
-	// Provider configuration
-	Provider     string // "aws", "gcp", "azure", "local"
 	StorageClass string // Provider-appropriate storage class for persistent volumes
 
 	// Certificate configuration
