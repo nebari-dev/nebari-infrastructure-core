@@ -2,25 +2,32 @@ package hetzner
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestResolveK3sVersion(t *testing.T) {
-	releases := []ghRelease{
-		{TagName: "v1.32.12+k3s1", Prerelease: false},
-		{TagName: "v1.32.12-rc1+k3s1", Prerelease: true},
-		{TagName: "v1.32.11+k3s3", Prerelease: false},
-		{TagName: "v1.31.5+k3s1", Prerelease: false},
+// createFakeHetznerK3s creates a shell script that mimics `hetzner-k3s releases`.
+func createFakeHetznerK3s(t *testing.T, releases []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hetzner-k3s")
+	content := "#!/bin/sh\ncat <<'RELEASES'\n" + strings.Join(releases, "\n") + "\nRELEASES\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil { //nolint:gosec // Test helper script needs execute permission
+		t.Fatal(err)
 	}
+	return script
+}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(releases)
-	}))
-	defer server.Close()
+func TestResolveK3sVersion(t *testing.T) {
+	releases := []string{
+		"v1.32.12+k3s1",
+		"v1.32.12-rc1+k3s1",
+		"v1.32.11+k3s3",
+		"v1.31.5+k3s1",
+	}
+	binary := createFakeHetznerK3s(t, releases)
 
 	tests := []struct {
 		name    string
@@ -61,7 +68,7 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveK3sVersion(context.Background(), tt.version, server.URL)
+			got, err := resolveK3sVersion(context.Background(), tt.version, binary)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("resolveK3sVersion() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -73,30 +80,12 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 }
 
-func TestResolveK3sVersion_APIError(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		errMsg     string
-	}{
-		{"server error", http.StatusInternalServerError, "status 500"},
-		{"rate limited", http.StatusForbidden, "status 403"},
-		{"not found", http.StatusNotFound, "status 404"},
+func TestResolveK3sVersion_BinaryError(t *testing.T) {
+	_, err := resolveK3sVersion(context.Background(), "1.32", "/nonexistent/hetzner-k3s")
+	if err == nil {
+		t.Fatal("expected error for missing binary")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer server.Close()
-
-			_, err := resolveK3sVersion(context.Background(), "1.32", server.URL)
-			if err == nil {
-				t.Fatal("expected error for non-200 response")
-			}
-			if !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("error should contain %q, got: %v", tt.errMsg, err)
-			}
-		})
+	if !strings.Contains(err.Error(), "failed to get hetzner-k3s releases") {
+		t.Errorf("error should mention hetzner-k3s releases, got: %v", err)
 	}
 }

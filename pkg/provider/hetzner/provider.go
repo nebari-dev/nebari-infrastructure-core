@@ -152,7 +152,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Resolving k3s version").
 		WithResource("provider").WithAction("deploy"))
 
-	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, "")
+	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, binaryPath)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve k3s version: %w", err)
