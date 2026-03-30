@@ -2,9 +2,23 @@ package provider
 
 import (
 	"context"
+	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
+
+// DeployOptions holds runtime flags for infrastructure deployment.
+type DeployOptions struct {
+	DryRun  bool
+	Timeout time.Duration
+}
+
+// DestroyOptions holds runtime flags for infrastructure destruction.
+type DestroyOptions struct {
+	DryRun  bool
+	Force   bool
+	Timeout time.Duration
+}
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.
 // The ArgoCD writer and deploy command use these to configure templates
@@ -59,13 +73,13 @@ type Provider interface {
 	// Deploy creates or updates infrastructure to match the desired configuration.
 	// Backed by OpenTofu, this operation is idempotent - running Deploy multiple
 	// times with the same config results in the same infrastructure state.
-	// Use --dry-run flag to preview changes without applying them (runs tofu plan).
-	Deploy(ctx context.Context, config *config.NebariConfig) error
+	// Use DeployOptions.DryRun to preview changes without applying them (runs tofu plan).
+	Deploy(ctx context.Context, config *config.NebariConfig, opts DeployOptions) error
 
 	// Destroy tears down all infrastructure resources in the correct order,
 	// respecting dependencies (e.g., node groups before cluster, cluster before VPC).
 	// Backed by OpenTofu's tofu destroy command.
-	Destroy(ctx context.Context, config *config.NebariConfig) error
+	Destroy(ctx context.Context, config *config.NebariConfig, opts DestroyOptions) error
 
 	// GetKubeconfig generates a kubeconfig file for authenticating with the
 	// Kubernetes cluster. The returned bytes can be written to a file or used

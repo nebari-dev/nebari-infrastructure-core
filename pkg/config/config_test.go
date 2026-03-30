@@ -78,21 +78,6 @@ func TestClusterConfig_ProviderAccess(t *testing.T) {
 	}
 }
 
-func TestNebariConfig_RuntimeOptions(t *testing.T) {
-	// Verify runtime options are independent of YAML parsing
-	cfg := &NebariConfig{
-		DryRun: true,
-		Force:  true,
-	}
-
-	if !cfg.DryRun {
-		t.Error("DryRun should be true")
-	}
-	if !cfg.Force {
-		t.Error("Force should be true")
-	}
-}
-
 func TestParseConfigBytes(t *testing.T) {
 	tests := []struct {
 		name        string

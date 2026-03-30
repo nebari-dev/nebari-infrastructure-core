@@ -82,7 +82,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	return nil
 }
 
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Deploy")
 	defer span.End()
@@ -93,9 +93,9 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	)
 
 	// Apply deployment timeout if configured
-	if cfg.Timeout > 0 {
+	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
@@ -186,7 +186,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would create Hetzner k3s cluster").
 			WithResource("provider").WithAction("deploy").
 			WithMetadata("cluster_yaml", clusterYAMLPath))
@@ -220,7 +220,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	return nil
 }
 
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Destroy")
 	defer span.End()
@@ -231,9 +231,9 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	)
 
 	// Apply timeout if configured
-	if cfg.Timeout > 0 {
+	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
@@ -256,7 +256,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return fmt.Errorf("cluster.yaml not found at %s - was this cluster created by NIC?", clusterYAMLPath)
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would destroy Hetzner k3s cluster").
 			WithResource("provider").WithAction("destroy").
 			WithMetadata("cluster_yaml", clusterYAMLPath))
