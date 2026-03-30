@@ -17,42 +17,56 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml"><img src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
+  <a href="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml"><img
+  src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a> <a
+  href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img
+  src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a> <a href="https://golang.org"><img
+  src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="docs/cli-reference.md">CLI Reference</a> &middot;
-  <a href="#architecture">Architecture</a> &middot;
-  <a href="#roadmap">Roadmap</a> &middot;
-  <a href="docs/design-doc/README.md">Documentation</a>
+  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/cli-reference.md">CLI Reference</a> &middot; <a
+  href="#architecture">Architecture</a> &middot; <a href="#roadmap">Roadmap</a> &middot; <a
+  href="docs/design-doc/README.md">Documentation</a>
 </p>
 
----
 
-> **Status**: Under heavy development and very unstable. APIs, configuration formats, and behavior will change without notice. Not yet suitable for production use.
+
+> **Status**: Under heavy development and very unstable. APIs, configuration formats, and behavior will change without
+> notice. Not yet suitable for production use.
 
 ## What is Nebari Infrastructure Core?
 
-Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever observability system you already run — all wired together and working out of the box.
+Nebari Infrastructure Core (NIC) is an opinionated Kubernetes distribution that ships with sane defaults (that are fully
+configurable) and a suite of foundational software. A single YAML config file gives you a production-grade Kubernetes
+cluster with SSO, GitOps, API gateway, TLS certificates, and an OpenTelemetry exporter that plugs into whatever
+observability system you already run — all wired together and working out of the box.
 
-NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
+NIC's composable architecture means you get exactly the platform you need — nothing more, nothing less. Our initial
+focus is AI/ML workflows (notebook environments, model serving, experiment tracking), but the foundation is
+general-purpose. Software Packs let you tailor the platform to your workload without carrying software you don't use.
 
-NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up, based on seven years of lessons learned deploying data science platforms in production.
+NIC is the successor to [Nebari](https://github.com/nebari-dev/nebari), rebuilt from the ground up, based on seven years
+of lessons learned deploying data science platforms in production.
 
 ### The Problem
 
-Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
+Getting from a managed Kubernetes cluster to a platform teams can actually use requires assembling and integrating
+dozens of components: identity providers, certificate management, ingress controllers, telemetry pipelines, GitOps
+tooling. This takes months of engineering time, and keeping it all working across environments takes even more.
 
 ### The Solution
 
-NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the infrastructure and deploys foundational services that are pre-integrated and production-hardened.
+NIC deploys a **complete platform stack** — not just a cluster. You declare what you want, NIC provisions the
+infrastructure and deploys foundational services that are pre-integrated and production-hardened.
 
-On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
+On top of this foundation, **Software Packs** let you compose your platform. Software Packs are curated collections of
+open-source tools packaged as ArgoCD applications with a `NebariApp` Custom Resource. When installed, they automatically
+register with the platform — picking up SSO, routing, TLS, and telemetry with zero manual configuration.
 
-Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe, Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is independent, so you deploy only what you need.
+Want JupyterHub and conda-store? Install the Data Science Pack. Need model serving? Add the ML Pack (MLflow, KServe,
+Envoy AI Gateway). Want dashboards and log aggregation? Add the Observability Pack (Grafana LGTM stack). Each pack is
+independent, so you deploy only what you need.
 
 ## Architecture
 
@@ -99,7 +113,8 @@ nic deploy -f config.yaml
 
 1. **Provisions infrastructure** — VPC, managed Kubernetes, node pools, storage, IAM via OpenTofu
 2. **Deploys foundational software** — ArgoCD installs Keycloak, Envoy Gateway, cert-manager, OpenTelemetry Collector
-3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and telemetry
+3. **Activates the Nebari Operator** — watches for `NebariApp` resources, auto-configures SSO, routing, TLS, and
+   telemetry
 4. **Configures DNS** — optional Cloudflare integration for automatic record management
 
 ## Launchpad
@@ -156,10 +171,10 @@ cp examples/aws-config.yaml config.yaml
 cp .env.example .env  # Edit with your cloud provider credentials
 
 # Validate your config
-./nic validate -f config.yaml
+./nic validate
 
 # Deploy everything
-./nic deploy -f config.yaml
+./nic deploy
 ```
 
 See the [CLI Reference](docs/cli-reference.md) for all commands and options.
@@ -169,12 +184,16 @@ See the [CLI Reference](docs/cli-reference.md) for all commands and options.
 Deploy infrastructure and foundational services based on a configuration file.
 
 ```bash
+./nic deploy [flags]
 ./nic deploy -f <config-file> [flags]
 ```
 
+The `-f` flag is optional. When omitted, NIC looks for `config.yaml` in the current directory. You can also set
+`NIC_CONFIG_PATH` as an environment variable.
+
 Options:
 
-- `-f, --file`: Path to config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (auto-discovered if omitted)
 - `--dry-run`: Preview changes without applying them
 - `--timeout`: Override default timeout (e.g., '45m', '1h')
 - `--regen-apps`: Regenerate ArgoCD application manifests even if already bootstrapped
@@ -191,24 +210,26 @@ The deploy command:
 Validate a configuration file without deploying any infrastructure.
 
 ```bash
+./nic validate
 ./nic validate -f <config-file>
 ```
 
 Options:
 
-- `-f, --file`: Path to config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (auto-discovered if omitted)
 
 ### `nic destroy`
 
 Destroy all infrastructure resources.
 
 ```bash
+./nic destroy [flags]
 ./nic destroy -f <config-file> [flags]
 ```
 
 Options:
 
-- `-f, --file`: Path to config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (auto-discovered if omitted)
 - `--auto-approve`: Skip confirmation prompt and destroy immediately
 - `--dry-run`: Show what would be destroyed without actually deleting
 - `--force`: Continue destruction even if some resources fail to delete
@@ -221,12 +242,13 @@ Options:
 Generate a kubeconfig for the deployed Kubernetes cluster.
 
 ```bash
+./nic kubeconfig [-o output-file]
 ./nic kubeconfig -f <config-file> [-o output-file]
 ```
 
 Options:
 
-- `-f, --file`: Path to config.yaml file (required)
+- `-f, --file`: Path to config.yaml file (auto-discovered if omitted)
 - `-o, --output`: Path to output kubeconfig file (defaults to stdout)
 
 ### `nic version`
@@ -266,8 +288,8 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 - `OTEL_ENDPOINT`: OTLP endpoint (default: `localhost:4317`)
 
 ```bash
-# Console traces (debugging)
-OTEL_EXPORTER=console ./nic deploy -f config.yaml
+# Console traces (debugging) — config.yaml auto-discovered in current directory
+OTEL_EXPORTER=console ./nic deploy
 
 # OTLP traces
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
@@ -284,7 +306,8 @@ make localkind-up    # Create Kind cluster and deploy
 make localkind-down  # Tear down
 ```
 
-A GitHub repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the `GIT_SSH_PRIVATE_KEY` environment variable.
+A GitHub repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the
+`GIT_SSH_PRIVATE_KEY` environment variable.
 
 ### Running Tests
 
@@ -347,7 +370,8 @@ docs/                 Architecture docs, design decisions, ADRs
 
 NIC is under very active development.
 
-Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04.roadmap.md). We welcome feedback and contributions to help shape the future of the project!
+Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04.roadmap.md). We welcome feedback and
+contributions to help shape the future of the project!
 
 ## Documentation
 

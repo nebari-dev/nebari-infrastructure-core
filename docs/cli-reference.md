@@ -7,14 +7,19 @@
 Deploy infrastructure and foundational services based on a configuration file.
 
 ```bash
+nic deploy [flags]
 nic deploy -f <config-file> [flags]
 ```
+
+The config file is optional. When `-f` is omitted NIC resolves it in this order:
+1. `NIC_CONFIG_PATH` environment variable
+2. `./config.yaml` in the current working directory
 
 **Options:**
 
 | Flag | Description |
 |------|-------------|
-| `-f, --file` | Path to config.yaml file (required) |
+| `-f, --file` | Path to config.yaml file (auto-discovered if omitted) |
 | `--dry-run` | Preview changes without applying them |
 | `--timeout` | Override default timeout (e.g., `45m`, `1h`) |
 | `--regen-apps` | Regenerate ArgoCD application manifests even if already bootstrapped |
@@ -31,6 +36,7 @@ nic deploy -f <config-file> [flags]
 Validate a configuration file without deploying any infrastructure.
 
 ```bash
+nic validate
 nic validate -f <config-file>
 ```
 
@@ -38,13 +44,14 @@ nic validate -f <config-file>
 
 | Flag | Description |
 |------|-------------|
-| `-f, --file` | Path to config.yaml file (required) |
+| `-f, --file` | Path to config.yaml file (auto-discovered if omitted) |
 
 ### `nic destroy`
 
 Destroy all infrastructure resources.
 
 ```bash
+nic destroy [flags]
 nic destroy -f <config-file> [flags]
 ```
 
@@ -52,7 +59,7 @@ nic destroy -f <config-file> [flags]
 
 | Flag | Description |
 |------|-------------|
-| `-f, --file` | Path to config.yaml file (required) |
+| `-f, --file` | Path to config.yaml file (auto-discovered if omitted) |
 | `--auto-approve` | Skip confirmation prompt and destroy immediately |
 | `--dry-run` | Show what would be destroyed without actually deleting |
 | `--force` | Continue destruction even if some resources fail to delete |
@@ -65,6 +72,7 @@ nic destroy -f <config-file> [flags]
 Generate a kubeconfig for the deployed Kubernetes cluster.
 
 ```bash
+nic kubeconfig [-o output-file]
 nic kubeconfig -f <config-file> [-o output-file]
 ```
 
@@ -72,7 +80,7 @@ nic kubeconfig -f <config-file> [-o output-file]
 
 | Flag | Description |
 |------|-------------|
-| `-f, --file` | Path to config.yaml file (required) |
+| `-f, --file` | Path to config.yaml file (auto-discovered if omitted) |
 | `-o, --output` | Path to output kubeconfig file (defaults to stdout) |
 
 ### `nic version`
@@ -98,11 +106,16 @@ NIC uses a YAML configuration file. See the [`examples/`](../examples/) director
 
 ### Environment Variables
 
-Secrets are never stored in configuration files. Use environment variables or a `.env` file (see [`.env.example`](../.env.example)):
+Secrets are never stored in configuration files. Use environment variables or a `.env` file (see
+[`.env.example`](../.env.example)):
 
 ```bash
 cp .env.example .env
 ```
+
+| Variable | Description |
+|----------|-------------|
+| `NIC_CONFIG_PATH` | Override the config file path for all commands (lower priority than `--file`) |
 
 ### OpenTelemetry Configuration
 
@@ -114,9 +127,9 @@ NIC supports OpenTelemetry tracing with configurable exporters:
 | `OTEL_ENDPOINT` | OTLP collector endpoint | `localhost:4317` |
 
 ```bash
-# Console traces (debugging)
-OTEL_EXPORTER=console nic deploy -f config.yaml
+# Console traces (debugging) — config.yaml auto-discovered in current directory
+OTEL_EXPORTER=console nic deploy
 
-# OTLP traces (production)
+# OTLP traces (production) with explicit config path
 OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 nic deploy -f config.yaml
 ```
