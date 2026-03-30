@@ -1,5 +1,6 @@
 module "eks_cluster" {
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feature/longhorn-sg-rules"
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.1.0"
 
   project_name                             = var.project_name
   tags                                     = var.tags
