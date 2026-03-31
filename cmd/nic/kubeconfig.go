@@ -68,7 +68,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to generate kubeconfig", "error", err)

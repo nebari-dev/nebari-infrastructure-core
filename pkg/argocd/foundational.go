@@ -76,7 +76,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		WithAction("installing"))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
