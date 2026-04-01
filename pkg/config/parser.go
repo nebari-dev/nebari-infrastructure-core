@@ -10,16 +10,13 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// ParseConfigBytes parses YAML configuration from bytes and validates it.
+// ParseConfigBytes parses YAML configuration from bytes.
 // This is the core parsing logic, separated from file I/O for testability.
+// Call Validate on the returned config to check for semantic errors.
 func ParseConfigBytes(data []byte) (*NebariConfig, error) {
 	var config NebariConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	if err := config.Validate(); err != nil {
-		return nil, err
 	}
 
 	return &config, nil
