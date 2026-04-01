@@ -10,109 +10,33 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-func TestIsValidDNSProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{
-			name:     "cloudflare is valid",
-			provider: "cloudflare",
-			want:     true,
-		},
-		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
-		},
-		{
-			name:     "unknown provider is invalid",
-			provider: "notreal",
-			want:     false,
-		},
-		{
-			name:     "Cloudflare uppercase is invalid",
-			provider: "Cloudflare",
-			want:     false,
-		},
-	}
+func TestClusterConfig_NilReceiver(t *testing.T) {
+	var cluster *ClusterConfig
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidDNSProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
-			}
-		})
+	if got := cluster.ProviderName(); got != "" {
+		t.Errorf("nil.ProviderName() = %q, want empty string", got)
+	}
+	if got := cluster.ProviderConfig(); got != nil {
+		t.Errorf("nil.ProviderConfig() = %v, want nil", got)
 	}
 }
 
-func TestProviderConfig_NilMapAccess(t *testing.T) {
-	// Verify that accessing a nil ProviderConfig map returns nil (Go behavior)
-	cfg := &NebariConfig{
-		// ProviderConfig is nil
-	}
-
-	// Reading from nil map should return nil, not panic
-	got := cfg.ProviderConfig["amazon_web_services"]
-	if got != nil {
-		t.Errorf("Expected nil from nil map access, got %v", got)
-	}
-}
-
-func TestProviderConfig_DirectAccess(t *testing.T) {
-	type mockConfig struct {
-		Region string
-		Zone   string
-	}
-
-	cfg := &NebariConfig{
-		ProviderConfig: map[string]any{
-			"amazon_web_services": &mockConfig{Region: "us-west-2", Zone: "a"},
+func TestClusterConfig_ProviderAccess(t *testing.T) {
+	cluster := &ClusterConfig{
+		Providers: map[string]any{
+			"aws": map[string]any{"region": "us-west-2"},
 		},
 	}
 
-	// Access existing key
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
-	if rawCfg == nil {
-		t.Fatal("Expected non-nil config for existing key")
+	if cluster.ProviderName() != "aws" {
+		t.Errorf("ProviderName() = %q, want %q", cluster.ProviderName(), "aws")
 	}
-
-	awsCfg, ok := rawCfg.(*mockConfig)
-	if !ok {
-		t.Fatalf("Expected *mockConfig, got %T", rawCfg)
+	pc := cluster.ProviderConfig()
+	if pc == nil {
+		t.Fatal("ProviderConfig() is nil")
 	}
-	if awsCfg.Region != "us-west-2" {
-		t.Errorf("Region = %q, want %q", awsCfg.Region, "us-west-2")
-	}
-
-	// Access non-existing key
-	missing := cfg.ProviderConfig["nonexistent"]
-	if missing != nil {
-		t.Errorf("Expected nil for missing key, got %v", missing)
-	}
-}
-
-func TestProviderConfig_MultipleProviders(t *testing.T) {
-	// Verify multiple provider configs can coexist
-	cfg := &NebariConfig{
-		ProviderConfig: map[string]any{
-			"amazon_web_services":   map[string]any{"region": "us-west-2"},
-			"google_cloud_platform": map[string]any{"project": "my-project"},
-			"azure":                 map[string]any{"region": "eastus"},
-		},
-	}
-
-	// All should be accessible
-	if cfg.ProviderConfig["amazon_web_services"] == nil {
-		t.Error("AWS config should not be nil")
-	}
-	if cfg.ProviderConfig["google_cloud_platform"] == nil {
-		t.Error("GCP config should not be nil")
-	}
-	if cfg.ProviderConfig["azure"] == nil {
-		t.Error("Azure config should not be nil")
+	if pc["region"] != "us-west-2" {
+		t.Errorf("ProviderConfig()[region] = %v, want %q", pc["region"], "us-west-2")
 	}
 }
 
@@ -143,15 +67,15 @@ func TestParseConfigBytes(t *testing.T) {
 			name: "minimal valid config",
 			yaml: `
 project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.ProjectName != "test-project" {
 					t.Errorf("ProjectName = %q, want %q", cfg.ProjectName, "test-project")
 				}
-				if cfg.Provider != "aws" {
-					t.Errorf("Provider = %q, want %q", cfg.Provider, "aws")
+				if cfg.Cluster.ProviderName() != "aws" {
+					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "aws")
 				}
 			},
 		},
@@ -159,7 +83,8 @@ provider: aws
 			name: "config with git_repository",
 			yaml: `
 project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 git_repository:
   url: "git@github.com:org/repo.git"
   branch: main
@@ -167,7 +92,6 @@ git_repository:
   auth:
     ssh_key_env: GIT_SSH_KEY
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.GitRepository == nil {
 					t.Fatal("GitRepository is nil")
@@ -190,7 +114,8 @@ git_repository:
 			name: "config with git_repository and argocd_auth",
 			yaml: `
 project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 git_repository:
   url: "https://github.com/org/repo.git"
   auth:
@@ -198,7 +123,6 @@ git_repository:
   argocd_auth:
     token_env: ARGOCD_TOKEN
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.GitRepository == nil {
 					t.Fatal("GitRepository is nil")
@@ -215,87 +139,39 @@ git_repository:
 			},
 		},
 		{
-			name: "missing provider",
+			name: "missing cluster parses successfully",
 			yaml: `
 project_name: test-project
 `,
-			wantErr:     true,
-			errContains: "provider field is required",
-		},
-		{
-			name: "hetzner provider is accepted",
-			yaml: `
-project_name: test-project
-provider: hetzner
-`,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.Provider != "hetzner" {
-					t.Errorf("Provider = %q, want %q", cfg.Provider, "hetzner")
+				if cfg.Cluster != nil {
+					t.Errorf("Cluster should be nil, got %+v", cfg.Cluster)
 				}
 			},
 		},
 		{
-			name: "unknown provider passes config validation",
+			name: "any provider name parses successfully",
 			yaml: `
 project_name: test-project
-provider: unknown-provider
+cluster:
+  unknown-provider: {}
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.Provider != "unknown-provider" {
-					t.Errorf("Provider = %q, want %q", cfg.Provider, "unknown-provider")
+				if cfg.Cluster.ProviderName() != "unknown-provider" {
+					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "unknown-provider")
 				}
 			},
 		},
 		{
-			name: "invalid git_repository - missing url",
+			name: "DNS format with nested provider",
 			yaml: `
 project_name: test-project
-provider: aws
-git_repository:
-  branch: main
-  auth:
-    ssh_key_env: GIT_SSH_KEY
-`,
-			wantErr:     true,
-			errContains: "url is required",
-		},
-		{
-			name: "invalid git_repository - missing auth",
-			yaml: `
-project_name: test-project
-provider: aws
-git_repository:
-  url: "git@github.com:org/repo.git"
-`,
-			wantErr:     true,
-			errContains: "ssh_key_env or token_env is required",
-		},
-		{
-			name: "invalid git_repository - both ssh and token",
-			yaml: `
-project_name: test-project
-provider: aws
-git_repository:
-  url: "git@github.com:org/repo.git"
-  auth:
-    ssh_key_env: GIT_SSH_KEY
-    token_env: GIT_TOKEN
-`,
-			wantErr:     true,
-			errContains: "only one of",
-		},
-		{
-			name: "new DNS format with nested provider",
-			yaml: `
-project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 dns:
   cloudflare:
     zone_name: example.com
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.DNS == nil {
 					t.Fatal("DNS is nil")
@@ -313,25 +189,13 @@ dns:
 			},
 		},
 		{
-			name: "old DNS format rejected",
-			yaml: `
-project_name: test-project
-provider: aws
-dns_provider: cloudflare
-dns:
-  zone_name: example.com
-`,
-			wantErr:     true,
-			errContains: "dns_provider",
-		},
-		{
 			name: "bare dns block treated as no DNS configured",
 			yaml: `
 project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 dns:
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.DNS != nil {
 					t.Errorf("DNS should be nil for bare dns: block, got %+v", cfg.DNS)
@@ -339,16 +203,25 @@ dns:
 			},
 		},
 		{
-			name: "invalid DNS provider name rejected",
+			name: "cluster with provider config",
 			yaml: `
 project_name: test-project
-provider: aws
-dns:
-  notreal:
-    zone_name: example.com
+cluster:
+  aws:
+    region: us-west-2
 `,
-			wantErr:     true,
-			errContains: "invalid DNS provider",
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Cluster.ProviderName() != "aws" {
+					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "aws")
+				}
+				pc := cfg.Cluster.ProviderConfig()
+				if pc == nil {
+					t.Fatal("Cluster.ProviderConfig() is nil")
+				}
+				if pc["region"] != "us-west-2" {
+					t.Errorf("Cluster.ProviderConfig()[region] = %v, want %q", pc["region"], "us-west-2")
+				}
+			},
 		},
 		{
 			name:        "invalid YAML syntax",
@@ -392,7 +265,8 @@ func TestParseConfig(t *testing.T) {
 		configFile := filepath.Join(tmpDir, "config.yaml")
 		yaml := `
 project_name: test-project
-provider: aws
+cluster:
+  aws: {}
 `
 		if err := os.WriteFile(configFile, []byte(yaml), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
@@ -402,8 +276,8 @@ provider: aws
 		if err != nil {
 			t.Fatalf("ParseConfig() error: %v", err)
 		}
-		if cfg.Provider != "aws" {
-			t.Errorf("Provider = %q, want %q", cfg.Provider, "aws")
+		if cfg.Cluster.ProviderName() != "aws" {
+			t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "aws")
 		}
 	})
 
@@ -420,8 +294,8 @@ provider: aws
 	t.Run("wraps parsing errors with filename", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
-		// Missing provider field triggers validation error
-		if err := os.WriteFile(configFile, []byte("project_name: test"), 0600); err != nil {
+		// Invalid YAML syntax triggers parse error
+		if err := os.WriteFile(configFile, []byte("invalid: yaml: ["), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
@@ -446,7 +320,9 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "valid minimal config",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 			},
 			wantErr: false,
 		},
@@ -454,7 +330,9 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "valid config with git_repository",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					Auth: git.AuthConfig{
@@ -487,26 +365,31 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "project_name",
 		},
 		{
-			name: "missing provider",
+			name: "missing cluster",
 			config: NebariConfig{
 				ProjectName: "test",
 			},
 			wantErr:     true,
-			errContains: "provider field is required",
+			errContains: "cluster field is required",
 		},
 		{
-			name: "any provider name passes config validation",
+			name: "unknown provider rejected",
 			config: NebariConfig{
 				ProjectName: "test",
-				Provider:    "any-provider-name",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"any-provider-name": map[string]any{}},
+				},
 			},
-			wantErr: false,
+			wantErr:     true,
+			errContains: "invalid cluster provider",
 		},
 		{
 			name: "valid config with DNS",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"cloudflare": map[string]any{"zone_name": "example.com"},
@@ -519,7 +402,9 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "invalid DNS - no provider",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 				DNS: &DNSConfig{
 					Providers: map[string]any{},
 				},
@@ -531,7 +416,9 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "invalid DNS provider name",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"notreal": map[string]any{"zone_name": "example.com"},
@@ -542,22 +429,12 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid DNS provider",
 		},
 		{
-			name: "old format dns_provider rejected",
-			config: NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
-				ProviderConfig: map[string]any{
-					"dns_provider": "cloudflare",
-				},
-			},
-			wantErr:     true,
-			errContains: "dns_provider",
-		},
-		{
 			name: "invalid git_repository",
 			config: NebariConfig{
 				ProjectName: "test-project",
-				Provider:    "aws",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
 				GitRepository: &git.Config{
 					URL: "git@github.com:org/repo.git",
 					// missing auth
@@ -568,9 +445,14 @@ func TestNebariConfigValidate(t *testing.T) {
 		},
 	}
 
+	opts := ValidateOptions{
+		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
+		DNSProviders:     []string{"cloudflare"},
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			err := tt.config.Validate(opts)
 
 			if tt.wantErr {
 				if err == nil {
@@ -655,9 +537,11 @@ func TestDNSConfigValidate(t *testing.T) {
 		},
 	}
 
+	validDNSProviders := []string{"cloudflare"}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.dns.Validate()
+			err := tt.dns.Validate(validDNSProviders)
 
 			if tt.wantErr {
 				if err == nil {
@@ -779,11 +663,102 @@ func TestDNSConfigNilReceiver(t *testing.T) {
 	}
 }
 
+func TestClusterConfigValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		cluster     ClusterConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid single provider",
+			cluster: ClusterConfig{
+				Providers: map[string]any{
+					"aws": map[string]any{"region": "us-west-2"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "no provider configured",
+			cluster: ClusterConfig{
+				Providers: map[string]any{},
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "nil providers map",
+			cluster: ClusterConfig{
+				Providers: nil,
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "multiple providers",
+			cluster: ClusterConfig{
+				Providers: map[string]any{
+					"aws":   map[string]any{"region": "us-west-2"},
+					"azure": map[string]any{"region": "eastus"},
+				},
+			},
+			wantErr:     true,
+			errContains: "only one cluster provider",
+		},
+		{
+			name: "invalid provider name",
+			cluster: ClusterConfig{
+				Providers: map[string]any{
+					"notreal": map[string]any{},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid cluster provider",
+		},
+		{
+			name: "scalar provider value rejected",
+			cluster: ClusterConfig{
+				Providers: map[string]any{
+					"aws": "not-a-map",
+				},
+			},
+			wantErr:     true,
+			errContains: "must be a mapping",
+		},
+	}
+
+	validProviders := []string{"aws", "gcp", "azure", "hetzner", "local"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cluster.Validate(validProviders)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	// Test that the git.Config type works correctly when embedded in NebariConfig
 	cfg := &NebariConfig{
 		ProjectName: "test",
-		Provider:    "aws",
+		Cluster: &ClusterConfig{
+			Providers: map[string]any{"aws": map[string]any{}},
+		},
 		GitRepository: &git.Config{
 			URL:    "git@github.com:org/repo.git",
 			Branch: "develop",
@@ -806,7 +781,11 @@ func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	}
 
 	// Verify NebariConfig.Validate works
-	if err := cfg.Validate(); err != nil {
+	opts := ValidateOptions{
+		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
+		DNSProviders:     []string{"cloudflare"},
+	}
+	if err := cfg.Validate(opts); err != nil {
 		t.Errorf("Validate() unexpected error: %v", err)
 	}
 }

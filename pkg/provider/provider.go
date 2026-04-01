@@ -51,12 +51,6 @@ type Provider interface {
 	// and OpenTelemetry span attributes (e.g., "aws", "gcp", "azure", "local").
 	Name() string
 
-	// ConfigKey returns the YAML key used for this provider's configuration block.
-	// This allows providers to extract their own config from NebariConfig.ProviderConfig
-	// without the config package needing to know about provider-specific types.
-	// Examples: "amazon_web_services", "google_cloud_platform", "azure", "local"
-	ConfigKey() string
-
 	// Validate checks that the configuration is valid before any infrastructure
 	// operations. This includes verifying required fields, validating formats,
 	// and checking cloud-specific constraints (e.g., valid regions, instance types).

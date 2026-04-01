@@ -40,21 +40,24 @@ Use --auto-approve to skip the confirmation prompt.`,
 )
 
 func init() {
-	destroyCmd.Flags().StringVarP(&destroyConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
+	destroyCmd.Flags().StringVarP(&destroyConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 	destroyCmd.Flags().BoolVar(&destroyAutoApprove, "auto-approve", false, "Skip confirmation prompt and destroy immediately")
 	destroyCmd.Flags().BoolVar(&destroyForce, "force", false, "Continue destruction even if some resources fail to delete")
 	destroyCmd.Flags().StringVar(&destroyTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	destroyCmd.Flags().BoolVar(&destroyDryRun, "dry-run", false, "Show what would be destroyed without actually deleting")
-
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := destroyCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(destroyConfigFile)
+	if err != nil {
+		return err
+	}
+	destroyConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.destroy")
 	defer span.End()
@@ -76,8 +79,18 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(config.ValidateOptions{
+		ClusterProviders: registry.List(ctx),
+		DNSProviders:     dnsRegistry.List(ctx),
+	}); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", destroyConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
@@ -99,10 +112,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	prov, err := registry.Get(ctx, cfg.Provider)
+	prov, err := registry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
@@ -181,7 +194,7 @@ func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error 
 
 	// Show warning message
 	fmt.Println("\n⚠️  WARNING: You are about to destroy the following infrastructure:")
-	fmt.Printf("   Provider:     %s\n", cfg.Provider)
+	fmt.Printf("   Provider:     %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
 
 	// Show provider-specific details

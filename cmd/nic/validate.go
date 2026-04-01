@@ -25,16 +25,20 @@ all required fields.`,
 )
 
 func init() {
-	validateCmd.Flags().StringVarP(&validateConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := validateCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
+	validateCmd.Flags().StringVarP(&validateConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(validateConfigFile)
+	if err != nil {
+		return err
+	}
+	validateConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()
@@ -51,20 +55,23 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	slog.Info("Configuration is valid",
-		"provider", cfg.Provider,
-		"project_name", cfg.ProjectName,
-	)
-
-	// Verify provider is registered
-	if _, err := registry.Get(ctx, cfg.Provider); err != nil {
+	// Validate configuration with registered providers
+	if err := cfg.Validate(config.ValidateOptions{
+		ClusterProviders: registry.List(ctx),
+		DNSProviders:     dnsRegistry.List(ctx),
+	}); err != nil {
 		span.RecordError(err)
-		slog.Error("Provider not available", "error", err, "provider", cfg.Provider)
+		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err
 	}
 
+	slog.Info("Configuration is valid",
+		"provider", cfg.Cluster.ProviderName(),
+		"project_name", cfg.ProjectName,
+	)
+
 	fmt.Printf("✓ Configuration file is valid\n")
-	fmt.Printf("  Provider: %s\n", cfg.Provider)
+	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil

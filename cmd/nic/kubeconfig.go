@@ -27,17 +27,21 @@ or other Kubernetes clients.`,
 )
 
 func init() {
-	kubeconfigCmd.Flags().StringVarP(&kubeconfigConfigFile, "file", "f", "", "Path to nebari-config.yaml file (required)")
+	kubeconfigCmd.Flags().StringVarP(&kubeconfigConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 	kubeconfigCmd.Flags().StringVarP(&kubeconfigOutputFile, "output", "o", "", "Path to output kubeconfig file (defaults to stdout)")
-	// Panic is appropriate in init() since we cannot return errors and this indicates a programming error
-	if err := kubeconfigCmd.MarkFlagRequired("file"); err != nil {
-		panic(err)
-	}
 }
 
 func runKubeconfig(cmd *cobra.Command, args []string) error {
 	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+
+	// Resolve config file path via auto-discovery if not explicitly provided.
+	resolved, err := resolveConfigFile(kubeconfigConfigFile)
+	if err != nil {
+		return err
+	}
+	kubeconfigConfigFile = resolved
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
 	defer span.End()
@@ -52,15 +56,25 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(config.ValidateOptions{
+		ClusterProviders: registry.List(ctx),
+		DNSProviders:     dnsRegistry.List(ctx),
+	}); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", kubeconfigConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
-	provider, err := registry.Get(ctx, cfg.Provider)
+	provider, err := registry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 

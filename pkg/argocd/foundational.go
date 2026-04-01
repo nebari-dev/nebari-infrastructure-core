@@ -20,14 +20,23 @@ const (
 	// KeycloakDefaultNamespace is the namespace where Keycloak is deployed.
 	KeycloakDefaultNamespace = "keycloak"
 
+	// NebariSystemNamespace is the namespace where Nebari system services are deployed (e.g., landing page).
+	NebariSystemNamespace = "nebari-system"
+
 	// KeycloakDefaultAdminSecretName is the name of the Kubernetes secret containing Keycloak admin credentials.
 	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
+
+	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
+	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
 type FoundationalConfig struct {
 	// Keycloak configuration
 	Keycloak KeycloakConfig
+
+	// LandingPage configuration
+	LandingPage LandingPageConfig
 
 	// MetalLB configuration (local deployments only)
 	MetalLB MetalLBConfig
@@ -44,6 +53,11 @@ type KeycloakConfig struct {
 	Hostname              string
 	RealmAdminUsername    string // Username for the admin user in the nebari realm
 	RealmAdminPassword    string // Password for the admin user in the nebari realm
+}
+
+// LandingPageConfig holds landing page-specific configuration
+type LandingPageConfig struct {
+	RedisPassword string // Password for Redis used by nebari-landing
 }
 
 // MetalLBConfig holds MetalLB-specific configuration
@@ -111,6 +125,18 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
+		}
+
+		// Create namespace for Nebari system services
+		if err := createNamespace(ctx, k8sClient, NebariSystemNamespace); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Nebari system namespace: %w", err)
+		}
+
+		// Create Redis secret for landing page
+		if err := createLandingPageSecrets(ctx, k8sClient, foundationalCfg.LandingPage); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create landing page secrets: %w", err)
 		}
 	}
 
@@ -260,6 +286,32 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		}); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// createLandingPageSecrets creates the required secrets for the nebari-landing service
+func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, landingCfg LandingPageConfig) error {
+	namespace := NebariSystemNamespace
+
+	// Create Redis password secret for nebari-landing
+	// This secret is referenced by the helm chart to prevent password regeneration on every sync
+	if err := createSecret(ctx, client, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      NebariLandingRedisSecretName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/part-of":    "nebari-foundational",
+				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"redis-password": landingCfg.RedisPassword,
+		},
+	}); err != nil {
+		return err
 	}
 
 	return nil
