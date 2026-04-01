@@ -1,29 +1,16 @@
-package dnsprovider
+package registry
 
 import (
 	"context"
 	"fmt"
-	"sync"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// Registry holds registered DNS providers
-type Registry struct {
-	mu        sync.RWMutex
-	providers map[string]DNSProvider
-}
-
-// NewRegistry creates a new DNS provider registry
-func NewRegistry() *Registry {
-	return &Registry{
-		providers: make(map[string]DNSProvider),
-	}
-}
-
 // Register registers a DNS provider with the given name
-func (r *Registry) Register(ctx context.Context, name string, provider DNSProvider) error {
+func (r *Registry) RegisterDNSProvider(ctx context.Context, name string, provider dnsprovider.DNSProvider) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "dnsregistry.Register")
 	defer span.End()
@@ -33,18 +20,18 @@ func (r *Registry) Register(ctx context.Context, name string, provider DNSProvid
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.providers[name]; exists {
+	if _, exists := r.DNSProviders[name]; exists {
 		err := fmt.Errorf("DNS provider %q is already registered", name)
 		span.RecordError(err)
 		return err
 	}
 
-	r.providers[name] = provider
+	r.DNSProviders[name] = provider
 	return nil
 }
 
 // Get retrieves a DNS provider by name
-func (r *Registry) Get(ctx context.Context, name string) (DNSProvider, error) {
+func (r *Registry) GetDNSProvider(ctx context.Context, name string) (dnsprovider.DNSProvider, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "dnsregistry.Get")
 	defer span.End()
@@ -54,7 +41,7 @@ func (r *Registry) Get(ctx context.Context, name string) (DNSProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	provider, exists := r.providers[name]
+	provider, exists := r.DNSProviders[name]
 	if !exists {
 		err := fmt.Errorf("DNS provider %q is not registered", name)
 		span.RecordError(err)
@@ -65,7 +52,7 @@ func (r *Registry) Get(ctx context.Context, name string) (DNSProvider, error) {
 }
 
 // List returns all registered DNS provider names
-func (r *Registry) List(ctx context.Context) []string {
+func (r *Registry) ListDNSProviders(ctx context.Context) []string {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "dnsregistry.List")
 	defer span.End()
@@ -73,8 +60,8 @@ func (r *Registry) List(ctx context.Context) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]string, 0, len(r.providers))
-	for name := range r.providers {
+	names := make([]string, 0, len(r.DNSProviders))
+	for name := range r.DNSProviders {
 		names = append(names, name)
 	}
 

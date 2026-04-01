@@ -11,23 +11,19 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/hetzner"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/telemetry"
 )
 
 var (
 	// Global provider registry
-	registry *provider.Registry
-
-	// Global DNS provider registry
-	dnsRegistry *dnsprovider.Registry
+	reg *registry.Registry
 
 	// Root command
 	rootCmd = &cobra.Command{
@@ -51,36 +47,33 @@ func init() {
 	_ = godotenv.Load()
 
 	// Initialize provider registry
-	registry = provider.NewRegistry()
+	reg = registry.NewRegistry()
 
 	// Register all providers explicitly (no blank imports or init() magic)
 	ctx := context.Background()
 
-	if err := registry.Register(ctx, "aws", aws.NewProvider()); err != nil {
+	if err := reg.RegisterClusterProvider(ctx, "aws", aws.NewProvider()); err != nil {
 		log.Fatalf("Failed to register AWS provider: %v", err)
 	}
 
-	if err := registry.Register(ctx, "gcp", gcp.NewProvider()); err != nil {
+	if err := reg.RegisterClusterProvider(ctx, "gcp", gcp.NewProvider()); err != nil {
 		log.Fatalf("Failed to register GCP provider: %v", err)
 	}
 
-	if err := registry.Register(ctx, "azure", azure.NewProvider()); err != nil {
+	if err := reg.RegisterClusterProvider(ctx, "azure", azure.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Azure provider: %v", err)
 	}
 
-	if err := registry.Register(ctx, "local", local.NewProvider()); err != nil {
+	if err := reg.RegisterClusterProvider(ctx, "local", local.NewProvider()); err != nil {
 		log.Fatalf("Failed to register local provider: %v", err)
 	}
 
-	if err := registry.Register(ctx, "hetzner", hetzner.NewProvider()); err != nil {
+	if err := reg.RegisterClusterProvider(ctx, "hetzner", hetzner.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Hetzner provider: %v", err)
 	}
 
-	// Initialize DNS provider registry
-	dnsRegistry = dnsprovider.NewRegistry()
-
 	// Register DNS providers explicitly
-	if err := dnsRegistry.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
+	if err := reg.RegisterDNSProvider(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
 	}
 
