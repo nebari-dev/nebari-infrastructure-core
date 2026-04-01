@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
@@ -72,12 +71,12 @@ func containsSubstring(slice []string, substr string) bool {
 }
 
 // extractAWSConfig converts the any provider config to AWS Config type
-func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
+func extractAWSConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
-	rawCfg := cfg.Cluster.ProviderConfig()
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
 		err := fmt.Errorf("AWS configuration is required")
 		span.RecordError(err)
@@ -94,30 +93,18 @@ func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, e
 }
 
 // Validate validates the AWS configuration with pre-flight checks
-func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Validate")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
-		attribute.String("project_name", cfg.ProjectName),
-		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
+		attribute.String("project_name", projectName),
 	)
 
-	// For existing clusters, we don't need AWS infrastructure config
-	if cfg.IsExistingCluster() {
-		span.SetAttributes(attribute.String("kube_context", cfg.GetKubeContext()))
-		// Just validate that the kube context exists
-		if err := kubeconfig.ValidateContext(cfg.GetKubeContext()); err != nil {
-			span.RecordError(err)
-			return err
-		}
-		return nil
-	}
-
 	// Extract and validate AWS configuration
-	awsCfg, err := extractAWSConfig(ctx, cfg)
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -221,27 +208,19 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 }
 
 // Deploy deploys AWS infrastructure using stateless reconciliation
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 		attribute.Bool("dry_run", opts.DryRun),
-		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
 
-	// For existing clusters, skip infrastructure provisioning
-	if cfg.IsExistingCluster() {
-		span.SetAttributes(attribute.String("kube_context", cfg.GetKubeContext()))
-		// Nothing to deploy - using existing cluster
-		return nil
-	}
-
 	// Extract AWS configuration
-	awsCfg, err := extractAWSConfig(ctx, cfg)
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -258,7 +237,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 			span.RecordError(err)
 			return fmt.Errorf("failed to create STS client: %w", err)
 		}
-		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		bucketName, err = getStateBucketName(ctx, stsClient, region, projectName)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to get state bucket name: %w", err)
@@ -285,7 +264,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -308,7 +287,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 	} else {
 		err = tf.Init(ctx,
 			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(projectName))),
 			tfexec.BackendConfig(fmt.Sprintf("region=%s", awsCfg.Region)),
 		)
 	}
@@ -334,7 +313,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 
 	// Install Longhorn storage if enabled
 	if awsCfg.LonghornEnabled() {
-		kubeconfigBytes, err := p.GetKubeconfig(ctx, cfg)
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
@@ -350,13 +329,13 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 }
 
 // Destroy tears down AWS infrastructure in reverse order
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
 
 	// Extract AWS configuration
-	awsCfg, err := extractAWSConfig(ctx, cfg)
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -372,7 +351,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 			span.RecordError(err)
 			return fmt.Errorf("failed to create STS client: %w", err)
 		}
-		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		bucketName, err = getStateBucketName(ctx, stsClient, region, projectName)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to get state bucket name: %w", err)
@@ -381,7 +360,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
-		attribute.String("cluster_name", cfg.ProjectName),
+		attribute.String("cluster_name", projectName),
 		attribute.String("region", region),
 		attribute.Bool("dry_run", opts.DryRun),
 		attribute.Bool("force", opts.Force),
@@ -399,7 +378,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 		return err
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -422,7 +401,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 	} else {
 		err = tf.Init(ctx,
 			tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+			tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(projectName))),
 			tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
 		)
 	}
@@ -444,7 +423,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 
 	// Clean up Kubernetes-created load balancers before destroying infrastructure.
 	// These are not managed by Terraform and will block VPC/subnet deletion.
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up Kubernetes-created load balancers for cluster: %s", cfg.ProjectName)).
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up Kubernetes-created load balancers for cluster: %s", projectName)).
 		WithResource("load-balancer").
 		WithAction("cleanup"))
 	elbClient, err := newELBClient(ctx, region)
@@ -457,7 +436,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 		span.RecordError(err)
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
-	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, cfg.ProjectName); err != nil {
+	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, projectName); err != nil {
 		if opts.Force {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
 				WithResource("load-balancer").
@@ -483,35 +462,19 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts p
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster
-func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
-	// For existing clusters, extract kubeconfig from the specified context
-	if cfg.IsExistingCluster() {
-		contextName := cfg.GetKubeContext()
-		span.SetAttributes(
-			attribute.String("provider", ProviderName),
-			attribute.String("kube_context", contextName),
-			attribute.Bool("existing_cluster", true),
-		)
-		kubeconfigBytes, err := kubeconfig.ExtractContext(contextName)
-		if err != nil {
-			span.RecordError(err)
-			return nil, err
-		}
-		return kubeconfigBytes, nil
-	}
-
 	// Extract AWS configuration
-	awsCfg, err := extractAWSConfig(ctx, cfg)
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
-	clusterName := cfg.ProjectName
+	clusterName := projectName
 	region := awsCfg.Region
 
 	// Get bucket name from config or generate one
@@ -522,7 +485,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to create STS client: %w", err)
 		}
-		bucketName, err = getStateBucketName(ctx, stsClient, region, cfg.ProjectName)
+		bucketName, err = getStateBucketName(ctx, stsClient, region, projectName)
 		if err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to get state bucket name: %w", err)
@@ -553,7 +516,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	}
 
 	// Initialize terraform to read outputs from state
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(cfg.ProjectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to setup terraform: %w", err)
@@ -567,7 +530,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 	err = tf.Init(ctx,
 		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(cfg.ProjectName))),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(projectName))),
 		tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
 	)
 	if err != nil {
@@ -617,17 +580,10 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 }
 
 // Summary returns key configuration details for display purposes
-func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := make(map[string]string)
 
-	// Show kube context if using existing cluster
-	if cfg.IsExistingCluster() {
-		result["Kube Context"] = cfg.GetKubeContext()
-		result["Mode"] = "existing-cluster"
-		return result
-	}
-
-	rawCfg := cfg.Cluster.ProviderConfig()
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -643,10 +599,10 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
-func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 
-	rawCfg := cfg.Cluster.ProviderConfig()
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {
