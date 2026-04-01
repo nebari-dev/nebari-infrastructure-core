@@ -45,9 +45,9 @@ func TestIsValidDNSProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidDNSProvider(tt.provider, tt.validProviders)
+			got := isValidProvider(tt.provider, tt.validProviders)
 			if got != tt.want {
-				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
+				t.Errorf("isValidProvider(%q) = %v, want %v", tt.provider, got, tt.want)
 			}
 		})
 	}
@@ -449,10 +449,11 @@ provider: aws
 
 func TestNebariConfigValidate(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      NebariConfig
-		wantErr     bool
-		errContains string
+		name           string
+		config         NebariConfig
+		validProviders ValidProviders
+		wantErr        bool
+		errContains    string
 	}{
 		{
 			name: "valid minimal config",
@@ -460,10 +461,12 @@ func TestNebariConfigValidate(t *testing.T) {
 				ProjectName: "test-project",
 				Provider:    "aws",
 			},
-			wantErr: false,
+			validProviders: mockValidProviders,
+			wantErr:        false,
 		},
 		{
-			name: "valid config with git_repository",
+			name:           "valid config with git_repository",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Provider:    "aws",
@@ -477,13 +480,15 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "missing project_name",
-			config:      NebariConfig{},
-			wantErr:     true,
-			errContains: "project_name field is required",
+			name:           "missing project_name",
+			validProviders: mockValidProviders,
+			config:         NebariConfig{},
+			wantErr:        true,
+			errContains:    "project_name field is required",
 		},
 		{
-			name: "invalid project_name with path traversal",
+			name:           "invalid project_name with path traversal",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "../../etc",
 			},
@@ -491,7 +496,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "project_name",
 		},
 		{
-			name: "invalid project_name with dots",
+			name:           "invalid project_name with dots",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "..sneaky",
 			},
@@ -499,7 +505,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "project_name",
 		},
 		{
-			name: "missing provider",
+			name:           "missing provider",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test",
 			},
@@ -507,7 +514,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name: "any provider name passes config validation",
+			name:           "any provider name passes config validation",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test",
 				Provider:    "any-provider-name",
@@ -515,11 +523,11 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config with DNS",
+			name:           "valid config with DNS",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
-				ProjectName:    "test-project",
-				Provider:       "aws",
-				ValidProviders: mockValidProviders,
+				ProjectName: "test-project",
+				Provider:    "aws",
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"cloudflare": map[string]any{"zone_name": "example.com"},
@@ -529,7 +537,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid DNS - no provider",
+			name:           "invalid DNS - no provider",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Provider:    "aws",
@@ -541,7 +550,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid dns",
 		},
 		{
-			name: "invalid DNS provider name",
+			name:           "invalid DNS provider name",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Provider:    "aws",
@@ -555,7 +565,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid DNS provider",
 		},
 		{
-			name: "old format dns_provider rejected",
+			name:           "old format dns_provider rejected",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Provider:    "aws",
@@ -567,7 +578,8 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "dns_provider",
 		},
 		{
-			name: "invalid git_repository",
+			name:           "invalid git_repository",
+			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Provider:    "aws",
@@ -583,7 +595,7 @@ func TestNebariConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			err := tt.config.Validate(tt.validProviders)
 
 			if tt.wantErr {
 				if err == nil {
@@ -819,7 +831,7 @@ func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	}
 
 	// Verify NebariConfig.Validate works
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Validate(mockValidProviders); err != nil {
 		t.Errorf("Validate() unexpected error: %v", err)
 	}
 }

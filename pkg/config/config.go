@@ -17,10 +17,9 @@ type ValidProviders struct {
 
 // NebariConfig represents the parsed nebari-config.yaml structure
 type NebariConfig struct {
-	ProjectName    string `yaml:"project_name"`
-	Provider       string `yaml:"provider"`
-	ValidProviders ValidProviders
-	Domain         string `yaml:"domain,omitempty"`
+	ProjectName string `yaml:"project_name"`
+	Provider    string `yaml:"provider"`
+	Domain      string `yaml:"domain,omitempty"`
 
 	// KubeContext specifies an existing Kubernetes context to deploy to.
 	// When set, this enables "bring your own cluster" mode - the provider's
@@ -51,100 +50,13 @@ type NebariConfig struct {
 	Timeout time.Duration `yaml:"-"` // Override default operation timeout
 }
 
-// DNSConfig holds typed DNS provider configuration.
-// The provider name is the map key, the provider config is the map value.
-// Example YAML:
-//
-//	dns:
-//	  cloudflare:
-//	    zone_name: example.com
-type DNSConfig struct {
-	// Providers captures the provider name as key and its config as value.
-	Providers map[string]any `yaml:",inline"`
-}
-
-func IsValidDNSProvider(name string, validProvidesr []string) bool {
-	for _, p := range validProvidesr {
-		if p == name {
-			return true
-		}
-	}
-	return false
-}
-
-// Validate checks that exactly one valid DNS provider is configured.
-func (d *DNSConfig) Validate(validProviders []string) error {
-	if len(d.Providers) == 0 {
-		return fmt.Errorf("dns block is present but no provider is configured")
-	}
-	if len(d.Providers) > 1 {
-		return fmt.Errorf("only one DNS provider can be configured at a time")
-	}
-	name := d.ProviderName()
-	if !IsValidDNSProvider(name, validProviders) {
-		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, validProviders)
-	}
-	if d.ProviderConfig() == nil {
-		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
-	}
-	return nil
-}
-
-// ProviderName returns the name of the configured DNS provider,
-// or an empty string if none is configured.
-// Precondition: Validate() ensures exactly one entry in the map.
-func (d *DNSConfig) ProviderName() string {
-	if d == nil {
-		return ""
-	}
-	for name := range d.Providers {
-		return name
-	}
-	return ""
-}
-
-// ProviderConfig returns the DNS provider config as a map.
-// Returns nil if no provider is configured or the value is not a map.
-// Precondition: Validate() ensures exactly one entry in the map.
-func (d *DNSConfig) ProviderConfig() map[string]any {
-	if d == nil {
-		return nil
-	}
-	for _, v := range d.Providers {
-		if m, ok := v.(map[string]any); ok {
-			return m
-		}
-		return nil
-	}
-	return nil
-}
-
-// CertificateConfig holds TLS certificate configuration
-type CertificateConfig struct {
-	// Type is the certificate type: "selfsigned" or "letsencrypt"
-	Type string `yaml:"type,omitempty"`
-
-	// ACME configuration for Let's Encrypt
-	ACME *ACMEConfig `yaml:"acme,omitempty"`
-}
-
-// ACMEConfig holds ACME (Let's Encrypt) configuration
-type ACMEConfig struct {
-	// Email is the email address for Let's Encrypt registration
-	Email string `yaml:"email"`
-
-	// Server is the ACME server URL (defaults to Let's Encrypt production)
-	// Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing
-	Server string `yaml:"server,omitempty"`
-}
-
 // safeProjectName matches alphanumeric strings with hyphens and underscores.
 // Used to validate ProjectName before it is used as a filesystem path component.
 var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
-func (c *NebariConfig) Validate() error {
+func (c *NebariConfig) Validate(validProviders ValidProviders) error {
 	if c.ProjectName == "" {
 		return fmt.Errorf("project_name field is required")
 	}
@@ -166,7 +78,7 @@ func (c *NebariConfig) Validate() error {
 	}
 
 	if c.DNS != nil {
-		if err := c.DNS.Validate(c.ValidProviders.DNSProviders); err != nil {
+		if err := c.DNS.Validate(validProviders.DNSProviders); err != nil {
 			return fmt.Errorf("invalid dns: %w", err)
 		}
 	}
@@ -192,4 +104,14 @@ func (c *NebariConfig) GetKubeContext() string {
 // When true, infrastructure provisioning should be skipped.
 func (c *NebariConfig) IsExistingCluster() bool {
 	return c.KubeContext != ""
+}
+
+// isValidProvider checks if the given provider name is in the list of valid providers.
+func isValidProvider(name string, validProviders []string) bool {
+	for _, p := range validProviders {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }

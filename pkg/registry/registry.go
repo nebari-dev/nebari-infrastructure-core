@@ -11,18 +11,18 @@ import (
 // Registry holds registered DNS providers
 type Registry struct {
 	mu               sync.RWMutex
-	ClusterProviders map[string]provider.Provider
-	DNSProviders     map[string]dnsprovider.DNSProvider
+	clusterProviders map[string]provider.Provider
+	dnsProviders     map[string]dnsprovider.DNSProvider
 	// TODO implement provider pattern for Git and Certs
 	// CertProviders map[string]certprovider.CertProvider
 	// GitProviders map[string]gitprovider.GitProvider
 }
 
-// NewRegistry creates a new DNS provider registry
+// NewRegistry creates a new unified provider registry
 func NewRegistry() *Registry {
 	return &Registry{
-		ClusterProviders: make(map[string]provider.Provider),
-		DNSProviders:     make(map[string]dnsprovider.DNSProvider),
+		clusterProviders: make(map[string]provider.Provider),
+		dnsProviders:     make(map[string]dnsprovider.DNSProvider),
 		// CertProviders: make(map[string]certprovider.Provider),
 		// GitProviders:     make(map[string]gitprovider.Provider),
 	}
@@ -31,12 +31,12 @@ func NewRegistry() *Registry {
 func (r *Registry) ValidProviders() config.ValidProviders {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	clusterNames := make([]string, 0, len(r.ClusterProviders))
-	for name := range r.ClusterProviders {
+	clusterNames := make([]string, 0, len(r.clusterProviders))
+	for name := range r.clusterProviders {
 		clusterNames = append(clusterNames, name)
 	}
-	dnsNames := make([]string, 0, len(r.DNSProviders))
-	for name := range r.DNSProviders {
+	dnsNames := make([]string, 0, len(r.dnsProviders))
+	for name := range r.dnsProviders {
 		dnsNames = append(dnsNames, name)
 	}
 	return config.ValidProviders{
