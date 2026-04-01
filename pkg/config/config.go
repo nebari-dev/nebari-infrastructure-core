@@ -3,10 +3,19 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
+
+// ValidateOptions configures validation behavior.
+// Provider lists are injected by the caller (typically from a registry)
+// to keep the config package decoupled from provider implementations.
+type ValidateOptions struct {
+	ClusterProviders []string
+	DNSProviders     []string
+}
 
 // NebariConfig represents the parsed nebari-config.yaml structure
 type NebariConfig struct {
@@ -53,7 +62,8 @@ type DNSConfig struct {
 }
 
 // Validate checks that exactly one valid DNS provider is configured.
-func (d *DNSConfig) Validate() error {
+// When validProviders is non-empty, the provider name is checked against the list.
+func (d *DNSConfig) Validate(validProviders []string) error {
 	if len(d.Providers) == 0 {
 		return fmt.Errorf("dns block is present but no provider is configured")
 	}
@@ -61,8 +71,8 @@ func (d *DNSConfig) Validate() error {
 		return fmt.Errorf("only one DNS provider can be configured at a time")
 	}
 	name := d.ProviderName()
-	if !IsValidDNSProvider(name) {
-		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, ValidDNSProviders)
+	if len(validProviders) > 0 && !slices.Contains(validProviders, name) {
+		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, validProviders)
 	}
 	if d.ProviderConfig() == nil {
 		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
@@ -112,7 +122,8 @@ type ClusterConfig struct {
 }
 
 // Validate checks that exactly one valid cluster provider is configured.
-func (c *ClusterConfig) Validate() error {
+// When validProviders is non-empty, the provider name is checked against the list.
+func (c *ClusterConfig) Validate(validProviders []string) error {
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("cluster block is present but no provider is configured")
 	}
@@ -120,8 +131,8 @@ func (c *ClusterConfig) Validate() error {
 		return fmt.Errorf("only one cluster provider can be configured at a time")
 	}
 	name := c.ProviderName()
-	if !IsValidClusterProvider(name) {
-		return fmt.Errorf("invalid cluster provider %q, must be one of: %v", name, ValidClusterProviders)
+	if len(validProviders) > 0 && !slices.Contains(validProviders, name) {
+		return fmt.Errorf("invalid cluster provider %q, must be one of: %v", name, validProviders)
 	}
 	if c.ProviderConfig() == nil {
 		return fmt.Errorf("cluster provider %q config must be a mapping, not a scalar value", name)
@@ -181,35 +192,10 @@ type ACMEConfig struct {
 // Used to validate ProjectName before it is used as a filesystem path component.
 var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
-// ValidDNSProviders lists the supported DNS providers
-var ValidDNSProviders = []string{"cloudflare"}
-
-// IsValidDNSProvider checks if the DNS provider string is valid
-func IsValidDNSProvider(provider string) bool {
-	for _, p := range ValidDNSProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
-
-// ValidClusterProviders lists the supported cluster providers
-var ValidClusterProviders = []string{"aws", "gcp", "azure", "hetzner", "local"}
-
-// IsValidClusterProvider checks if the cluster provider string is valid
-func IsValidClusterProvider(provider string) bool {
-	for _, p := range ValidClusterProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
-
 // Validate checks that the configuration is valid.
+// The opts parameter provides the set of valid provider names, injected by the caller.
 // Returns an error describing the first validation failure encountered.
-func (c *NebariConfig) Validate() error {
+func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	if c.ProjectName == "" {
 		return fmt.Errorf("project_name field is required")
 	}
@@ -220,12 +206,12 @@ func (c *NebariConfig) Validate() error {
 	if c.Cluster == nil {
 		return fmt.Errorf("cluster field is required")
 	}
-	if err := c.Cluster.Validate(); err != nil {
+	if err := c.Cluster.Validate(opts.ClusterProviders); err != nil {
 		return fmt.Errorf("invalid cluster: %w", err)
 	}
 
 	if c.DNS != nil {
-		if err := c.DNS.Validate(); err != nil {
+		if err := c.DNS.Validate(opts.DNSProviders); err != nil {
 			return fmt.Errorf("invalid dns: %w", err)
 		}
 	}
