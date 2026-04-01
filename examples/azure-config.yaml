@@ -1,5 +1,4 @@
 project_name: my-nebari-azure
-provider: azure
 domain: nebari.example.com
 
 # TLS certificate configuration
@@ -19,29 +18,30 @@ git_repository:
     # OR use token for HTTPS:
     # token_env: GIT_TOKEN
 
-azure:
-  region: eastus
-  kubernetes_version: "1.34"
-  storage_account_postfix: "nebari"
-  resource_group_name: "nebari-resources"
-  private_cluster_enabled: false
+cluster:
+  azure:
+    region: eastus
+    kubernetes_version: "1.34"
+    storage_account_postfix: "nebari"
+    resource_group_name: "nebari-resources"
+    private_cluster_enabled: false
 
-  node_groups:
-    general:
-      instance: Standard_D8_v3
-      min_nodes: 1
-      max_nodes: 1
+    node_groups:
+      general:
+        instance: Standard_D8_v3
+        min_nodes: 1
+        max_nodes: 1
 
-    user:
-      instance: Standard_D4_v3
-      min_nodes: 0
-      max_nodes: 5
+      user:
+        instance: Standard_D4_v3
+        min_nodes: 0
+        max_nodes: 5
 
-    worker:
-      instance: Standard_D4_v3
-      min_nodes: 0
-      max_nodes: 5
+      worker:
+        instance: Standard_D4_v3
+        min_nodes: 0
+        max_nodes: 5
 
-  tags:
-    Environment: development
-    Project: nebari
+    tags:
+      Environment: development
+      Project: nebari

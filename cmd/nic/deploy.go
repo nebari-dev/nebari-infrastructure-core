@@ -101,8 +101,18 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(config.ValidateOptions{
+		ClusterProviders: registry.List(ctx),
+		DNSProviders:     dnsRegistry.List(ctx),
+	}); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", deployConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
@@ -123,10 +133,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	provider, err := registry.Get(ctx, cfg.Provider)
+	provider, err := registry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 

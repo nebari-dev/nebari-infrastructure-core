@@ -26,11 +26,6 @@ func (p *Provider) Name() string {
 	return "azure"
 }
 
-// ConfigKey returns the YAML configuration key for Azure
-func (p *Provider) ConfigKey() string {
-	return "azure"
-}
-
 // Validate validates the Azure configuration (stub implementation)
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -60,7 +55,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["azure"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		var azureCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &azureCfg); err == nil {
 			span.SetAttributes(attribute.String("azure.region", azureCfg.Region))
@@ -123,7 +118,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	result := make(map[string]string)
 
-	rawCfg := cfg.ProviderConfig["azure"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
