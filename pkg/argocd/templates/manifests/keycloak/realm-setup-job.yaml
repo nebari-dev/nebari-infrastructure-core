@@ -81,8 +81,9 @@ spec:
               $KCADM add-roles -r nebari --uusername admin --rolename user || true
 
               echo "Configuring groups client scope with group-membership mapper..."
+              # Look up the groups client scope ID using grep/sed (no python3 in keycloak image)
               GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
-                python3 -c "import sys,json; scopes=json.load(sys.stdin); print(next((s['id'] for s in scopes if s['name']=='groups'),''))" 2>/dev/null)
+                grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
 
               if [ -z "$GROUPS_SCOPE_ID" ]; then
                 echo "Creating groups client scope..."
@@ -91,7 +92,7 @@ spec:
                   -s protocol=openid-connect \
                   -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"true"}' || true
                 GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
-                  python3 -c "import sys,json; scopes=json.load(sys.stdin); print(next((s['id'] for s in scopes if s['name']=='groups'),''))" 2>/dev/null)
+                  grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
               fi
 
               if [ -n "$GROUPS_SCOPE_ID" ]; then
@@ -101,6 +102,9 @@ spec:
                   -s protocol=openid-connect \
                   -s protocolMapper=oidc-group-membership-mapper \
                   -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || echo "Mapper may already exist"
+
+                echo "Ensuring groups is a realm default client scope..."
+                $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
 
               echo "Realm setup complete!"
