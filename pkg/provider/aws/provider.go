@@ -71,18 +71,13 @@ func containsSubstring(slice []string, substr string) bool {
 	return false
 }
 
-// ConfigKey returns the YAML configuration key for AWS
-func (p *Provider) ConfigKey() string {
-	return "amazon_web_services"
-}
-
 // extractAWSConfig converts the any provider config to AWS Config type
 func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		err := fmt.Errorf("AWS configuration is required")
 		span.RecordError(err)
@@ -632,7 +627,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 		return result
 	}
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -651,7 +646,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {

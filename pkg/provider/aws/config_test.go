@@ -114,12 +114,14 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &Provider{}
-			cfg := &config.NebariConfig{
-				Provider:       "aws",
-				ProviderConfig: map[string]any{},
-			}
+			providers := map[string]any{"aws": map[string]any{}}
 			if tt.config != nil {
-				cfg.ProviderConfig["amazon_web_services"] = tt.config
+				providers["aws"] = tt.config
+			}
+			cfg := &config.NebariConfig{
+				Cluster: &config.ClusterConfig{
+					Providers: providers,
+				},
 			}
 
 			got := p.InfraSettings(cfg).StorageClass
