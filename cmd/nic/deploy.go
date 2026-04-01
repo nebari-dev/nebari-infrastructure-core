@@ -77,9 +77,11 @@ func getOrCreateGitConfig(cfg *config.NebariConfig) (*git.Config, error) {
 	}
 
 	// Only auto-create local gitops for the local provider
-	// Cloud providers require explicit git_repository configuration
+	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
 	if cfg.Provider != "local" {
-		return nil, fmt.Errorf("git_repository configuration is required for cloud provider %q; local gitops auto-creation is only supported for provider: local", cfg.Provider)
+		slog.Info("No git_repository configured for cloud provider, skipping GitOps bootstrap",
+			"provider", cfg.Provider)
+		return nil, nil
 	}
 
 	gitCfg := defaultGitConfig(cfg.ProjectName)
@@ -475,25 +477,36 @@ func writeConfigToRepo(configFile, workDir string) error {
 // scrubSensitiveFields removes the auth block from git_repository config to prevent
 // accidentally committing credentials. Only env var names should be in configs,
 // but this provides defense in depth.
+// Only scrubs auth blocks that are nested under git_repository, preserving other auth blocks.
 func scrubSensitiveFields(configBytes []byte) []byte {
 	lines := strings.Split(string(configBytes), "\n")
 	var result []string
+	inGitRepoBlock := false
+	gitRepoIndent := 0
 	inAuthBlock := false
 	authIndent := 0
 
 	for _, line := range lines {
-		// Check if we're entering an auth block under git_repository
 		trimmed := strings.TrimLeft(line, " \t")
 		currentIndent := len(line) - len(trimmed)
 
-		if strings.HasPrefix(trimmed, "auth:") {
+		// Track when we enter/exit the git_repository block
+		if strings.HasPrefix(trimmed, "git_repository:") {
+			inGitRepoBlock = true
+			gitRepoIndent = currentIndent
+		} else if inGitRepoBlock && trimmed != "" && currentIndent <= gitRepoIndent {
+			inGitRepoBlock = false
+		}
+
+		// Only scrub auth blocks inside git_repository
+		if inGitRepoBlock && strings.HasPrefix(trimmed, "auth:") {
 			inAuthBlock = true
 			authIndent = currentIndent
 			result = append(result, strings.Repeat(" ", currentIndent)+"# auth: <scrubbed for security>")
 			continue
 		}
 
-		// If we're in an auth block, skip lines that are indented more
+		// If we're in an auth block (under git_repository), skip lines that are indented more
 		if inAuthBlock {
 			if trimmed == "" || currentIndent > authIndent {
 				continue // Skip auth block contents

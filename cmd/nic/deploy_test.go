@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -136,6 +137,29 @@ provider: local`,
 			contains: []string{},
 			excludes: []string{},
 		},
+		{
+			name: "preserves auth blocks outside git_repository",
+			input: `amazon_web_services:
+  auth:
+    role_arn: arn:aws:iam::123456:role/deploy
+git_repository:
+  url: "git@github.com:org/repo.git"
+  auth:
+    ssh_key_env: MY_SSH_KEY
+provider: aws`,
+			contains: []string{
+				"amazon_web_services:",
+				"auth:",
+				"role_arn: arn:aws:iam::123456:role/deploy",
+				"url: \"git@github.com:org/repo.git\"",
+				"# auth: <scrubbed for security>",
+				"provider: aws",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"MY_SSH_KEY",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -158,5 +182,5 @@ provider: local`,
 }
 
 func containsString(haystack, needle string) bool {
-	return bytes.Contains([]byte(haystack), []byte(needle))
+	return strings.Contains(haystack, needle)
 }
