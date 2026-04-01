@@ -74,9 +74,9 @@ func getOrCreateGitConfig(cfg *config.NebariConfig) (*git.Config, error) {
 
 	// Only auto-create local gitops for the local provider
 	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
-	if cfg.Provider != "local" {
+	if cfg.Cluster.ProviderName() != "local" {
 		slog.Info("No git_repository configured for cloud provider, skipping GitOps bootstrap",
-			"provider", cfg.Provider)
+			"provider", cfg.Cluster.ProviderName())
 		return nil, nil
 	}
 
