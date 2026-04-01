@@ -48,7 +48,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	slog.Info("Validating configuration", "config_file", validateConfigFile)
 
 	// Parse configuration
-	cfg, err := config.ParseConfig(ctx, validateConfigFile)
+	cfg, err := config.ParseConfig(ctx, validateConfigFile, globalRegistry.ValidProviders())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
@@ -61,7 +61,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	)
 
 	// Verify provider is registered
-	if _, err := registry.Get(ctx, cfg.Provider); err != nil {
+	if _, err := globalRegistry.GetClusterProvider(ctx, cfg.Provider); err != nil {
 		span.RecordError(err)
 		slog.Error("Provider not available", "error", err, "provider", cfg.Provider)
 		return err

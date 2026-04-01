@@ -1,4 +1,4 @@
-package dnsprovider
+package registry
 
 import (
 	"context"
@@ -22,42 +22,35 @@ func (m *mockDNSProvider) DestroyRecords(ctx context.Context, domain string, dns
 	return nil
 }
 
-func TestNewRegistry(t *testing.T) {
-	registry := NewRegistry()
-	if registry == nil || registry.providers == nil {
-		t.Fatal("NewRegistry() returned nil or has nil providers map")
-	}
-}
-
-func TestRegisterProvider(t *testing.T) {
+func TestRegisterDNSProvider(t *testing.T) {
 	ctx := context.Background()
 	registry := NewRegistry()
 
 	provider := &mockDNSProvider{name: "test"}
-	err := registry.Register(ctx, "test", provider)
+	err := registry.RegisterDNSProvider(ctx, "test", provider)
 	if err != nil {
 		t.Fatalf("Register() failed: %v", err)
 	}
 
 	// Test duplicate registration
-	err = registry.Register(ctx, "test", provider)
+	err = registry.RegisterDNSProvider(ctx, "test", provider)
 	if err == nil {
 		t.Fatal("Register() should fail for duplicate provider")
 	}
 }
 
-func TestGetProvider(t *testing.T) {
+func TestGetDNSProvider(t *testing.T) {
 	ctx := context.Background()
 	registry := NewRegistry()
 
 	provider := &mockDNSProvider{name: "test"}
-	err := registry.Register(ctx, "test", provider)
+	err := registry.RegisterDNSProvider(ctx, "test", provider)
 	if err != nil {
 		t.Fatalf("Register() failed: %v", err)
 	}
 
 	// Test successful get
-	got, err := registry.Get(ctx, "test")
+	got, err := registry.GetDNSProvider(ctx, "test")
 	if err != nil {
 		t.Fatalf("Get() failed: %v", err)
 	}
@@ -66,32 +59,32 @@ func TestGetProvider(t *testing.T) {
 	}
 
 	// Test non-existent provider
-	_, err = registry.Get(ctx, "nonexistent")
+	_, err = registry.GetDNSProvider(ctx, "nonexistent")
 	if err == nil {
 		t.Fatal("Get() should fail for non-existent provider")
 	}
 }
 
-func TestListProviders(t *testing.T) {
+func TestListDNSProviders(t *testing.T) {
 	ctx := context.Background()
 	registry := NewRegistry()
 
 	// Test empty registry
-	providers := registry.List(ctx)
+	providers := registry.ListDNSProviders(ctx)
 	if len(providers) != 0 {
 		t.Fatalf("List() returned %d providers, expected 0", len(providers))
 	}
 
 	// Register providers
-	if err := registry.Register(ctx, "test1", &mockDNSProvider{name: "test1"}); err != nil {
+	if err := registry.RegisterDNSProvider(ctx, "test1", &mockDNSProvider{name: "test1"}); err != nil {
 		t.Fatalf("Register() failed: %v", err)
 	}
-	if err := registry.Register(ctx, "test2", &mockDNSProvider{name: "test2"}); err != nil {
+	if err := registry.RegisterDNSProvider(ctx, "test2", &mockDNSProvider{name: "test2"}); err != nil {
 		t.Fatalf("Register() failed: %v", err)
 	}
 
 	// Test list
-	providers = registry.List(ctx)
+	providers = registry.ListDNSProviders(ctx)
 	if len(providers) != 2 {
 		t.Fatalf("List() returned %d providers, expected 2", len(providers))
 	}

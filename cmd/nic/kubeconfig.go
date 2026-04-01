@@ -49,7 +49,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 	span.SetAttributes(attribute.String("config.file", kubeconfigConfigFile))
 
 	// Parse configuration
-	cfg, err := config.ParseConfig(ctx, kubeconfigConfigFile)
+	cfg, err := config.ParseConfig(ctx, kubeconfigConfigFile, globalRegistry.ValidProviders())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to parse configuration", "error", err, "file", kubeconfigConfigFile)
@@ -61,7 +61,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
-	provider, err := registry.Get(ctx, cfg.Provider)
+	provider, err := globalRegistry.GetClusterProvider(ctx, cfg.Provider)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)

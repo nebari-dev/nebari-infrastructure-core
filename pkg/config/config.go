@@ -8,11 +8,19 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
+type ValidProviders struct {
+	ClusterProviders []string
+	DNSProviders     []string
+	GitProviders     []string
+	CertProviders    []string
+}
+
 // NebariConfig represents the parsed nebari-config.yaml structure
 type NebariConfig struct {
-	ProjectName string `yaml:"project_name"`
-	Provider    string `yaml:"provider"`
-	Domain      string `yaml:"domain,omitempty"`
+	ProjectName    string `yaml:"project_name"`
+	Provider       string `yaml:"provider"`
+	ValidProviders ValidProviders
+	Domain         string `yaml:"domain,omitempty"`
 
 	// KubeContext specifies an existing Kubernetes context to deploy to.
 	// When set, this enables "bring your own cluster" mode - the provider's
@@ -55,8 +63,17 @@ type DNSConfig struct {
 	Providers map[string]any `yaml:",inline"`
 }
 
+func IsValidDNSProvider(name string, validProvidesr []string) bool {
+	for _, p := range validProvidesr {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks that exactly one valid DNS provider is configured.
-func (d *DNSConfig) Validate() error {
+func (d *DNSConfig) Validate(validProviders []string) error {
 	if len(d.Providers) == 0 {
 		return fmt.Errorf("dns block is present but no provider is configured")
 	}
@@ -64,8 +81,8 @@ func (d *DNSConfig) Validate() error {
 		return fmt.Errorf("only one DNS provider can be configured at a time")
 	}
 	name := d.ProviderName()
-	if !IsValidDNSProvider(name) {
-		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, ValidDNSProviders)
+	if !IsValidDNSProvider(name, validProviders) {
+		return fmt.Errorf("invalid DNS provider %q, must be one of: %v", name, validProviders)
 	}
 	if d.ProviderConfig() == nil {
 		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
@@ -125,19 +142,6 @@ type ACMEConfig struct {
 // Used to validate ProjectName before it is used as a filesystem path component.
 var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
-// ValidDNSProviders lists the supported DNS providers
-var ValidDNSProviders = []string{"cloudflare"}
-
-// IsValidDNSProvider checks if the DNS provider string is valid
-func IsValidDNSProvider(provider string) bool {
-	for _, p := range ValidDNSProviders {
-		if p == provider {
-			return true
-		}
-	}
-	return false
-}
-
 // Validate checks that the configuration is valid.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate() error {
@@ -162,7 +166,7 @@ func (c *NebariConfig) Validate() error {
 	}
 
 	if c.DNS != nil {
-		if err := c.DNS.Validate(); err != nil {
+		if err := c.DNS.Validate(c.ValidProviders.DNSProviders); err != nil {
 			return fmt.Errorf("invalid dns: %w", err)
 		}
 	}

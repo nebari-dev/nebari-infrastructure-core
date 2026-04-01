@@ -12,35 +12,40 @@ import (
 
 func TestIsValidDNSProvider(t *testing.T) {
 	tests := []struct {
-		name     string
-		provider string
-		want     bool
+		name           string
+		provider       string
+		validProviders []string
+		want           bool
 	}{
 		{
-			name:     "cloudflare is valid",
-			provider: "cloudflare",
-			want:     true,
+			name:           "cloudflare is valid",
+			provider:       "cloudflare",
+			validProviders: []string{"cloudflare"},
+			want:           true,
 		},
 		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
+			name:           "empty string is invalid",
+			provider:       "",
+			validProviders: []string{"cloudflare"},
+			want:           false,
 		},
 		{
-			name:     "unknown provider is invalid",
-			provider: "notreal",
-			want:     false,
+			name:           "unknown provider is invalid",
+			provider:       "notreal",
+			validProviders: []string{"cloudflare"},
+			want:           false,
 		},
 		{
-			name:     "Cloudflare uppercase is invalid",
-			provider: "Cloudflare",
-			want:     false,
+			name:           "Cloudflare uppercase is invalid",
+			provider:       "Cloudflare",
+			validProviders: []string{"cloudflare"},
+			want:           false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidDNSProvider(tt.provider)
+			got := IsValidDNSProvider(tt.provider, tt.validProviders)
 			if got != tt.want {
 				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
 			}
@@ -360,7 +365,7 @@ dns:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := ParseConfigBytes([]byte(tt.yaml))
+			cfg, err := ParseConfigBytes([]byte(tt.yaml), mockValidProviders)
 
 			if tt.wantErr {
 				if err == nil {
@@ -385,6 +390,13 @@ dns:
 	}
 }
 
+var mockValidProviders = ValidProviders{
+	ClusterProviders: []string{"aws", "hetzner"},
+	DNSProviders:     []string{"cloudflare"},
+	GitProviders:     []string{"existing", "local"},
+	CertProviders:    []string{"letsencrypt"},
+}
+
 func TestParseConfig(t *testing.T) {
 	// Test file I/O wrapper - parsing logic is tested in TestParseConfigBytes
 	t.Run("reads and parses valid file", func(t *testing.T) {
@@ -398,7 +410,7 @@ provider: aws
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
-		cfg, err := ParseConfig(context.Background(), configFile)
+		cfg, err := ParseConfig(context.Background(), configFile, mockValidProviders)
 		if err != nil {
 			t.Fatalf("ParseConfig() error: %v", err)
 		}
@@ -408,7 +420,7 @@ provider: aws
 	})
 
 	t.Run("returns error for nonexistent file", func(t *testing.T) {
-		_, err := ParseConfig(context.Background(), "/nonexistent/path/config.yaml")
+		_, err := ParseConfig(context.Background(), "/nonexistent/path/config.yaml", mockValidProviders)
 		if err == nil {
 			t.Error("ParseConfig() expected error for nonexistent file, got nil")
 		}
@@ -425,7 +437,7 @@ provider: aws
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
-		_, err := ParseConfig(context.Background(), configFile)
+		_, err := ParseConfig(context.Background(), configFile, mockValidProviders)
 		if err == nil {
 			t.Error("ParseConfig() expected error, got nil")
 		}
@@ -505,8 +517,9 @@ func TestNebariConfigValidate(t *testing.T) {
 		{
 			name: "valid config with DNS",
 			config: NebariConfig{
-				ProjectName: "test-project",
-				Provider:    "aws",
+				ProjectName:    "test-project",
+				Provider:       "aws",
+				ValidProviders: mockValidProviders,
 				DNS: &DNSConfig{
 					Providers: map[string]any{
 						"cloudflare": map[string]any{"zone_name": "example.com"},
@@ -657,7 +670,7 @@ func TestDNSConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.dns.Validate()
+			err := tt.dns.Validate(mockValidProviders.DNSProviders)
 
 			if tt.wantErr {
 				if err == nil {

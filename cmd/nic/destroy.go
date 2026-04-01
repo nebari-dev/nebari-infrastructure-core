@@ -72,7 +72,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	slog.Info("Starting infrastructure destruction", "config_file", destroyConfigFile)
 
 	// Parse configuration first to show user what will be destroyed
-	cfg, err := config.ParseConfig(ctx, destroyConfigFile)
+	cfg, err := config.ParseConfig(ctx, destroyConfigFile, globalRegistry.ValidProviders())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to parse configuration", "error", err, "file", destroyConfigFile)
@@ -102,7 +102,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	prov, err := registry.Get(ctx, cfg.Provider)
+	prov, err := globalRegistry.GetClusterProvider(ctx, cfg.Provider)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
@@ -162,7 +162,7 @@ func destroyDNS(ctx context.Context, cfg *config.NebariConfig) error {
 		return nil
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
+	dnsProvider, err := globalRegistry.GetDNSProvider(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		return err
 	}

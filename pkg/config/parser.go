@@ -12,11 +12,13 @@ import (
 
 // ParseConfigBytes parses YAML configuration from bytes and validates it.
 // This is the core parsing logic, separated from file I/O for testability.
-func ParseConfigBytes(data []byte) (*NebariConfig, error) {
+func ParseConfigBytes(data []byte, validProviders ValidProviders) (*NebariConfig, error) {
 	var config NebariConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
+
+	config.ValidProviders = validProviders
 
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -27,7 +29,7 @@ func ParseConfigBytes(data []byte) (*NebariConfig, error) {
 
 // ParseConfig reads and parses a nebari-config.yaml file.
 // This is a convenience wrapper around ParseConfigBytes that handles file I/O.
-func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
+func ParseConfig(ctx context.Context, filePath string, validValidProviders ValidProviders) (*NebariConfig, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "config.ParseConfig")
 	defer span.End()
@@ -40,7 +42,7 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", filePath, err)
 	}
 
-	config, err := ParseConfigBytes(data)
+	config, err := ParseConfigBytes(data, validValidProviders)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("config file %s: %w", filePath, err)
