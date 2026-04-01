@@ -68,9 +68,9 @@ func (c *NebariConfig) Validate(validProviders ValidProviders) error {
 		return fmt.Errorf("provider field is required")
 	}
 
-	// Provider name validation is handled by the registry in CLI commands
-	// (registry.Get returns an error for unknown providers). Config.Validate
-	// only checks that the field is non-empty.
+	if len(validProviders.ClusterProviders) > 0 && !isValidProvider(c.Provider, validProviders.ClusterProviders) {
+		return fmt.Errorf("invalid cluster provider %q, must be one of: %v", c.Provider, validProviders.ClusterProviders)
+	}
 
 	// Check for old-format dns_provider field
 	if _, ok := c.ProviderConfig["dns_provider"]; ok {

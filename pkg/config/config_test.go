@@ -241,17 +241,13 @@ provider: hetzner
 			},
 		},
 		{
-			name: "unknown provider passes config validation",
+			name: "unknown provider fails config validation",
 			yaml: `
 project_name: test-project
 provider: unknown-provider
 `,
-			wantErr: false,
-			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.Provider != "unknown-provider" {
-					t.Errorf("Provider = %q, want %q", cfg.Provider, "unknown-provider")
-				}
-			},
+			wantErr:     true,
+			errContains: "invalid cluster provider",
 		},
 		{
 			name: "invalid git_repository - missing url",
@@ -514,13 +510,23 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "provider field is required",
 		},
 		{
-			name:           "any provider name passes config validation",
+			name:           "registered provider passes validation",
 			validProviders: mockValidProviders,
 			config: NebariConfig{
 				ProjectName: "test",
-				Provider:    "any-provider-name",
+				Provider:    "aws",
 			},
 			wantErr: false,
+		},
+		{
+			name:           "unregistered provider fails validation",
+			validProviders: mockValidProviders,
+			config: NebariConfig{
+				ProjectName: "test",
+				Provider:    "unknown-provider",
+			},
+			wantErr:     true,
+			errContains: "invalid cluster provider",
 		},
 		{
 			name:           "valid config with DNS",
