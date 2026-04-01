@@ -10,44 +10,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
-func TestIsValidDNSProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{
-			name:     "cloudflare is valid",
-			provider: "cloudflare",
-			want:     true,
-		},
-		{
-			name:     "empty string is invalid",
-			provider: "",
-			want:     false,
-		},
-		{
-			name:     "unknown provider is invalid",
-			provider: "notreal",
-			want:     false,
-		},
-		{
-			name:     "Cloudflare uppercase is invalid",
-			provider: "Cloudflare",
-			want:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidDNSProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidDNSProvider(%q) = %v, want %v", tt.provider, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestClusterConfig_NilReceiver(t *testing.T) {
 	var cluster *ClusterConfig
 
@@ -93,7 +55,6 @@ project_name: test-project
 cluster:
   aws: {}
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.ProjectName != "test-project" {
 					t.Errorf("ProjectName = %q, want %q", cfg.ProjectName, "test-project")
@@ -116,7 +77,6 @@ git_repository:
   auth:
     ssh_key_env: GIT_SSH_KEY
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.GitRepository == nil {
 					t.Fatal("GitRepository is nil")
@@ -148,7 +108,6 @@ git_repository:
   argocd_auth:
     token_env: ARGOCD_TOKEN
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.GitRepository == nil {
 					t.Fatal("GitRepository is nil")
@@ -165,77 +124,28 @@ git_repository:
 			},
 		},
 		{
-			name: "missing cluster",
+			name: "missing cluster parses successfully",
 			yaml: `
 project_name: test-project
 `,
-			wantErr:     true,
-			errContains: "cluster field is required",
-		},
-		{
-			name: "hetzner provider is accepted",
-			yaml: `
-project_name: test-project
-cluster:
-  hetzner: {}
-`,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.Cluster.ProviderName() != "hetzner" {
-					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "hetzner")
+				if cfg.Cluster != nil {
+					t.Errorf("Cluster should be nil, got %+v", cfg.Cluster)
 				}
 			},
 		},
 		{
-			name: "unknown provider rejected by config validation",
+			name: "any provider name parses successfully",
 			yaml: `
 project_name: test-project
 cluster:
   unknown-provider: {}
 `,
-			wantErr:     true,
-			errContains: "invalid cluster provider",
-		},
-		{
-			name: "invalid git_repository - missing url",
-			yaml: `
-project_name: test-project
-cluster:
-  aws: {}
-git_repository:
-  branch: main
-  auth:
-    ssh_key_env: GIT_SSH_KEY
-`,
-			wantErr:     true,
-			errContains: "url is required",
-		},
-		{
-			name: "invalid git_repository - missing auth",
-			yaml: `
-project_name: test-project
-cluster:
-  aws: {}
-git_repository:
-  url: "git@github.com:org/repo.git"
-`,
-			wantErr:     true,
-			errContains: "ssh_key_env or token_env is required",
-		},
-		{
-			name: "invalid git_repository - both ssh and token",
-			yaml: `
-project_name: test-project
-cluster:
-  aws: {}
-git_repository:
-  url: "git@github.com:org/repo.git"
-  auth:
-    ssh_key_env: GIT_SSH_KEY
-    token_env: GIT_TOKEN
-`,
-			wantErr:     true,
-			errContains: "only one of",
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Cluster.ProviderName() != "unknown-provider" {
+					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "unknown-provider")
+				}
+			},
 		},
 		{
 			name: "DNS format with nested provider",
@@ -247,7 +157,6 @@ dns:
   cloudflare:
     zone_name: example.com
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.DNS == nil {
 					t.Fatal("DNS is nil")
@@ -272,7 +181,6 @@ cluster:
   aws: {}
 dns:
 `,
-			wantErr: false,
 			validate: func(t *testing.T, cfg *NebariConfig) {
 				if cfg.DNS != nil {
 					t.Errorf("DNS should be nil for bare dns: block, got %+v", cfg.DNS)
@@ -280,17 +188,25 @@ dns:
 			},
 		},
 		{
-			name: "invalid DNS provider name rejected",
+			name: "cluster with provider config",
 			yaml: `
 project_name: test-project
 cluster:
-  aws: {}
-dns:
-  notreal:
-    zone_name: example.com
+  aws:
+    region: us-west-2
 `,
-			wantErr:     true,
-			errContains: "invalid DNS provider",
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.Cluster.ProviderName() != "aws" {
+					t.Errorf("Cluster.ProviderName() = %q, want %q", cfg.Cluster.ProviderName(), "aws")
+				}
+				pc := cfg.Cluster.ProviderConfig()
+				if pc == nil {
+					t.Fatal("Cluster.ProviderConfig() is nil")
+				}
+				if pc["region"] != "us-west-2" {
+					t.Errorf("Cluster.ProviderConfig()[region] = %v, want %q", pc["region"], "us-west-2")
+				}
+			},
 		},
 		{
 			name: "cluster with provider config",
@@ -385,8 +301,8 @@ cluster:
 	t.Run("wraps parsing errors with filename", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configFile := filepath.Join(tmpDir, "config.yaml")
-		// Missing provider field triggers validation error
-		if err := os.WriteFile(configFile, []byte("project_name: test"), 0600); err != nil {
+		// Invalid YAML syntax triggers parse error
+		if err := os.WriteFile(configFile, []byte("invalid: yaml: ["), 0600); err != nil {
 			t.Fatalf("failed to write config file: %v", err)
 		}
 
@@ -536,9 +452,14 @@ func TestNebariConfigValidate(t *testing.T) {
 		},
 	}
 
+	opts := ValidateOptions{
+		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
+		DNSProviders:     []string{"cloudflare"},
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			err := tt.config.Validate(opts)
 
 			if tt.wantErr {
 				if err == nil {
@@ -623,9 +544,11 @@ func TestDNSConfigValidate(t *testing.T) {
 		},
 	}
 
+	validDNSProviders := []string{"cloudflare"}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.dns.Validate()
+			err := tt.dns.Validate(validDNSProviders)
 
 			if tt.wantErr {
 				if err == nil {
@@ -812,9 +735,11 @@ func TestClusterConfigValidate(t *testing.T) {
 		},
 	}
 
+	validProviders := []string{"aws", "gcp", "azure", "hetzner", "local"}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.cluster.Validate()
+			err := tt.cluster.Validate(validProviders)
 
 			if tt.wantErr {
 				if err == nil {
@@ -829,31 +754,6 @@ func TestClusterConfigValidate(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("Validate() unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestIsValidClusterProvider(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		{name: "aws is valid", provider: "aws", want: true},
-		{name: "gcp is valid", provider: "gcp", want: true},
-		{name: "azure is valid", provider: "azure", want: true},
-		{name: "hetzner is valid", provider: "hetzner", want: true},
-		{name: "local is valid", provider: "local", want: true},
-		{name: "empty string is invalid", provider: "", want: false},
-		{name: "unknown provider is invalid", provider: "notreal", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidClusterProvider(tt.provider)
-			if got != tt.want {
-				t.Errorf("IsValidClusterProvider(%q) = %v, want %v", tt.provider, got, tt.want)
 			}
 		})
 	}
@@ -888,7 +788,11 @@ func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
 	}
 
 	// Verify NebariConfig.Validate works
-	if err := cfg.Validate(); err != nil {
+	opts := ValidateOptions{
+		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
+		DNSProviders:     []string{"cloudflare"},
+	}
+	if err := cfg.Validate(opts); err != nil {
 		t.Errorf("Validate() unexpected error: %v", err)
 	}
 }

@@ -79,6 +79,16 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(config.ValidateOptions{
+		ClusterProviders: registry.List(ctx),
+		DNSProviders:     dnsRegistry.List(ctx),
+	}); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", destroyConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
 		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
