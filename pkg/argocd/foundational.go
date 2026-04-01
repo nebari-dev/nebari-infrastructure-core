@@ -73,7 +73,7 @@ type MetalLBConfig struct {
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
-// via ArgoCD from the git repository.
+// via ArgoCD from the git repository. cfg.GitRepository may be either remote or local file:// path.
 func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
@@ -140,7 +140,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 	}
 
-	// 3. Apply root App-of-Apps if git repository is configured
+	// 3. Apply root App-of-Apps if git configuration is available
 	if cfg.GitRepository != nil {
 		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, cfg); err != nil {
 			span.RecordError(err)
