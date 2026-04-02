@@ -57,7 +57,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	// Validate configuration with registered providers
 	if err := cfg.Validate(config.ValidateOptions{
-		ClusterProviders: registry.List(ctx),
+		ClusterProviders: clusterRegistry.List(ctx),
 		DNSProviders:     dnsRegistry.List(ctx),
 	}); err != nil {
 		span.RecordError(err)

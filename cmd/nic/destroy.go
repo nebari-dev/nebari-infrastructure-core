@@ -81,7 +81,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 
 	// Validate configuration with registered providers
 	if err := cfg.Validate(config.ValidateOptions{
-		ClusterProviders: registry.List(ctx),
+		ClusterProviders: clusterRegistry.List(ctx),
 		DNSProviders:     dnsRegistry.List(ctx),
 	}); err != nil {
 		span.RecordError(err)
@@ -112,7 +112,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	prov, err := registry.Get(ctx, cfg.Cluster.ProviderName())
+	prov, err := clusterRegistry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())

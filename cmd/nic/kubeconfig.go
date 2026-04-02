@@ -58,7 +58,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 
 	// Validate configuration with registered providers
 	if err := cfg.Validate(config.ValidateOptions{
-		ClusterProviders: registry.List(ctx),
+		ClusterProviders: clusterRegistry.List(ctx),
 		DNSProviders:     dnsRegistry.List(ctx),
 	}); err != nil {
 		span.RecordError(err)
@@ -71,7 +71,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
-	provider, err := registry.Get(ctx, cfg.Cluster.ProviderName())
+	provider, err := clusterRegistry.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
