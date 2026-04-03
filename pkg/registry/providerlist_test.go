@@ -4,44 +4,34 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
-// mockClusterProvider is a mock implementation for testing
-type mockClusterProvider struct {
+// named is a minimal interface for testing ProviderList with a concrete type.
+type named interface {
+	Name() string
+}
+
+// stubProvider implements named for test purposes.
+type stubProvider struct {
 	name string
 }
 
-func (m *mockClusterProvider) Name() string                                             { return m.name }
-func (m *mockClusterProvider) Validate(_ context.Context, _ *config.NebariConfig) error { return nil }
-func (m *mockClusterProvider) Deploy(_ context.Context, _ *config.NebariConfig) error   { return nil }
-func (m *mockClusterProvider) Destroy(_ context.Context, _ *config.NebariConfig) error  { return nil }
-func (m *mockClusterProvider) GetKubeconfig(_ context.Context, _ *config.NebariConfig) ([]byte, error) {
-	return nil, nil
-}
-func (m *mockClusterProvider) Summary(_ *config.NebariConfig) map[string]string { return nil }
-func (m *mockClusterProvider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
-	return provider.InfraSettings{}
-}
+func (s *stubProvider) Name() string { return s.name }
 
-func TestRegisterClusterProvider(t *testing.T) {
+func TestProviderList_Register(t *testing.T) {
 	tests := []struct {
 		name        string
-		providers   []string // names to register in order
-		wantErr     bool     // error expected on last registration
+		providers   []string
+		wantErr     bool
 		errContains string
 	}{
 		{
-			name:      "register single provider",
+			name:      "single provider",
 			providers: []string{"aws"},
-			wantErr:   false,
 		},
 		{
-			name:      "register multiple providers",
+			name:      "multiple providers",
 			providers: []string{"aws", "gcp", "azure"},
-			wantErr:   false,
 		},
 		{
 			name:        "duplicate registration fails",
@@ -54,11 +44,11 @@ func TestRegisterClusterProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			reg := NewRegistry()
+			pl := newProviderList[named]("TestProviders")
 
 			var err error
 			for _, name := range tt.providers {
-				err = reg.RegisterClusterProvider(ctx, name, &mockClusterProvider{name: name})
+				err = pl.Register(ctx, name, &stubProvider{name: name})
 			}
 
 			if tt.wantErr {
@@ -77,11 +67,11 @@ func TestRegisterClusterProvider(t *testing.T) {
 	}
 }
 
-func TestGetClusterProvider(t *testing.T) {
+func TestProviderList_Get(t *testing.T) {
 	tests := []struct {
 		name        string
-		register    []string // providers to register first
-		lookup      string   // name to look up
+		register    []string
+		lookup      string
 		wantErr     bool
 		errContains string
 	}{
@@ -89,7 +79,6 @@ func TestGetClusterProvider(t *testing.T) {
 			name:     "existing provider",
 			register: []string{"aws"},
 			lookup:   "aws",
-			wantErr:  false,
 		},
 		{
 			name:        "non-existent provider",
@@ -99,7 +88,7 @@ func TestGetClusterProvider(t *testing.T) {
 			errContains: "not registered",
 		},
 		{
-			name:        "empty registry",
+			name:        "empty list",
 			register:    []string{},
 			lookup:      "aws",
 			wantErr:     true,
@@ -110,15 +99,15 @@ func TestGetClusterProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			reg := NewRegistry()
+			pl := newProviderList[named]("TestProviders")
 
 			for _, name := range tt.register {
-				if err := reg.RegisterClusterProvider(ctx, name, &mockClusterProvider{name: name}); err != nil {
-					t.Fatalf("setup: RegisterClusterProvider(%q) failed: %v", name, err)
+				if err := pl.Register(ctx, name, &stubProvider{name: name}); err != nil {
+					t.Fatalf("setup: Register(%q) failed: %v", name, err)
 				}
 			}
 
-			got, err := reg.GetClusterProvider(ctx, tt.lookup)
+			got, err := pl.Get(ctx, tt.lookup)
 
 			if tt.wantErr {
 				if err == nil {
@@ -139,14 +128,14 @@ func TestGetClusterProvider(t *testing.T) {
 	}
 }
 
-func TestListClusterProviders(t *testing.T) {
+func TestProviderList_List(t *testing.T) {
 	tests := []struct {
 		name     string
 		register []string
 		want     int
 	}{
 		{
-			name:     "empty registry",
+			name:     "empty list",
 			register: []string{},
 			want:     0,
 		},
@@ -165,27 +154,26 @@ func TestListClusterProviders(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			reg := NewRegistry()
+			pl := newProviderList[named]("TestProviders")
 
 			for _, name := range tt.register {
-				if err := reg.RegisterClusterProvider(ctx, name, &mockClusterProvider{name: name}); err != nil {
-					t.Fatalf("setup: RegisterClusterProvider(%q) failed: %v", name, err)
+				if err := pl.Register(ctx, name, &stubProvider{name: name}); err != nil {
+					t.Fatalf("setup: Register(%q) failed: %v", name, err)
 				}
 			}
 
-			got := reg.ListClusterProviders(ctx)
+			got := pl.List(ctx)
 			if len(got) != tt.want {
-				t.Fatalf("ListClusterProviders() returned %d providers, want %d", len(got), tt.want)
+				t.Fatalf("List() returned %d names, want %d", len(got), tt.want)
 			}
 
-			// Verify all registered names are present
 			found := make(map[string]bool)
 			for _, name := range got {
 				found[name] = true
 			}
 			for _, name := range tt.register {
 				if !found[name] {
-					t.Errorf("ListClusterProviders() missing %q", name)
+					t.Errorf("List() missing %q", name)
 				}
 			}
 		})

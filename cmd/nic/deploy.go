@@ -102,7 +102,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate configuration with registered providers
-	if err := cfg.Validate(reg.ValidProviders(ctx)); err != nil {
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", deployConfigFile)
 		return err
@@ -130,7 +130,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the appropriate provider
-	provider, err := reg.GetClusterProvider(ctx, cfg.Cluster.ProviderName())
+	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
@@ -284,7 +284,7 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 		return lbEndpoint
 	}
 
-	dnsProvider, err := reg.GetDNSProvider(ctx, cfg.DNS.ProviderName())
+	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
 		return lbEndpoint

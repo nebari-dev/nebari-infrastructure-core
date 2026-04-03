@@ -52,28 +52,28 @@ func init() {
 	// Register all providers explicitly (no blank imports or init() magic)
 	ctx := context.Background()
 
-	if err := reg.RegisterClusterProvider(ctx, "aws", aws.NewProvider()); err != nil {
+	if err := reg.ClusterProviders.Register(ctx, "aws", aws.NewProvider()); err != nil {
 		log.Fatalf("Failed to register AWS provider: %v", err)
 	}
 
-	if err := reg.RegisterClusterProvider(ctx, "gcp", gcp.NewProvider()); err != nil {
+	if err := reg.ClusterProviders.Register(ctx, "gcp", gcp.NewProvider()); err != nil {
 		log.Fatalf("Failed to register GCP provider: %v", err)
 	}
 
-	if err := reg.RegisterClusterProvider(ctx, "azure", azure.NewProvider()); err != nil {
+	if err := reg.ClusterProviders.Register(ctx, "azure", azure.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Azure provider: %v", err)
 	}
 
-	if err := reg.RegisterClusterProvider(ctx, "local", local.NewProvider()); err != nil {
+	if err := reg.ClusterProviders.Register(ctx, "local", local.NewProvider()); err != nil {
 		log.Fatalf("Failed to register local provider: %v", err)
 	}
 
-	if err := reg.RegisterClusterProvider(ctx, "hetzner", hetzner.NewProvider()); err != nil {
+	if err := reg.ClusterProviders.Register(ctx, "hetzner", hetzner.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Hetzner provider: %v", err)
 	}
 
 	// Register DNS providers explicitly
-	if err := reg.RegisterDNSProvider(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
+	if err := reg.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
 	}
 

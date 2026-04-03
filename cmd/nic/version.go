@@ -37,12 +37,9 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
 	// Show registered providers
-	providers := reg.ListClusterProviders(ctx)
-	fmt.Printf("Registered cloud providers: %v\n", providers)
-
-	// Show registered DNS providers
-	dnsProviders := reg.ListDNSProviders(ctx)
-	fmt.Printf("Registered DNS providers: %v\n", dnsProviders)
+	providers := getValidNames(ctx, reg)
+	fmt.Printf("Registered cloud providers: %v\n", providers.ClusterProviders)
+	fmt.Printf("Registered DNS providers: %v\n", providers.DNSProviders)
 
 	return nil
 }
