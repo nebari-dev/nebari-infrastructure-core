@@ -94,21 +94,18 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
-	// Set runtime options from CLI flags
-	cfg.DryRun = destroyDryRun
-	cfg.Force = destroyForce
-
-	// Apply custom timeout if specified
+	// Parse custom timeout if specified
+	var timeout time.Duration
 	if destroyTimeout != "" {
-		duration, err := time.ParseDuration(destroyTimeout)
+		var err error
+		timeout, err = time.ParseDuration(destroyTimeout)
 		if err != nil {
 			span.RecordError(err)
 			slog.Error("Invalid timeout duration", "error", err, "timeout", destroyTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", destroyTimeout, err)
 		}
-		cfg.Timeout = duration
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
-		slog.Info("Using custom timeout", "timeout", duration)
+		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
 	// Get the appropriate provider
@@ -151,7 +148,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Destroy infrastructure
-	if err := prov.Destroy(ctx, cfg); err != nil {
+	if err := prov.Destroy(ctx, cfg, provider.DestroyOptions{DryRun: destroyDryRun, Force: destroyForce, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Destruction failed", "error", err, "provider", prov.Name())
 		if destroyForce {

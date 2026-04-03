@@ -45,7 +45,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 }
 
 // Deploy deploys Azure infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()
@@ -79,7 +79,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 }
 
 // Destroy tears down Azure infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "azure.Destroy")
 	defer span.End()
