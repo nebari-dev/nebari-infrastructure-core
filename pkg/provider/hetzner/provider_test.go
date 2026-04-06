@@ -191,7 +191,6 @@ func TestProvider_Deploy_DryRun(t *testing.T) {
 	// The Deploy integration requires network access, so we verify the dry-run
 	// logic through the Validate + DryRun flag path.
 	cfg := validHetznerConfig()
-	cfg.DryRun = true
 
 	// Validate should pass
 	err := p.Validate(context.Background(), cfg)

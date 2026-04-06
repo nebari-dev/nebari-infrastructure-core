@@ -112,7 +112,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 }
 
 // Deploy deploys local K3s infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Deploy")
 	defer span.End()
@@ -146,7 +146,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 }
 
 // Destroy tears down local infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Destroy")
 	defer span.End()
