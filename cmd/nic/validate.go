@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -9,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
 var (
@@ -56,10 +58,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate configuration with registered providers
-	if err := cfg.Validate(config.ValidateOptions{
-		ClusterProviders: registry.List(ctx),
-		DNSProviders:     dnsRegistry.List(ctx),
-	}); err != nil {
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err
@@ -75,4 +74,11 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil
+}
+
+func getValidNames(ctx context.Context, reg *registry.Registry) config.ValidateOptions {
+	return config.ValidateOptions{
+		ClusterProviders: reg.ClusterProviders.List(ctx),
+		DNSProviders:     reg.DNSProviders.List(ctx),
+	}
 }
