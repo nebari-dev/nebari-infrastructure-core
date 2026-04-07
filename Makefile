@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down external-auth-smoke
 
 # Variables
 BINARY_NAME=nic
@@ -85,6 +85,9 @@ test-all: ## Run all tests (unit + integration)
 	$(MAKE) test-unit
 	$(MAKE) test-integration
 	@echo "All tests passed successfully"
+
+external-auth-smoke: ## Run cross-repo external auth smoke test (Docker + Keycloak + Nebari + Nebi)
+	@bash ./scripts/external-auth-smoke.sh
 
 localstack-up: ## Start LocalStack using docker-compose
 	@echo "Starting LocalStack..."

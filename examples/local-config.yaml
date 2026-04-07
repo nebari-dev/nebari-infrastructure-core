@@ -22,3 +22,12 @@ git_repository:
   path: "clusters/test1"  # Optional subdirectory within the repo
   auth:
     ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
+
+# External auth broker routing (optional)
+# Enable when a broker service is deployed and should be exposed through the gateway.
+external_auth_broker:
+  enabled: false
+  path_prefix: /external-auth
+  backend_service_name: nebari-broker
+  backend_service_namespace: nebari-system
+  backend_service_port: 80

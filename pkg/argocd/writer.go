@@ -64,6 +64,14 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// External auth broker route configuration.
+	ExternalAuthBrokerEnabled          bool
+	ExternalAuthBrokerHostname         string
+	ExternalAuthBrokerPathPrefix       string
+	ExternalAuthBrokerServiceName      string
+	ExternalAuthBrokerServiceNamespace string
+	ExternalAuthBrokerServicePort      int
 }
 
 // NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
@@ -90,6 +98,12 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		KeycloakRealm:                "nebari",
 		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
 		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
+
+		ExternalAuthBrokerEnabled:          false,
+		ExternalAuthBrokerPathPrefix:       "/external-auth",
+		ExternalAuthBrokerServiceName:      "nebari-broker",
+		ExternalAuthBrokerServiceNamespace: "nebari-system",
+		ExternalAuthBrokerServicePort:      80,
 	}
 
 	// Set git repository info
@@ -139,6 +153,30 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	// template will need a guard or a separate value for the OIDC issuer URL.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
+	}
+
+	if cfg.ExternalAuthBroker != nil {
+		data.ExternalAuthBrokerEnabled = cfg.ExternalAuthBroker.Enabled
+		if cfg.ExternalAuthBroker.PathPrefix != "" {
+			data.ExternalAuthBrokerPathPrefix = cfg.ExternalAuthBroker.PathPrefix
+		}
+		if cfg.ExternalAuthBroker.BackendServiceName != "" {
+			data.ExternalAuthBrokerServiceName = cfg.ExternalAuthBroker.BackendServiceName
+		}
+		if cfg.ExternalAuthBroker.BackendServiceNamespace != "" {
+			data.ExternalAuthBrokerServiceNamespace = cfg.ExternalAuthBroker.BackendServiceNamespace
+		}
+		if cfg.ExternalAuthBroker.BackendServicePort != 0 {
+			data.ExternalAuthBrokerServicePort = cfg.ExternalAuthBroker.BackendServicePort
+		}
+
+		// Default to primary domain unless explicitly overridden.
+		data.ExternalAuthBrokerHostname = data.Domain
+		if cfg.ExternalAuthBroker.Hostname != "" {
+			data.ExternalAuthBrokerHostname = cfg.ExternalAuthBroker.Hostname
+		}
+	} else {
+		data.ExternalAuthBrokerHostname = data.Domain
 	}
 
 	return data
@@ -285,6 +323,11 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip external auth broker route unless explicitly enabled.
+		if isExternalAuthBrokerRoutePath(relPath) && !data.ExternalAuthBrokerEnabled {
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -330,6 +373,10 @@ func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+func isExternalAuthBrokerRoutePath(relPath string) bool {
+	return relPath == "manifests/networking/routes/external-auth-broker-httproute.yaml"
 }
 
 // processTemplate processes a template file with the given data.

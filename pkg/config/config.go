@@ -41,6 +41,26 @@ type NebariConfig struct {
 
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
+
+	// ExternalAuthBroker configures routing and enablement for the platform
+	// external OAuth broker endpoints.
+	ExternalAuthBroker *ExternalAuthBrokerConfig `yaml:"external_auth_broker,omitempty"`
+}
+
+// ExternalAuthBrokerConfig holds external auth broker routing settings.
+type ExternalAuthBrokerConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+
+	// Hostname is optional. When empty, broker routes use the primary domain.
+	Hostname string `yaml:"hostname,omitempty"`
+
+	// PathPrefix is routed to the broker backend (default: /external-auth).
+	PathPrefix string `yaml:"path_prefix,omitempty"`
+
+	// Backend service target for broker HTTPRoute.
+	BackendServiceName      string `yaml:"backend_service_name,omitempty"`
+	BackendServiceNamespace string `yaml:"backend_service_namespace,omitempty"`
+	BackendServicePort      int    `yaml:"backend_service_port,omitempty"`
 }
 
 // DNSConfig holds typed DNS provider configuration.

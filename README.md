@@ -179,6 +179,42 @@ cp .env.example .env  # Edit with your cloud provider credentials
 
 See the [CLI Reference](docs/cli-reference.md) for all commands and options.
 
+## External Auth Smoke Test (Cross-Repo Local)
+
+Run this local smoke test to verify external auth broker integration across Keycloak, Nebari, and Nebi:
+
+```bash
+make external-auth-smoke
+```
+
+Equivalent direct command:
+
+```bash
+bash ./scripts/external-auth-smoke.sh
+```
+
+The smoke flow validates the contract for:
+
+- `GET /api/v1/external-auth/providers`
+- `POST /api/v1/external-auth/github/login`
+- `GET /api/v1/external-auth/github/token`
+- `DELETE /api/v1/external-auth/github/link`
+
+Pre-PR local validation checklist:
+
+- Run `make external-auth-smoke` (or `bash ./scripts/external-auth-smoke.sh`)
+- Confirm scenario 1 output includes:
+  - `[smoke] scenario: real keycloak unlinked`
+  - `[smoke] ok GET http://127.0.0.1:18460/api/v1/external-auth/github/token -> 401`
+- Confirm scenario 2 output includes:
+  - `[smoke] scenario: mocked linked token_valid`
+  - `[smoke] ok GET http://127.0.0.1:18461/api/v1/external-auth/github/token -> 200`
+  - `[smoke] external auth contract checks passed (unlinked + token_valid)`
+
+Troubleshooting:
+
+- See `docs/external-auth-runbook.md` for failure-to-fix steps.
+
 ### `nic deploy`
 
 Deploy infrastructure and foundational services based on a configuration file.

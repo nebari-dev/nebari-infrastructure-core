@@ -124,6 +124,44 @@ git_repository:
 			},
 		},
 		{
+			name: "config with external auth broker",
+			yaml: `
+project_name: test-project
+cluster:
+  aws: {}
+external_auth_broker:
+  enabled: true
+  hostname: broker.test.example.com
+  path_prefix: /external-auth
+  backend_service_name: nebari-broker
+  backend_service_namespace: nebari-system
+  backend_service_port: 8080
+`,
+			validate: func(t *testing.T, cfg *NebariConfig) {
+				if cfg.ExternalAuthBroker == nil {
+					t.Fatal("ExternalAuthBroker is nil")
+				}
+				if !cfg.ExternalAuthBroker.Enabled {
+					t.Error("ExternalAuthBroker.Enabled = false, want true")
+				}
+				if cfg.ExternalAuthBroker.Hostname != "broker.test.example.com" {
+					t.Errorf("ExternalAuthBroker.Hostname = %q, want %q", cfg.ExternalAuthBroker.Hostname, "broker.test.example.com")
+				}
+				if cfg.ExternalAuthBroker.PathPrefix != "/external-auth" {
+					t.Errorf("ExternalAuthBroker.PathPrefix = %q, want %q", cfg.ExternalAuthBroker.PathPrefix, "/external-auth")
+				}
+				if cfg.ExternalAuthBroker.BackendServiceName != "nebari-broker" {
+					t.Errorf("ExternalAuthBroker.BackendServiceName = %q, want %q", cfg.ExternalAuthBroker.BackendServiceName, "nebari-broker")
+				}
+				if cfg.ExternalAuthBroker.BackendServiceNamespace != "nebari-system" {
+					t.Errorf("ExternalAuthBroker.BackendServiceNamespace = %q, want %q", cfg.ExternalAuthBroker.BackendServiceNamespace, "nebari-system")
+				}
+				if cfg.ExternalAuthBroker.BackendServicePort != 8080 {
+					t.Errorf("ExternalAuthBroker.BackendServicePort = %d, want %d", cfg.ExternalAuthBroker.BackendServicePort, 8080)
+				}
+			},
+		},
+		{
 			name: "missing cluster parses successfully",
 			yaml: `
 project_name: test-project

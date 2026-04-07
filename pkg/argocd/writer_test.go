@@ -529,9 +529,15 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 	}
 
 	data := TemplateData{
-		Domain:              "test.example.com",
-		HTTPSPort:           443,
-		KeycloakServiceName: "keycloak-keycloakx-http",
+		Domain:                             "test.example.com",
+		HTTPSPort:                          443,
+		KeycloakServiceName:                "keycloak-keycloakx-http",
+		ExternalAuthBrokerEnabled:          true,
+		ExternalAuthBrokerHostname:         "test.example.com",
+		ExternalAuthBrokerPathPrefix:       "/external-auth",
+		ExternalAuthBrokerServiceName:      "nebari-broker",
+		ExternalAuthBrokerServiceNamespace: "nebari-system",
+		ExternalAuthBrokerServicePort:      80,
 	}
 
 	for _, entry := range entries {
@@ -606,6 +612,40 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 				t.Errorf("KeycloakIssuerURL = %q, want %q", data.KeycloakIssuerURL, tt.wantIssuerURL)
 			}
 		})
+	}
+}
+
+func TestNewTemplateData_ExternalAuthBroker(t *testing.T) {
+	cfg := &config.NebariConfig{
+		Domain: "test.example.com",
+		ExternalAuthBroker: &config.ExternalAuthBrokerConfig{
+			Enabled:                 true,
+			Hostname:                "broker.test.example.com",
+			PathPrefix:              "/external-auth",
+			BackendServiceName:      "nebari-broker",
+			BackendServiceNamespace: "nebari-system",
+			BackendServicePort:      8080,
+		},
+	}
+
+	data := NewTemplateData(cfg, provider.InfraSettings{})
+	if !data.ExternalAuthBrokerEnabled {
+		t.Fatal("ExternalAuthBrokerEnabled = false, want true")
+	}
+	if data.ExternalAuthBrokerHostname != "broker.test.example.com" {
+		t.Fatalf("ExternalAuthBrokerHostname = %q, want %q", data.ExternalAuthBrokerHostname, "broker.test.example.com")
+	}
+	if data.ExternalAuthBrokerPathPrefix != "/external-auth" {
+		t.Fatalf("ExternalAuthBrokerPathPrefix = %q, want %q", data.ExternalAuthBrokerPathPrefix, "/external-auth")
+	}
+	if data.ExternalAuthBrokerServiceName != "nebari-broker" {
+		t.Fatalf("ExternalAuthBrokerServiceName = %q, want %q", data.ExternalAuthBrokerServiceName, "nebari-broker")
+	}
+	if data.ExternalAuthBrokerServiceNamespace != "nebari-system" {
+		t.Fatalf("ExternalAuthBrokerServiceNamespace = %q, want %q", data.ExternalAuthBrokerServiceNamespace, "nebari-system")
+	}
+	if data.ExternalAuthBrokerServicePort != 8080 {
+		t.Fatalf("ExternalAuthBrokerServicePort = %d, want %d", data.ExternalAuthBrokerServicePort, 8080)
 	}
 }
 
