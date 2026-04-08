@@ -35,6 +35,9 @@ type FoundationalConfig struct {
 	// Keycloak configuration
 	Keycloak KeycloakConfig
 
+	// ArgoCD SSO configuration
+	ArgoCD ArgoCDSSOConfig
+
 	// LandingPage configuration
 	LandingPage LandingPageConfig
 
@@ -64,6 +67,11 @@ type LandingPageConfig struct {
 type MetalLBConfig struct {
 	Enabled     bool
 	AddressPool string // e.g., "192.168.1.100-192.168.1.110"
+}
+
+// ArgoCDSSOConfig holds ArgoCD SSO configuration
+type ArgoCDSSOConfig struct {
+	ClientSecret string // Pre-generated OIDC client secret for ArgoCD's Keycloak integration
 }
 
 // InstallFoundationalServices installs foundational services via GitOps.
@@ -122,7 +130,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 
 		// Create secrets for Keycloak and PostgreSQL
-		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak); err != nil {
+		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak, foundationalCfg.ArgoCD); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
 		}
@@ -220,7 +228,7 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 }
 
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
-func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig) error {
+func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig, argocdSSO ArgoCDSSOConfig) error {
 	namespace := KeycloakDefaultNamespace
 
 	// 1. Create admin credentials secret
@@ -282,6 +290,26 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			StringData: map[string]string{
 				"username": keycloakCfg.RealmAdminUsername,
 				"password": keycloakCfg.RealmAdminPassword,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
+	// 5. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
+	if argocdSSO.ClientSecret != "" {
+		if err := createSecret(ctx, client, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-oidc-client-secret",
+				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of":    "nebari-foundational",
+					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"client-secret": argocdSSO.ClientSecret,
 			},
 		}); err != nil {
 			return err
