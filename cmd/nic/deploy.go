@@ -166,7 +166,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !deployDryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider, argocd.DefaultConfig()); err != nil {
+
+		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
+		// and the Keycloak realm-setup job
+		argoCDClientSecret := generateSecurePassword(rand.Reader)
+
+		// Build ArgoCD config with Keycloak OIDC SSO
+		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
+
+		if err := argocd.Install(ctx, cfg, provider, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -187,6 +195,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
+				},
+				ArgoCD: argocd.ArgoCDSSOConfig{
+					ClientSecret: argoCDClientSecret,
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
