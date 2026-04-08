@@ -1,11 +1,10 @@
 package hetzner
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -13,25 +12,16 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-const k3sReleasesURL = "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100"
-
-// ghRelease is the subset of GitHub release API response we need.
-type ghRelease struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-}
-
 // resolveK3sVersion resolves a Kubernetes version (e.g., "1.32" or "1.32.0")
-// to a full k3s release tag (e.g., "v1.32.12+k3s1") by querying the GitHub API.
-// If version already contains "+k3s", it's returned as-is.
-// apiURL allows injecting a test server URL; pass "" to use the default GitHub API.
+// to a full k3s release tag (e.g., "v1.32.12+k3s1") by matching against the
+// provided list of available releases. This is a pure function - the caller is
+// responsible for fetching the releases list from the hetzner-k3s binary.
 //
-// Note: only the 100 most recent releases are fetched (no pagination).
-// Older Kubernetes versions may not resolve if there are 100+ newer releases.
-// Use an explicit k3s version string (e.g., "v1.28.5+k3s1") for older versions.
-func resolveK3sVersion(ctx context.Context, version string, apiURL string) (string, error) {
+// If version already contains "+k3s", it's returned as-is.
+// releases should be ordered newest-first for correct resolution.
+func resolveK3sVersion(ctx context.Context, version string, releases []string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
+	_, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("requested_version", version))
@@ -39,10 +29,6 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 	if strings.Contains(version, "+k3s") {
 		span.SetAttributes(attribute.String("resolved_version", version))
 		return version, nil
-	}
-
-	if apiURL == "" {
-		apiURL = k3sReleasesURL
 	}
 
 	normalized := strings.TrimPrefix(version, "v")
@@ -58,45 +44,52 @@ func resolveK3sVersion(ctx context.Context, version string, apiURL string) (stri
 		return "", fmt.Errorf("invalid kubernetes version format: %q (expected MAJOR.MINOR or MAJOR.MINOR.PATCH)", version)
 	}
 
+	// Releases are returned newest-first; find the first stable match.
+	// Skip pre-release versions (rc, alpha, beta).
+	for _, tag := range releases {
+		if isPrerelease(tag) {
+			continue
+		}
+		if strings.HasPrefix(tag, matchPrefix) {
+			span.SetAttributes(attribute.String("resolved_version", tag))
+			return tag, nil
+		}
+	}
+
+	return "", fmt.Errorf("no supported k3s release found for kubernetes version %q (run 'hetzner-k3s releases' to see available versions)", version)
+}
+
+// isPrerelease returns true if the version tag indicates a pre-release version.
+// Checks for common pre-release suffixes: -rc, -alpha, -beta.
+func isPrerelease(tag string) bool {
+	return strings.Contains(tag, "-rc") ||
+		strings.Contains(tag, "-alpha") ||
+		strings.Contains(tag, "-beta")
+}
+
+// getHetznerK3sReleases runs `hetzner-k3s releases` and returns the list of
+// supported version tags. Results are returned in the order the binary outputs
+// them (newest first). A 30-second timeout is applied to prevent hanging if
+// the binary makes network calls internally.
+func getHetznerK3sReleases(ctx context.Context, binaryPath string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", userAgent)
+	cmd := exec.CommandContext(ctx, binaryPath, "releases")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch k3s releases: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // Best-effort close on read-only response
-
-	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-		span.RecordError(err)
-		return "", err
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to get hetzner-k3s releases: %w: %s", err, stderr.String())
 	}
 
-	const maxAPIResponseSize = 10 * 1024 * 1024 // 10 MB
-	var releases []ghRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIResponseSize)).Decode(&releases); err != nil {
-		return "", fmt.Errorf("failed to decode k3s releases: %w", err)
-	}
-
-	for _, r := range releases {
-		if r.Prerelease {
-			continue
-		}
-		if strings.HasPrefix(r.TagName, matchPrefix) {
-			span.SetAttributes(attribute.String("resolved_version", r.TagName))
-			return r.TagName, nil
+	var releases []string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		tag := strings.TrimSpace(line)
+		if tag != "" {
+			releases = append(releases, tag)
 		}
 	}
-
-	err = fmt.Errorf("no stable k3s release found for kubernetes version %q (try an explicit k3s version like 'v1.32.0+k3s1')", version)
-	span.RecordError(err)
-	return "", err
+	return releases, nil
 }
