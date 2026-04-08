@@ -101,39 +101,44 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", deployConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
-	// Set runtime options from CLI flags
-	cfg.DryRun = deployDryRun
-
-	// Apply custom timeout if specified
+	// Parse custom timeout if specified
+	var timeout time.Duration
 	if deployTimeout != "" {
-		duration, err := time.ParseDuration(deployTimeout)
+		var err error
+		timeout, err = time.ParseDuration(deployTimeout)
 		if err != nil {
 			span.RecordError(err)
 			slog.Error("Invalid timeout duration", "error", err, "timeout", deployTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", deployTimeout, err)
 		}
-		cfg.Timeout = duration
 		span.SetAttributes(attribute.String("timeout", deployTimeout))
-		slog.Info("Using custom timeout", "timeout", duration)
+		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
 	// Get the appropriate provider
-	provider, err := registry.Get(ctx, cfg.Provider)
+	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
 	slog.Info("Provider selected", "provider", provider.Name())
 
 	// Deploy infrastructure
-	if err := provider.Deploy(ctx, cfg); err != nil {
+	if err := provider.Deploy(ctx, cfg, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Deployment failed", "error", err, "provider", provider.Name())
 		return err
@@ -159,7 +164,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	var argoCDInstalled, keycloakInstalled bool
 
 	// Install Argo CD (skip in dry-run mode)
-	if !cfg.DryRun {
+	if !deployDryRun {
 		slog.Info("Installing Argo CD on cluster")
 		if err := argocd.Install(ctx, cfg, provider); err != nil {
 			// Log error but don't fail deployment
@@ -277,7 +282,7 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 		return lbEndpoint
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
+	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
 		return lbEndpoint

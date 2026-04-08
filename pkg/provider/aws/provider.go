@@ -71,18 +71,13 @@ func containsSubstring(slice []string, substr string) bool {
 	return false
 }
 
-// ConfigKey returns the YAML configuration key for AWS
-func (p *Provider) ConfigKey() string {
-	return "amazon_web_services"
-}
-
 // extractAWSConfig converts the any provider config to AWS Config type
 func extractAWSConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		err := fmt.Errorf("AWS configuration is required")
 		span.RecordError(err)
@@ -226,7 +221,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 }
 
 // Deploy deploys AWS infrastructure using stateless reconciliation
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
@@ -234,7 +229,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("project_name", cfg.ProjectName),
-		attribute.Bool("dry_run", cfg.DryRun),
+		attribute.Bool("dry_run", opts.DryRun),
 		attribute.Bool("existing_cluster", cfg.IsExistingCluster()),
 	)
 
@@ -283,7 +278,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	}
 
 	// Only create the state bucket for non-dry-run operations
-	if !cfg.DryRun {
+	if !opts.DryRun {
 		if err := ensureStateBucket(ctx, s3Client, awsCfg.Region, bucketName); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to ensure state bucket: %w", err)
@@ -302,7 +297,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		}
 	}()
 
-	if cfg.DryRun && !bucketExists {
+	if opts.DryRun && !bucketExists {
 		// First-time dry run: override the S3 backend with a local backend since
 		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
 		if err := tf.WriteBackendOverride(); err != nil {
@@ -322,7 +317,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		_, err = tf.Plan(ctx)
 		if err != nil {
 			span.RecordError(err)
@@ -355,7 +350,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 }
 
 // Destroy tears down AWS infrastructure in reverse order
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
@@ -388,8 +383,8 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", cfg.ProjectName),
 		attribute.String("region", region),
-		attribute.Bool("dry_run", cfg.DryRun),
-		attribute.Bool("force", cfg.Force),
+		attribute.Bool("dry_run", opts.DryRun),
+		attribute.Bool("force", opts.Force),
 	)
 
 	// Check if state bucket exists
@@ -416,7 +411,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		}
 	}()
 
-	if cfg.DryRun && !bucketExists {
+	if opts.DryRun && !bucketExists {
 		// First-time dry run: override the S3 backend with a local backend since
 		// the state bucket doesn't exist yet and a dry run should not create cloud resources.
 		if err := tf.WriteBackendOverride(); err != nil {
@@ -436,7 +431,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return err
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		_, err = tf.Plan(ctx, tfexec.Destroy(true))
 		if err != nil {
 			span.RecordError(err)
@@ -463,7 +458,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
 	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, cfg.ProjectName); err != nil {
-		if cfg.Force {
+		if opts.Force {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
 				WithResource("load-balancer").
 				WithAction("cleanup"))
@@ -632,7 +627,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 		return result
 	}
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -651,7 +646,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 
-	rawCfg := cfg.ProviderConfig["amazon_web_services"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {

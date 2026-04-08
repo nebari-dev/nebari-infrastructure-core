@@ -1,15 +1,17 @@
 # Example: Deploying to an existing AWS EKS cluster
 #
 # This configuration uses "bring your own cluster" mode:
-# - provider: aws          -> Uses AWS-specific settings (gp2 storage class, etc.)
+# - cluster: aws: {}       -> Uses AWS-specific settings (gp2 storage class, etc.)
 # - kube_context: <arn>    -> Skips infrastructure provisioning, uses existing cluster
 #
-# The amazon_web_services section is NOT required when using an existing cluster.
+# The aws config block can be empty when using an existing cluster.
 
 project_name: my-nebari-aws
-provider: aws
 domain: nebari.local
 kube_context: "arn:aws:eks:us-west-2:123456789012:cluster/my-nebari-aws"
+
+cluster:
+  aws: {}
 
 certificate:
   type: selfsigned
