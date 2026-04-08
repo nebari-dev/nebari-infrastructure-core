@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
@@ -42,11 +41,6 @@ type NebariConfig struct {
 
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
-
-	// Runtime options (set by CLI, not from YAML file)
-	DryRun  bool          `yaml:"-"` // Preview changes without applying them
-	Force   bool          `yaml:"-"` // Continue destruction even if some resources fail to delete
-	Timeout time.Duration `yaml:"-"` // Override default operation timeout
 }
 
 // DNSConfig holds typed DNS provider configuration.

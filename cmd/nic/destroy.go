@@ -80,10 +80,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate configuration with registered providers
-	if err := cfg.Validate(config.ValidateOptions{
-		ClusterProviders: registry.List(ctx),
-		DNSProviders:     dnsRegistry.List(ctx),
-	}); err != nil {
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", destroyConfigFile)
 		return err
@@ -94,25 +91,22 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		"project_name", cfg.ProjectName,
 	)
 
-	// Set runtime options from CLI flags
-	cfg.DryRun = destroyDryRun
-	cfg.Force = destroyForce
-
-	// Apply custom timeout if specified
+	// Parse custom timeout if specified
+	var timeout time.Duration
 	if destroyTimeout != "" {
-		duration, err := time.ParseDuration(destroyTimeout)
+		var err error
+		timeout, err = time.ParseDuration(destroyTimeout)
 		if err != nil {
 			span.RecordError(err)
 			slog.Error("Invalid timeout duration", "error", err, "timeout", destroyTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", destroyTimeout, err)
 		}
-		cfg.Timeout = duration
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
-		slog.Info("Using custom timeout", "timeout", duration)
+		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
 	// Get the appropriate provider
-	prov, err := registry.Get(ctx, cfg.Cluster.ProviderName())
+	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
@@ -151,7 +145,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Destroy infrastructure
-	if err := prov.Destroy(ctx, cfg); err != nil {
+	if err := prov.Destroy(ctx, cfg, provider.DestroyOptions{DryRun: destroyDryRun, Force: destroyForce, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Destruction failed", "error", err, "provider", prov.Name())
 		if destroyForce {
@@ -172,7 +166,7 @@ func destroyDNS(ctx context.Context, cfg *config.NebariConfig) error {
 		return nil
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
+	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		return err
 	}
