@@ -49,6 +49,8 @@ spec:
                   key: password
             - name: KC_HOSTNAME
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+            - name: KC_FEATURES
+              value: "token-exchange,admin-fine-grained-authz:v1"
           proxy:
             mode: xforwarded
           livenessProbe: |

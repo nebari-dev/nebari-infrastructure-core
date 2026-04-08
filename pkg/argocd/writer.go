@@ -37,8 +37,6 @@ type TemplateData struct {
 	// Domain configuration
 	Domain string
 
-	// Provider configuration
-	Provider     string // "aws", "gcp", "azure", "local"
 	StorageClass string // Provider-appropriate storage class for persistent volumes
 
 	// Certificate configuration
@@ -79,7 +77,6 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 
 	data := TemplateData{
 		Domain:                  cfg.Domain,
-		Provider:                cfg.Provider,
 		StorageClass:            settings.StorageClass,
 		HTTPSPort:               httpsPort,
 		MetalLBAddressRange:     settings.MetalLBAddressPool,

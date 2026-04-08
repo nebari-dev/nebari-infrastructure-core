@@ -29,11 +29,6 @@ func (p *Provider) Name() string {
 	return "local"
 }
 
-// ConfigKey returns the YAML key for this provider's configuration
-func (p *Provider) ConfigKey() string {
-	return "local"
-}
-
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -52,7 +47,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 
 	// Parse local provider config
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to unmarshal local config: %w", err)
@@ -117,7 +112,7 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 }
 
 // Deploy deploys local K3s infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Deploy")
 	defer span.End()
@@ -127,7 +122,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		var localCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err == nil {
 			span.SetAttributes(attribute.String("local.kube_context", localCfg.KubeContext))
@@ -151,7 +146,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 }
 
 // Destroy tears down local infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Destroy")
 	defer span.End()
@@ -181,7 +176,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 
 	// Parse local provider config to get the kube context
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := cfg.Cluster.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to unmarshal local config: %w", err)
@@ -260,7 +255,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 	}
 
 	// Fall back to provider-specific config
-	rawCfg := cfg.ProviderConfig["local"]
+	rawCfg := cfg.Cluster.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
