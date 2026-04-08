@@ -6,22 +6,22 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 // resolveK3sVersion resolves a Kubernetes version (e.g., "1.32" or "1.32.0")
-// to a full k3s release tag (e.g., "v1.32.12+k3s1") by querying the hetzner-k3s
-// binary for its supported releases. This ensures the resolved version is actually
-// supported by hetzner-k3s, not just published on GitHub.
+// to a full k3s release tag (e.g., "v1.32.12+k3s1") by matching against the
+// provided list of available releases. This is a pure function - the caller is
+// responsible for fetching the releases list from the hetzner-k3s binary.
 //
 // If version already contains "+k3s", it's returned as-is.
-// binaryPath is the path to the hetzner-k3s binary; pass "" to use the releasesFunc
-// override (for testing).
-func resolveK3sVersion(ctx context.Context, version string, binaryPath string) (string, error) {
+// releases should be ordered newest-first for correct resolution.
+func resolveK3sVersion(ctx context.Context, version string, releases []string) (string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
+	_, span := tracer.Start(ctx, "hetzner.resolveK3sVersion")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("requested_version", version))
@@ -44,15 +44,10 @@ func resolveK3sVersion(ctx context.Context, version string, binaryPath string) (
 		return "", fmt.Errorf("invalid kubernetes version format: %q (expected MAJOR.MINOR or MAJOR.MINOR.PATCH)", version)
 	}
 
-	releases, err := getHetznerK3sReleases(ctx, binaryPath)
-	if err != nil {
-		span.RecordError(err)
-		return "", err
-	}
-
 	// Releases are returned newest-first; find the first stable match.
+	// Skip pre-release versions (rc, alpha, beta).
 	for _, tag := range releases {
-		if strings.Contains(tag, "-rc") {
+		if isPrerelease(tag) {
 			continue
 		}
 		if strings.HasPrefix(tag, matchPrefix) {
@@ -61,15 +56,25 @@ func resolveK3sVersion(ctx context.Context, version string, binaryPath string) (
 		}
 	}
 
-	err = fmt.Errorf("no supported k3s release found for kubernetes version %q (run 'hetzner-k3s releases' to see available versions)", version)
-	span.RecordError(err)
-	return "", err
+	return "", fmt.Errorf("no supported k3s release found for kubernetes version %q (run 'hetzner-k3s releases' to see available versions)", version)
+}
+
+// isPrerelease returns true if the version tag indicates a pre-release version.
+// Checks for common pre-release suffixes: -rc, -alpha, -beta.
+func isPrerelease(tag string) bool {
+	return strings.Contains(tag, "-rc") ||
+		strings.Contains(tag, "-alpha") ||
+		strings.Contains(tag, "-beta")
 }
 
 // getHetznerK3sReleases runs `hetzner-k3s releases` and returns the list of
 // supported version tags. Results are returned in the order the binary outputs
-// them (newest first).
+// them (newest first). A 30-second timeout is applied to prevent hanging if
+// the binary makes network calls internally.
 func getHetznerK3sReleases(ctx context.Context, binaryPath string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, binaryPath, "releases")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

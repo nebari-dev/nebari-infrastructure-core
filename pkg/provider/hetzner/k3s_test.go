@@ -2,23 +2,8 @@ package hetzner
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
-
-// createFakeHetznerK3s creates a shell script that mimics `hetzner-k3s releases`.
-func createFakeHetznerK3s(t *testing.T, releases []string) string {
-	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, "hetzner-k3s")
-	content := "#!/bin/sh\ncat <<'RELEASES'\n" + strings.Join(releases, "\n") + "\nRELEASES\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil { //nolint:gosec // Test helper script needs execute permission
-		t.Fatal(err)
-	}
-	return script
-}
 
 func TestResolveK3sVersion(t *testing.T) {
 	releases := []string{
@@ -27,7 +12,6 @@ func TestResolveK3sVersion(t *testing.T) {
 		"v1.32.11+k3s3",
 		"v1.31.5+k3s1",
 	}
-	binary := createFakeHetznerK3s(t, releases)
 
 	tests := []struct {
 		name    string
@@ -51,7 +35,7 @@ func TestResolveK3sVersion(t *testing.T) {
 			want:    "v1.32.0+k3s1",
 		},
 		{
-			name:    "skips prerelease",
+			name:    "skips prerelease rc",
 			version: "1.32.12",
 			want:    "v1.32.12+k3s1",
 		},
@@ -68,7 +52,7 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveK3sVersion(context.Background(), tt.version, binary)
+			got, err := resolveK3sVersion(context.Background(), tt.version, releases)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("resolveK3sVersion() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -80,12 +64,39 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 }
 
-func TestResolveK3sVersion_BinaryError(t *testing.T) {
-	_, err := resolveK3sVersion(context.Background(), "1.32", "/nonexistent/hetzner-k3s")
-	if err == nil {
-		t.Fatal("expected error for missing binary")
+func TestResolveK3sVersion_SkipsAllPrereleaseTypes(t *testing.T) {
+	releases := []string{
+		"v1.32.12-alpha1+k3s1",
+		"v1.32.12-beta1+k3s1",
+		"v1.32.12-rc1+k3s1",
+		"v1.32.11+k3s1", // first stable
 	}
-	if !strings.Contains(err.Error(), "failed to get hetzner-k3s releases") {
-		t.Errorf("error should mention hetzner-k3s releases, got: %v", err)
+
+	got, err := resolveK3sVersion(context.Background(), "1.32", releases)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "v1.32.11+k3s1" {
+		t.Errorf("resolveK3sVersion() = %q, want %q (should skip alpha, beta, rc)", got, "v1.32.11+k3s1")
+	}
+}
+
+func TestIsPrerelease(t *testing.T) {
+	tests := []struct {
+		tag  string
+		want bool
+	}{
+		{"v1.32.12+k3s1", false},
+		{"v1.32.12-rc1+k3s1", true},
+		{"v1.32.12-alpha1+k3s1", true},
+		{"v1.32.12-beta1+k3s1", true},
+		{"v1.32.12-rc+k3s1", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			if got := isPrerelease(tt.tag); got != tt.want {
+				t.Errorf("isPrerelease(%q) = %v, want %v", tt.tag, got, tt.want)
+			}
+		})
 	}
 }
