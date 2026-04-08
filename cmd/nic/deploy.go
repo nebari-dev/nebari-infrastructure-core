@@ -224,7 +224,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !deployDryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider); err != nil {
+		if err := argocd.Install(ctx, cfg, provider, argocd.DefaultConfig()); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
