@@ -79,7 +79,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			PostgresUserPassword:  "db-pass-456-user",
 		}
 
-		err := createKeycloakSecrets(ctx, client, cfg)
+		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
 		if err != nil {
 			t.Fatalf("createKeycloakSecrets() error = %v", err)
 		}
@@ -131,7 +131,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			RealmAdminPassword: "realm-admin-pass",
 		}
 
-		err := createKeycloakSecrets(ctx, client, cfg)
+		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
 		if err != nil {
 			t.Fatalf("createKeycloakSecrets() error = %v", err)
 		}
@@ -168,7 +168,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			RealmAdminPassword: "", // Empty - should not create secret
 		}
 
-		err := createKeycloakSecrets(ctx, client, cfg)
+		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
 		if err != nil {
 			t.Fatalf("createKeycloakSecrets() error = %v", err)
 		}
@@ -204,7 +204,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			DBPassword:    "db-pass",
 		}
 
-		err := createKeycloakSecrets(ctx, client, cfg)
+		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
 		if err != nil {
 			t.Fatalf("createKeycloakSecrets() error = %v", err)
 		}
@@ -278,6 +278,88 @@ func TestFoundationalConfig(t *testing.T) {
 			t.Errorf("MetalLB.AddressPool = %q, want %q", cfg.MetalLB.AddressPool, "192.168.1.100-192.168.1.110")
 		}
 	})
+}
+
+func TestArgoCDSSOConfigDefaults(t *testing.T) {
+	cfg := ArgoCDSSOConfig{}
+	if cfg.ClientSecret != "" {
+		t.Error("ArgoCDSSOConfig.ClientSecret should default to empty")
+	}
+}
+
+func TestCreateKeycloakSecrets_CreatesArgoCDOIDCSecret(t *testing.T) {
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "keycloak",
+		},
+	}
+	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+	keycloakCfg := KeycloakConfig{
+		Enabled:               true,
+		AdminUsername:         "admin",
+		AdminPassword:         "admin-pass",
+		DBPassword:            "db-pass",
+		PostgresAdminPassword: "pg-admin-pass",
+		PostgresUserPassword:  "pg-user-pass",
+		RealmAdminUsername:    "admin",
+		RealmAdminPassword:    "realm-admin-pass",
+	}
+	argocdSSO := ArgoCDSSOConfig{
+		ClientSecret: "argocd-oidc-secret-value",
+	}
+
+	err := createKeycloakSecrets(ctx, client, keycloakCfg, argocdSSO)
+	if err != nil {
+		t.Fatalf("createKeycloakSecrets() error = %v", err)
+	}
+
+	// Verify argocd-oidc-client-secret was created
+	secret, err := client.CoreV1().Secrets("keycloak").Get(ctx, "argocd-oidc-client-secret", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get argocd-oidc-client-secret: %v", err)
+	}
+	if got := getSecretValue(secret, "client-secret"); got != "argocd-oidc-secret-value" {
+		t.Errorf("client-secret = %q, want %q", got, "argocd-oidc-secret-value")
+	}
+	// Verify labels
+	if secret.Labels["app.kubernetes.io/part-of"] != "nebari-foundational" {
+		t.Error("missing or incorrect part-of label")
+	}
+}
+
+func TestCreateKeycloakSecrets_SkipsArgoCDSecretWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "keycloak",
+		},
+	}
+	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+	keycloakCfg := KeycloakConfig{
+		Enabled:       true,
+		AdminUsername: "admin",
+		AdminPassword: "admin-pass",
+		DBPassword:    "db-pass",
+	}
+	argocdSSO := ArgoCDSSOConfig{
+		ClientSecret: "", // Empty - should not create secret
+	}
+
+	err := createKeycloakSecrets(ctx, client, keycloakCfg, argocdSSO)
+	if err != nil {
+		t.Fatalf("createKeycloakSecrets() error = %v", err)
+	}
+
+	// Verify argocd-oidc-client-secret was NOT created
+	_, err = client.CoreV1().Secrets("keycloak").Get(ctx, "argocd-oidc-client-secret", metav1.GetOptions{})
+	if err == nil {
+		t.Error("argocd-oidc-client-secret should not be created when ClientSecret is empty")
+	}
 }
 
 func TestNewK8sClient(t *testing.T) {

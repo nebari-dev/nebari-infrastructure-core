@@ -166,7 +166,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Install Argo CD (skip in dry-run mode)
 	if !deployDryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider); err != nil {
+
+		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
+		// and the Keycloak realm-setup job
+		argoCDClientSecret := generateSecurePassword(rand.Reader)
+
+		// Build ArgoCD config with Keycloak OIDC SSO
+		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
+
+		if err := argocd.Install(ctx, cfg, provider, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -187,6 +195,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
+				},
+				ArgoCD: argocd.ArgoCDSSOConfig{
+					ClientSecret: argoCDClientSecret,
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
@@ -436,9 +447,9 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 // printArgoCDInstructions prints instructions for accessing Argo CD
 func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println("  ARGO CD INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println()
 	fmt.Println("  Argo CD has been successfully installed on your cluster.")
 	fmt.Println()
@@ -453,16 +464,20 @@ func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
 	fmt.Println("    Then visit: https://localhost:8080")
 	fmt.Println()
-	fmt.Println("  Get the admin password:")
+	fmt.Println("  SSO Login:")
+	fmt.Println("    Click 'Log in via Keycloak' to authenticate with your Nebari account.")
+	fmt.Println("    Users in the 'argocd-admins' group get full admin access.")
+	fmt.Println("    Users in the 'argocd-viewers' group get read-only access.")
+	fmt.Println()
+	fmt.Println("  Admin fallback (break-glass):")
 	fmt.Println()
 	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
 	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
 	fmt.Println()
-	fmt.Println("  Login credentials:")
 	fmt.Println("    Username: admin")
 	fmt.Println("    Password: <from command above>")
 	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println()
 }
 
