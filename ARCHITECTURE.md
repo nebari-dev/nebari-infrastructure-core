@@ -64,7 +64,7 @@ nebari-infrastructure-core/
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Defines `Provider` interface with Name(), ConfigKey(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
+| `provider.go` | Defines `Provider` interface with Name(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
 | `registry.go` | Thread-safe provider registry with registration and lookup |
 
 ### AWS Provider (pkg/provider/aws/) - **Fully Implemented**
@@ -152,7 +152,7 @@ func (p *Provider) reconcileVPC(ctx context.Context, clients *Clients, cfg *conf
 
 **Config Extraction Pattern:**
 ```go
-// Every function extracts provider config at entry
+// Every function extracts provider config at entry via cfg.Cluster.ProviderConfig()
 func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *config.NebariConfig) error {
     awsCfg, err := extractAWSConfig(ctx, cfg)
     if err != nil {
@@ -243,19 +243,21 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 **Central Config (pkg/config/config.go):**
 ```go
 type NebariConfig struct {
-    Provider       string         `yaml:"provider"`         // Required: "aws", "gcp", "azure", "local"
-    ProjectName    string         `yaml:"project_name"`     // Required: cluster name
-    Domain         string         `yaml:"domain,omitempty"` // Optional: domain for ingress
-    DNS            *DNSConfig     `yaml:"dns,omitempty"` // Nested: dns.cloudflare.zone_name
-
-    // Provider-specific config captured via inline YAML
-    // Access via: cfg.ProviderConfig["amazon_web_services"], etc.
-    ProviderConfig map[string]any `yaml:",inline"`
+    ProjectName string          `yaml:"project_name"`     // Required: cluster name
+    Domain      string          `yaml:"domain,omitempty"` // Optional: domain for ingress
+    Cluster     *ClusterConfig  `yaml:"cluster,omitempty"` // Nested: cluster.aws.region
+    DNS         *DNSConfig      `yaml:"dns,omitempty"`    // Nested: dns.cloudflare.zone_name
 
     // Runtime options (not from YAML)
     DryRun  bool          `yaml:"-"`
     Force   bool          `yaml:"-"`
     Timeout time.Duration `yaml:"-"`
+}
+
+// ClusterConfig uses the same nested-key pattern as DNSConfig.
+// Access via: cfg.Cluster.ProviderName(), cfg.Cluster.ProviderConfig()
+type ClusterConfig struct {
+    Providers map[string]any `yaml:",inline"`
 }
 ```
 
@@ -396,7 +398,8 @@ defer cleanup()
 
 ### 4. Provider Configuration Isolation
 - Each provider owns its configuration types in `pkg/provider/<provider>/config.go`
-- Central config stores provider configs as `any`
+- Central config uses nested `cluster: <provider>:` format (same pattern as `dns: <provider>:`)
+- Provider name via `cfg.Cluster.ProviderName()`, raw config via `cfg.Cluster.ProviderConfig()`
 - Type conversion via `config.UnmarshalProviderConfig()` helper
 - Providers extract their config at function entry with `extractConfig()` pattern
 

@@ -56,7 +56,6 @@ Files organized by **resource** (vpc, eks, nodegroups), not by operation. Each r
 ```go
 type Provider interface {
     Name() string
-    ConfigKey() string
     Validate(ctx context.Context, config *config.NebariConfig) error
     Deploy(ctx context.Context, config *config.NebariConfig) error
     Reconcile(ctx context.Context, config *config.NebariConfig) error  // Deprecated - see issue #44

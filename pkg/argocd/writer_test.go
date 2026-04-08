@@ -151,7 +151,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.NebariConfig{Provider: "test", Domain: "test.example.com"}
+			cfg := &config.NebariConfig{Domain: "test.example.com"}
 			data := NewTemplateData(cfg, tt.settings)
 			if data.StorageClass != tt.wantStorageClass {
 				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantStorageClass)
@@ -173,7 +173,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 }
 
 func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
-	cfg := &config.NebariConfig{Provider: "hetzner", Domain: "test.example.com"}
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
 	settings := provider.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
@@ -195,7 +195,6 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:    "test.example.com",
-		Provider:  "hetzner",
 		HTTPSPort: 443,
 		LoadBalancerAnnotations: map[string]string{
 			"load-balancer.hetzner.cloud/location": "ash",
@@ -237,7 +236,6 @@ func TestGatewayTemplate_WithAnnotations(t *testing.T) {
 func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	data := TemplateData{
 		Domain:            "test.example.com",
-		Provider:          "aws",
 		HTTPSPort:         443,
 		CertificateIssuer: "selfsigned-issuer",
 	}
@@ -295,7 +293,6 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
 				Domain:                  "test.example.com",
-				Provider:                "hetzner",
 				KeycloakBasePath:        tt.keycloakBasePath,
 				KeycloakNamespace:       "keycloak",
 				KeycloakAdminSecretName: "keycloak-admin",
@@ -414,7 +411,6 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
 				Domain:    "test.example.com",
-				Provider:  "aws",
 				HTTPSPort: tt.httpsPort,
 			}
 
@@ -534,7 +530,6 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 	data := TemplateData{
 		Domain:              "test.example.com",
-		Provider:            "aws",
 		HTTPSPort:           443,
 		KeycloakServiceName: "keycloak-keycloakx-http",
 	}
@@ -603,7 +598,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.NebariConfig{Provider: "test", Domain: tt.domain}
+			cfg := &config.NebariConfig{Domain: tt.domain}
 			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
 			data := NewTemplateData(cfg, settings)
 
@@ -619,8 +614,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.NebariConfig{
-		Provider: "aws",
-		Domain:   "test.example.com",
+		Domain: "test.example.com",
 	}
 	settings := provider.InfraSettings{
 		StorageClass: "gp2",
