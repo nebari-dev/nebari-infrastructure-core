@@ -1,6 +1,9 @@
 package argocd
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	defaultChartVersion = "9.4.1"
@@ -27,6 +30,52 @@ type Config struct {
 
 	// Values are custom Helm values to apply
 	Values map[string]any
+}
+
+// ConfigWithOIDC returns an Argo CD configuration with Keycloak OIDC SSO enabled.
+// It builds on DefaultConfig and adds OIDC provider config, RBAC policies mapping
+// Keycloak groups to ArgoCD roles, and the client secret.
+//
+// The OIDC config references the client secret via $oidc.keycloak.clientSecret,
+// which ArgoCD resolves from the argocd-secret Kubernetes Secret. The secret value
+// is injected via configs.secret.extra in the Helm values.
+func ConfigWithOIDC(domain, keycloakBasePath, clientSecret string) Config {
+	cfg := DefaultConfig()
+
+	issuerURL := fmt.Sprintf("https://keycloak.%s%s/realms/nebari", domain, keycloakBasePath)
+	argocdURL := fmt.Sprintf("https://argocd.%s", domain)
+
+	oidcConfig := fmt.Sprintf(`name: Keycloak
+issuer: %s
+clientID: argocd
+clientSecret: $oidc.keycloak.clientSecret
+requestedScopes:
+  - openid
+  - profile
+  - email
+  - groups`, issuerURL)
+
+	rbacPolicy := `g, argocd-admins, role:admin
+g, argocd-viewers, role:readonly`
+
+	configs := cfg.Values["configs"].(map[string]any)
+	configs["cm"] = map[string]any{
+		"url":         argocdURL,
+		"oidc.config": oidcConfig,
+	}
+	configs["rbac"] = map[string]any{
+		"policy.default": "",
+		"scopes":         "[groups]",
+		"policy.csv":     rbacPolicy,
+	}
+	configs["secret"] = map[string]any{
+		"extra": map[string]any{
+			"oidc.keycloak.clientSecret": clientSecret,
+		},
+	}
+
+	cfg.Values["configs"] = configs
+	return cfg
 }
 
 // DefaultConfig returns the default Argo CD configuration
