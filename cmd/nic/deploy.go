@@ -188,6 +188,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
 				},
+				LandingPage: argocd.LandingPageConfig{
+					RedisPassword: generateSecurePassword(rand.Reader),
+				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
 					Enabled:     infraSettings.NeedsMetalLB,
