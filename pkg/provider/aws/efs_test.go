@@ -89,6 +89,14 @@ func TestCreateEFSStorageClassWithClient(t *testing.T) {
 			wantFileSystemID: "fs-abcdef01",
 		},
 		{
+			name: "rejects empty efsID",
+			config: &Config{
+				EFS: &EFSConfig{Enabled: true},
+			},
+			efsID:   "",
+			wantErr: true,
+		},
+		{
 			name: "updates StorageClass when it already exists",
 			config: &Config{
 				EFS: &EFSConfig{Enabled: true},

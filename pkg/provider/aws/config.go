@@ -75,7 +75,8 @@ type EFSConfig struct {
 const defaultEFSStorageClassName = "efs-sc"
 
 // EFSStorageClassName returns the StorageClass name for EFS volumes.
-// Defaults to "efs-sc" when not set.
+// Returns the default "efs-sc" when EFS is not configured or when
+// StorageClassName is empty.
 func (c *Config) EFSStorageClassName() string {
 	if c.EFS == nil || c.EFS.StorageClassName == "" {
 		return defaultEFSStorageClassName

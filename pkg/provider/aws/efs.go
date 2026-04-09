@@ -11,7 +11,6 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -35,7 +34,7 @@ func createEFSStorageClass(ctx context.Context, kubeconfigBytes []byte, cfg *Con
 		attribute.String("efs_id", efsID),
 	)
 
-	client, err := newEFSK8sClient(kubeconfigBytes)
+	client, err := newK8sClient(kubeconfigBytes)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
@@ -51,6 +50,12 @@ func createEFSStorageClassWithClient(ctx context.Context, client kubernetes.Inte
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.createEFSStorageClassWithClient")
 	defer span.End()
+
+	if efsID == "" {
+		err := fmt.Errorf("efs_id must not be empty")
+		span.RecordError(err)
+		return err
+	}
 
 	storageClassName := cfg.EFSStorageClassName()
 
@@ -87,6 +92,10 @@ func createEFSStorageClassWithClient(ctx context.Context, client kubernetes.Inte
 		span.RecordError(err)
 		return fmt.Errorf("failed to get EFS StorageClass: %w", err)
 	default:
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Updating existing EFS StorageClass").
+			WithResource("efs-storageclass").
+			WithAction("updating").
+			WithMetadata("name", storageClassName))
 		sc.ResourceVersion = existing.ResourceVersion
 		if _, err := client.StorageV1().StorageClasses().Update(ctx, sc, metav1.UpdateOptions{}); err != nil {
 			span.RecordError(err)
@@ -100,13 +109,4 @@ func createEFSStorageClassWithClient(ctx context.Context, client kubernetes.Inte
 		WithMetadata("name", storageClassName))
 
 	return nil
-}
-
-// newEFSK8sClient creates a Kubernetes clientset from kubeconfig bytes.
-func newEFSK8sClient(kubeconfigBytes []byte) (*kubernetes.Clientset, error) {
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-	return kubernetes.NewForConfig(restConfig)
 }
