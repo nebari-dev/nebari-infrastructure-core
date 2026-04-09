@@ -325,6 +325,39 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Create EFS StorageClass if EFS is enabled
+	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for EFS StorageClass: %w", err)
+		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for EFS: %w", err)
+		}
+
+		efsIDOutput, ok := outputs["efs_id"]
+		if !ok {
+			err := fmt.Errorf("efs_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var efsID string
+		if err := json.Unmarshal(efsIDOutput.Value, &efsID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal efs_id: %w", err)
+		}
+
+		if err := createEFSStorageClass(ctx, kubeconfigBytes, awsCfg, efsID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create EFS StorageClass: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -599,19 +632,27 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
+// EFSStorageClass is set when EFS is enabled.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
+	var efsSC string
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
-		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil && !awsCfg.LonghornEnabled() {
-			sc = storageClassGP2
+		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
+			if !awsCfg.LonghornEnabled() {
+				sc = storageClassGP2
+			}
+			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
+				efsSC = awsCfg.EFSStorageClassName()
+			}
 		}
 	}
 
 	return provider.InfraSettings{
-		StorageClass: sc,
-		NeedsMetalLB: false,
+		StorageClass:    sc,
+		NeedsMetalLB:    false,
+		EFSStorageClass: efsSC,
 	}
 }

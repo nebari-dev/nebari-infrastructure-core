@@ -52,6 +52,11 @@ type InfraSettings struct {
 	// Providers running behind a non-standard HTTPS port (e.g., development on 8443)
 	// can override this.
 	HTTPSPort int
+
+	// EFSStorageClass is the name of the EFS-backed StorageClass, if available.
+	// Empty when EFS is not enabled. Software packs can use this for ReadWriteMany
+	// volumes (e.g., shared model storage for LLM serving).
+	EFSStorageClass string
 }
 
 // Provider defines the interface that all cloud providers must implement.
