@@ -373,6 +373,12 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig, opts pr
 			return fmt.Errorf("failed to unmarshal efs_id: %w", err)
 		}
 
+		if efsID == "" {
+			err := fmt.Errorf("efs_id is empty in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
 		if err := createEFSStorageClass(ctx, kubeconfigBytes, awsCfg, efsID); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create EFS StorageClass: %w", err)
