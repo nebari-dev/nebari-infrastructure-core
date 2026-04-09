@@ -1,6 +1,7 @@
 # Configuration Reference
 
-This document provides a complete reference for all configuration options in NIC, based on the actual struct definitions in `pkg/config/config.go`.
+This document provides a complete reference for all configuration options in NIC, based on the actual struct definitions
+in `pkg/config/config.go`.
 
 ## Table of Contents
 
@@ -13,7 +14,7 @@ This document provides a complete reference for all configuration options in NIC
 7. [DNS Provider Configuration](#dns-provider-configuration)
 8. [Complete Examples](#complete-examples)
 
----
+
 
 ## Global Configuration
 
@@ -44,12 +45,16 @@ dns:
 
 **Field Descriptions:**
 
-- **project_name** (string, required): Unique identifier for your Nebari deployment. Used in resource naming and tagging across all cloud resources.
-- **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`, `hetzner`, `local`.
-- **domain** (string, optional): Fully qualified domain name for accessing Nebari services. Required for TLS/Let's Encrypt integration.
-- **dns** (object, optional): DNS provider configuration. The provider name is the key (e.g., `cloudflare`), and its config is the value. Only one provider can be configured. See DNS Provider Configuration section.
+- **project_name** (string, required): Unique identifier for your Nebari deployment. Used in resource naming and tagging
+  across all cloud resources.
+- **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`,
+  `hetzner`, `local`.
+- **domain** (string, optional): Fully qualified domain name for accessing Nebari services. Required for TLS/Let's
+  Encrypt integration.
+- **dns** (object, optional): DNS provider configuration. The provider name is the key (e.g., `cloudflare`), and its
+  config is the value. Only one provider can be configured. See DNS Provider Configuration section.
 
----
+
 
 ## AWS Provider Configuration
 
@@ -81,21 +86,13 @@ amazon_web_services:
   # Must be a valid RFC 1918 private network range
   vpc_cidr_block: "10.10.0.0/16"
 
-  # OPTIONAL: EKS API endpoint access configuration
-  # Valid values: "public", "private", "public-and-private"
-  # Default: "public"
-  # - public: API accessible from internet
-  # - private: API only accessible from within VPC
-  # - public-and-private: API accessible from both
-  eks_endpoint_access: "public"
+  # OPTIONAL: Enable private EKS API endpoint (accessible from within VPC only)
+  # Default: false
+  endpoint_private_access: false
 
-  # OPTIONAL: CIDR blocks allowed to access public EKS endpoint
-  # Only applies when eks_endpoint_access is "public" or "public-and-private"
-  # Default: ["0.0.0.0/0"] (allow all)
-  # Restrict to your organization's IP ranges for security
-  eks_public_access_cidrs:
-    - "203.0.113.0/24"
-    - "198.51.100.0/24"
+  # OPTIONAL: Enable public EKS API endpoint (accessible from internet)
+  # Default: false
+  endpoint_public_access: true
 
   # OPTIONAL: ARN of KMS key for EKS secrets encryption
   # If specified, Kubernetes secrets will be encrypted with this key
@@ -229,7 +226,7 @@ AWS_PROFILE=nebari-admin
 # No environment variables needed - uses instance/pod IAM role
 ```
 
----
+
 
 ## GCP Provider Configuration
 
@@ -425,7 +422,7 @@ GOOGLE_CREDENTIALS='{"type":"service_account","project_id":"my-project",...}'
 GOOGLE_PROJECT=my-gcp-project-id
 ```
 
----
+
 
 ## Azure Provider Configuration
 
@@ -590,11 +587,12 @@ AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111
 # NIC will use credentials from Azure CLI
 ```
 
----
+
 
 ## Hetzner Provider Configuration
 
-Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on Hetzner Cloud using the hetzner-k3s CLI tool.
+Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on
+Hetzner Cloud using the hetzner-k3s CLI tool.
 
 ```yaml
 provider: hetzner
@@ -683,7 +681,8 @@ kubectl get nodes
 
 **SSH access to nodes:**
 
-NIC auto-generates an ed25519 key pair in `~/.cache/nic/hetzner-k3s/ssh/` (or uses your custom keys if configured via `ssh:` in the config). To SSH into a node:
+NIC auto-generates an ed25519 key pair in `~/.cache/nic/hetzner-k3s/ssh/` (or uses your custom keys if configured via
+`ssh:` in the config). To SSH into a node:
 
 ```bash
 # Get node IPs
@@ -695,9 +694,12 @@ ssh -i ~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519 root@<node-ip>
 
 **Important: SSH key portability**
 
-Unlike managed Kubernetes providers (EKS, GKE, AKS) where authentication is handled by cloud IAM, Hetzner uses hetzner-k3s which provisions clusters over SSH. The SSH key pair used during `nic deploy` is required for all subsequent cluster operations (redeploy, destroy, scale) from any machine.
+Unlike managed Kubernetes providers (EKS, GKE, AKS) where authentication is handled by cloud IAM, Hetzner uses
+hetzner-k3s which provisions clusters over SSH. The SSH key pair used during `nic deploy` is required for all subsequent
+cluster operations (redeploy, destroy, scale) from any machine.
 
-If you auto-generate keys (the default), they are stored in `~/.cache/nic/hetzner-k3s/ssh/`. To manage the cluster from a different computer, you must copy these files:
+If you auto-generate keys (the default), they are stored in `~/.cache/nic/hetzner-k3s/ssh/`. To manage the cluster from
+a different computer, you must copy these files:
 
 ```bash
 # On the original machine, copy both files:
@@ -705,7 +707,8 @@ If you auto-generate keys (the default), they are stored in `~/.cache/nic/hetzne
 ~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519.pub
 ```
 
-Alternatively, use your own SSH keys by configuring the `ssh:` block in your config, so the same key is available on all machines without manual copying.
+Alternatively, use your own SSH keys by configuring the `ssh:` block in your config, so the same key is available on all
+machines without manual copying.
 
 **Key differences from managed Kubernetes providers (AWS/GCP/Azure):**
 
@@ -716,7 +719,7 @@ Alternatively, use your own SSH keys by configuring the `ssh:` block in your con
 - Worker groups can override the top-level location for multi-region deployments
 - SSH and API access CIDRs default to 0.0.0.0/0 if not restricted
 
----
+
 
 ## Local Provider Configuration
 
@@ -774,7 +777,7 @@ KUBECONFIG=/path/to/custom/kubeconfig
 # If not set, uses default: ~/.kube/config
 ```
 
----
+
 
 ## DNS Provider Configuration
 
@@ -823,9 +826,12 @@ When a `dns` block is configured, NIC will:
 - On destroy: remove those DNS records before tearing down infrastructure
 - DNS errors are treated as warnings and never block deploy or destroy
 
-**Known limitation:** If you change the `domain` field and redeploy, records for the old domain are not automatically removed. You must manually delete them from Cloudflare. See [DNS Provider Architecture](../implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change) for details.
+**Known limitation:** If you change the `domain` field and redeploy, records for the old domain are not automatically
+removed. You must manually delete them from Cloudflare. See
+[DNS Provider Architecture](../implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change) for
+details.
 
----
+
 
 ## Complete Examples
 
@@ -864,9 +870,8 @@ amazon_web_services:
     - us-east-1b
     - us-east-1c
   vpc_cidr_block: "10.100.0.0/16"
-  eks_endpoint_access: "public-and-private"
-  eks_public_access_cidrs:
-    - "203.0.113.0/24"  # Office network
+  endpoint_private_access: true
+  endpoint_public_access: true
   permissions_boundary: "arn:aws:iam::123456789012:policy/DepartmentBoundary"
 
   tags:
@@ -1281,7 +1286,7 @@ local:
   kube_context: "k3d-nebari-dev"
 ```
 
----
+
 
 ## Configuration Validation
 
@@ -1302,7 +1307,7 @@ nic validate -f config.yaml
 #   Node Groups: 4 (general, user, worker, gpu)
 ```
 
----
+
 
 ## Environment Variables Reference
 
@@ -1348,13 +1353,13 @@ CLOUDFLARE_EMAIL=<email>
 KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 ```
 
----
+
 
 ## Best Practices
 
 ### Security
 1. **Never commit secrets to git**: Use `.env` file (gitignored) or CI/CD secret management
-2. **Use restrictive CIDR blocks**: Limit `eks_public_access_cidrs` / `authorized_ip_ranges` to known networks
+2. **Use restrictive CIDR blocks**: Limit `authorized_ip_ranges` to known networks
 3. **Enable private clusters**: Set `private_cluster_enabled: true` for production when possible
 4. **Use permissions boundaries**: Apply `permissions_boundary` in enterprise environments
 5. **Rotate credentials regularly**: Update API tokens and service account keys periodically
@@ -1375,8 +1380,8 @@ KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 2. **Use taints for specialized workloads**: Ensure GPU/high-memory nodes only used when needed
 3. **Monitor node utilization**: Adjust instance types and scaling limits based on metrics
 
----
 
-**Last Updated**: 2025-01-14
+
+**Last Updated**: 2026-03-27
 **NIC Version**: v0.1.0
 **Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
