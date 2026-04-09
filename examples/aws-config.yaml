@@ -77,7 +77,7 @@ cluster:
       performance_mode: generalPurpose # generalPurpose or maxIO
       throughput_mode: bursting # bursting, provisioned, or elastic
       encrypted: true
-      # storage_class_name: efs-sc      # Name for the K8s StorageClass (default: efs-sc)
+      storage_class_name: efs-sc        # Name for the K8s StorageClass (default: efs-sc)
       # kms_key_id: ""                  # Optional: KMS key ARN for encryption
       # provisioned_mbps: 100           # Required if throughput_mode is provisioned
 

@@ -69,6 +69,18 @@ type EFSConfig struct {
 	ProvisionedThroughput int    `yaml:"provisioned_throughput_mibps,omitempty"`
 	Encrypted             bool   `yaml:"encrypted,omitempty"` // default: true
 	KMSKeyArn             string `yaml:"kms_key_arn,omitempty"`
+	StorageClassName      string `yaml:"storage_class_name,omitempty"` // default: efs-sc
+}
+
+const defaultEFSStorageClassName = "efs-sc"
+
+// EFSStorageClassName returns the StorageClass name for EFS volumes.
+// Defaults to "efs-sc" when not set.
+func (c *Config) EFSStorageClassName() string {
+	if c.EFS == nil || c.EFS.StorageClassName == "" {
+		return defaultEFSStorageClassName
+	}
+	return c.EFS.StorageClassName
 }
 
 type LonghornConfig struct {
