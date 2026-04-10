@@ -24,7 +24,7 @@ func TestProvider_InfraSettings(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		cfg     *config.NebariConfig
+		cfg     *config.ClusterConfig
 		wantSC  string
 		wantLBA map[string]string
 		wantKBP string
@@ -32,12 +32,10 @@ func TestProvider_InfraSettings(t *testing.T) {
 	}{
 		{
 			name: "default settings with location",
-			cfg: &config.NebariConfig{
-				Cluster: &config.ClusterConfig{
-					Providers: map[string]any{
-						"hetzner": map[string]any{
-							"location": "ash",
-						},
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{
+					"hetzner": map[string]any{
+						"location": "ash",
 					},
 				},
 			},
@@ -48,10 +46,8 @@ func TestProvider_InfraSettings(t *testing.T) {
 		},
 		{
 			name: "nil provider config uses defaults",
-			cfg: &config.NebariConfig{
-				Cluster: &config.ClusterConfig{
-					Providers: map[string]any{"hetzner": map[string]any{}},
-				},
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{"hetzner": map[string]any{}},
 			},
 			wantSC:  "hcloud-volumes",
 			wantKBP: "",
@@ -84,24 +80,21 @@ func TestProvider_InfraSettings(t *testing.T) {
 // Compile-time check that Provider implements the interface
 var _ provider.Provider = (*Provider)(nil)
 
-func validHetznerConfig() *config.NebariConfig {
-	return &config.NebariConfig{
-		ProjectName: "test-project",
-		Cluster: &config.ClusterConfig{
-			Providers: map[string]any{
-				"hetzner": map[string]any{
-					"location":           "ash",
-					"kubernetes_version": "1.32",
-					"node_groups": map[string]any{
-						"master": map[string]any{
-							"instance_type": "cpx21",
-							"count":         1,
-							"master":        true,
-						},
-						"workers": map[string]any{
-							"instance_type": "cpx31",
-							"count":         2,
-						},
+func validHetznerClusterConfig() *config.ClusterConfig {
+	return &config.ClusterConfig{
+		Providers: map[string]any{
+			"hetzner": map[string]any{
+				"location":           "ash",
+				"kubernetes_version": "1.32",
+				"node_groups": map[string]any{
+					"master": map[string]any{
+						"instance_type": "cpx21",
+						"count":         1,
+						"master":        true,
+					},
+					"workers": map[string]any{
+						"instance_type": "cpx31",
+						"count":         2,
 					},
 				},
 			},
@@ -113,7 +106,7 @@ func TestProvider_Validate_MissingToken(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "")
 
-	err := p.Validate(context.Background(), validHetznerConfig())
+	err := p.Validate(context.Background(), "test-project", validHetznerClusterConfig())
 	if err == nil {
 		t.Fatal("expected error when HETZNER_TOKEN is missing")
 	}
@@ -126,7 +119,7 @@ func TestProvider_Validate_Success(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	err := p.Validate(context.Background(), validHetznerConfig())
+	err := p.Validate(context.Background(), "test-project", validHetznerClusterConfig())
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -136,18 +129,15 @@ func TestProvider_Validate_InvalidConfig(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		Cluster: &config.ClusterConfig{
-			Providers: map[string]any{
-				"hetzner": map[string]any{
-					"location": "", // missing required field
-				},
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{
+			"hetzner": map[string]any{
+				"location": "", // missing required field
 			},
 		},
 	}
 
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
 		t.Fatal("expected validation error for missing location")
 	}
@@ -157,14 +147,11 @@ func TestProvider_Validate_MissingConfigBlock(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		Cluster: &config.ClusterConfig{
-			Providers: map[string]any{"hetzner": map[string]any{}},
-		},
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{"hetzner": map[string]any{}},
 	}
 
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
 		t.Fatal("expected error for missing hetzner_cloud block")
 	}
@@ -190,10 +177,10 @@ func TestProvider_Deploy_DryRun(t *testing.T) {
 	// with the real GitHub API URL, we test the components individually.
 	// The Deploy integration requires network access, so we verify the dry-run
 	// logic through the Validate + DryRun flag path.
-	cfg := validHetznerConfig()
+	cfg := validHetznerClusterConfig()
 
 	// Validate should pass
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test-project", cfg)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}

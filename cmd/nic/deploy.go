@@ -138,7 +138,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Provider selected", "provider", provider.Name())
 
 	// Deploy infrastructure
-	if err := provider.Deploy(ctx, cfg, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
+	if err := provider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Deployment failed", "error", err, "provider", provider.Name())
 		return err
@@ -147,7 +147,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
 	// Get provider infrastructure settings for GitOps and foundational services
-	infraSettings := provider.InfraSettings(cfg)
+	infraSettings := provider.InfraSettings(cfg.Cluster)
 
 	// Bootstrap GitOps repository if configured
 	if cfg.GitRepository != nil && !deployDryRun {
@@ -241,7 +241,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
 func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider) *endpoint.LoadBalancerEndpoint {
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
 		return nil
