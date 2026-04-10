@@ -370,7 +370,7 @@ docs/                 Architecture docs, design decisions, ADRs
 
 NIC is under very active development.
 
-Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04.roadmap.md). We welcome feedback and
+Our current roadmap can be found at [2026-02-04-roadmap.md](docs/plans/2026-02-04-roadmap.md). We welcome feedback and
 contributions to help shape the future of the project!
 
 ## Documentation
