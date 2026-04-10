@@ -21,13 +21,6 @@ type NebariConfig struct {
 	ProjectName string `yaml:"project_name"`
 	Domain      string `yaml:"domain,omitempty"`
 
-	// KubeContext specifies an existing Kubernetes context to deploy to.
-	// When set, this enables "bring your own cluster" mode - the provider's
-	// infrastructure provisioning (Terraform) is skipped, but provider-specific
-	// settings (storage classes, resource types) are still applied based on
-	// the cluster provider. This allows deploying to pre-existing clusters.
-	KubeContext string `yaml:"kube_context,omitempty"`
-
 	// Cluster Provider configuration.
 	// Only one provider can be configured at a time.
 	Cluster *ClusterConfig `yaml:"cluster,omitempty"`
@@ -217,18 +210,4 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	}
 
 	return nil
-}
-
-// GetKubeContext returns the effective Kubernetes context to use.
-// It checks the top-level kube_context first, which enables "bring your own cluster" mode.
-// Returns an empty string if no context is specified (provider will create the cluster).
-func (c *NebariConfig) GetKubeContext() string {
-	return c.KubeContext
-}
-
-// IsExistingCluster returns true if deploying to an existing cluster
-// (i.e., kube_context is specified at the top level).
-// When true, infrastructure provisioning should be skipped.
-func (c *NebariConfig) IsExistingCluster() bool {
-	return c.KubeContext != ""
 }

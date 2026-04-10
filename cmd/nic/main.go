@@ -14,6 +14,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/existing"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/hetzner"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
@@ -70,6 +71,10 @@ func init() {
 
 	if err := reg.ClusterProviders.Register(ctx, "hetzner", hetzner.NewProvider()); err != nil {
 		log.Fatalf("Failed to register Hetzner provider: %v", err)
+	}
+
+	if err := reg.ClusterProviders.Register(ctx, "existing", existing.NewProvider()); err != nil {
+		log.Fatalf("Failed to register existing provider: %v", err)
 	}
 
 	// Register DNS providers explicitly
