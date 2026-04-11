@@ -68,6 +68,16 @@ func NewPlain(w io.Writer, verbose bool) *Pretty {
 	return &Pretty{w: w, verbose: verbose, sym: asciiSymbols, color: false}
 }
 
+// printf writes formatted output, discarding any write error.
+// Presentation-layer writes have no meaningful error recovery.
+func (p *Pretty) printf(format string, args ...any) {
+	_, _ = fmt.Fprintf(p.w, format, args...)
+}
+
+func (p *Pretty) println(args ...any) {
+	_, _ = fmt.Fprintln(p.w, args...)
+}
+
 func (p *Pretty) c(code, text string) string {
 	if !p.color {
 		return text
@@ -92,7 +102,6 @@ func (p *Pretty) rightAlign(left string, dur time.Duration, width int) string {
 	if durStr == "" {
 		return left
 	}
-	// Calculate visible length (strip ANSI codes for padding)
 	visLen := visibleLen(left)
 	pad := width - visLen - len(durStr)
 	if pad < 1 {
@@ -103,28 +112,22 @@ func (p *Pretty) rightAlign(left string, dur time.Duration, width int) string {
 
 func (p *Pretty) StartPhase(name string) {
 	p.phase = name
-	fmt.Fprintf(p.w, "\n  %s %s\n", p.c(colorCyan, p.sym.bullet), p.c(colorBold, name))
+	p.printf("\n  %s %s\n", p.c(colorCyan, p.sym.bullet), p.c(colorBold, name))
 }
 
-func (p *Pretty) EndPhase(status PhaseStatus, elapsed time.Duration) {
-	// Phase end is implicit — the next StartPhase or final summary provides the visual break.
-	// We only emit timing on the phase header after the fact if needed,
-	// but the simpler approach is to let EndStep lines carry the detail.
+func (p *Pretty) EndPhase(_ PhaseStatus, _ time.Duration) {
 	p.phase = ""
-	_ = status
-	_ = elapsed
 }
 
 func (p *Pretty) StartStep(_ string) {
-	// Steps are rendered on EndStep with their final status, so StartStep is a no-op.
-	// This avoids partial line rendering in non-interactive terminals.
+	// Steps are rendered on EndStep with their final status.
 }
 
 func (p *Pretty) EndStep(status StepStatus, elapsed time.Duration, detail string) {
 	icon := p.stepIcon(status)
 	left := fmt.Sprintf("    %s %s %s", p.sym.branch, icon, detail)
 	line := p.rightAlign(left, elapsed, 72)
-	fmt.Fprintln(p.w, line)
+	p.println(line)
 }
 
 func (p *Pretty) stepIcon(s StepStatus) string {
@@ -146,7 +149,7 @@ func (p *Pretty) Detail(line string) {
 	if !p.verbose {
 		return
 	}
-	fmt.Fprintf(p.w, "    %s     %s\n", p.c(colorDim, p.sym.pipe), p.c(colorDim, line))
+	p.printf("    %s     %s\n", p.c(colorDim, p.sym.pipe), p.c(colorDim, line))
 }
 
 func (p *Pretty) Summary(items []SummaryItem) {
@@ -154,7 +157,6 @@ func (p *Pretty) Summary(items []SummaryItem) {
 		return
 	}
 
-	// Find max label width for alignment
 	maxLabel := 0
 	for _, item := range items {
 		if len(item.Label) > maxLabel {
@@ -162,68 +164,67 @@ func (p *Pretty) Summary(items []SummaryItem) {
 		}
 	}
 
-	// Calculate box width
-	boxWidth := maxLabel + 4 // padding
+	boxWidth := maxLabel + 4
 	for _, item := range items {
-		lineLen := maxLabel + 3 + len(item.Value) // "  Label  Value"
+		lineLen := maxLabel + 3 + len(item.Value)
 		if lineLen > boxWidth {
 			boxWidth = lineLen
 		}
 	}
-	boxWidth += 4 // border padding
+	boxWidth += 4
 
 	border := strings.Repeat(p.sym.hline, boxWidth)
 
-	fmt.Fprintln(p.w)
-	fmt.Fprintf(p.w, "  %s%s%s\n", p.sym.topLeft, border, p.sym.topLeft)
+	p.println()
+	p.printf("  %s%s%s\n", p.sym.topLeft, border, p.sym.topLeft)
 	for _, item := range items {
 		pad := maxLabel - len(item.Label) + 2
-		fmt.Fprintf(p.w, "  %s  %s%s%s  %s\n", p.sym.pipe, item.Label, strings.Repeat(" ", pad), item.Value, p.sym.pipe)
+		p.printf("  %s  %s%s%s  %s\n", p.sym.pipe, item.Label, strings.Repeat(" ", pad), item.Value, p.sym.pipe)
 	}
-	fmt.Fprintf(p.w, "  %s%s%s\n", p.sym.botLeft, border, p.sym.botLeft)
-	fmt.Fprintln(p.w)
+	p.printf("  %s%s%s\n", p.sym.botLeft, border, p.sym.botLeft)
+	p.println()
 }
 
 func (p *Pretty) Error(err error, hint string) {
-	fmt.Fprintf(p.w, "\n      %s %s\n", p.c(colorRed, "Error:"), err.Error())
+	p.printf("\n      %s %s\n", p.c(colorRed, "Error:"), err.Error())
 	if hint != "" {
-		fmt.Fprintf(p.w, "      %s %s\n", p.c(colorDim, "Hint:"), hint)
+		p.printf("      %s %s\n", p.c(colorDim, "Hint:"), hint)
 	}
-	fmt.Fprintln(p.w)
+	p.println()
 }
 
 func (p *Pretty) Warn(message string) {
-	fmt.Fprintf(p.w, "    %s %s\n", p.c(colorYellow, p.sym.warn), message)
+	p.printf("    %s %s\n", p.c(colorYellow, p.sym.warn), message)
 }
 
 func (p *Pretty) Info(message string) {
-	fmt.Fprintf(p.w, "  %s\n", message)
+	p.printf("  %s\n", message)
 }
 
 func (p *Pretty) Version(ver, commitHash, tofuVer string, clusterProviders, dnsProviders []string) {
-	fmt.Fprintf(p.w, "%s\n", p.c(colorBold, "Nebari Infrastructure Core (NIC)"))
-	fmt.Fprintf(p.w, "Version:    %s\n", ver)
-	fmt.Fprintf(p.w, "Commit:     %s\n", commitHash)
-	fmt.Fprintf(p.w, "OpenTofu:   %s\n", tofuVer)
-	fmt.Fprintf(p.w, "Providers:  %s\n", strings.Join(clusterProviders, ", "))
-	fmt.Fprintf(p.w, "DNS:        %s\n", strings.Join(dnsProviders, ", "))
+	p.printf("%s\n", p.c(colorBold, "Nebari Infrastructure Core (NIC)"))
+	p.printf("Version:    %s\n", ver)
+	p.printf("Commit:     %s\n", commitHash)
+	p.printf("OpenTofu:   %s\n", tofuVer)
+	p.printf("Providers:  %s\n", strings.Join(clusterProviders, ", "))
+	p.printf("DNS:        %s\n", strings.Join(dnsProviders, ", "))
 }
 
 func (p *Pretty) Confirm(message string, details map[string]string, expected string) (bool, error) {
-	fmt.Fprintf(p.w, "\n  %s  %s\n\n", p.c(colorYellow, "⚠"), p.c(colorBold, message))
+	p.printf("\n  %s  %s\n\n", p.c(colorYellow, "⚠"), p.c(colorBold, message))
 	for k, v := range details {
-		fmt.Fprintf(p.w, "    %s: %s\n", k, v)
+		p.printf("    %s: %s\n", k, v)
 	}
-	fmt.Fprintf(p.w, "\n  %s\n", p.c(colorRed, "This will permanently delete all resources and data."))
-	fmt.Fprintf(p.w, "  This action cannot be undone.\n")
-	fmt.Fprintf(p.w, "\n  Type '%s' to confirm: ", expected)
+	p.printf("\n  %s\n", p.c(colorRed, "This will permanently delete all resources and data."))
+	p.printf("  This action cannot be undone.\n")
+	p.printf("\n  Type '%s' to confirm: ", expected)
 
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false, fmt.Errorf("failed to read user input: %w", err)
 	}
-	fmt.Fprintln(p.w)
+	p.println()
 	return strings.TrimSpace(response) == expected, nil
 }
 

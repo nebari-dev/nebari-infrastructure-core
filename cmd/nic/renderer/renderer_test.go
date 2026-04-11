@@ -250,18 +250,18 @@ type mockRenderer struct {
 	detailFn func(string)
 }
 
-func (m *mockRenderer) StartPhase(string)                                           {}
-func (m *mockRenderer) EndPhase(PhaseStatus, time.Duration)                         {}
-func (m *mockRenderer) StartStep(string)                                            {}
-func (m *mockRenderer) EndStep(StepStatus, time.Duration, string)                   {}
-func (m *mockRenderer) Detail(line string)                                          { m.detailFn(line) }
-func (m *mockRenderer) Summary([]SummaryItem)                                       {}
-func (m *mockRenderer) Error(error, string)                                         {}
-func (m *mockRenderer) Warn(string)                                                 {}
-func (m *mockRenderer) Info(string)                                                 {}
-func (m *mockRenderer) Version(string, string, string, []string, []string)          {}
-func (m *mockRenderer) Confirm(string, map[string]string, string) (bool, error)     { return false, nil }
-func (m *mockRenderer) DetailWriter() io.Writer { return &lineWriter{r: m} }
+func (m *mockRenderer) StartPhase(string)                                       {}
+func (m *mockRenderer) EndPhase(PhaseStatus, time.Duration)                     {}
+func (m *mockRenderer) StartStep(string)                                        {}
+func (m *mockRenderer) EndStep(StepStatus, time.Duration, string)               {}
+func (m *mockRenderer) Detail(line string)                                      { m.detailFn(line) }
+func (m *mockRenderer) Summary([]SummaryItem)                                   {}
+func (m *mockRenderer) Error(error, string)                                     {}
+func (m *mockRenderer) Warn(string)                                             {}
+func (m *mockRenderer) Info(string)                                             {}
+func (m *mockRenderer) Version(string, string, string, []string, []string)      {}
+func (m *mockRenderer) Confirm(string, map[string]string, string) (bool, error) { return false, nil }
+func (m *mockRenderer) DetailWriter() io.Writer                                 { return &lineWriter{r: m} }
 
 func assertJSONContains(t *testing.T, output, key, value string) {
 	t.Helper()
