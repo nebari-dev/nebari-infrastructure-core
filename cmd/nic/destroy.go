@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/cmd/nic/renderer"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -48,10 +45,9 @@ func init() {
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+	r := renderer.FromContext(ctx)
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
 	resolved, err := resolveConfigFile(destroyConfigFile)
 	if err != nil {
 		return err
@@ -69,100 +65,105 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		attribute.Bool("dry_run", destroyDryRun),
 	)
 
-	slog.Info("Starting infrastructure destruction", "config_file", destroyConfigFile)
-
-	// Parse configuration first to show user what will be destroyed
 	cfg, err := config.ParseConfig(ctx, destroyConfigFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", destroyConfigFile)
+		r.Error(err, "")
 		return err
 	}
 
-	// Validate configuration with registered providers
 	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", destroyConfigFile)
+		r.Error(err, "")
 		return err
 	}
 
-	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
-
-	// Parse custom timeout if specified
 	var timeout time.Duration
 	if destroyTimeout != "" {
-		var err error
 		timeout, err = time.ParseDuration(destroyTimeout)
 		if err != nil {
 			span.RecordError(err)
-			slog.Error("Invalid timeout duration", "error", err, "timeout", destroyTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", destroyTimeout, err)
 		}
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
-		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
-	// Get the appropriate provider
 	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
-	slog.Info("Provider selected", "provider", prov.Name())
-
-	// Show what will be destroyed and get confirmation (skip for dry-run)
+	// Confirmation prompt
 	if !destroyAutoApprove && !destroyDryRun {
-		if err := confirmDestruction(cfg, prov); err != nil {
+		details := map[string]string{
+			"Provider":     cfg.Cluster.ProviderName(),
+			"Project Name": cfg.ProjectName,
+		}
+		for k, v := range prov.Summary(cfg.Cluster) {
+			details[k] = v
+		}
+		confirmed, err := r.Confirm(
+			fmt.Sprintf("You are about to destroy: %s (%s)", cfg.ProjectName, cfg.Cluster.ProviderName()),
+			details,
+			"yes",
+		)
+		if err != nil {
 			span.RecordError(err)
-			slog.Info("Destruction cancelled by user")
 			return err
+		}
+		if !confirmed {
+			r.Info("Destruction cancelled by user")
+			return fmt.Errorf("destruction cancelled (user did not type 'yes')")
 		}
 	}
 
-	// Setup status handler for progress updates
-	ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
+	// Setup status handler
+	ctx, cleanupStatus := status.StartHandler(ctx, statusRendererHandler(r))
 	defer cleanupStatus()
 
-	// Handle context cancellation (from signal interrupt)
 	defer func() {
 		if ctx.Err() == context.Canceled {
-			slog.Warn("Destruction interrupted by user")
+			r.Warn("Destruction interrupted by user")
 		}
 	}()
 
-	// Clean up DNS records if a DNS provider is configured
+	// DNS cleanup
 	if cfg.DNS != nil {
-		err := destroyDNS(ctx, cfg)
-		if err != nil {
-			slog.Warn("Failed to clean up DNS records", "error", err)
-			slog.Warn("You may need to manually remove DNS records from your provider")
+		r.StartPhase("DNS Cleanup")
+		dnsStart := time.Now()
+		if err := destroyDNS(ctx, cfg, r); err != nil {
+			r.Warn(fmt.Sprintf("Failed to clean up DNS records: %v", err))
+			r.Warn("You may need to manually remove DNS records from your provider")
 		}
+		r.EndPhase(renderer.PhaseOK, time.Since(dnsStart))
 	}
 
-	// Destroy infrastructure
+	// Infrastructure destruction
+	r.StartPhase("Infrastructure")
+	destroyStart := time.Now()
+
 	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, provider.DestroyOptions{DryRun: destroyDryRun, Force: destroyForce, Timeout: timeout}); err != nil {
 		span.RecordError(err)
-		slog.Error("Destruction failed", "error", err, "provider", prov.Name())
+		r.Error(err, "")
 		if destroyForce {
-			slog.Warn("Continuing despite errors due to --force flag")
+			r.Warn("Continuing despite errors due to --force flag")
 		} else {
+			r.EndPhase(renderer.PhaseFailed, time.Since(destroyStart))
 			return err
 		}
 	}
 
-	slog.Info("Destruction completed successfully", "provider", prov.Name())
+	r.EndStep(renderer.StepOK, time.Since(destroyStart), "Infrastructure destroyed")
+	r.EndPhase(renderer.PhaseOK, time.Since(destroyStart))
 
+	r.EndStep(renderer.StepOK, 0, "Destruction completed successfully")
 	return nil
 }
 
-func destroyDNS(ctx context.Context, cfg *config.NebariConfig) error {
+func destroyDNS(ctx context.Context, cfg *config.NebariConfig, r renderer.Renderer) error {
 	if destroyDryRun {
-		slog.Info("Would clean up DNS records (dry-run)", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+		r.Info(fmt.Sprintf("Would clean up DNS records (dry-run): %s", cfg.Domain))
 		return nil
 	}
 
@@ -170,58 +171,12 @@ func destroyDNS(ctx context.Context, cfg *config.NebariConfig) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("Cleaning up DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
 
+	dnsStart := time.Now()
 	if err := dnsProvider.DestroyRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig()); err != nil {
 		return err
 	}
 
-	slog.Info("DNS records cleaned up successfully", "domain", cfg.Domain)
-	return nil
-}
-
-// confirmDestruction prompts the user to confirm before destroying infrastructure
-func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(context.Background(), "cmd.confirmDestruction")
-	defer span.End()
-
-	// Show warning message
-	fmt.Println("\n⚠️  WARNING: You are about to destroy the following infrastructure:")
-	fmt.Printf("   Provider:     %s\n", cfg.Cluster.ProviderName())
-	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
-
-	// Show provider-specific details
-	for key, value := range prov.Summary(cfg.Cluster) {
-		pad := 13 - len(key)
-		if pad < 1 {
-			pad = 1
-		}
-		fmt.Printf("   %s:%s%s\n", key, strings.Repeat(" ", pad), value)
-	}
-
-	fmt.Println("\n❌ This will permanently delete all resources and data.")
-	fmt.Println("   This action cannot be undone.")
-	fmt.Print("\nDo you want to continue? Type 'yes' to confirm: ")
-
-	// Read user input
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to read user input: %w", err)
-	}
-
-	// Trim whitespace and newlines
-	response = strings.TrimSpace(response)
-
-	// Check if user confirmed
-	if response != "yes" {
-		span.SetAttributes(attribute.String("user_response", response))
-		return fmt.Errorf("destruction cancelled (user did not type 'yes')")
-	}
-
-	span.SetAttributes(attribute.Bool("confirmed", true))
-	fmt.Println()
+	r.EndStep(renderer.StepOK, time.Since(dnsStart), fmt.Sprintf("DNS records cleaned up (%s)", cfg.Domain))
 	return nil
 }
