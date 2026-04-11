@@ -6,13 +6,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log/slog"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/cmd/nic/renderer"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
@@ -50,10 +50,9 @@ func init() {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+	r := renderer.FromContext(ctx)
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
 	resolved, err := resolveConfigFile(deployConfigFile)
 	if err != nil {
 		return err
@@ -69,14 +68,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		attribute.Bool("dry_run", deployDryRun),
 	)
 
-	if deployDryRun {
-		slog.Info("Starting deployment (dry-run)", "config_file", deployConfigFile)
-	} else {
-		slog.Info("Starting deployment", "config_file", deployConfigFile)
-	}
-
-	// Setup status handler for progress updates
-	ctx, cleanupStatusFn := status.StartHandler(ctx, statusLogHandler())
+	// Setup status handler routed through the renderer
+	ctx, cleanupStatusFn := status.StartHandler(ctx, statusRendererHandler(r))
 	var statusCleanedUp bool
 	cleanupStatus := func() {
 		if !statusCleanedUp {
@@ -86,96 +79,102 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanupStatus()
 
-	// Handle context cancellation (from signal interrupt)
 	defer func() {
 		if ctx.Err() == context.Canceled {
-			slog.Warn("Deployment interrupted by user")
+			r.Warn("Deployment interrupted by user")
 		}
 	}()
 
-	// Parse configuration
+	// --- Configuration phase ---
+	start := time.Now()
 	cfg, err := config.ParseConfig(ctx, deployConfigFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", deployConfigFile)
+		r.Error(err, "Check your config file syntax")
 		return err
 	}
-
-	// Validate configuration with registered providers
 	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", deployConfigFile)
+		r.Error(err, "Run 'nic validate -f "+deployConfigFile+"' for details")
 		return err
 	}
+	r.EndStep(renderer.StepOK, time.Since(start), "Configuration validated")
 
-	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
+	mode := ""
+	if deployDryRun {
+		mode = " (dry-run)"
+	}
+	r.Info(fmt.Sprintf("Deploying %s (%s)%s", cfg.ProjectName, cfg.Cluster.ProviderName(), mode))
 
-	// Parse custom timeout if specified
+	// Parse custom timeout
 	var timeout time.Duration
 	if deployTimeout != "" {
-		var err error
 		timeout, err = time.ParseDuration(deployTimeout)
 		if err != nil {
 			span.RecordError(err)
-			slog.Error("Invalid timeout duration", "error", err, "timeout", deployTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", deployTimeout, err)
 		}
 		span.SetAttributes(attribute.String("timeout", deployTimeout))
-		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
-	// Get the appropriate provider
+	// --- Infrastructure phase ---
+	r.StartPhase("Infrastructure")
+	infraStart := time.Now()
+
 	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
+		r.EndPhase(renderer.PhaseFailed, time.Since(infraStart))
 		return err
 	}
 
-	slog.Info("Provider selected", "provider", provider.Name())
-
-	// Deploy infrastructure
 	if err := provider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
 		span.RecordError(err)
-		slog.Error("Deployment failed", "error", err, "provider", provider.Name())
+		r.Error(err, "")
+		r.EndPhase(renderer.PhaseFailed, time.Since(infraStart))
 		return err
 	}
+	r.EndStep(renderer.StepOK, time.Since(infraStart), "Cluster created")
+	r.EndPhase(renderer.PhaseOK, time.Since(infraStart))
 
-	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
-
-	// Get provider infrastructure settings for GitOps and foundational services
 	infraSettings := provider.InfraSettings(cfg.Cluster)
 
-	// Bootstrap GitOps repository if configured
+	// --- GitOps phase ---
 	if cfg.GitRepository != nil && !deployDryRun {
+		r.StartPhase("GitOps")
+		gitStart := time.Now()
 		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, infraSettings); err != nil {
 			span.RecordError(err)
-			slog.Error("GitOps bootstrap failed", "error", err)
+			r.Error(err, "")
+			r.EndPhase(renderer.PhaseFailed, time.Since(gitStart))
 			return err
 		}
+		r.EndStep(renderer.StepOK, time.Since(gitStart), "Repository bootstrapped")
+		r.EndPhase(renderer.PhaseOK, time.Since(gitStart))
 	}
 
-	slog.Info("Deployment completed successfully", "provider", provider.Name())
-
-	// Track what was installed so we can print instructions after flushing status messages
+	// Track what was installed for final summary
 	var argoCDInstalled, keycloakInstalled bool
+	var summaryItems []renderer.SummaryItem
 
-	// Install Argo CD (skip in dry-run mode)
+	// --- ArgoCD phase ---
 	if !deployDryRun {
-		slog.Info("Installing Argo CD on cluster")
+		r.StartPhase("ArgoCD")
+		argoStart := time.Now()
 		if err := argocd.Install(ctx, cfg, provider); err != nil {
-			// Log error but don't fail deployment
-			slog.Warn("Failed to install Argo CD", "error", err)
-			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
+			r.Warn(fmt.Sprintf("Failed to install Argo CD: %v", err))
+			r.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
+			r.EndPhase(renderer.PhaseFailed, time.Since(argoStart))
 		} else {
-			slog.Info("Argo CD installed successfully")
+			r.EndStep(renderer.StepOK, time.Since(argoStart), "Helm chart installed")
 			argoCDInstalled = true
+			if cfg.Domain != "" {
+				summaryItems = append(summaryItems, renderer.SummaryItem{Label: "ArgoCD", Value: fmt.Sprintf("https://argocd.%s", cfg.Domain)})
+			}
 
-			// Install foundational services via Argo CD
-			slog.Info("Installing foundational services")
+			// --- Foundational Services phase ---
+			r.StartPhase("Foundational Services")
+			foundStart := time.Now()
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
@@ -186,12 +185,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					PostgresUserPassword:  generateSecurePassword(rand.Reader),
 					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
-					Hostname:              "", // Will be auto-generated from domain
+					Hostname:              "",
 				},
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: generateSecurePassword(rand.Reader),
 				},
-				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
@@ -199,39 +197,47 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, provider, foundationalCfg); err != nil {
-				// Log warning but don't fail deployment
-				slog.Warn("Failed to install foundational services", "error", err)
-				slog.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
+				r.Warn(fmt.Sprintf("Failed to install foundational services: %v", err))
+				r.EndPhase(renderer.PhaseFailed, time.Since(foundStart))
 			} else {
-				slog.Info("Foundational services installed successfully")
+				r.EndStep(renderer.StepOK, time.Since(foundStart), "Foundational services installed")
+				r.EndPhase(renderer.PhaseOK, time.Since(foundStart))
 				keycloakInstalled = true
+				if cfg.Domain != "" {
+					summaryItems = append(summaryItems, renderer.SummaryItem{Label: "Keycloak", Value: fmt.Sprintf("https://keycloak.%s", cfg.Domain)})
+				}
+			}
+
+			if !argoCDInstalled {
+				r.EndPhase(renderer.PhaseFailed, time.Since(argoStart))
+			} else {
+				r.EndPhase(renderer.PhaseOK, time.Since(argoStart))
 			}
 		}
 	} else {
-		slog.Info("Would install Argo CD and foundational services (dry-run mode)")
+		r.Info("Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Look up LB endpoint and provision DNS records if configured
+	// --- DNS phase ---
 	var lbEndpoint *endpoint.LoadBalancerEndpoint
 	if cfg.Domain != "" && !deployDryRun {
-		lbEndpoint = lookupEndpointAndProvisionDNS(ctx, cfg, provider)
+		r.StartPhase("DNS")
+		dnsStart := time.Now()
+		lbEndpoint = lookupEndpointAndProvisionDNS(ctx, cfg, provider, r)
+		r.EndPhase(renderer.PhaseOK, time.Since(dnsStart))
 	}
 
-	// Flush all pending status messages before printing instructions
-	// This prevents log messages from appearing in the middle of the instructions
+	// Flush pending status messages before final summary
 	cleanupStatus()
 
-	// Print instructions after status handler is cleaned up
-	if argoCDInstalled {
-		printArgoCDInstructions(cfg)
-	}
-	if keycloakInstalled {
-		printKeycloakInstructions(cfg)
-	}
+	// --- Final summary ---
+	_ = lbEndpoint
+	_ = keycloakInstalled
 
-	// Print DNS guidance only if no DNS provider is configured
-	if cfg.DNS == nil && cfg.Domain != "" && !deployDryRun {
-		printDNSGuidance(cfg, lbEndpoint)
+	r.EndStep(renderer.StepOK, time.Since(start), "Deployment complete")
+
+	if len(summaryItems) > 0 {
+		r.Summary(summaryItems)
 	}
 
 	return nil
@@ -240,39 +246,38 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
-func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider) *endpoint.LoadBalancerEndpoint {
+func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider, r renderer.Renderer) *endpoint.LoadBalancerEndpoint {
 	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
-		slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		r.Warn(fmt.Sprintf("Could not get kubeconfig for endpoint lookup: %v", err))
 		return nil
 	}
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 	if err != nil {
-		slog.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+		r.Warn(fmt.Sprintf("Could not parse kubeconfig for endpoint lookup: %v", err))
 		return nil
 	}
 
 	k8sClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		slog.Warn("Could not create k8s client for endpoint lookup", "error", err)
+		r.Warn(fmt.Sprintf("Could not create k8s client for endpoint lookup: %v", err))
 		return nil
 	}
 
-	slog.Info("Waiting for load balancer endpoint...")
+	r.StartStep("Waiting for load balancer endpoint")
 	lbEndpoint, err := endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
 	if err != nil {
-		slog.Warn("Could not retrieve load balancer endpoint", "error", err)
+		r.Warn(fmt.Sprintf("Could not retrieve load balancer endpoint: %v", err))
 		return nil
 	}
 
-	// Provision DNS records if a provider is configured
 	if cfg.DNS == nil {
 		return lbEndpoint
 	}
 
 	if lbEndpoint == nil {
-		slog.Warn("Skipping DNS provisioning: load balancer endpoint not available")
+		r.Warn("Skipping DNS provisioning: load balancer endpoint not available")
 		return nil
 	}
 
@@ -281,22 +286,21 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 		lbEndpointStr = lbEndpoint.IP
 	}
 	if lbEndpointStr == "" {
-		slog.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
+		r.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
 		return lbEndpoint
 	}
 
 	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
-		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
+		r.Warn(fmt.Sprintf("DNS provider not found: %v", err))
 		return lbEndpoint
 	}
 
-	slog.Info("Provisioning DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+	dnsStart := time.Now()
 	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig(), lbEndpointStr); err != nil {
-		slog.Warn("Failed to provision DNS records", "error", err)
-		slog.Warn("You can configure DNS manually - see instructions below")
+		r.Warn(fmt.Sprintf("Failed to provision DNS records: %v", err))
 	} else {
-		slog.Info("DNS records provisioned successfully", "domain", cfg.Domain)
+		r.EndStep(renderer.StepOK, time.Since(dnsStart), fmt.Sprintf("DNS records provisioned (%s)", cfg.Domain))
 	}
 
 	return lbEndpoint
@@ -305,6 +309,8 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
 func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings providerPkg.InfraSettings) error {
+	r := renderer.FromContext(ctx)
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
@@ -314,9 +320,6 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
-
-	// Create git client
 	gitClient, err := git.NewClient(cfg.GitRepository)
 	if err != nil {
 		span.RecordError(err)
@@ -324,19 +327,18 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 	}
 	defer func() { _ = gitClient.Cleanup() }()
 
-	// Validate authentication before proceeding
 	if err := gitClient.ValidateAuth(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("git authentication failed: %w", err)
 	}
 
-	// Clone/pull the repository
+	start := time.Now()
 	if err := gitClient.Init(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to initialize git repository: %w", err)
 	}
+	r.EndStep(renderer.StepOK, time.Since(start), "Repository cloned")
 
-	// Check if already bootstrapped
 	bootstrapped, err := gitClient.IsBootstrapped(ctx)
 	if err != nil {
 		span.RecordError(err)
@@ -344,31 +346,24 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 	}
 
 	if bootstrapped && !regenApps {
-		slog.Info("GitOps repository already bootstrapped, skipping manifest generation")
+		r.EndStep(renderer.StepSkipped, 0, "Already bootstrapped, skipping")
 		span.SetAttributes(attribute.Bool("skipped", true))
 		return nil
 	}
 
-	if regenApps {
-		slog.Info("Regenerating ArgoCD application manifests (--regen-apps)")
-	} else {
-		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
-	}
-
-	// Write all ArgoCD application manifests and raw K8s manifests to git
-	slog.Info("Writing ArgoCD application manifests to git repository")
+	writeStart := time.Now()
 	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
 
-	// Write bootstrap marker
 	if err := gitClient.WriteBootstrapMarker(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
+	r.EndStep(renderer.StepOK, time.Since(writeStart), "Manifests generated")
 
-	// Commit and push
+	pushStart := time.Now()
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
@@ -377,134 +372,9 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		span.RecordError(err)
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
+	r.EndStep(renderer.StepOK, time.Since(pushStart), "Changes pushed")
 
-	slog.Info("GitOps repository bootstrapped successfully")
 	return nil
-}
-
-// printDNSGuidance prints instructions for manual DNS configuration
-func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  DNS CONFIGURATION REQUIRED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  No DNS provider is configured. To access your services, you must manually")
-	fmt.Println("  configure the following DNS records with your DNS provider:")
-	fmt.Println()
-	fmt.Printf("  Domain: %s\n", cfg.Domain)
-	fmt.Println()
-
-	if lb != nil {
-		var recordType, value string
-		if lb.Hostname != "" {
-			recordType = "CNAME"
-			value = lb.Hostname
-		} else {
-			recordType = "A"
-			value = lb.IP
-		}
-
-		fmt.Println("  Required DNS Records:")
-		fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
-		fmt.Printf("  │ Type  : %-65s │\n", recordType)
-		fmt.Printf("  │ Name  : %-65s │\n", cfg.Domain)
-		fmt.Printf("  │ Value : %-65s │\n", value)
-		fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
-		fmt.Printf("  │ Type  : %-65s │\n", recordType)
-		fmt.Printf("  │ Name  : %-65s │\n", "*."+cfg.Domain)
-		fmt.Printf("  │ Value : %-65s │\n", value)
-		fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
-	} else {
-		fmt.Println("  The load balancer endpoint is not yet available.")
-		fmt.Println("  Run the following command to check when it's ready:")
-		fmt.Println()
-		fmt.Println("    nic status -f <config-file>")
-		fmt.Println()
-		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
-		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)
-	}
-
-	fmt.Println()
-	fmt.Println("  To automate DNS management, add a dns block to your configuration:")
-	fmt.Println()
-	fmt.Println("    dns:")
-	fmt.Println("      cloudflare:")
-	fmt.Println("        zone_name: example.com")
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-}
-
-// printArgoCDInstructions prints instructions for accessing Argo CD
-func printArgoCDInstructions(cfg *config.NebariConfig) {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  ARGO CD INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  Argo CD has been successfully installed on your cluster.")
-	fmt.Println()
-	fmt.Println("  To access Argo CD:")
-	fmt.Println()
-	if cfg.Domain != "" {
-		fmt.Printf("    UI: https://argocd.%s (after DNS configuration)\n", cfg.Domain)
-		fmt.Println()
-		fmt.Println("  Or use port-forwarding:")
-		fmt.Println()
-	}
-	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
-	fmt.Println("    Then visit: https://localhost:8080")
-	fmt.Println()
-	fmt.Println("  Get the admin password:")
-	fmt.Println()
-	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
-	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
-	fmt.Println()
-	fmt.Println("  Login credentials:")
-	fmt.Println("    Username: admin")
-	fmt.Println("    Password: <from command above>")
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-}
-
-// printKeycloakInstructions prints instructions for accessing Keycloak
-func printKeycloakInstructions(cfg *config.NebariConfig) {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  KEYCLOAK INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  Keycloak has been configured for installation via Argo CD.")
-	fmt.Println("  It may take several minutes for Keycloak to be fully deployed and ready.")
-	fmt.Println()
-	fmt.Println("  Check deployment status:")
-	fmt.Println("    kubectl get pods -n keycloak")
-	fmt.Println()
-	fmt.Println("  To access Keycloak after deployment:")
-	fmt.Println()
-	if cfg.Domain != "" {
-		fmt.Printf("    UI: https://keycloak.%s (after DNS configuration)\n", cfg.Domain)
-		fmt.Println()
-		fmt.Println("  Or use port-forwarding:")
-		fmt.Println()
-	}
-	fmt.Println("    kubectl port-forward svc/keycloak -n keycloak 8080:80")
-	fmt.Println("    Then visit: http://localhost:8080")
-	fmt.Println()
-	fmt.Println("  Get the admin password:")
-	fmt.Println()
-	fmt.Println("    kubectl -n keycloak get secret keycloak-admin-credentials \\")
-	fmt.Println("      -o jsonpath=\"{.data.admin-password}\" | base64 -d")
-	fmt.Println()
-	fmt.Println("  Login credentials:")
-	fmt.Println("    Username: admin")
-	fmt.Println("    Password: <from command above>")
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
 }
 
 // generateSecurePassword generates a cryptographically secure random password.

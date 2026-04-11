@@ -1,48 +1,33 @@
 package main
 
 import (
-	"log/slog"
+	"fmt"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/cmd/nic/renderer"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// statusLogHandler returns a status.Handler that logs updates using slog
-// This keeps the logging concern in the application layer while reusing
-// the status package's channel management
-func statusLogHandler() status.Handler {
+// statusRendererHandler returns a status.Handler that routes updates to the given Renderer.
+func statusRendererHandler(r renderer.Renderer) status.Handler {
 	return func(update status.Update) {
-		// Build structured logging attributes
-		attrs := []any{
-			"message", update.Message,
-		}
-
+		detail := update.Message
 		if update.Resource != "" {
-			attrs = append(attrs, "resource", update.Resource)
+			detail = fmt.Sprintf("%s: %s", update.Resource, update.Message)
 		}
 
-		if update.Action != "" {
-			attrs = append(attrs, "action", update.Action)
-		}
-
-		// Add metadata as individual attributes
-		for key, value := range update.Metadata {
-			attrs = append(attrs, key, value)
-		}
-
-		// Log at appropriate level
 		switch update.Level {
-		case status.LevelInfo:
-			slog.Info("Status", attrs...)
 		case status.LevelProgress:
-			slog.Info("Progress", attrs...)
+			r.StartStep(detail)
 		case status.LevelSuccess:
-			slog.Info("Success", attrs...)
+			r.EndStep(renderer.StepOK, 0, detail)
+		case status.LevelInfo:
+			r.Info(detail)
 		case status.LevelWarning:
-			slog.Warn("Warning", attrs...)
+			r.Warn(detail)
 		case status.LevelError:
-			slog.Error("Error", attrs...)
+			r.Error(fmt.Errorf("%s", detail), "")
 		default:
-			slog.Info("Status", attrs...)
+			r.Info(detail)
 		}
 	}
 }
