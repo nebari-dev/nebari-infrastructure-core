@@ -58,9 +58,19 @@ type tuiPhase struct {
 
 const maxEvents = 1000
 
+// Event level constants.
+const (
+	levelInfo   = "info"
+	levelOK     = "ok"
+	levelWarn   = "warn"
+	levelError  = "error"
+	levelDetail = "detail"
+	levelPhase  = "phase"
+)
+
 type tuiEvent struct {
 	Time    time.Time
-	Level   string // "info", "ok", "warn", "error", "detail", "phase"
+	Level   string // levelInfo, levelOK, levelWarn, levelError, levelDetail, levelPhase
 	Message string
 }
 
@@ -136,12 +146,12 @@ type tuiModel struct {
 	project  string
 	provider string
 
-	startTime  time.Time
-	spinner    spinner.Model
-	warnCount  int
-	errCount   int
-	stepCount  int
-	lastStep   string // most recent step detail (shown in status)
+	startTime time.Time
+	spinner   spinner.Model
+	warnCount int
+	errCount  int
+	stepCount int
+	lastStep  string // most recent step detail (shown in status)
 
 	scrollOffset int
 	autoScroll   bool
@@ -229,7 +239,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.phases = append(m.phases, tuiPhase{Name: msg.name, Status: phaseRunning})
-		m.addEvent("phase", msg.name)
+		m.addEvent(levelPhase, msg.name)
 
 	case tuiPhaseEndMsg:
 		for i := range m.phases {
@@ -247,13 +257,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stepCount++
 		m.lastStep = msg.detail
 
-		level := "ok"
-		if msg.status == StepFailed {
-			level = "error"
-		} else if msg.status == StepWarning {
-			level = "warn"
-		} else if msg.status == StepSkipped {
-			level = "info"
+		level := levelOK
+		switch msg.status {
+		case StepFailed:
+			level = levelError
+		case StepWarning:
+			level = levelWarn
+		case StepSkipped:
+			level = levelInfo
 		}
 		durStr := ""
 		if msg.elapsed > 0 {
@@ -262,7 +273,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addEvent(level, msg.detail+durStr)
 
 	case tuiDetailMsg:
-		m.addEvent("detail", msg.line)
+		m.addEvent(levelDetail, msg.line)
 
 	case tuiInfoMsg:
 		// Extract project/provider from structured "Deploying X (Y)" message
@@ -276,11 +287,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		m.addEvent("info", msg.message)
+		m.addEvent(levelInfo, msg.message)
 
 	case tuiWarnMsg:
 		m.warnCount++
-		m.addEvent("warn", msg.message)
+		m.addEvent(levelWarn, msg.message)
 
 	case tuiErrorMsg:
 		m.errCount++
@@ -288,7 +299,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.hint != "" {
 			errMsg += " — " + msg.hint
 		}
-		m.addEvent("error", errMsg)
+		m.addEvent(levelError, errMsg)
 
 	case tuiSummaryMsg:
 		m.summaryItems = msg.items
@@ -298,7 +309,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.phases[i].Status = phaseDone
 			}
 		}
-		m.addEvent("ok", "Deployment complete")
+		m.addEvent(levelOK, "Deployment complete")
 
 	case tuiQuitMsg:
 		m.done = true
@@ -575,15 +586,15 @@ func (m tuiModel) renderEvent(e tuiEvent, w int) string {
 	maxMsg := w - 14
 
 	switch e.Level {
-	case "phase":
+	case levelPhase:
 		return " " + s.phaseHdr.Render("── "+e.Message+" ──")
-	case "ok":
+	case levelOK:
 		return " " + ts + " " + s.ok.Render("✓ "+truncate(e.Message, maxMsg-2))
-	case "warn":
+	case levelWarn:
 		return " " + ts + " " + s.warn.Render("⚠ "+truncate(e.Message, maxMsg-2))
-	case "error":
+	case levelError:
 		return " " + ts + " " + s.err.Render("✗ "+truncate(e.Message, maxMsg-2))
-	case "detail":
+	case levelDetail:
 		return " " + ts + " " + s.detail.Render("  "+truncate(e.Message, maxMsg-2))
 	default:
 		return " " + ts + " " + s.val.Render(truncate(e.Message, maxMsg))
