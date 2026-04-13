@@ -11,54 +11,77 @@ import (
 
 // ANSI color codes
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorCyan   = "\033[36m"
-	colorDim    = "\033[2m"
-	colorBold   = "\033[1m"
+	colorReset     = "\033[0m"
+	colorRed       = "\033[31m"
+	colorGreen     = "\033[32m"
+	colorYellow    = "\033[33m"
+	colorBlue      = "\033[34m"
+	colorCyan      = "\033[36m"
+	colorDim       = "\033[2m"
+	colorBold = "\033[1m"
+)
+
+// Column widths for the tabular layout
+const (
+	colOp       = 5  // " ✓  " or " ✗  "
+	colResource = 38 // resource name with tree prefix
+	colStatus   = 14 // "completed", "failed", etc.
+	colDur      = 8  // "3m38s", "0.24s"
 )
 
 // symbols holds the Unicode/ASCII glyphs used in output.
 type symbols struct {
-	ok      string
-	fail    string
-	warn    string
-	skip    string
-	bullet  string
-	branch  string
-	last    string
-	pipe    string
-	hline   string
-	topLeft string
-	botLeft string
-	tee     string
+	ok     string
+	fail   string
+	warn   string
+	skip   string
+	phase  string
+	branch string
+	last   string
+	pipe   string
+	hSep   string // header separator (thin line)
+	dotSep string // detail containment separator (dotted)
 }
 
 var unicodeSymbols = symbols{
-	ok: "✓", fail: "✗", warn: "!", skip: "-", bullet: "●",
-	branch: "├─", last: "└─", pipe: "│", hline: "─",
-	topLeft: "┌", botLeft: "└", tee: "├",
+	ok: "✓", fail: "✗", warn: "⚠", skip: "─", phase: "▸",
+	branch: "├─ ", last: "└─ ", pipe: "│  ",
+	hSep: "───", dotSep: "┄",
 }
 
 var asciiSymbols = symbols{
-	ok: "[OK]", fail: "[FAIL]", warn: "[WARN]", skip: "[SKIP]", bullet: "*",
-	branch: "|--", last: "\\--", pipe: "|", hline: "-",
-	topLeft: "+", botLeft: "+", tee: "+",
+	ok: "+", fail: "x", warn: "!", skip: "-", phase: ">",
+	branch: "|-- ", last: "\\-- ", pipe: "|   ",
+	hSep: "---", dotSep: ".",
 }
 
-// Pretty is a Renderer that outputs colored, Unicode tree-structured text.
+// pendingStep holds a buffered step that hasn't been rendered yet.
+// We buffer steps so we can decide whether to use ├─ (more steps follow)
+// or └─ (last step in the phase).
+type pendingStep struct {
+	op      string
+	opColor string
+	detail  string
+	status  string
+	dur     string
+	inPhase bool // whether this step was created inside a phase
+}
+
+// Pretty is a Renderer that outputs a Pulumi-style columnar, tree-structured display.
 type Pretty struct {
 	w       io.Writer
 	verbose bool
 	sym     symbols
 	color   bool
-	phase   string
+
+	// state
+	phase      string
+	inDetail   bool         // currently inside a detail block (between dotted lines)
+	pending    *pendingStep // step waiting to know if it's the last in its phase
+	afterPhase bool         // true after EndPhase, used to print separator before out-of-phase steps
 }
 
 // NewPretty creates a Pretty renderer that writes to w.
-// If verbose is true, Detail() lines are shown.
 func NewPretty(w io.Writer, verbose bool) *Pretty {
 	return &Pretty{w: w, verbose: verbose, sym: unicodeSymbols, color: true}
 }
@@ -68,8 +91,6 @@ func NewPlain(w io.Writer, verbose bool) *Pretty {
 	return &Pretty{w: w, verbose: verbose, sym: asciiSymbols, color: false}
 }
 
-// printf writes formatted output, discarding any write error.
-// Presentation-layer writes have no meaningful error recovery.
 func (p *Pretty) printf(format string, args ...any) {
 	_, _ = fmt.Fprintf(p.w, format, args...)
 }
@@ -92,56 +113,158 @@ func (p *Pretty) formatDuration(d time.Duration) string {
 	if d >= time.Minute {
 		mins := int(d.Minutes())
 		secs := int(d.Seconds()) % 60
-		return fmt.Sprintf("%dm %ds", mins, secs)
+		return fmt.Sprintf("%dm%ds", mins, secs)
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.2fs", d.Seconds())
 	}
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
-func (p *Pretty) rightAlign(left string, dur time.Duration, width int) string {
-	durStr := p.formatDuration(dur)
-	if durStr == "" {
-		return left
+// row prints a single columnar row: op | resource | status | duration
+func (p *Pretty) row(op, opColor, resource, status, dur string) {
+	opCell := p.padRight(" "+op, colOp)
+	if opColor != "" {
+		opCell = p.c(opColor, opCell)
 	}
-	visLen := visibleLen(left)
-	pad := width - visLen - len(durStr)
-	if pad < 1 {
-		pad = 1
+
+	resCell := p.padRight(resource, colResource)
+	statCell := p.padRight(status, colStatus)
+
+	if dur != "" {
+		dur = p.c(colorDim, dur)
 	}
-	return left + strings.Repeat(" ", pad) + p.c(colorDim, durStr)
+
+	p.printf(" %s  %s  %s  %s\n", opCell, resCell, statCell, dur)
+}
+
+// separator prints a horizontal rule across all columns.
+func (p *Pretty) separator() {
+	p.printf(" %s  %s  %s  %s\n",
+		p.c(colorDim, p.padRight(p.sym.hSep, colOp)),
+		p.c(colorDim, strings.Repeat(p.sym.hSep, colResource/3)),
+		p.c(colorDim, p.padRight(p.sym.hSep, colStatus)),
+		p.c(colorDim, p.padRight(p.sym.hSep, colDur)),
+	)
+}
+
+// detailSeparator prints a dotted line in the resource column under the pipe prefix.
+func (p *Pretty) detailSeparator() {
+	p.printf(" %s  %s\n",
+		strings.Repeat(" ", colOp),
+		p.c(colorDim, p.sym.pipe+strings.Repeat(p.sym.dotSep, colResource)),
+	)
+}
+
+// closeDetailBlock closes an open detail block by printing the closing dotted separator.
+func (p *Pretty) closeDetailBlock() {
+	if !p.inDetail {
+		return
+	}
+	p.inDetail = false
+	p.detailSeparator()
+}
+
+// flushPending renders a buffered step. If isLast is true, the step is rendered
+// with └─ (last step in phase); otherwise with ├─.
+func (p *Pretty) flushPending(isLast bool) {
+	if p.pending == nil {
+		return
+	}
+	s := p.pending
+	p.pending = nil
+
+	resource := s.detail
+	if s.inPhase {
+		prefix := p.sym.branch
+		if isLast {
+			prefix = p.sym.last
+		}
+		resource = prefix + s.detail
+	}
+
+	p.row(s.op, s.opColor, resource, s.status, s.dur)
+}
+
+func (p *Pretty) padRight(s string, width int) string {
+	vis := visibleLen(s)
+	if vis >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-vis)
 }
 
 func (p *Pretty) StartPhase(name string) {
+	p.closeDetailBlock()
+	p.flushPending(true) // any pending step from a previous phase is the last in that phase
 	p.phase = name
-	p.printf("\n  %s %s\n", p.c(colorCyan, p.sym.bullet), p.c(colorBold, name))
+	p.afterPhase = false
+	p.println()
+	p.row(p.sym.phase, colorCyan, p.c(colorBold, name), "", "")
 }
 
 func (p *Pretty) EndPhase(_ PhaseStatus, _ time.Duration) {
+	p.closeDetailBlock()
+	p.flushPending(true) // last step in the phase
 	p.phase = ""
+	p.afterPhase = true
 }
 
 func (p *Pretty) StartStep(_ string) {
-	// Steps are rendered on EndStep with their final status.
+	// Rendered on EndStep
 }
 
 func (p *Pretty) EndStep(status StepStatus, elapsed time.Duration, detail string) {
-	icon := p.stepIcon(status)
-	left := fmt.Sprintf("    %s %s %s", p.sym.branch, icon, detail)
-	line := p.rightAlign(left, elapsed, 72)
-	p.println(line)
+	p.closeDetailBlock()
+	p.flushPending(false) // previous step is not the last — this new one follows
+
+	op, opColor := p.stepOp(status)
+	statusText := p.stepStatusText(status)
+	dur := p.formatDuration(elapsed)
+
+	// Steps outside a phase after a phase ended get a separator
+	if p.phase == "" && p.afterPhase {
+		p.separator()
+		p.afterPhase = false
+	}
+
+	p.pending = &pendingStep{
+		op:      op,
+		opColor: opColor,
+		detail:  detail,
+		status:  statusText,
+		dur:     dur,
+		inPhase: p.phase != "",
+	}
 }
 
-func (p *Pretty) stepIcon(s StepStatus) string {
+func (p *Pretty) stepOp(s StepStatus) (string, string) {
 	switch s {
 	case StepOK:
-		return p.c(colorGreen, p.sym.ok)
+		return p.sym.ok, colorGreen
 	case StepFailed:
-		return p.c(colorRed, p.sym.fail)
+		return p.sym.fail, colorRed
 	case StepWarning:
-		return p.c(colorYellow, p.sym.warn)
+		return p.sym.warn, colorYellow
 	case StepSkipped:
-		return p.c(colorDim, p.sym.skip)
+		return p.sym.skip, colorDim
 	default:
-		return p.c(colorDim, p.sym.skip)
+		return " ", ""
+	}
+}
+
+func (p *Pretty) stepStatusText(s StepStatus) string {
+	switch s {
+	case StepOK:
+		return p.c(colorGreen, "completed")
+	case StepFailed:
+		return p.c(colorRed, "failed")
+	case StepWarning:
+		return p.c(colorYellow, "warning")
+	case StepSkipped:
+		return p.c(colorDim, "skipped")
+	default:
+		return ""
 	}
 }
 
@@ -149,13 +272,35 @@ func (p *Pretty) Detail(line string) {
 	if !p.verbose {
 		return
 	}
-	p.printf("    %s     %s\n", p.c(colorDim, p.sym.pipe), p.c(colorDim, line))
+
+	// Flush any pending step before detail lines (it's not the last step
+	// since detail lines follow it as part of the same phase context)
+	p.flushPending(false)
+
+	// Open a detail block if not already in one
+	if !p.inDetail {
+		p.inDetail = true
+		p.detailSeparator()
+	}
+
+	// Detail lines are contained under the pipe, indented in the resource column
+	p.printf(" %s  %s\n",
+		strings.Repeat(" ", colOp),
+		p.c(colorDim, p.sym.pipe+line),
+	)
 }
 
 func (p *Pretty) Summary(items []SummaryItem) {
 	if len(items) == 0 {
 		return
 	}
+
+	// Flush any pending step before summary
+	p.closeDetailBlock()
+	p.flushPending(true)
+
+	p.println()
+	p.printf(" %s\n", p.c(colorBold+colorBlue, "Outputs:"))
 
 	maxLabel := 0
 	for _, item := range items {
@@ -164,60 +309,65 @@ func (p *Pretty) Summary(items []SummaryItem) {
 		}
 	}
 
-	boxWidth := maxLabel + 4
 	for _, item := range items {
-		lineLen := maxLabel + 3 + len(item.Value)
-		if lineLen > boxWidth {
-			boxWidth = lineLen
-		}
+		pad := maxLabel - len(item.Label)
+		p.printf("     %s:%s  %s\n", item.Label, strings.Repeat(" ", pad), p.c(colorCyan, item.Value))
 	}
-	boxWidth += 4
-
-	border := strings.Repeat(p.sym.hline, boxWidth)
-
-	p.println()
-	p.printf("  %s%s%s\n", p.sym.topLeft, border, p.sym.topLeft)
-	for _, item := range items {
-		pad := maxLabel - len(item.Label) + 2
-		p.printf("  %s  %s%s%s  %s\n", p.sym.pipe, item.Label, strings.Repeat(" ", pad), item.Value, p.sym.pipe)
-	}
-	p.printf("  %s%s%s\n", p.sym.botLeft, border, p.sym.botLeft)
 	p.println()
 }
 
 func (p *Pretty) Error(err error, hint string) {
-	p.printf("\n      %s %s\n", p.c(colorRed, "Error:"), err.Error())
-	if hint != "" {
-		p.printf("      %s %s\n", p.c(colorDim, "Hint:"), hint)
-	}
+	p.closeDetailBlock()
+	p.flushPending(false)
 	p.println()
+	p.printf("  %s  %s\n", p.c(colorBold+colorRed, "error:"), err.Error())
+	if hint != "" {
+		p.printf("         %s\n", p.c(colorDim, hint))
+	}
 }
 
 func (p *Pretty) Warn(message string) {
-	p.printf("    %s %s\n", p.c(colorYellow, p.sym.warn), message)
+	p.closeDetailBlock()
+	p.flushPending(false)
+	p.row(p.sym.warn, colorYellow, message, p.c(colorYellow, "warning"), "")
 }
 
 func (p *Pretty) Info(message string) {
+	p.closeDetailBlock()
+	p.flushPending(false)
 	p.printf("  %s\n", message)
 }
 
 func (p *Pretty) Version(ver, commitHash, tofuVer string, clusterProviders, dnsProviders []string) {
 	p.printf("%s\n", p.c(colorBold, "Nebari Infrastructure Core (NIC)"))
-	p.printf("Version:    %s\n", ver)
-	p.printf("Commit:     %s\n", commitHash)
-	p.printf("OpenTofu:   %s\n", tofuVer)
-	p.printf("Providers:  %s\n", strings.Join(clusterProviders, ", "))
-	p.printf("DNS:        %s\n", strings.Join(dnsProviders, ", "))
+	p.printf("  Version:    %s\n", ver)
+	p.printf("  Commit:     %s\n", commitHash)
+	p.printf("  OpenTofu:   %s\n", tofuVer)
+	p.printf("  Providers:  %s\n", strings.Join(clusterProviders, ", "))
+	p.printf("  DNS:        %s\n", strings.Join(dnsProviders, ", "))
 }
 
 func (p *Pretty) Confirm(message string, details map[string]string, expected string) (bool, error) {
-	p.printf("\n  %s  %s\n\n", p.c(colorYellow, "⚠"), p.c(colorBold, message))
-	for k, v := range details {
-		p.printf("    %s: %s\n", k, v)
+	p.println()
+	p.printf(" %s  %s\n", p.c(colorBold+colorYellow, p.sym.warn), p.c(colorBold, message))
+	p.println()
+
+	maxKey := 0
+	for k := range details {
+		if len(k) > maxKey {
+			maxKey = len(k)
+		}
 	}
-	p.printf("\n  %s\n", p.c(colorRed, "This will permanently delete all resources and data."))
-	p.printf("  This action cannot be undone.\n")
-	p.printf("\n  Type '%s' to confirm: ", expected)
+	for k, v := range details {
+		pad := maxKey - len(k)
+		p.printf("     %s:%s  %s\n", k, strings.Repeat(" ", pad), v)
+	}
+
+	p.println()
+	p.printf("  %s\n", p.c(colorRed, "This will permanently delete all resources and data."))
+	p.printf("  %s\n", "This action cannot be undone.")
+	p.println()
+	p.printf("  Type %s to confirm: ", p.c(colorBold, "'"+expected+"'"))
 
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')

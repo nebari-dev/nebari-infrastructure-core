@@ -55,6 +55,15 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 			}
 			return nil
 		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			// Ensure the TUI is properly shut down when commands finish
+			// without calling Summary() (e.g., version, validate).
+			r := renderer.FromContext(cmd.Context())
+			if t, ok := r.(*renderer.TUI); ok {
+				t.Quit()
+			}
+			return nil
+		},
 	}
 )
 
@@ -63,6 +72,8 @@ func selectRenderer(format string, verbose bool) (renderer.Renderer, error) {
 	switch format {
 	case "json":
 		return renderer.NewJSON(os.Stderr), nil
+	case "tui":
+		return renderer.NewTUI(), nil
 	case "pretty":
 		return renderer.NewPretty(os.Stdout, verbose), nil
 	case "plain":
@@ -76,13 +87,13 @@ func selectRenderer(format string, verbose bool) (renderer.Renderer, error) {
 		}
 		return renderer.NewJSON(os.Stderr), nil
 	default:
-		return nil, fmt.Errorf("unknown format %q: must be auto, pretty, json, or plain", format)
+		return nil, fmt.Errorf("unknown format %q: must be auto, pretty, tui, json, or plain", format)
 	}
 }
 
 func init() {
 	// Register global persistent flags
-	rootCmd.PersistentFlags().StringVar(&formatFlag, "format", "auto", "Output format: auto, pretty, json, or plain")
+	rootCmd.PersistentFlags().StringVar(&formatFlag, "format", "auto", "Output format: auto, tui, pretty, json, or plain")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed output from third-party tools")
 
 	// Load .env file if it exists (silently ignore if not found)
