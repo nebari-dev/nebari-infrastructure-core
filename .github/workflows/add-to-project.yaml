@@ -1,17 +1,50 @@
-# .github/workflows/add-to-project.yml
 name: Add to project
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled, unlabeled]
   pull_request:
-    types: [opened]
+    types: [opened, labeled, unlabeled]
 
 jobs:
   add-to-project:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/add-to-project@v1.0.2
+      # https://github.com/actions/add-to-project/releases/tag/v1.0.2
+      - uses: actions/add-to-project@244f685bbc3b7adfa8466e08b698b5577571133e
+        id: add
         with:
-          project-url: https://github.com/orgs/nebari-dev/projects/12
+          project-url: ${{ vars.PROJECT_BOARD_URL }}
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+
+      - name: Sync priority field from labels
+        if: steps.add.outputs.itemId != ''
+        env:
+          GH_TOKEN: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          PROJECT_ID: PVT_kwDOBd3CI84BKoKt
+          FIELD_ID: PVTSSF_lADOBd3CI84BKoKtzg6cHO8
+          ITEM_ID: ${{ steps.add.outputs.itemId }}
+          LABELS: ${{ toJSON(github.event.issue.labels || github.event.pull_request.labels) }}
+        run: |
+          set -uo pipefail
+          PRIORITY=$(echo "$LABELS" | jq -r '.[].name' | grep -oE '^priority: (critical|high|medium|low|icebox)' | head -1 | awk '{print $2}')
+          case "$PRIORITY" in
+            critical) OPT=79628723 ;;
+            high)     OPT=0a877460 ;;
+            medium)   OPT=da944a9c ;;
+            low)      OPT=2772da2e ;;
+            icebox)   OPT=ff56cb75 ;;
+            *)        OPT="" ;;
+          esac
+
+          if [ -n "$OPT" ]; then
+            gh api graphql -f query='
+              mutation($p:ID!,$i:ID!,$f:ID!,$o:String!) {
+                updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}) { projectV2Item { id } }
+              }' -F p="$PROJECT_ID" -F i="$ITEM_ID" -F f="$FIELD_ID" -f o="$OPT"
+          else
+            gh api graphql -f query='
+              mutation($p:ID!,$i:ID!,$f:ID!) {
+                clearProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f}) { projectV2Item { id } }
+              }' -F p="$PROJECT_ID" -F i="$ITEM_ID" -F f="$FIELD_ID"
+          fi
