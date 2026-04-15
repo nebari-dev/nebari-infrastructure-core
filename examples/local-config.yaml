@@ -2,10 +2,10 @@ project_name: my-nebari-local
 domain: nebari.local
 certificate:
   type: selfsigned
-kube_context: "kind-nebari-local"
 
 cluster:
   local:
+    kube_context: "kind-nebari-local"
     node_selectors:
       general:
         kubernetes.io/os: linux

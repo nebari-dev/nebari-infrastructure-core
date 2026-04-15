@@ -118,10 +118,8 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 			if tt.config != nil {
 				providers["aws"] = tt.config
 			}
-			cfg := &config.NebariConfig{
-				Cluster: &config.ClusterConfig{
-					Providers: providers,
-				},
+			cfg := &config.ClusterConfig{
+				Providers: providers,
 			}
 
 			got := p.InfraSettings(cfg).StorageClass

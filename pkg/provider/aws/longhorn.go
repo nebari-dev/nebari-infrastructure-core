@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/helm"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -100,7 +99,7 @@ func ensureISCSI(ctx context.Context, kubeconfigBytes []byte) error {
 		WithResource("iscsi-daemonset").
 		WithAction("installing"))
 
-	client, err := newLonghornK8sClient(kubeconfigBytes)
+	client, err := newK8sClient(kubeconfigBytes)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
@@ -222,15 +221,6 @@ func waitForDaemonSetReady(ctx context.Context, client kubernetes.Interface, nam
 			}
 		}
 	}
-}
-
-// newLonghornK8sClient creates a Kubernetes clientset from kubeconfig bytes.
-func newLonghornK8sClient(kubeconfigBytes []byte) (*kubernetes.Clientset, error) {
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-	return kubernetes.NewForConfig(restConfig)
 }
 
 // longhornHelmValues generates the Helm values map for the Longhorn chart
