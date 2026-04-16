@@ -1,5 +1,6 @@
 .PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
 
+# Trivial change to demo priority-label workflow
 # Variables
 BINARY_NAME=nic
 CMD_DIR=./cmd/nic
