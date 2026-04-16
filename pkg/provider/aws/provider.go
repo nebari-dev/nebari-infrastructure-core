@@ -325,6 +325,40 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Install AWS Load Balancer Controller if enabled.
+	// Must run before any workload that relies on Service type=LoadBalancer.
+	if awsCfg.LoadBalancerControllerEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for AWS Load Balancer Controller install: %w", err)
+		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for AWS Load Balancer Controller: %w", err)
+		}
+
+		vpcIDOutput, ok := outputs["vpc_id"]
+		if !ok {
+			err := fmt.Errorf("vpc_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var vpcID string
+		if err := json.Unmarshal(vpcIDOutput.Value, &vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal vpc_id: %w", err)
+		}
+
+		if err := installAWSLoadBalancerController(ctx, kubeconfigBytes, awsCfg, projectName, vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install AWS Load Balancer Controller: %w", err)
+		}
+	}
+
 	// Create EFS StorageClass if EFS is enabled
 	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)

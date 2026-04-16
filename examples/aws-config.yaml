@@ -70,6 +70,19 @@ cluster:
       #   max_nodes: 2
       #   ami_type: AL2023_x86_64_NEURON
 
+    # AWS Load Balancer Controller (LBC) configuration (optional).
+    # Enabled by default. The controller authenticates via an EKS Pod Identity
+    # association provisioned by the terraform-aws-eks-cluster module, so no
+    # IRSA annotations are required on the ServiceAccount.
+    #
+    # To expose a workload via an NLB, annotate the Service (not handled by nic):
+    #   service.beta.kubernetes.io/aws-load-balancer-type: external
+    #   service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    #   service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    # aws_load_balancer_controller:
+    #   enabled: true
+    #   # chart_version: "3.2.1"  # optional override; tracks latest v3.x by default
+
     # EFS configuration for shared storage (optional)
     # Creates an EFS file system with mount targets in each private subnet
     efs:
