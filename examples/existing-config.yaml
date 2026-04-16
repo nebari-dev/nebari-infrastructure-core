@@ -3,8 +3,10 @@ domain: nebari.example.com
 
 cluster:
   existing:
-    # Kubeconfig defaults to KUBECONFIG env or ~/.kube/config
-    kubeconfig: ~/.kube/config
+    # kubeconfig is the path to the kubeconfig file. May be absolute or relative and
+    # tilde (~) is not expanded. If not specified, defaults to the KUBECONFIG environment
+    # variable or $HOME/.kube/config.
+    kubeconfig: path/to/kubeconfig
     context: "arn:aws:eks:us-west-2:123456789012:cluster/my-nebari"
     storage_class: gp2
 
