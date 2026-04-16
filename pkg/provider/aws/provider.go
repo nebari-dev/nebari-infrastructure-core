@@ -673,6 +673,11 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
 // EFSStorageClass is set when EFS is enabled.
+//
+// LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
+// Controller (type=external) and request a public, IP-targeted NLB. Without
+// aws-load-balancer-scheme=internet-facing, LBC creates an internal NLB by
+// default, which is not reachable from outside the VPC.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 	var efsSC string
@@ -694,5 +699,10 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LoadBalancerAnnotations: map[string]string{
+			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
+			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":          "internet-facing",
+		},
 	}
 }
