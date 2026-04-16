@@ -79,6 +79,77 @@ func TestLonghornReplicaCount(t *testing.T) {
 	}
 }
 
+func TestLoadBalancerControllerEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "nil AWSLoadBalancerController defaults to enabled",
+			config:   Config{AWSLoadBalancerController: nil},
+			expected: true,
+		},
+		{
+			name:     "empty AWSLoadBalancerController defaults to enabled",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{}},
+			expected: true,
+		},
+		{
+			name:     "explicitly enabled",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{Enabled: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "explicitly disabled",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{Enabled: boolPtr(false)}},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.LoadBalancerControllerEnabled()
+			if got != tt.expected {
+				t.Errorf("LoadBalancerControllerEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadBalancerControllerChartVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{
+			name:     "nil AWSLoadBalancerController returns default",
+			config:   Config{AWSLoadBalancerController: nil},
+			expected: defaultLBCChartVersion,
+		},
+		{
+			name:     "empty ChartVersion returns default",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{}},
+			expected: defaultLBCChartVersion,
+		},
+		{
+			name:     "custom ChartVersion is used",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{ChartVersion: "3.1.0"}},
+			expected: "3.1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.LoadBalancerControllerChartVersion()
+			if got != tt.expected {
+				t.Errorf("LoadBalancerControllerChartVersion() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestProviderInfraSettingsStorageClass(t *testing.T) {
 	tests := []struct {
 		name     string
