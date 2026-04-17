@@ -53,20 +53,32 @@ func extractConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*C
 
 // loadAndValidateContext loads the kubeconfig file and validates that the
 // required context exists. Returns the kubeconfig path and context name.
-func loadAndValidateContext(cfg *Config) (string, string, error) {
+func loadAndValidateContext(ctx context.Context, cfg *Config) (string, string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "existing.loadAndValidateContext")
+	defer span.End()
+
 	if cfg.Context == "" {
-		return "", "", fmt.Errorf("context is required for existing cluster provider")
+		err := fmt.Errorf("context is required for existing cluster provider")
+		span.RecordError(err)
+		return "", "", err
 	}
 
 	path, err := cfg.GetKubeconfigPath()
 	if err != nil {
+		span.RecordError(err)
 		return "", "", err
 	}
 
 	if err := kubeconfig.ValidateContext(path, cfg.Context); err != nil {
+		span.RecordError(err)
 		return "", "", err
 	}
 
+	span.SetAttributes(
+		attribute.String("kubeconfig_path", path),
+		attribute.String("kube_context", cfg.Context),
+	)
 	return path, cfg.Context, nil
 }
 
@@ -88,7 +100,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
-	path, contextName, err := loadAndValidateContext(existingCfg)
+	path, contextName, err := loadAndValidateContext(ctx, existingCfg)
 	if err != nil {
 		span.RecordError(err)
 		return err
