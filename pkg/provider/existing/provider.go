@@ -192,7 +192,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 		return result
 	}
 
-	result["Mode"] = "existing-cluster"
+	result["Provider"] = "Existing Cluster"
 	if path, err := existingCfg.GetKubeconfigPath(); err == nil {
 		result["Kubeconfig"] = path
 	}
