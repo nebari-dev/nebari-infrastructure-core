@@ -144,12 +144,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		return nil, err
 	}
 
-	if existingCfg.Context == "" {
-		err := fmt.Errorf("context is required for existing cluster provider")
-		span.RecordError(err)
-		return nil, err
-	}
-
 	path, err := existingCfg.GetKubeconfigPath()
 	if err != nil {
 		span.RecordError(err)
