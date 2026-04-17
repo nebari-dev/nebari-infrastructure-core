@@ -1,5 +1,5 @@
 module "eks_cluster" {
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feature/aws-lb-controller"
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=v0.3.0"
 
   project_name                             = var.project_name
   tags                                     = var.tags
