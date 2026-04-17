@@ -96,21 +96,16 @@ func ExtractContext(contextName string) ([]byte, error) {
 	return WriteBytes(filtered)
 }
 
-// ValidateContext checks that the specified context exists in the kubeconfig.
-// Returns an error with available contexts if not found.
-func ValidateContext(contextName string) error {
-	path, err := GetPath()
-	if err != nil {
-		return err
-	}
-
-	config, err := Load()
+// ValidateContext checks that the specified context exists in the kubeconfig at
+// the given path. Returns an error with available contexts if not found.
+func ValidateContext(path, contextName string) error {
+	config, err := LoadFromPath(path)
 	if err != nil {
 		return fmt.Errorf("failed to load kubeconfig from %s: %w", path, err)
 	}
 
 	if _, exists := config.Contexts[contextName]; !exists {
-		return fmt.Errorf("context %q not found in kubeconfig. Available contexts: %v", contextName, GetContextNames(config))
+		return fmt.Errorf("context %q not found in kubeconfig %s. Available contexts: %v", contextName, path, GetContextNames(config))
 	}
 
 	return nil

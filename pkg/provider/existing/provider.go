@@ -6,7 +6,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
@@ -64,14 +63,8 @@ func loadAndValidateContext(cfg *Config) (string, string, error) {
 		return "", "", err
 	}
 
-	kubeconfigData, err := clientcmd.LoadFromFile(path)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to load kubeconfig from %s: %w", path, err)
-	}
-
-	if _, exists := kubeconfigData.Contexts[cfg.Context]; !exists {
-		availableContexts := kubeconfig.GetContextNames(kubeconfigData)
-		return "", "", fmt.Errorf("context %q not found in kubeconfig %s. Available contexts: %v", cfg.Context, path, availableContexts)
+	if err := kubeconfig.ValidateContext(path, cfg.Context); err != nil {
+		return "", "", err
 	}
 
 	return path, cfg.Context, nil
