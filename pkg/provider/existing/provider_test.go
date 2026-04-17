@@ -233,8 +233,8 @@ func TestSummary(t *testing.T) {
 
 	summary := p.Summary(cc)
 
-	if summary["Mode"] != "existing-cluster" {
-		t.Errorf("Mode = %q, want %q", summary["Mode"], "existing-cluster")
+	if summary["Provider"] != "Existing Cluster" {
+		t.Errorf("Provider = %q, want %q", summary["Provider"], "Existing Cluster")
 	}
 	if summary["Context"] != "my-context" {
 		t.Errorf("Context = %q, want %q", summary["Context"], "my-context")
