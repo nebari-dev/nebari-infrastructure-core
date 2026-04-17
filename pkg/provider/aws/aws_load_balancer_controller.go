@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/storage/driver"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/helm"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -104,11 +106,17 @@ func installAWSLoadBalancerController(ctx context.Context, kubeconfigBytes []byt
 
 	histClient := action.NewHistory(actionConfig)
 	histClient.Max = 1
-	if _, err := histClient.Run(lbcReleaseName); err == nil {
+	switch _, err := histClient.Run(lbcReleaseName); {
+	case err == nil:
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "AWS Load Balancer Controller already installed, upgrading").
 			WithResource("aws-load-balancer-controller").
 			WithAction("upgrading"))
 		return upgradeAWSLoadBalancerController(ctx, actionConfig, cfg, clusterName, vpcID)
+	case errors.Is(err, driver.ErrReleaseNotFound):
+		// No existing release; fall through to fresh install.
+	default:
+		span.RecordError(err)
+		return fmt.Errorf("failed to query Helm release history for %s: %w", lbcReleaseName, err)
 	}
 
 	helmValues := awsLoadBalancerControllerHelmValues(cfg, clusterName, vpcID)
@@ -154,7 +162,7 @@ func installAWSLoadBalancerController(ctx context.Context, kubeconfigBytes []byt
 // upgradeAWSLoadBalancerController upgrades an existing release.
 func upgradeAWSLoadBalancerController(ctx context.Context, actionConfig *action.Configuration, cfg *Config, clusterName, vpcID string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.upgradeAWSLoadBalancerController")
+	ctx, span := tracer.Start(ctx, "aws.upgradeAWSLoadBalancerController")
 	defer span.End()
 
 	chartVersion := cfg.LoadBalancerControllerChartVersion()
