@@ -243,6 +243,75 @@ func cleanupELBv2LoadBalancers(ctx context.Context, client ELBv2Client, clusterN
 	return deleted, nil
 }
 
+// cleanupELBv2TargetGroups deletes all target groups tagged
+// elbv2.k8s.aws/cluster=<clusterName>. Must be called after
+// cleanupELBv2LoadBalancers so no load balancer still references them.
+func cleanupELBv2TargetGroups(ctx context.Context, client ELBv2Client, clusterName string) (int, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.cleanupELBv2TargetGroups")
+	defer span.End()
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	var arns []string
+	paginator := elbv2.NewDescribeTargetGroupsPaginator(client, &elbv2.DescribeTargetGroupsInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return 0, fmt.Errorf("failed to describe target groups: %w", err)
+		}
+		for _, tg := range page.TargetGroups {
+			if tg.TargetGroupArn != nil {
+				arns = append(arns, *tg.TargetGroupArn)
+			}
+		}
+	}
+
+	if len(arns) == 0 {
+		span.SetAttributes(attribute.Int("target_groups_deleted", 0))
+		return 0, nil
+	}
+
+	const maxTagBatch = 20
+	var matchingARNs []string
+	for i := 0; i < len(arns); i += maxTagBatch {
+		end := min(i+maxTagBatch, len(arns))
+		batch := arns[i:end]
+		out, err := client.DescribeTags(ctx, &elbv2.DescribeTagsInput{ResourceArns: batch})
+		if err != nil {
+			span.RecordError(err)
+			return 0, fmt.Errorf("failed to describe target group tags: %w", err)
+		}
+		for _, desc := range out.TagDescriptions {
+			if desc.ResourceArn == nil {
+				continue
+			}
+			for _, tag := range desc.Tags {
+				if tag.Key != nil && *tag.Key == clusterTagELBv2 && tag.Value != nil && *tag.Value == clusterName {
+					matchingARNs = append(matchingARNs, *desc.ResourceArn)
+					break
+				}
+			}
+		}
+	}
+
+	var deleted int
+	for _, arn := range matchingARNs {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleting elbv2 target group: %s", arn)).
+			WithResource("target-group").WithAction("deleting"))
+		if _, err := client.DeleteTargetGroup(ctx, &elbv2.DeleteTargetGroupInput{TargetGroupArn: aws.String(arn)}); err != nil {
+			span.RecordError(err)
+			return deleted, fmt.Errorf("failed to delete target group %s: %w", arn, err)
+		}
+		deleted++
+	}
+
+	span.SetAttributes(attribute.Int("target_groups_deleted", deleted))
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Target group cleanup complete: %d deleted", deleted)).
+		WithResource("target-group").WithAction("cleanup"))
+	return deleted, nil
+}
+
 // cleanupK8sSecurityGroupsByPrefix deletes security groups whose GroupName starts
 // with the given prefix AND carry the given cluster tag key. Used to clean up
 // Kubernetes-created ELB/NLB security groups (k8s-elb-*, k8s-traffic-*) that
