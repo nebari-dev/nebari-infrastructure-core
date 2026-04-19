@@ -154,6 +154,95 @@ type ELBv2Client interface {
 	DeleteTargetGroup(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error)
 }
 
+// clusterTagELBv2 is the tag key the AWS Load Balancer Controller attaches to
+// every NLB/ALB/TargetGroup it creates, scoped to the EKS cluster name.
+const clusterTagELBv2 = "elbv2.k8s.aws/cluster"
+
+// cleanupELBv2LoadBalancers deletes all NLBs/ALBs tagged
+// elbv2.k8s.aws/cluster=<clusterName>. Waits for each deletion to complete via
+// the elbv2 LoadBalancersDeletedWaiter so ENIs are released before the caller
+// moves on to VPC teardown.
+func cleanupELBv2LoadBalancers(ctx context.Context, client ELBv2Client, clusterName string) (int, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.cleanupELBv2LoadBalancers")
+	defer span.End()
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	var arns []string
+	nameByARN := map[string]string{}
+	paginator := elbv2.NewDescribeLoadBalancersPaginator(client, &elbv2.DescribeLoadBalancersInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return 0, fmt.Errorf("failed to describe elbv2 load balancers: %w", err)
+		}
+		for _, lb := range page.LoadBalancers {
+			if lb.LoadBalancerArn == nil {
+				continue
+			}
+			arns = append(arns, *lb.LoadBalancerArn)
+			if lb.LoadBalancerName != nil {
+				nameByARN[*lb.LoadBalancerArn] = *lb.LoadBalancerName
+			}
+		}
+	}
+
+	if len(arns) == 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No elbv2 load balancers found").
+			WithResource("load-balancer").WithAction("discovering"))
+		span.SetAttributes(attribute.Int("load_balancers_deleted", 0))
+		return 0, nil
+	}
+
+	// elbv2 DescribeTags accepts up to 20 ARNs per call.
+	const maxTagBatch = 20
+	var matchingARNs []string
+	for i := 0; i < len(arns); i += maxTagBatch {
+		end := min(i+maxTagBatch, len(arns))
+		batch := arns[i:end]
+		out, err := client.DescribeTags(ctx, &elbv2.DescribeTagsInput{ResourceArns: batch})
+		if err != nil {
+			span.RecordError(err)
+			return 0, fmt.Errorf("failed to describe elbv2 tags: %w", err)
+		}
+		for _, desc := range out.TagDescriptions {
+			if desc.ResourceArn == nil {
+				continue
+			}
+			for _, tag := range desc.Tags {
+				if tag.Key != nil && *tag.Key == clusterTagELBv2 && tag.Value != nil && *tag.Value == clusterName {
+					matchingARNs = append(matchingARNs, *desc.ResourceArn)
+					break
+				}
+			}
+		}
+	}
+
+	var deleted int
+	waiter := elbv2.NewLoadBalancersDeletedWaiter(client)
+	for _, arn := range matchingARNs {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleting elbv2 load balancer: %s", nameByARN[arn])).
+			WithResource("load-balancer").WithAction("deleting"))
+
+		if _, err := client.DeleteLoadBalancer(ctx, &elbv2.DeleteLoadBalancerInput{LoadBalancerArn: aws.String(arn)}); err != nil {
+			span.RecordError(err)
+			return deleted, fmt.Errorf("failed to delete elbv2 load balancer %s: %w", arn, err)
+		}
+
+		if err := waiter.Wait(ctx, &elbv2.DescribeLoadBalancersInput{LoadBalancerArns: []string{arn}}, 5*time.Minute); err != nil {
+			span.RecordError(err)
+			return deleted, fmt.Errorf("timed out waiting for elbv2 load balancer %s to delete: %w", arn, err)
+		}
+		deleted++
+	}
+
+	span.SetAttributes(attribute.Int("load_balancers_deleted", deleted))
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("elbv2 load balancer cleanup complete: %d deleted", deleted)).
+		WithResource("load-balancer").WithAction("cleanup"))
+	return deleted, nil
+}
+
 // cleanupK8sSecurityGroupsByPrefix deletes security groups whose GroupName starts
 // with the given prefix AND carry the given cluster tag key. Used to clean up
 // Kubernetes-created ELB/NLB security groups (k8s-elb-*, k8s-traffic-*) that
