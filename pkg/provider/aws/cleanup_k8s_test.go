@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -141,4 +142,30 @@ func TestSweepLoadBalancerServices(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitForLoadBalancerServicesGone(t *testing.T) {
+	t.Run("returns nil when no LB services remain", func(t *testing.T) {
+		//nolint:staticcheck
+		c := k8sfake.NewSimpleClientset()
+		err := waitForLoadBalancerServicesGone(context.Background(), c, 500*time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("returns error on timeout when LB services persist", func(t *testing.T) {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "stuck"},
+			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
+		}
+		//nolint:staticcheck
+		c := k8sfake.NewSimpleClientset(svc)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		err := waitForLoadBalancerServicesGone(ctx, c, 10*time.Second)
+		if err == nil {
+			t.Fatalf("expected timeout error, got nil")
+		}
+	})
 }
