@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +12,7 @@ import (
 	elb "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
 	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/aws/smithy-go"
 )
 
@@ -82,8 +84,6 @@ func (m *mockELBClient) DeleteLoadBalancer(ctx context.Context, params *elb.Dele
 }
 
 // mockELBv2Client implements ELBv2Client for testing.
-//
-//nolint:unused // Used by Task 6 and Task 7 tests
 type mockELBv2Client struct {
 	DescribeLoadBalancersFunc func(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error)
 	DescribeTagsFunc          func(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error)
@@ -92,7 +92,6 @@ type mockELBv2Client struct {
 	DeleteTargetGroupFunc     func(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error)
 }
 
-//nolint:unused // Used by Task 6 and Task 7 tests
 func (m *mockELBv2Client) DescribeLoadBalancers(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error) {
 	if m.DescribeLoadBalancersFunc != nil {
 		return m.DescribeLoadBalancersFunc(ctx, params, optFns...)
@@ -100,7 +99,6 @@ func (m *mockELBv2Client) DescribeLoadBalancers(ctx context.Context, params *elb
 	return &elbv2.DescribeLoadBalancersOutput{}, nil
 }
 
-//nolint:unused // Used by Task 6 and Task 7 tests
 func (m *mockELBv2Client) DescribeTags(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
 	if m.DescribeTagsFunc != nil {
 		return m.DescribeTagsFunc(ctx, params, optFns...)
@@ -108,7 +106,6 @@ func (m *mockELBv2Client) DescribeTags(ctx context.Context, params *elbv2.Descri
 	return &elbv2.DescribeTagsOutput{}, nil
 }
 
-//nolint:unused // Used by Task 6 and Task 7 tests
 func (m *mockELBv2Client) DeleteLoadBalancer(ctx context.Context, params *elbv2.DeleteLoadBalancerInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error) {
 	if m.DeleteLoadBalancerFunc != nil {
 		return m.DeleteLoadBalancerFunc(ctx, params, optFns...)
@@ -116,7 +113,6 @@ func (m *mockELBv2Client) DeleteLoadBalancer(ctx context.Context, params *elbv2.
 	return &elbv2.DeleteLoadBalancerOutput{}, nil
 }
 
-//nolint:unused // Used by Task 6 and Task 7 tests
 func (m *mockELBv2Client) DescribeTargetGroups(ctx context.Context, params *elbv2.DescribeTargetGroupsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error) {
 	if m.DescribeTargetGroupsFunc != nil {
 		return m.DescribeTargetGroupsFunc(ctx, params, optFns...)
@@ -124,12 +120,112 @@ func (m *mockELBv2Client) DescribeTargetGroups(ctx context.Context, params *elbv
 	return &elbv2.DescribeTargetGroupsOutput{}, nil
 }
 
-//nolint:unused // Used by Task 6 and Task 7 tests
 func (m *mockELBv2Client) DeleteTargetGroup(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error) {
 	if m.DeleteTargetGroupFunc != nil {
 		return m.DeleteTargetGroupFunc(ctx, params, optFns...)
 	}
 	return &elbv2.DeleteTargetGroupOutput{}, nil
+}
+
+func TestCleanupELBv2LoadBalancers(t *testing.T) {
+	clusterTag := "elbv2.k8s.aws/cluster"
+	clusterName := "test-cluster"
+
+	tests := []struct {
+		name         string
+		lbs          []elbv2types.LoadBalancer
+		tagsByARN    map[string][]elbv2types.Tag
+		deleteErrors map[string]error
+		wantDeleted  []string
+		wantErr      bool
+	}{
+		{
+			name: "deletes only tagged NLBs",
+			lbs: []elbv2types.LoadBalancer{
+				{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-a"), LoadBalancerName: aws.String("a")},
+				{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-b"), LoadBalancerName: aws.String("b")},
+			},
+			tagsByARN: map[string][]elbv2types.Tag{
+				"arn:aws:elbv2::nlb-a": {{Key: aws.String(clusterTag), Value: aws.String(clusterName)}},
+				"arn:aws:elbv2::nlb-b": {{Key: aws.String("other"), Value: aws.String("x")}},
+			},
+			wantDeleted: []string{"arn:aws:elbv2::nlb-a"},
+		},
+		{
+			name:        "no load balancers returns no error",
+			lbs:         nil,
+			wantDeleted: nil,
+		},
+		{
+			name: "wrong cluster tag value is ignored",
+			lbs:  []elbv2types.LoadBalancer{{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-c"), LoadBalancerName: aws.String("c")}},
+			tagsByARN: map[string][]elbv2types.Tag{
+				"arn:aws:elbv2::nlb-c": {{Key: aws.String(clusterTag), Value: aws.String("different-cluster")}},
+			},
+			wantDeleted: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleted []string
+			mock := &mockELBv2Client{
+				DescribeLoadBalancersFunc: func(ctx context.Context, p *elbv2.DescribeLoadBalancersInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error) {
+					// When the waiter calls DescribeLoadBalancers with specific ARNs after
+					// deletion, return LoadBalancerNotFound so the waiter treats it as success.
+					if len(p.LoadBalancerArns) > 0 {
+						allDeleted := true
+						for _, arn := range p.LoadBalancerArns {
+							if !slices.Contains(deleted, arn) {
+								allDeleted = false
+								break
+							}
+						}
+						if allDeleted {
+							return nil, &mockAPIError{code: "LoadBalancerNotFound", message: "not found"}
+						}
+					}
+					return &elbv2.DescribeLoadBalancersOutput{LoadBalancers: tt.lbs}, nil
+				},
+				DescribeTagsFunc: func(ctx context.Context, p *elbv2.DescribeTagsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+					var out []elbv2types.TagDescription
+					for _, arn := range p.ResourceArns {
+						out = append(out, elbv2types.TagDescription{
+							ResourceArn: aws.String(arn),
+							Tags:        tt.tagsByARN[arn],
+						})
+					}
+					return &elbv2.DescribeTagsOutput{TagDescriptions: out}, nil
+				},
+				DeleteLoadBalancerFunc: func(ctx context.Context, p *elbv2.DeleteLoadBalancerInput, _ ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error) {
+					deleted = append(deleted, *p.LoadBalancerArn)
+					if err, ok := tt.deleteErrors[*p.LoadBalancerArn]; ok {
+						return nil, err
+					}
+					return &elbv2.DeleteLoadBalancerOutput{}, nil
+				},
+			}
+
+			count, err := cleanupELBv2LoadBalancers(context.Background(), mock, clusterName)
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if count != len(tt.wantDeleted) {
+				t.Errorf("deleted count = %d, want %d", count, len(tt.wantDeleted))
+			}
+			if len(deleted) != len(tt.wantDeleted) {
+				t.Errorf("DeleteLoadBalancer called %d times, want %d", len(deleted), len(tt.wantDeleted))
+			}
+			for i, arn := range tt.wantDeleted {
+				if i >= len(deleted) || deleted[i] != arn {
+					t.Errorf("deleted[%d] = %v, want %v", i, deleted, tt.wantDeleted)
+				}
+			}
+		})
+	}
 }
 
 func TestCleanupKubernetesLoadBalancers(t *testing.T) {
