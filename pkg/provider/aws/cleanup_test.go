@@ -586,6 +586,49 @@ func TestRevokeReferencingRules(t *testing.T) {
 	})
 }
 
+func TestCleanupELBv2TargetGroups(t *testing.T) {
+	clusterTag := "elbv2.k8s.aws/cluster"
+	clusterName := "test-cluster"
+
+	tgs := []elbv2types.TargetGroup{
+		{TargetGroupArn: aws.String("arn:aws:elbv2::tg-a"), TargetGroupName: aws.String("a")},
+		{TargetGroupArn: aws.String("arn:aws:elbv2::tg-b"), TargetGroupName: aws.String("b")},
+	}
+	tagsByARN := map[string][]elbv2types.Tag{
+		"arn:aws:elbv2::tg-a": {{Key: aws.String(clusterTag), Value: aws.String(clusterName)}},
+		"arn:aws:elbv2::tg-b": {{Key: aws.String("other"), Value: aws.String("x")}},
+	}
+
+	var deleted []string
+	mock := &mockELBv2Client{
+		DescribeTargetGroupsFunc: func(ctx context.Context, p *elbv2.DescribeTargetGroupsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error) {
+			return &elbv2.DescribeTargetGroupsOutput{TargetGroups: tgs}, nil
+		},
+		DescribeTagsFunc: func(ctx context.Context, p *elbv2.DescribeTagsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+			var out []elbv2types.TagDescription
+			for _, arn := range p.ResourceArns {
+				out = append(out, elbv2types.TagDescription{ResourceArn: aws.String(arn), Tags: tagsByARN[arn]})
+			}
+			return &elbv2.DescribeTagsOutput{TagDescriptions: out}, nil
+		},
+		DeleteTargetGroupFunc: func(ctx context.Context, p *elbv2.DeleteTargetGroupInput, _ ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error) {
+			deleted = append(deleted, *p.TargetGroupArn)
+			return &elbv2.DeleteTargetGroupOutput{}, nil
+		},
+	}
+
+	count, err := cleanupELBv2TargetGroups(context.Background(), mock, clusterName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("deleted count = %d, want 1", count)
+	}
+	if len(deleted) != 1 || deleted[0] != "arn:aws:elbv2::tg-a" {
+		t.Errorf("deleted = %v, want [arn:aws:elbv2::tg-a]", deleted)
+	}
+}
+
 func TestDeleteSecurityGroupWithRetry(t *testing.T) {
 	tests := []struct {
 		name         string
