@@ -2,11 +2,14 @@ package aws
 
 import (
 	"testing"
+	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 func boolPtr(b bool) *bool { return &b }
+
+func durPtr(d time.Duration) *time.Duration { return &d }
 
 func TestLonghornEnabled(t *testing.T) {
 	tests := []struct {
@@ -145,6 +148,39 @@ func TestLoadBalancerControllerChartVersion(t *testing.T) {
 			got := tt.config.LoadBalancerControllerChartVersion()
 			if got != tt.expected {
 				t.Errorf("LoadBalancerControllerChartVersion() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadBalancerControllerDestroyTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected time.Duration
+	}{
+		{
+			name:     "nil AWSLoadBalancerController defaults to 5m",
+			config:   Config{AWSLoadBalancerController: nil},
+			expected: 5 * time.Minute,
+		},
+		{
+			name:     "nil DestroyTimeout defaults to 5m",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{}},
+			expected: 5 * time.Minute,
+		},
+		{
+			name:     "explicitly set to 90s",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{DestroyTimeout: durPtr(90 * time.Second)}},
+			expected: 90 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.LoadBalancerControllerDestroyTimeout()
+			if got != tt.expected {
+				t.Errorf("LoadBalancerControllerDestroyTimeout() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
