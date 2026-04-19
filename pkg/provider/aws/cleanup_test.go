@@ -10,6 +10,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	elb "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
+	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/smithy-go"
 )
 
@@ -78,6 +79,57 @@ func (m *mockELBClient) DeleteLoadBalancer(ctx context.Context, params *elb.Dele
 		return m.DeleteLoadBalancerFunc(ctx, params, optFns...)
 	}
 	return &elb.DeleteLoadBalancerOutput{}, nil
+}
+
+// mockELBv2Client implements ELBv2Client for testing.
+//
+//nolint:unused // Used by Task 6 and Task 7 tests
+type mockELBv2Client struct {
+	DescribeLoadBalancersFunc func(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error)
+	DescribeTagsFunc          func(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error)
+	DeleteLoadBalancerFunc    func(ctx context.Context, params *elbv2.DeleteLoadBalancerInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error)
+	DescribeTargetGroupsFunc  func(ctx context.Context, params *elbv2.DescribeTargetGroupsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error)
+	DeleteTargetGroupFunc     func(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error)
+}
+
+//nolint:unused // Used by Task 6 and Task 7 tests
+func (m *mockELBv2Client) DescribeLoadBalancers(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error) {
+	if m.DescribeLoadBalancersFunc != nil {
+		return m.DescribeLoadBalancersFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeLoadBalancersOutput{}, nil
+}
+
+//nolint:unused // Used by Task 6 and Task 7 tests
+func (m *mockELBv2Client) DescribeTags(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+	if m.DescribeTagsFunc != nil {
+		return m.DescribeTagsFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeTagsOutput{}, nil
+}
+
+//nolint:unused // Used by Task 6 and Task 7 tests
+func (m *mockELBv2Client) DeleteLoadBalancer(ctx context.Context, params *elbv2.DeleteLoadBalancerInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error) {
+	if m.DeleteLoadBalancerFunc != nil {
+		return m.DeleteLoadBalancerFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DeleteLoadBalancerOutput{}, nil
+}
+
+//nolint:unused // Used by Task 6 and Task 7 tests
+func (m *mockELBv2Client) DescribeTargetGroups(ctx context.Context, params *elbv2.DescribeTargetGroupsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error) {
+	if m.DescribeTargetGroupsFunc != nil {
+		return m.DescribeTargetGroupsFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeTargetGroupsOutput{}, nil
+}
+
+//nolint:unused // Used by Task 6 and Task 7 tests
+func (m *mockELBv2Client) DeleteTargetGroup(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error) {
+	if m.DeleteTargetGroupFunc != nil {
+		return m.DeleteTargetGroupFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DeleteTargetGroupOutput{}, nil
 }
 
 func TestCleanupKubernetesLoadBalancers(t *testing.T) {
