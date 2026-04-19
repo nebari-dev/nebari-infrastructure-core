@@ -6,10 +6,12 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -52,4 +54,42 @@ func deleteNebariGateway(ctx context.Context, dyn dynamic.Interface) error {
 	}
 	span.RecordError(err)
 	return fmt.Errorf("failed to delete Gateway %s/%s: %w", gatewayNamespace, gatewayName, err)
+}
+
+// sweepLoadBalancerServices deletes every Service whose spec.type is
+// LoadBalancer across every namespace. This covers Envoy Gateway's own
+// managed Service (left behind if the Gateway delete raced the operator) and
+// any other user-created LoadBalancer Services.
+func sweepLoadBalancerServices(ctx context.Context, client kubernetes.Interface) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.sweepLoadBalancerServices")
+	defer span.End()
+
+	list, err := client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to list services: %w", err)
+	}
+
+	var deleted int
+	for _, svc := range list.Items {
+		if svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
+			continue
+		}
+		if err := client.CoreV1().Services(svc.Namespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to delete LoadBalancer service %s/%s: %v", svc.Namespace, svc.Name, err)).
+				WithResource("service").WithAction("deleting"))
+			span.RecordError(err)
+			continue
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted LoadBalancer service %s/%s", svc.Namespace, svc.Name)).
+			WithResource("service").WithAction("deleting"))
+		deleted++
+	}
+
+	span.SetAttributes(attribute.Int("load_balancer_services_deleted", deleted))
+	return nil
 }
