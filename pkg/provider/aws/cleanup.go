@@ -127,7 +127,7 @@ func cleanupKubernetesLoadBalancers(ctx context.Context, elbClient ELBClient, ec
 		WithAction("cleanup"))
 
 	// Clean up orphaned k8s-elb-* security groups left behind by deleted load balancers
-	sgDeleted, err := cleanupK8sELBSecurityGroups(ctx, ec2Client, tagKey)
+	sgDeleted, err := cleanupK8sSecurityGroupsByPrefix(ctx, ec2Client, tagKey, "k8s-elb-")
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -154,15 +154,16 @@ type ELBv2Client interface {
 	DeleteTargetGroup(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error)
 }
 
-// cleanupK8sELBSecurityGroups deletes security groups with names prefixed with
-// "k8s-elb-" that are tagged with the given cluster tag key. These are created
-// by Kubernetes for load balancers but not always cleaned up when the ELB is deleted.
-func cleanupK8sELBSecurityGroups(ctx context.Context, client EC2Client, tagKey string) (int, error) {
+// cleanupK8sSecurityGroupsByPrefix deletes security groups whose GroupName starts
+// with the given prefix AND carry the given cluster tag key. Used to clean up
+// Kubernetes-created ELB/NLB security groups (k8s-elb-*, k8s-traffic-*) that
+// are not always removed when their owning load balancer is deleted.
+func cleanupK8sSecurityGroupsByPrefix(ctx context.Context, client EC2Client, tagKey, namePrefix string) (int, error) {
 	sgs, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
 		Filters: []ec2types.Filter{
 			{
 				Name:   aws.String("group-name"),
-				Values: []string{"k8s-elb-*"},
+				Values: []string{namePrefix + "*"},
 			},
 		},
 	})
@@ -172,17 +173,15 @@ func cleanupK8sELBSecurityGroups(ctx context.Context, client EC2Client, tagKey s
 
 	var deleted int
 	for _, sg := range sgs.SecurityGroups {
-		if sg.GroupName == nil || !strings.HasPrefix(*sg.GroupName, "k8s-elb-") {
+		if sg.GroupName == nil || !strings.HasPrefix(*sg.GroupName, namePrefix) {
 			continue
 		}
 
-		// Check for the cluster tag
 		for _, tag := range sg.Tags {
 			if tag.Key != nil && *tag.Key == tagKey {
-				status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleting orphaned Kubernetes ELB security group: %s (%s)", *sg.GroupName, *sg.GroupId)).
+				status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleting orphaned Kubernetes security group: %s (%s)", *sg.GroupName, *sg.GroupId)).
 					WithResource("security-group").
 					WithAction("deleting"))
-				// Remove ingress rules in other SGs that reference this one
 				if err := revokeReferencingRules(ctx, client, *sg.GroupId); err != nil {
 					return deleted, err
 				}
@@ -195,7 +194,7 @@ func cleanupK8sELBSecurityGroups(ctx context.Context, client EC2Client, tagKey s
 		}
 	}
 
-	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Kubernetes ELB security group cleanup complete: %d deleted", deleted)).
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Kubernetes security group cleanup complete for prefix %s: %d deleted", namePrefix, deleted)).
 		WithResource("security-group").
 		WithAction("cleanup"))
 	return deleted, nil

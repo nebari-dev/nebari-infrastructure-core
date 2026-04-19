@@ -261,7 +261,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 	})
 }
 
-func TestCleanupK8sELBSecurityGroups(t *testing.T) {
+func TestCleanupK8sSecurityGroupsByPrefix(t *testing.T) {
 	tagKey := "kubernetes.io/cluster/my-cluster"
 
 	t.Run("deletes matching security groups", func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 			},
 		}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -329,7 +329,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 			},
 		}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -341,7 +341,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 	t.Run("no security groups found", func(t *testing.T) {
 		mock := &mockEC2Client{}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
