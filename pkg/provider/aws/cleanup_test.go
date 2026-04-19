@@ -228,7 +228,7 @@ func TestCleanupELBv2LoadBalancers(t *testing.T) {
 	}
 }
 
-func TestCleanupKubernetesLoadBalancers(t *testing.T) {
+func TestCleanupAWSLoadBalancers(t *testing.T) {
 	clusterName := "my-cluster"
 	tagKey := "kubernetes.io/cluster/" + clusterName
 
@@ -295,7 +295,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 			},
 		}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -353,7 +353,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -391,7 +391,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
