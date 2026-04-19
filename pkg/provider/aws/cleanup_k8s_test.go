@@ -144,6 +144,32 @@ func TestSweepLoadBalancerServices(t *testing.T) {
 	}
 }
 
+func TestCleanupKubernetesResources_HappyPath(t *testing.T) {
+	gw := newGatewayUnstructured()
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "svc-a"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
+	}
+	dyn := newDynamicClientWithGateway(gw)
+	//nolint:staticcheck
+	k8s := k8sfake.NewSimpleClientset(svc)
+
+	// Short wait: we're validating orchestration, not timing. 200ms is enough
+	// because the poll sees the Service as already gone (sweepLoadBalancerServices
+	// deleted it synchronously with the fake clients).
+	err := runCleanupKubernetesResources(context.Background(), dyn, k8s, 200*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, getErr := dyn.Resource(gatewayGVR()).Namespace(gatewayNamespace).Get(context.Background(), gatewayName, metav1.GetOptions{}); getErr == nil {
+		t.Errorf("expected Gateway deleted")
+	}
+	if _, getErr := k8s.CoreV1().Services("default").Get(context.Background(), "svc-a", metav1.GetOptions{}); getErr == nil {
+		t.Errorf("expected LoadBalancer service deleted")
+	}
+}
+
 func TestWaitForLoadBalancerServicesGone(t *testing.T) {
 	t.Run("returns nil when no LB services remain", func(t *testing.T) {
 		//nolint:staticcheck
