@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -92,4 +93,47 @@ func sweepLoadBalancerServices(ctx context.Context, client kubernetes.Interface)
 
 	span.SetAttributes(attribute.Int("load_balancer_services_deleted", deleted))
 	return nil
+}
+
+// waitForLoadBalancerServicesGone polls until there are zero Services of
+// type=LoadBalancer, or timeout elapses. Timeout is non-fatal in callers; the
+// SDK sweep stage will clean up stragglers.
+func waitForLoadBalancerServicesGone(ctx context.Context, client kubernetes.Interface, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.waitForLoadBalancerServicesGone")
+	defer span.End()
+	span.SetAttributes(attribute.String("timeout", timeout.String()))
+
+	deadline := time.Now().Add(timeout)
+	const pollInterval = 5 * time.Second
+
+	for {
+		list, err := client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to list services while polling: %w", err)
+		}
+
+		var remaining int
+		for _, svc := range list.Items {
+			if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			span.SetAttributes(attribute.Int("load_balancer_services_stragglers", 0))
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			span.SetAttributes(attribute.Int("load_balancer_services_stragglers", remaining))
+			return fmt.Errorf("%d LoadBalancer service(s) still present after %s", remaining, timeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
 }
