@@ -494,6 +494,21 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
+	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
+	// falls through to the Stage 2 SDK sweep below.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Attempting graceful Kubernetes-side load balancer cleanup").
+		WithResource("load-balancer").WithAction("cleanup"))
+	kubeconfigBytes, kcErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+	if kcErr != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kubernetes API unreachable; skipping graceful LB cleanup: %v", kcErr)).
+			WithResource("load-balancer").WithAction("cleanup"))
+	} else {
+		if err := cleanupKubernetesResources(ctx, kubeconfigBytes, projectName, awsCfg.LoadBalancerControllerDestroyTimeout()); err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Graceful LB cleanup incomplete: %v", err)).
+				WithResource("load-balancer").WithAction("cleanup"))
+		}
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up AWS load balancers for cluster: %s", projectName)).
 		WithResource("load-balancer").
 		WithAction("cleanup"))

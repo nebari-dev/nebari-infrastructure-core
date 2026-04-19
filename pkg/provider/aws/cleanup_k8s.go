@@ -100,8 +100,6 @@ func sweepLoadBalancerServices(ctx context.Context, client kubernetes.Interface)
 // Kubernetes clients from a kubeconfig blob, then delegates to
 // runCleanupKubernetesResources. All failures inside are best-effort; callers
 // should log-and-continue so the Stage 2 SDK sweep still runs.
-//
-//nolint:unused // wired into provider.go Destroy in the next task
 func cleanupKubernetesResources(ctx context.Context, kubeconfig []byte, clusterName string, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.cleanupKubernetesResources")
