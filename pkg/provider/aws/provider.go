@@ -494,9 +494,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	// Clean up Kubernetes-created load balancers before destroying infrastructure.
-	// These are not managed by Terraform and will block VPC/subnet deletion.
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up Kubernetes-created load balancers for cluster: %s", projectName)).
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up AWS load balancers for cluster: %s", projectName)).
 		WithResource("load-balancer").
 		WithAction("cleanup"))
 	elbClient, err := newELBClient(ctx, region)
@@ -504,16 +502,20 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		span.RecordError(err)
 		return fmt.Errorf("failed to create ELB client: %w", err)
 	}
+	elbv2Client, err := newELBv2Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create ELBv2 client: %w", err)
+	}
 	ec2ClientForCleanup, err := newEC2Client(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
-	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, projectName); err != nil {
+	if err := cleanupAWSLoadBalancers(ctx, elbClient, elbv2Client, ec2ClientForCleanup, projectName); err != nil {
 		if opts.Force {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
-				WithResource("load-balancer").
-				WithAction("cleanup"))
+				WithResource("load-balancer").WithAction("cleanup"))
 		} else {
 			span.RecordError(err)
 			return fmt.Errorf("failed to clean up load balancers: %w", err)
