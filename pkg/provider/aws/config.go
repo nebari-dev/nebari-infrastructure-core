@@ -1,5 +1,7 @@
 package aws
 
+import "time"
+
 type Config struct {
 	Region                    string                           `yaml:"region"`
 	StateBucket               string                           `yaml:"state_bucket,omitempty"`
@@ -24,13 +26,19 @@ type Config struct {
 }
 
 type AWSLoadBalancerControllerConfig struct {
-	Enabled      *bool  `yaml:"enabled,omitempty"`
-	ChartVersion string `yaml:"chart_version,omitempty"`
+	Enabled        *bool          `yaml:"enabled,omitempty"`
+	ChartVersion   string         `yaml:"chart_version,omitempty"`
+	DestroyTimeout *time.Duration `yaml:"destroy_timeout,omitempty"`
 }
 
 // defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
 // Bump to track the latest v3.x line; v2/chart-v1 is EOL.
 const defaultLBCChartVersion = "3.2.1"
+
+// defaultLBCDestroyTimeout is the maximum time the graceful Kubernetes-side
+// cleanup will wait for LBC's finalizer to drain load balancers before falling
+// through to the SDK sweep.
+const defaultLBCDestroyTimeout = 5 * time.Minute
 
 // LoadBalancerControllerEnabled returns whether the AWS Load Balancer Controller
 // should be installed. Defaults to true.
@@ -48,6 +56,16 @@ func (c *Config) LoadBalancerControllerChartVersion() string {
 		return defaultLBCChartVersion
 	}
 	return c.AWSLoadBalancerController.ChartVersion
+}
+
+// LoadBalancerControllerDestroyTimeout returns the maximum time the graceful
+// Kubernetes-side cleanup will wait for LBC's finalizer to drain load
+// balancers before falling through to the SDK sweep.
+func (c *Config) LoadBalancerControllerDestroyTimeout() time.Duration {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.DestroyTimeout == nil {
+		return defaultLBCDestroyTimeout
+	}
+	return *c.AWSLoadBalancerController.DestroyTimeout
 }
 
 type NodeGroup struct {
