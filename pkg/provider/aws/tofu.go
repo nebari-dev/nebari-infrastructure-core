@@ -1,6 +1,11 @@
 package aws
 
-import "embed"
+import (
+	"crypto/sha256"
+	"embed"
+	"encoding/hex"
+	"fmt"
+)
 
 // Embed all files in the templates directory, including dotfiles (i.e. .terraform.lock.hcl)
 //
@@ -42,6 +47,62 @@ type TFVars struct {
 	EFSEncrypted                  bool                 `json:"efs_encrypted"`
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
 	NodeSGAdditionalRules         map[string]any       `json:"node_security_group_additional_rules,omitempty"`
+	CoreDNSCorefile               *string              `json:"coredns_corefile,omitempty"`
+}
+
+// gatewayProxyServiceFQDN returns the in-cluster DNS name of the Envoy proxy
+// Service that envoy-gateway auto-creates for the nebari-gateway Gateway.
+// The hash suffix is the first 8 hex chars of sha256("<ns>/<name>"), matching
+// envoy-gateway's internal/utils/misc.go::GetHashedName algorithm.
+func gatewayProxyServiceFQDN() string {
+	sum := sha256.Sum256([]byte(gatewayNamespace + "/" + gatewayName))
+	hash := hex.EncodeToString(sum[:])[:8]
+	return fmt.Sprintf("envoy-%s-%s-%s.%s.svc.cluster.local", gatewayNamespace, gatewayName, hash, gatewayNamespace)
+}
+
+// buildCoreDNSCorefile returns a Corefile that rewrites in-cluster DNS lookups
+// of the public domain (and its subdomains) to the in-cluster Envoy proxy
+// Service. This avoids AWS NLB hairpin failures for in-cluster pods that
+// resolve their own public hostnames - notably cert-manager's HTTP-01
+// self-check. The base config matches the EKS-shipped Corefile so behavior
+// for all other names is unchanged.
+func buildCoreDNSCorefile(domain string) string {
+	target := gatewayProxyServiceFQDN()
+	return fmt.Sprintf(`.:53 {
+    errors
+    health {
+        lameduck 5s
+    }
+    ready
+    rewrite stop name exact %[1]s %[2]s
+    rewrite stop name regex .*\.%[3]s %[2]s
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+        pods insecure
+        fallthrough in-addr.arpa ip6.arpa
+    }
+    prometheus :9153
+    forward . /etc/resolv.conf
+    cache 30
+    loop
+    reload
+    loadbalance
+}
+`, domain, target, regexEscapeDomain(domain))
+}
+
+// regexEscapeDomain escapes a DNS domain for use inside a CoreDNS rewrite
+// regex. CoreDNS uses Go's regexp/syntax; the only metacharacter that appears
+// in DNS labels is `.`, so escaping dots is sufficient.
+func regexEscapeDomain(domain string) string {
+	out := make([]byte, 0, len(domain)+8)
+	for i := 0; i < len(domain); i++ {
+		if domain[i] == '.' {
+			out = append(out, '\\', '.')
+			continue
+		}
+		out = append(out, domain[i])
+	}
+	return string(out)
 }
 
 func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
@@ -62,7 +123,12 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
-func (c *Config) toTFVars(projectName string) TFVars {
+// toTFVars converts the AWS provider config into terraform variables.
+// domain is the public DNS domain from NebariConfig; when non-empty, a
+// CoreDNS Corefile with a rewrite rule for that domain is generated and
+// passed to the EKS managed addon so in-cluster pods bypass the NLB
+// hairpin when resolving the cluster's public hostnames.
+func (c *Config) toTFVars(projectName, domain string) TFVars {
 	vars := TFVars{
 		Region:                 c.Region,
 		ProjectName:            projectName,
@@ -76,6 +142,11 @@ func (c *Config) toTFVars(projectName string) TFVars {
 		ClusterEnabledLogTypes: c.EnabledLogTypes,
 		CreateIAMRoles:         c.ExistingClusterRoleArn == "" && c.ExistingNodeRoleArn == "",
 		NodeGroups:             resolveNodeGroupAMIs(c.NodeGroups),
+	}
+
+	if domain != "" {
+		corefile := buildCoreDNSCorefile(domain)
+		vars.CoreDNSCorefile = &corefile
 	}
 
 	// Set pointer fields only when values are provided, so omitempty excludes them from JSON.
