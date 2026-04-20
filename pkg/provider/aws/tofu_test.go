@@ -1,6 +1,9 @@
 package aws
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestToTFVarsLonghornSGRules(t *testing.T) {
 	tests := []struct {
@@ -44,7 +47,7 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vars := tt.config.toTFVars("test-project")
+			vars := tt.config.toTFVars("test-project", "")
 
 			if len(vars.NodeSGAdditionalRules) != tt.wantRuleCount {
 				t.Errorf("NodeSGAdditionalRules length = %d, want %d", len(vars.NodeSGAdditionalRules), tt.wantRuleCount)
@@ -84,7 +87,7 @@ func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 		NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 	}
 
-	vars := cfg.toTFVars("test-project")
+	vars := cfg.toTFVars("test-project", "")
 
 	tests := []struct {
 		ruleKey  string
@@ -206,4 +209,126 @@ func TestResolveNodeGroupAMIs(t *testing.T) {
 			t.Error("resolveNodeGroupAMIs mutated the worker node group in the input map")
 		}
 	})
+}
+
+func TestGatewayProxyServiceFQDN(t *testing.T) {
+	// The hash is the first 8 hex chars of sha256("envoy-gateway-system/nebari-gateway"),
+	// matching envoy-gateway's internal/utils/misc.go::GetHashedName.
+	// Verified on a live cluster: be66687c.
+	const want = "envoy-envoy-gateway-system-nebari-gateway-be66687c.envoy-gateway-system.svc.cluster.local"
+	got := gatewayProxyServiceFQDN()
+	if got != want {
+		t.Errorf("gatewayProxyServiceFQDN() = %q, want %q", got, want)
+	}
+}
+
+func TestRegexEscapeDomain(t *testing.T) {
+	tests := []struct {
+		name   string
+		domain string
+		want   string
+	}{
+		{"simple two-label", "example.com", `example\.com`},
+		{"three-label", "llmd-test.openteams.dev", `llmd-test\.openteams\.dev`},
+		{"with hyphens", "a-b-c.d-e.org", `a-b-c\.d-e\.org`},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := regexEscapeDomain(tt.domain)
+			if got != tt.want {
+				t.Errorf("regexEscapeDomain(%q) = %q, want %q", tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildCoreDNSCorefile(t *testing.T) {
+	corefile := buildCoreDNSCorefile("llmd-test.openteams.dev")
+
+	target := gatewayProxyServiceFQDN()
+
+	tests := []struct {
+		name string
+		want string
+	}{
+		// Bare domain - covers the literal hostname (e.g. cert-manager's
+		// HTTP-01 self-check against https://llmd-test.openteams.dev).
+		{
+			name: "exact-match rewrite for bare domain",
+			want: "rewrite stop name exact llmd-test.openteams.dev " + target,
+		},
+		// Wildcard - covers every subdomain (keycloak., argocd., etc.)
+		// The rewritten question must be exactly the gateway service FQDN;
+		// keeping the captured prefix would yield <prefix>.<target> which
+		// the kubernetes plugin doesn't recognize and returns NXDOMAIN.
+		{
+			name: "regex rewrite drops captured prefix and lands on bare target",
+			want: `rewrite stop name regex .*\.llmd-test\.openteams\.dev ` + target,
+		},
+		// Required by EKS addon: without `ready`, the readiness probe fails.
+		{
+			name: "includes ready plugin",
+			want: "ready",
+		},
+		// Preserve in-cluster DNS for Services and Pods.
+		{
+			name: "preserves kubernetes plugin for cluster.local",
+			want: "kubernetes cluster.local in-addr.arpa ip6.arpa",
+		},
+		// Preserve forwarding to upstream resolvers for all other names.
+		{
+			name: "preserves upstream forward",
+			want: "forward . /etc/resolv.conf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(corefile, tt.want) {
+				t.Errorf("Corefile missing %q\nfull Corefile:\n%s", tt.want, corefile)
+			}
+		})
+	}
+}
+
+func TestToTFVarsCoreDNSCorefile(t *testing.T) {
+	baseConfig := Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.33",
+		NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
+	}
+
+	tests := []struct {
+		name       string
+		domain     string
+		wantNil    bool
+		wantSubstr string
+	}{
+		{
+			name:    "empty domain leaves corefile nil",
+			domain:  "",
+			wantNil: true,
+		},
+		{
+			name:       "non-empty domain populates corefile with rewrite rule",
+			domain:     "llmd-test.openteams.dev",
+			wantNil:    false,
+			wantSubstr: "rewrite stop name exact llmd-test.openteams.dev",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vars := baseConfig.toTFVars("test-project", tt.domain)
+			switch {
+			case tt.wantNil && vars.CoreDNSCorefile != nil:
+				t.Errorf("CoreDNSCorefile = %q, want nil", *vars.CoreDNSCorefile)
+			case !tt.wantNil && vars.CoreDNSCorefile == nil:
+				t.Fatal("CoreDNSCorefile is nil, want non-nil")
+			case !tt.wantNil && !strings.Contains(*vars.CoreDNSCorefile, tt.wantSubstr):
+				t.Errorf("CoreDNSCorefile missing %q\ngot:\n%s", tt.wantSubstr, *vars.CoreDNSCorefile)
+			}
+		})
+	}
 }
