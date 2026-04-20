@@ -499,6 +499,102 @@ func TestCleanupK8sSecurityGroupsByPrefix(t *testing.T) {
 	})
 }
 
+func TestCleanupLBCManagedSecurityGroups(t *testing.T) {
+	clusterName := "llmd-test"
+
+	tests := []struct {
+		name           string
+		sgs            []ec2types.SecurityGroup
+		wantDeletedIDs []string
+	}{
+		{
+			name: "deletes SG with both LBC tags",
+			sgs: []ec2types.SecurityGroup{
+				{
+					GroupId:   aws.String("sg-001"),
+					GroupName: aws.String("k8s-envoygat-envoyenv-1d571e2555"),
+					Tags: []ec2types.Tag{
+						{Key: aws.String(clusterTagELBv2), Value: aws.String(clusterName)},
+						{Key: aws.String("service.k8s.aws/resource"), Value: aws.String("ManagedLBSecurityGroup")},
+					},
+				},
+			},
+			wantDeletedIDs: []string{"sg-001"},
+		},
+		{
+			name:           "no SGs match - no deletes",
+			sgs:            nil,
+			wantDeletedIDs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deletedIDs []string
+			mock := &mockEC2Client{
+				DescribeSecurityGroupsFunc: func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					// First call is the tag-filtered lookup; second call is from
+					// revokeReferencingRules which uses ip-permission.group-id.
+					for _, f := range params.Filters {
+						if f.Name != nil && *f.Name == "ip-permission.group-id" {
+							return &ec2.DescribeSecurityGroupsOutput{}, nil
+						}
+					}
+					return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: tt.sgs}, nil
+				},
+				DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					deletedIDs = append(deletedIDs, *params.GroupId)
+					return &ec2.DeleteSecurityGroupOutput{}, nil
+				},
+			}
+
+			deleted, err := cleanupLBCManagedSecurityGroups(context.Background(), mock, clusterName)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if deleted != len(tt.wantDeletedIDs) {
+				t.Errorf("deleted = %d, want %d", deleted, len(tt.wantDeletedIDs))
+			}
+			if !slices.Equal(deletedIDs, tt.wantDeletedIDs) {
+				t.Errorf("deletedIDs = %v, want %v", deletedIDs, tt.wantDeletedIDs)
+			}
+		})
+	}
+}
+
+func TestCleanupLBCManagedSecurityGroups_PassesExpectedFilters(t *testing.T) {
+	clusterName := "llmd-test"
+	var capturedFilters []ec2types.Filter
+	mock := &mockEC2Client{
+		DescribeSecurityGroupsFunc: func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+			if capturedFilters == nil {
+				capturedFilters = params.Filters
+			}
+			return &ec2.DescribeSecurityGroupsOutput{}, nil
+		},
+	}
+
+	if _, err := cleanupLBCManagedSecurityGroups(context.Background(), mock, clusterName); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantFilterNames := map[string]string{
+		"tag:" + clusterTagELBv2:       clusterName,
+		"tag:service.k8s.aws/resource": "ManagedLBSecurityGroup",
+	}
+	gotFilterNames := map[string]string{}
+	for _, f := range capturedFilters {
+		if f.Name != nil && len(f.Values) == 1 {
+			gotFilterNames[*f.Name] = f.Values[0]
+		}
+	}
+	for k, v := range wantFilterNames {
+		if gotFilterNames[k] != v {
+			t.Errorf("filter %q = %q, want %q", k, gotFilterNames[k], v)
+		}
+	}
+}
+
 func TestRevokeReferencingRules(t *testing.T) {
 	t.Run("revokes rules in referencing security groups", func(t *testing.T) {
 		var revokedCalls []string

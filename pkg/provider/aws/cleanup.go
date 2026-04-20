@@ -54,7 +54,8 @@ type ELBClient interface {
 // cleanupAWSLoadBalancers runs the full SDK-level sweep of AWS resources
 // Kubernetes-managed load-balancer controllers may have created, covering
 // both the in-tree cloud controller (Classic ELBs + k8s-elb-* SGs) and the
-// AWS Load Balancer Controller (elbv2 NLBs/ALBs, target groups, k8s-traffic-* SGs).
+// AWS Load Balancer Controller (elbv2 NLBs/ALBs, target groups, and the
+// ManagedLBSecurityGroup-tagged frontend SGs it owns).
 // Safe to call when none of those resources exist - tag-scoped queries return empty.
 func cleanupAWSLoadBalancers(
 	ctx context.Context,
@@ -124,12 +125,13 @@ func cleanupAWSLoadBalancers(
 		return err
 	}
 
-	// Security-group cleanup: both classic (k8s-elb-*) and LBC (k8s-traffic-*) prefixes.
+	// Security-group cleanup: classic (in-tree CCM, k8s-elb-*) by name-prefix;
+	// LBC's ManagedLBSecurityGroup by tag (name pattern varies per service).
 	if _, err := cleanupK8sSecurityGroupsByPrefix(ctx, ec2Client, classicTagKey, "k8s-elb-"); err != nil {
 		span.RecordError(err)
 		return err
 	}
-	if _, err := cleanupK8sSecurityGroupsByPrefix(ctx, ec2Client, clusterTagELBv2, "k8s-traffic-"); err != nil {
+	if _, err := cleanupLBCManagedSecurityGroups(ctx, ec2Client, clusterName); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -314,8 +316,9 @@ func cleanupELBv2TargetGroups(ctx context.Context, client ELBv2Client, clusterNa
 
 // cleanupK8sSecurityGroupsByPrefix deletes security groups whose GroupName starts
 // with the given prefix AND carry the given cluster tag key. Used to clean up
-// Kubernetes-created ELB/NLB security groups (k8s-elb-*, k8s-traffic-*) that
-// are not always removed when their owning load balancer is deleted.
+// k8s-elb-* security groups left behind by the in-tree cloud controller.
+// LBC-managed frontend SGs are handled by cleanupLBCManagedSecurityGroups
+// instead because their names are not a fixed prefix.
 func cleanupK8sSecurityGroupsByPrefix(ctx context.Context, client EC2Client, tagKey, namePrefix string) (int, error) {
 	sgs, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
 		Filters: []ec2types.Filter{
@@ -353,6 +356,68 @@ func cleanupK8sSecurityGroupsByPrefix(ctx context.Context, client EC2Client, tag
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("Kubernetes security group cleanup complete for prefix %s: %d deleted", namePrefix, deleted)).
+		WithResource("security-group").
+		WithAction("cleanup"))
+	return deleted, nil
+}
+
+// cleanupLBCManagedSecurityGroups deletes security groups managed by the AWS
+// Load Balancer Controller for the given cluster. LBC tags every frontend SG
+// it creates with two tags:
+//   - elbv2.k8s.aws/cluster=<clusterName>
+//   - service.k8s.aws/resource=ManagedLBSecurityGroup
+//
+// The SG name follows the pattern k8s-<ns-trunc>-<svc-trunc>-<hash>, which is
+// not a fixed prefix - name-prefix matching is unreliable. Tag filtering is the
+// supported way to find them.
+func cleanupLBCManagedSecurityGroups(ctx context.Context, client EC2Client, clusterName string) (int, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.cleanupLBCManagedSecurityGroups")
+	defer span.End()
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	sgs, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
+		Filters: []ec2types.Filter{
+			{
+				Name:   aws.String("tag:" + clusterTagELBv2),
+				Values: []string{clusterName},
+			},
+			{
+				Name:   aws.String("tag:service.k8s.aws/resource"),
+				Values: []string{"ManagedLBSecurityGroup"},
+			},
+		},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return 0, fmt.Errorf("failed to describe LBC-managed security groups: %w", err)
+	}
+
+	var deleted int
+	for _, sg := range sgs.SecurityGroups {
+		if sg.GroupId == nil {
+			continue
+		}
+		name := ""
+		if sg.GroupName != nil {
+			name = *sg.GroupName
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleting LBC-managed security group: %s (%s)", name, *sg.GroupId)).
+			WithResource("security-group").
+			WithAction("deleting"))
+		if err := revokeReferencingRules(ctx, client, *sg.GroupId); err != nil {
+			span.RecordError(err)
+			return deleted, err
+		}
+		if err := deleteSecurityGroupWithRetry(ctx, client, *sg.GroupId); err != nil {
+			span.RecordError(err)
+			return deleted, err
+		}
+		deleted++
+	}
+
+	span.SetAttributes(attribute.Int("security_groups_deleted", deleted))
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("LBC-managed security group cleanup complete: %d deleted", deleted)).
 		WithResource("security-group").
 		WithAction("cleanup"))
 	return deleted, nil
