@@ -11,12 +11,6 @@ import (
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
-	// Domain is the public DNS domain the cluster is being deployed under
-	// (from NebariConfig.Domain). Providers may use this to render
-	// infra-layer config that needs to reference the public hostnames -
-	// e.g. the AWS provider rewrites in-cluster DNS for the gateway
-	// hostname so cert-manager's HTTP-01 self-check avoids NLB hairpin.
-	Domain string
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.
@@ -73,9 +67,8 @@ type InfraSettings struct {
 // CLI code (Open/Closed Principle).
 //
 // Methods receive only the data they need (projectName, ClusterConfig, options)
-// rather than the full NebariConfig, so providers never see certificate or
-// git repository settings. The public Domain is threaded through DeployOptions
-// because some providers need to render infra-layer DNS config against it.
+// rather than the full NebariConfig, so providers never see DNS, certificate,
+// or git repository settings.
 type Provider interface {
 	// Name returns the short provider identifier used in CLI output, logging,
 	// and OpenTelemetry span attributes (e.g., "aws", "gcp", "azure", "local").

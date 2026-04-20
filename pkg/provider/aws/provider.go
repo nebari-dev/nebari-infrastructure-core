@@ -264,7 +264,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName, opts.Domain))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -451,10 +451,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	// Destroy doesn't need to render a fresh CoreDNS Corefile; passing empty
-	// domain leaves coredns_corefile null. tofu destroy tears down whatever
-	// the state file says exists, regardless of input vars.
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName, ""))
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -608,10 +605,8 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		return nil, err
 	}
 
-	// Initialize terraform to read outputs from state. tofu output doesn't
-	// reconcile inputs, so passing empty domain (and skipping Corefile
-	// rendering) is fine here.
-	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName, ""))
+	// Initialize terraform to read outputs from state
+	tf, err := tofu.Setup(ctx, tofuTemplates, awsCfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to setup terraform: %w", err)

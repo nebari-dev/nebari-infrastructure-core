@@ -138,7 +138,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Provider selected", "provider", provider.Name())
 
 	// Deploy infrastructure
-	if err := provider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout, Domain: cfg.Domain}); err != nil {
+	if err := provider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Deployment failed", "error", err, "provider", provider.Name())
 		return err

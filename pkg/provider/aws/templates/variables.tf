@@ -122,8 +122,3 @@ variable "node_security_group_additional_rules" {
   type    = any
   default = {}
 }
-
-variable "coredns_corefile" {
-  type    = string
-  default = null
-}
