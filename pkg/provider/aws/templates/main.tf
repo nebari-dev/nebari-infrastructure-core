@@ -1,5 +1,5 @@
 module "eks_cluster" {
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feature/coredns-corefile"
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=v0.3.0"
 
   project_name                             = var.project_name
   tags                                     = var.tags
@@ -28,5 +28,4 @@ module "eks_cluster" {
   efs_encrypted                            = var.efs_encrypted
   efs_kms_key_arn                          = var.efs_kms_key_arn
   node_security_group_additional_rules     = var.node_security_group_additional_rules
-  coredns_corefile                         = var.coredns_corefile
 }
