@@ -145,7 +145,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Destroy infrastructure
-	if err := prov.Destroy(ctx, cfg, provider.DestroyOptions{DryRun: destroyDryRun, Force: destroyForce, Timeout: timeout}); err != nil {
+	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, provider.DestroyOptions{DryRun: destroyDryRun, Force: destroyForce, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Destruction failed", "error", err, "provider", prov.Name())
 		if destroyForce {
@@ -192,7 +192,7 @@ func confirmDestruction(cfg *config.NebariConfig, prov provider.Provider) error 
 	fmt.Printf("   Project Name: %s\n", cfg.ProjectName)
 
 	// Show provider-specific details
-	for key, value := range prov.Summary(cfg) {
+	for key, value := range prov.Summary(cfg.Cluster) {
 		pad := 13 - len(key)
 		if pad < 1 {
 			pad = 1

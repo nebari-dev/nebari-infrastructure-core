@@ -36,7 +36,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		WithMetadata("cluster_name", cfg.ProjectName))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get kubeconfig").
