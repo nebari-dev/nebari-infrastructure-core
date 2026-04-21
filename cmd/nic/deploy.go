@@ -9,12 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -65,17 +65,18 @@ func defaultGitConfig(projectName string) *git.Config {
 }
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
-// For local provider without explicit git_repository config, this auto-creates /tmp/nebari-gitops-{project_name}.
-// For cloud providers, explicit git_repository config is required (returns error if not configured).
-func getOrCreateGitConfig(cfg *config.NebariConfig) (*git.Config, error) {
+// For providers that support local gitops without explicit git_repository config, this auto-creates
+// /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
+// The supportsLocalGitOps parameter comes from provider.InfraSettings().SupportsLocalGitOps.
+func getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
 		return cfg.GitRepository, nil
 	}
 
-	// Only auto-create local gitops for the local provider
+	// Only auto-create local gitops for providers that support it (e.g., local, kind, k3s)
 	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
-	if cfg.Cluster.ProviderName() != "local" {
-		slog.Info("No git_repository configured for cloud provider, skipping GitOps bootstrap",
+	if !supportsLocalGitOps {
+		slog.Info("No git_repository configured and provider does not support local gitops, skipping GitOps bootstrap",
 			"provider", cfg.Cluster.ProviderName())
 		return nil, nil
 	}
@@ -196,8 +197,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Get provider infrastructure settings for GitOps and foundational services
 	infraSettings := provider.InfraSettings(cfg)
 
-	// Bootstrap GitOps (auto-create local directory for local provider if needed)
-	gitConfig, err := getOrCreateGitConfig(cfg)
+	// Bootstrap GitOps (auto-create local directory for providers that support it)
+	gitConfig, err := getOrCreateGitConfig(cfg, infraSettings.SupportsLocalGitOps)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("GitOps configuration failed", "error", err)
@@ -470,7 +471,10 @@ func writeConfigToRepo(configFile, workDir string) error {
 	}
 
 	// Scrub sensitive fields from the config before writing to the repo
-	scrubbedBytes := scrubSensitiveFields(configBytes)
+	scrubbedBytes, err := scrubSensitiveFields(configBytes)
+	if err != nil {
+		return fmt.Errorf("failed to scrub sensitive fields: %w", err)
+	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
 	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
@@ -483,50 +487,28 @@ func writeConfigToRepo(configFile, workDir string) error {
 	return nil
 }
 
-// scrubSensitiveFields removes the auth block from git_repository config to prevent
-// accidentally committing credentials. Only env var names should be in configs,
-// but this provides defense in depth.
-// Only scrubs auth blocks that are nested under git_repository, preserving other auth blocks.
-func scrubSensitiveFields(configBytes []byte) []byte {
-	lines := strings.Split(string(configBytes), "\n")
-	var result []string
-	inGitRepoBlock := false
-	gitRepoIndent := 0
-	inAuthBlock := false
-	authIndent := 0
-
-	for _, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		currentIndent := len(line) - len(trimmed)
-
-		// Track when we enter/exit the git_repository block
-		if strings.HasPrefix(trimmed, "git_repository:") {
-			inGitRepoBlock = true
-			gitRepoIndent = currentIndent
-		} else if inGitRepoBlock && trimmed != "" && currentIndent <= gitRepoIndent {
-			inGitRepoBlock = false
-		}
-
-		// Only scrub auth blocks inside git_repository
-		if inGitRepoBlock && strings.HasPrefix(trimmed, "auth:") {
-			inAuthBlock = true
-			authIndent = currentIndent
-			result = append(result, strings.Repeat(" ", currentIndent)+"# auth: <scrubbed for security>")
-			continue
-		}
-
-		// If we're in an auth block (under git_repository), skip lines that are indented more
-		if inAuthBlock {
-			if trimmed == "" || currentIndent > authIndent {
-				continue // Skip auth block contents
-			}
-			inAuthBlock = false // Exited auth block
-		}
-
-		result = append(result, line)
+// scrubSensitiveFields removes auth blocks from git_repository and argocd_auth to prevent
+// accidentally committing credentials. Uses proper YAML parsing to handle all valid YAML
+// formats (flow style, tabs, block scalars) and only scrubs fields under git_repository.
+func scrubSensitiveFields(configBytes []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(configBytes, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse config YAML: %w", err)
 	}
 
-	return []byte(strings.Join(result, "\n"))
+	// Scrub auth fields only under git_repository
+	if gitRepo, ok := doc["git_repository"].(map[string]any); ok {
+		delete(gitRepo, "auth")
+		delete(gitRepo, "argocd_auth")
+		// Add a comment placeholder (YAML doesn't preserve comments, so add as a field)
+		gitRepo["_auth_scrubbed"] = "credentials removed for security"
+	}
+
+	scrubbed, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal scrubbed config: %w", err)
+	}
+	return scrubbed, nil
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration

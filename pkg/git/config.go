@@ -187,6 +187,19 @@ func (a *AuthConfig) GetToken() (string, error) {
 	return token, nil
 }
 
+// RedactedCopy returns a copy of the Config with sensitive fields removed.
+// The auth block is replaced with a placeholder, suitable for writing to
+// the gitops repo without leaking credentials.
+func (c *Config) RedactedCopy() *Config {
+	return &Config{
+		URL:    c.URL,
+		Branch: c.Branch,
+		Path:   c.Path,
+		// Auth and ArgoCDAuth are intentionally omitted (zero values)
+		// to prevent accidentally committing credentials
+	}
+}
+
 // GetAuth returns the configured transport.AuthMethod for git operations.
 // Implements CredentialProvider interface.
 func (a *AuthConfig) GetAuth() (transport.AuthMethod, error) {

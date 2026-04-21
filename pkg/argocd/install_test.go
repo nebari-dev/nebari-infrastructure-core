@@ -42,7 +42,7 @@ func TestAddLocalGitopsMount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			addLocalGitopsMount(tt.values, tt.localPath)
+			addLocalGitopsMount(context.Background(), tt.values, tt.localPath)
 
 			repoServer, ok := tt.values["repoServer"].(map[string]any)
 			if !ok {
@@ -97,7 +97,7 @@ func TestAddLocalGitopsMountPreservesExistingKeys(t *testing.T) {
 		},
 	}
 
-	addLocalGitopsMount(values, "/tmp/test-repo")
+	addLocalGitopsMount(context.Background(), values, "/tmp/test-repo")
 
 	repoServer := values["repoServer"].(map[string]any)
 	if repoServer["replicas"] != 2 {
@@ -194,7 +194,7 @@ func TestAddLocalGitopsMountAppendsToExistingVolumes(t *testing.T) {
 		},
 	}
 
-	addLocalGitopsMount(values, "/tmp/test-repo")
+	addLocalGitopsMount(context.Background(), values, "/tmp/test-repo")
 
 	repoServer := values["repoServer"].(map[string]any)
 	volumes := repoServer["volumes"].([]map[string]any)

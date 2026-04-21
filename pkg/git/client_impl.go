@@ -16,7 +16,6 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -417,7 +416,7 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	}
 
 	// Stage and commit changes
-	committed, err := c.stageAndCommit(ctx, span, message)
+	committed, err := c.stageAndCommit(ctx, message)
 	if err != nil {
 		return err
 	}
@@ -452,13 +451,17 @@ func (c *ClientImpl) commitLocal(ctx context.Context, message string) error {
 		return err
 	}
 
-	_, err := c.stageAndCommit(ctx, span, message)
+	_, err := c.stageAndCommit(ctx, message)
 	return err
 }
 
 // stageAndCommit stages all changes and commits them. Returns true if a commit was made,
 // false if there were no changes to commit.
-func (c *ClientImpl) stageAndCommit(ctx context.Context, span trace.Span, message string) (bool, error) {
+func (c *ClientImpl) stageAndCommit(ctx context.Context, message string) (bool, error) {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.stageAndCommit")
+	defer span.End()
+
 	worktree, err := c.repo.Worktree()
 	if err != nil {
 		span.RecordError(err)

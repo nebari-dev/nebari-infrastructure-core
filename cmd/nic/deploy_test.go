@@ -81,10 +81,10 @@ git_repository:
 provider: aws`,
 			contains: []string{
 				"project_name: test",
-				"url: \"git@github.com:org/repo.git\"",
+				"url: git@github.com:org/repo.git",
 				"branch: main",
 				"provider: aws",
-				"# auth: <scrubbed for security>",
+				"_auth_scrubbed: credentials removed for security",
 			},
 			excludes: []string{
 				"ssh_key_env",
@@ -102,7 +102,7 @@ git_repository:
 provider: local`,
 			contains: []string{
 				"project_name: test",
-				"url: \"file:///tmp/repo\"",
+				"url: file:///tmp/repo",
 				"branch: main",
 				"provider: local",
 			},
@@ -120,7 +120,7 @@ provider: local`,
 			contains: []string{
 				"url: test",
 				"path: clusters/prod",
-				"# auth: <scrubbed for security>",
+				"_auth_scrubbed: credentials removed for security",
 			},
 			excludes: []string{
 				"ssh_key_env",
@@ -149,10 +149,9 @@ git_repository:
 provider: aws`,
 			contains: []string{
 				"amazon_web_services:",
-				"auth:",
 				"role_arn: arn:aws:iam::123456:role/deploy",
-				"url: \"git@github.com:org/repo.git\"",
-				"# auth: <scrubbed for security>",
+				"url: git@github.com:org/repo.git",
+				"_auth_scrubbed: credentials removed for security",
 				"provider: aws",
 			},
 			excludes: []string{
@@ -164,7 +163,11 @@ provider: aws`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := string(scrubSensitiveFields([]byte(tt.input)))
+			scrubbed, err := scrubSensitiveFields([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("scrubSensitiveFields() unexpected error: %v", err)
+			}
+			result := string(scrubbed)
 
 			for _, s := range tt.contains {
 				if !containsString(result, s) {

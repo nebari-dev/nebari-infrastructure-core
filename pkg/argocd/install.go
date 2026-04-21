@@ -84,7 +84,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		if err != nil {
 			return fmt.Errorf("invalid local git path: %w", err)
 		}
-		addLocalGitopsMount(argoCDCfg.Values, localPath)
+		addLocalGitopsMount(ctx, argoCDCfg.Values, localPath)
 
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
 			WithResource("argocd").
@@ -332,7 +332,12 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 
 // addLocalGitopsMount adds a hostPath volume and volumeMount to the ArgoCD
 // repo-server Helm values so it can access a local file:// git repository.
-func addLocalGitopsMount(values map[string]any, localPath string) {
+func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath string) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "argocd.addLocalGitopsMount")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("local_path", localPath))
 	repoServer, ok := values["repoServer"].(map[string]any)
 	if !ok {
 		repoServer = map[string]any{}

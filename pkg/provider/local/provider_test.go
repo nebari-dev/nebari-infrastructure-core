@@ -31,6 +31,7 @@ func TestInfraSettings(t *testing.T) {
 		{"MetalLBAddressPool", settings.MetalLBAddressPool, "192.168.1.100-192.168.1.110"},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
+		{"SupportsLocalGitOps", settings.SupportsLocalGitOps, true},
 	}
 
 	for _, tt := range tests {
