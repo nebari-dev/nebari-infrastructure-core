@@ -63,7 +63,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	span.SetAttributes(attribute.String("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Verify kubeconfig file exists
@@ -195,7 +199,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		WithMetadata("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Load the kubeconfig file

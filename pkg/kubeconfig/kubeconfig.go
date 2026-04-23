@@ -12,21 +12,25 @@ import (
 
 // GetPath returns the path to the kubeconfig file.
 // It checks the KUBECONFIG environment variable first, then falls back to ~/.kube/config.
-func GetPath() string {
+func GetPath() (string, error) {
 	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
-		return kubeconfigEnv
+		return kubeconfigEnv, nil
 	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".kube", "config")
+		return "", fmt.Errorf("failed to determine home directory for kubeconfig: %w", err)
 	}
-	return filepath.Join(homeDir, ".kube", "config")
+	return filepath.Join(homeDir, ".kube", "config"), nil
 }
 
 // Load loads the kubeconfig from the default path.
 func Load() (*clientcmdapi.Config, error) {
-	return LoadFromPath(GetPath())
+	path, err := GetPath()
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromPath(path)
 }
 
 // LoadFromPath loads the kubeconfig from the specified path.
@@ -92,16 +96,16 @@ func ExtractContext(contextName string) ([]byte, error) {
 	return WriteBytes(filtered)
 }
 
-// ValidateContext checks that the specified context exists in the kubeconfig.
-// Returns an error with available contexts if not found.
-func ValidateContext(contextName string) error {
-	config, err := Load()
+// ValidateContext checks that the specified context exists in the kubeconfig at
+// the given path. Returns an error with available contexts if not found.
+func ValidateContext(path, contextName string) error {
+	config, err := LoadFromPath(path)
 	if err != nil {
-		return fmt.Errorf("failed to load kubeconfig from %s: %w", GetPath(), err)
+		return fmt.Errorf("failed to load kubeconfig from %s: %w", path, err)
 	}
 
 	if _, exists := config.Contexts[contextName]; !exists {
-		return fmt.Errorf("context %q not found in kubeconfig. Available contexts: %v", contextName, GetContextNames(config))
+		return fmt.Errorf("context %q not found in kubeconfig %s. Available contexts: %v", contextName, path, GetContextNames(config))
 	}
 
 	return nil
