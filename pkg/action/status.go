@@ -1,4 +1,4 @@
-package main
+package action
 
 import (
 	"log/slog"
@@ -6,30 +6,24 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// statusLogHandler returns a status.Handler that logs updates using slog
-// This keeps the logging concern in the application layer while reusing
-// the status package's channel management
-func statusLogHandler() status.Handler {
+// defaultStatusHandler returns a status.Handler that forwards progress updates
+// to slog.Default() with the level and structured attributes preserved. It is
+// the built-in sink used by every action so progress flows through the caller's
+// existing slog configuration without any extra wiring.
+func defaultStatusHandler() status.Handler {
 	return func(update status.Update) {
-		// Build structured logging attributes
-		attrs := []any{
-			"message", update.Message,
-		}
+		attrs := []any{"message", update.Message}
 
 		if update.Resource != "" {
 			attrs = append(attrs, "resource", update.Resource)
 		}
-
 		if update.Action != "" {
 			attrs = append(attrs, "action", update.Action)
 		}
-
-		// Add metadata as individual attributes
 		for key, value := range update.Metadata {
 			attrs = append(attrs, key, value)
 		}
 
-		// Log at appropriate level
 		switch update.Level {
 		case status.LevelInfo:
 			slog.Info("Status", attrs...)
