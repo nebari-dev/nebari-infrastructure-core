@@ -2,25 +2,18 @@ package hetzner
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
 func TestResolveK3sVersion(t *testing.T) {
-	releases := []ghRelease{
-		{TagName: "v1.32.12+k3s1", Prerelease: false},
-		{TagName: "v1.32.12-rc1+k3s1", Prerelease: true},
-		{TagName: "v1.32.11+k3s3", Prerelease: false},
-		{TagName: "v1.31.5+k3s1", Prerelease: false},
+	// Releases are oldest-first, matching real `hetzner-k3s releases` output.
+	// The function iterates in reverse to find the newest match.
+	releases := []string{
+		"v1.31.5+k3s1",
+		"v1.32.11+k3s3",
+		"v1.32.12-rc1+k3s1",
+		"v1.32.12+k3s1",
 	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(releases)
-	}))
-	defer server.Close()
 
 	tests := []struct {
 		name    string
@@ -44,7 +37,7 @@ func TestResolveK3sVersion(t *testing.T) {
 			want:    "v1.32.0+k3s1",
 		},
 		{
-			name:    "skips prerelease",
+			name:    "skips prerelease rc",
 			version: "1.32.12",
 			want:    "v1.32.12+k3s1",
 		},
@@ -61,7 +54,7 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveK3sVersion(context.Background(), tt.version, server.URL)
+			got, err := resolveK3sVersion(context.Background(), tt.version, releases)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("resolveK3sVersion() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -73,30 +66,103 @@ func TestResolveK3sVersion(t *testing.T) {
 	}
 }
 
-func TestResolveK3sVersion_APIError(t *testing.T) {
+func TestResolveK3sVersion_SkipsAllPrereleaseTypes(t *testing.T) {
+	// Releases are oldest-first. The function iterates in reverse,
+	// so it will hit the pre-releases first and skip them.
+	releases := []string{
+		"v1.32.11+k3s1", // oldest stable
+		"v1.32.12-alpha1+k3s1",
+		"v1.32.12-beta1+k3s1",
+		"v1.32.12-rc1+k3s1",
+	}
+
+	got, err := resolveK3sVersion(context.Background(), "1.32", releases)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "v1.32.11+k3s1" {
+		t.Errorf("resolveK3sVersion() = %q, want %q (should skip alpha, beta, rc)", got, "v1.32.11+k3s1")
+	}
+}
+
+func TestIsPrerelease(t *testing.T) {
 	tests := []struct {
-		name       string
-		statusCode int
-		errMsg     string
+		tag  string
+		want bool
 	}{
-		{"server error", http.StatusInternalServerError, "status 500"},
-		{"rate limited", http.StatusForbidden, "status 403"},
-		{"not found", http.StatusNotFound, "status 404"},
+		{"v1.32.12+k3s1", false},
+		{"v1.32.12-rc1+k3s1", true},
+		{"v1.32.12-alpha1+k3s1", true},
+		{"v1.32.12-beta1+k3s1", true},
+		{"v1.32.12-rc+k3s1", true},
+		// Ensure loose strings don't match (e.g., a hypothetical tag with "rc" elsewhere)
+		{"v1.32.12+k3s1-rc", false}, // rc after +k3s should not match
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer server.Close()
-
-			_, err := resolveK3sVersion(context.Background(), "1.32", server.URL)
-			if err == nil {
-				t.Fatal("expected error for non-200 response")
-			}
-			if !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("error should contain %q, got: %v", tt.errMsg, err)
+		t.Run(tt.tag, func(t *testing.T) {
+			if got := isPrerelease(tt.tag); got != tt.want {
+				t.Errorf("isPrerelease(%q) = %v, want %v", tt.tag, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestK3sVersionPattern(t *testing.T) {
+	tests := []struct {
+		line  string
+		valid bool
+	}{
+		// Valid release tags
+		{"v1.32.12+k3s1", true},
+		{"v1.32.12-rc1+k3s1", true},
+		{"v1.32.12-alpha1+k3s1", true},
+		{"v1.32.12-beta+k3s1", true},
+		{"v0.1.0-rc1+k3s1", true},
+		{"v1.35.3+k3s2", true},
+
+		// Invalid - banner and header lines from hetzner-k3s output
+		{"╭─────────────────────────────────────────╮", false},
+		{"│            hetzner-k3s                  │", false},
+		{"│   Production-ready K8s on Hetzner       │", false},
+		{"╰─────────────────────────────────────────╯", false},
+		{"Version: 2.4.6", false},
+		{"Available k3s releases:", false},
+		{"", false},
+
+		// Invalid - malformed versions
+		{"1.32.12+k3s1", false},      // missing v prefix
+		{"v1.32+k3s1", false},        // missing patch
+		{"v1.32.12", false},          // missing +k3s suffix
+		{"v1.32.12+k3s", false},      // missing k3s number
+		{"v1.32.12-foo+k3s1", false}, // unknown pre-release type
+	}
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			if got := k3sVersionPattern.MatchString(tt.line); got != tt.valid {
+				t.Errorf("k3sVersionPattern.MatchString(%q) = %v, want %v", tt.line, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestExtractAvailableMinors(t *testing.T) {
+	releases := []string{
+		"v1.31.5+k3s1",
+		"v1.32.11+k3s3",
+		"v1.32.12-rc1+k3s1", // pre-release, should be skipped
+		"v1.32.12+k3s1",
+		"v1.33.1+k3s1",
+	}
+
+	got := extractAvailableMinors(releases)
+	want := []string{"1.31", "1.32", "1.33"}
+
+	if len(got) != len(want) {
+		t.Fatalf("extractAvailableMinors() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("extractAvailableMinors()[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }

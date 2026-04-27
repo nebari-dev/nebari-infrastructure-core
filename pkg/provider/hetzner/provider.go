@@ -148,7 +148,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Resolving k3s version").
 		WithResource("provider").WithAction("deploy"))
 
-	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, "")
+	releases, err := getHetznerK3sReleases(ctx, binaryPath)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get k3s releases: %w", err)
+	}
+
+	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, releases)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve k3s version: %w", err)
