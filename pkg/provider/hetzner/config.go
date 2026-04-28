@@ -5,6 +5,8 @@ import (
 	"net"
 	"regexp"
 	"strings"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 // Config holds Hetzner-specific provider configuration.
@@ -30,6 +32,14 @@ type Config struct {
 
 	SSH     *SSHConfig     `yaml:"ssh,omitempty"`
 	Network *NetworkConfig `yaml:"network,omitempty"`
+
+	// Longhorn opts the Hetzner provider into installing Longhorn distributed
+	// block storage on the cluster after creation. Hetzner's hcloud-volumes
+	// CSI is RWO-only; charts that need RWX (e.g. jupyterhub shared-storage
+	// for group dirs) require Longhorn — or another RWX provider — to avoid
+	// the in-cluster NFS-on-RWO workaround. Omit the block to skip the
+	// install; explicit `enabled: false` also disables.
+	Longhorn *longhorn.Config `yaml:"longhorn,omitempty"`
 }
 
 // NodeGroup defines a pool of Hetzner Cloud instances. Exactly one node group

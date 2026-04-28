@@ -10,6 +10,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 const ProviderName = "existing"
@@ -114,10 +115,13 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	return nil
 }
 
-// Deploy is a no-op for existing clusters.
+// Deploy installs cluster-side prerequisites for the existing cluster.
+// Infrastructure is assumed to already exist (the cluster was provisioned
+// out-of-band), so this is mostly a no-op except for opt-in components like
+// Longhorn that the user can request via the existing-cluster config.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "existing.Deploy")
+	ctx, span := tracer.Start(ctx, "existing.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -125,6 +129,28 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		attribute.String("project_name", projectName),
 		attribute.Bool("dry_run", opts.DryRun),
 	)
+
+	if opts.DryRun {
+		return nil
+	}
+
+	existingCfg, err := extractConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if existingCfg.Longhorn.IsEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
+		}
+		if err := longhorn.Install(ctx, kubeconfigBytes, existingCfg.Longhorn); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+	}
 
 	return nil
 }

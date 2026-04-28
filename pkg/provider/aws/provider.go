@@ -14,6 +14,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -319,7 +320,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 
-		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+		if err := longhorn.Install(ctx, kubeconfigBytes, awsCfg.Longhorn); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
 		}

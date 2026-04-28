@@ -198,6 +198,34 @@ func TestInfraSettings(t *testing.T) {
 			wantLBAnnotationLen: 1,
 			wantLBAnnotations:   map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 		},
+		{
+			name: "longhorn opt-in defaults StorageClass to longhorn",
+			config: map[string]any{
+				"context":  "my-context",
+				"longhorn": map[string]any{},
+			},
+			wantStorageClass: "longhorn",
+			wantMetalLB:      false,
+		},
+		{
+			name: "longhorn explicitly disabled keeps default StorageClass",
+			config: map[string]any{
+				"context":  "my-context",
+				"longhorn": map[string]any{"enabled": false},
+			},
+			wantStorageClass: "standard",
+			wantMetalLB:      false,
+		},
+		{
+			name: "explicit storage_class wins over longhorn block",
+			config: map[string]any{
+				"context":       "my-context",
+				"storage_class": "hcloud-volumes",
+				"longhorn":      map[string]any{},
+			},
+			wantStorageClass: "hcloud-volumes",
+			wantMetalLB:      false,
+		},
 	}
 
 	for _, tt := range tests {
