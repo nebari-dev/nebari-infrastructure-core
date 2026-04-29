@@ -269,8 +269,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // InfraSettings returns local provider Kubernetes infrastructure settings.
 func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
 	return provider.InfraSettings{
-		StorageClass:       "standard",
-		NeedsMetalLB:       true,
-		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+		StorageClass:        "standard",
+		NeedsMetalLB:        true,
+		MetalLBAddressPool:  "192.168.1.100-192.168.1.110",
+		SupportsLocalGitOps: true,
 	}
 }
