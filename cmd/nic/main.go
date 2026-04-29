@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -9,8 +11,10 @@ import (
 	"syscall"
 
 	"github.com/joho/godotenv"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/cmd/nic/renderer"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
@@ -26,23 +30,73 @@ var (
 	// Global provider registry
 	reg *registry.Registry
 
+	// Global flags
+	formatFlag  string
+	verboseFlag bool
+
 	// Root command
 	rootCmd = &cobra.Command{
 		Use:   "nic",
 		Short: "Nebari Infrastructure Core - Cloud infrastructure management for Nebari",
 		Long: `Nebari Infrastructure Core (NIC) is a standalone CLI tool that manages
 cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Setup structured logging
-			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
-			}))
-			slog.SetDefault(logger)
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			r, err := selectRenderer(formatFlag, verboseFlag)
+			if err != nil {
+				return err
+			}
+			cmd.SetContext(renderer.WithRenderer(cmd.Context(), r))
+
+			// For JSON mode, use the JSON renderer's slog logger as default.
+			// For pretty/plain mode, discard slog output to avoid JSON noise.
+			if jr, ok := r.(*renderer.JSON); ok {
+				slog.SetDefault(jr.Logger())
+			} else {
+				slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+			}
+			return nil
+		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			// Ensure the TUI is properly shut down when commands finish
+			// without calling Summary() (e.g., version, validate).
+			r := renderer.FromContext(cmd.Context())
+			if t, ok := r.(*renderer.TUI); ok {
+				t.Quit()
+			}
+			return nil
 		},
 	}
 )
 
+// selectRenderer chooses the Renderer based on the --format flag and TTY detection.
+func selectRenderer(format string, verbose bool) (renderer.Renderer, error) {
+	switch format {
+	case "json":
+		return renderer.NewJSON(os.Stderr), nil
+	case "tui":
+		return renderer.NewTUI(), nil
+	case "pretty":
+		return renderer.NewPretty(os.Stdout, verbose), nil
+	case "plain":
+		return renderer.NewPlain(os.Stdout, verbose), nil
+	case "auto", "":
+		if isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+			if os.Getenv("NO_COLOR") != "" {
+				return renderer.NewPlain(os.Stdout, verbose), nil
+			}
+			return renderer.NewPretty(os.Stdout, verbose), nil
+		}
+		return renderer.NewJSON(os.Stderr), nil
+	default:
+		return nil, fmt.Errorf("unknown format %q: must be auto, pretty, tui, json, or plain", format)
+	}
+}
+
 func init() {
+	// Register global persistent flags
+	rootCmd.PersistentFlags().StringVar(&formatFlag, "format", "auto", "Output format: auto, tui, pretty, json, or plain")
+	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed output from third-party tools")
+
 	// Load .env file if it exists (silently ignore if not found)
 	// This allows users to optionally use .env for local development
 	_ = godotenv.Load()

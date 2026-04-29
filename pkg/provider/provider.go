@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -11,6 +12,9 @@ import (
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
+	// Output is an optional writer for third-party tool output (OpenTofu, hetzner-k3s).
+	// If nil, defaults to os.Stdout.
+	Output io.Writer
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.
@@ -18,6 +22,9 @@ type DestroyOptions struct {
 	DryRun  bool
 	Force   bool
 	Timeout time.Duration
+	// Output is an optional writer for third-party tool output.
+	// If nil, defaults to os.Stdout.
+	Output io.Writer
 }
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.

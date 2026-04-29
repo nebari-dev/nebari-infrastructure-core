@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -223,7 +224,23 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 // Downloaded archives are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
 // The extracted binary is written to the temporary working directory to avoid conflicts
 // when multiple deployments run concurrently or use different OpenTofu versions.
-func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
+// SetupOption configures optional behavior for Setup.
+type SetupOption func(*setupConfig)
+
+type setupConfig struct {
+	stdout io.Writer
+	stderr io.Writer
+}
+
+// WithOutput redirects OpenTofu stdout and stderr to the given writers.
+func WithOutput(stdout, stderr io.Writer) SetupOption {
+	return func(c *setupConfig) {
+		c.stdout = stdout
+		c.stderr = stderr
+	}
+}
+
+func Setup(ctx context.Context, templates fs.FS, tfvars any, opts ...SetupOption) (te *TerraformExecutor, err error) {
 	appFs := afero.NewOsFs()
 
 	workingDir, err := extractTemplates(appFs, templates)
@@ -279,13 +296,18 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		return nil, fmt.Errorf("failed to write tfvars: %w", err)
 	}
 
+	cfg := &setupConfig{stdout: os.Stdout, stderr: os.Stderr}
+	for _, o := range opts {
+		o(cfg)
+	}
+
 	tf, err := tfexec.NewTerraform(workingDir, execPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create terraform executor: %w", err)
 	}
 
-	tf.SetStdout(os.Stdout)
-	tf.SetStderr(os.Stderr)
+	tf.SetStdout(cfg.stdout)
+	tf.SetStderr(cfg.stderr)
 
 	return &TerraformExecutor{
 		Terraform:  tf,

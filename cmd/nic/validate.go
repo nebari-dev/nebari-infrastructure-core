@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/cmd/nic/renderer"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
@@ -31,10 +31,9 @@ func init() {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
+	r := renderer.FromContext(ctx)
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
 	resolved, err := resolveConfigFile(validateConfigFile)
 	if err != nil {
 		return err
@@ -47,31 +46,24 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	span.SetAttributes(attribute.String("config.file", validateConfigFile))
 
-	slog.Info("Validating configuration", "config_file", validateConfigFile)
+	start := time.Now()
 
-	// Parse configuration
 	cfg, err := config.ParseConfig(ctx, validateConfigFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		r.Error(err, "Check your config file syntax")
 		return err
 	}
 
-	// Validate configuration with registered providers
 	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		r.Error(err, "")
 		return err
 	}
 
-	slog.Info("Configuration is valid",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
-
-	fmt.Printf("✓ Configuration file is valid\n")
-	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
-	fmt.Printf("  Project: %s\n", cfg.ProjectName)
+	r.EndStep(renderer.StepOK, time.Since(start), "Configuration is valid")
+	r.Info("  Provider: " + cfg.Cluster.ProviderName())
+	r.Info("  Project:  " + cfg.ProjectName)
 
 	return nil
 }
