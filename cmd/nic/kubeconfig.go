@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
@@ -32,15 +33,12 @@ func init() {
 }
 
 func runKubeconfig(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
-	resolved, err := resolveConfigFile(kubeconfigConfigFile)
+	kubeconfigConfigFile, err := resolveConfigFile(kubeconfigConfigFile)
 	if err != nil {
 		return err
 	}
-	kubeconfigConfigFile = resolved
 
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
@@ -48,7 +46,6 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 
 	span.SetAttributes(attribute.String("config.file", kubeconfigConfigFile))
 
-	// Parse configuration
 	cfg, err := config.ParseConfig(ctx, kubeconfigConfigFile)
 	if err != nil {
 		span.RecordError(err)
@@ -56,29 +53,9 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate configuration with registered providers
-	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
-		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", kubeconfigConfigFile)
-		return err
-	}
-
-	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
-
-	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	kubeconfigBytes, err := (&action.Kubeconfig{}).Run(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
-		return err
-	}
-
-	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
-	if err != nil {
-		span.RecordError(err)
-		slog.Error("Failed to generate kubeconfig", "error", err)
 		return err
 	}
 
@@ -89,13 +66,13 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		slog.Info("Kubeconfig written successfully", "file", kubeconfigOutputFile)
-	} else {
-		if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
-			span.RecordError(err)
-			slog.Error("Failed to write kubeconfig to stdout", "error", err)
-			return err
-		}
+		return nil
 	}
 
+	if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to write kubeconfig to stdout", "error", err)
+		return err
+	}
 	return nil
 }

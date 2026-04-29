@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -9,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
 var (
@@ -31,15 +30,12 @@ func init() {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
-	resolved, err := resolveConfigFile(validateConfigFile)
+	validateConfigFile, err := resolveConfigFile(validateConfigFile)
 	if err != nil {
 		return err
 	}
-	validateConfigFile = resolved
 
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
@@ -47,9 +43,6 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	span.SetAttributes(attribute.String("config.file", validateConfigFile))
 
-	slog.Info("Validating configuration", "config_file", validateConfigFile)
-
-	// Parse configuration
 	cfg, err := config.ParseConfig(ctx, validateConfigFile)
 	if err != nil {
 		span.RecordError(err)
@@ -57,28 +50,15 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate configuration with registered providers
-	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
+	if err := (&action.Validate{}).Run(ctx, cfg); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err
 	}
-
-	slog.Info("Configuration is valid",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
 
 	fmt.Printf("✓ Configuration file is valid\n")
 	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil
-}
-
-func getValidNames(ctx context.Context, reg *registry.Registry) config.ValidateOptions {
-	return config.ValidateOptions{
-		ClusterProviders: reg.ClusterProviders.List(ctx),
-		DNSProviders:     reg.DNSProviders.List(ctx),
-	}
 }
