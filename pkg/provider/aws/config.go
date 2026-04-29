@@ -1,25 +1,71 @@
 package aws
 
+import "time"
+
 type Config struct {
-	Region                   string               `yaml:"region"`
-	StateBucket              string               `yaml:"state_bucket,omitempty"`
-	AvailabilityZones        []string             `yaml:"availability_zones,omitempty"`
-	VPCCIDRBlock             string               `yaml:"vpc_cidr_block,omitempty"`
-	ExistingVPCID            string               `yaml:"existing_vpc_id,omitempty"`
-	ExistingPrivateSubnetIDs []string             `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID  string               `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion        string               `yaml:"kubernetes_version"`
-	EndpointPrivateAccess    bool                 `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess     bool                 `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                string               `yaml:"eks_kms_arn,omitempty"`
-	EnabledLogTypes          []string             `yaml:"enabled_log_types,omitempty"`
-	ExistingClusterRoleArn   string               `yaml:"existing_cluster_role_arn,omitempty"`
-	ExistingNodeRoleArn      string               `yaml:"existing_node_role_arn,omitempty"`
-	PermissionsBoundary      string               `yaml:"permissions_boundary,omitempty"`
-	NodeGroups               map[string]NodeGroup `yaml:"node_groups"`
-	Tags                     map[string]string    `yaml:"tags,omitempty"`
-	EFS                      *EFSConfig           `yaml:"efs,omitempty"`
-	Longhorn                 *LonghornConfig      `yaml:"longhorn,omitempty"`
+	Region                    string                           `yaml:"region"`
+	StateBucket               string                           `yaml:"state_bucket,omitempty"`
+	AvailabilityZones         []string                         `yaml:"availability_zones,omitempty"`
+	VPCCIDRBlock              string                           `yaml:"vpc_cidr_block,omitempty"`
+	ExistingVPCID             string                           `yaml:"existing_vpc_id,omitempty"`
+	ExistingPrivateSubnetIDs  []string                         `yaml:"existing_private_subnet_ids,omitempty"`
+	ExistingSecurityGroupID   string                           `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion         string                           `yaml:"kubernetes_version"`
+	EndpointPrivateAccess     bool                             `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess      bool                             `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                 string                           `yaml:"eks_kms_arn,omitempty"`
+	EnabledLogTypes           []string                         `yaml:"enabled_log_types,omitempty"`
+	ExistingClusterRoleArn    string                           `yaml:"existing_cluster_role_arn,omitempty"`
+	ExistingNodeRoleArn       string                           `yaml:"existing_node_role_arn,omitempty"`
+	PermissionsBoundary       string                           `yaml:"permissions_boundary,omitempty"`
+	NodeGroups                map[string]NodeGroup             `yaml:"node_groups"`
+	Tags                      map[string]string                `yaml:"tags,omitempty"`
+	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
+	Longhorn                  *LonghornConfig                  `yaml:"longhorn,omitempty"`
+	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
+}
+
+type AWSLoadBalancerControllerConfig struct {
+	Enabled        *bool          `yaml:"enabled,omitempty"`
+	ChartVersion   string         `yaml:"chart_version,omitempty"`
+	DestroyTimeout *time.Duration `yaml:"destroy_timeout,omitempty"`
+}
+
+// defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
+// Bump to track the latest v3.x line; v2/chart-v1 is EOL.
+const defaultLBCChartVersion = "3.2.1"
+
+// defaultLBCDestroyTimeout is the maximum time the graceful Kubernetes-side
+// cleanup will wait for LBC's finalizer to drain load balancers before falling
+// through to the SDK sweep.
+const defaultLBCDestroyTimeout = 5 * time.Minute
+
+// LoadBalancerControllerEnabled returns whether the AWS Load Balancer Controller
+// should be installed. Defaults to true.
+func (c *Config) LoadBalancerControllerEnabled() bool {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.Enabled == nil {
+		return true
+	}
+	return *c.AWSLoadBalancerController.Enabled
+}
+
+// LoadBalancerControllerChartVersion returns the Helm chart version for the
+// AWS Load Balancer Controller. Returns defaultLBCChartVersion when unset.
+func (c *Config) LoadBalancerControllerChartVersion() string {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.ChartVersion == "" {
+		return defaultLBCChartVersion
+	}
+	return c.AWSLoadBalancerController.ChartVersion
+}
+
+// LoadBalancerControllerDestroyTimeout returns the maximum time the graceful
+// Kubernetes-side cleanup will wait for LBC's finalizer to drain load
+// balancers before falling through to the SDK sweep.
+func (c *Config) LoadBalancerControllerDestroyTimeout() time.Duration {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.DestroyTimeout == nil {
+		return defaultLBCDestroyTimeout
+	}
+	return *c.AWSLoadBalancerController.DestroyTimeout
 }
 
 type NodeGroup struct {
