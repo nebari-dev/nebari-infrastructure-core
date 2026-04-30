@@ -212,11 +212,10 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner k3s cluster created successfully").
 		WithResource("provider").WithAction("deploy"))
 
-	// Install Longhorn if opted-in (block present, not explicitly disabled).
-	// Hetzner's hcloud-volumes CSI is RWO-only; Longhorn provides the RWX
-	// StorageClass that downstream charts (e.g. jupyterhub shared-storage
-	// for group dirs) need.
-	if hCfg.Longhorn.IsEnabled() {
+	// Install Longhorn unless explicitly disabled. Hetzner's hcloud-volumes
+	// CSI is RWO-only; Longhorn provides the RWX StorageClass that downstream
+	// charts (e.g. jupyterhub shared-storage for group dirs) need.
+	if hCfg.LonghornEnabled() {
 		kubeconfigBytes, err := os.ReadFile(kubeconfigPath) //nolint:gosec // Path constructed from known cache dir + project name
 		if err != nil {
 			span.RecordError(err)
@@ -358,13 +357,13 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *con
 
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
-		StorageClass: "hcloud-volumes",
+		StorageClass: longhorn.StorageClassName,
 		NeedsMetalLB: false,
 	}
 
-	// Derive LB annotations from location, and switch the default StorageClass
-	// to "longhorn" when Longhorn is opted in (so charts pick up the RWX-
-	// capable class instead of the RWO-only hcloud-volumes).
+	// Derive LB annotations from location, and fall back to "hcloud-volumes"
+	// when Longhorn is explicitly disabled. Longhorn is the Hetzner default
+	// because hcloud-volumes is RWO-only (see Config.LonghornEnabled).
 	// Parse errors are intentionally ignored here: InfraSettings is called after
 	// Validate() has already confirmed the config is parseable. If it somehow
 	// fails (e.g., nil config in tests), we return valid defaults without annotations.
@@ -377,8 +376,8 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 					"load-balancer.hetzner.cloud/location": hCfg.Location,
 				}
 			}
-			if hCfg.Longhorn.IsEnabled() {
-				settings.StorageClass = longhorn.StorageClassName
+			if !hCfg.LonghornEnabled() {
+				settings.StorageClass = "hcloud-volumes"
 			}
 		}
 	}
