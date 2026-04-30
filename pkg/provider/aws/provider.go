@@ -27,9 +27,6 @@ const (
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
 
-	// storageClassLonghorn is the StorageClass name used when Longhorn is enabled.
-	storageClassLonghorn = "longhorn"
-
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
 )
@@ -641,7 +638,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
 // EFSStorageClass is set when EFS is enabled.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	sc := storageClassLonghorn
+	sc := longhorn.StorageClassName
 	var efsSC string
 
 	rawCfg := clusterConfig.ProviderConfig()
