@@ -3,6 +3,8 @@ package git
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -64,6 +66,23 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("git repository url is required")
 	}
 
+	// For local file paths, validate directory exists but skip auth validation
+	if c.IsLocalPath() {
+		path, err := c.GetLocalPath()
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("local path does not exist: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("local path must be a directory: %s", path)
+		}
+		return nil
+	}
+
+	// For remote repositories, validate authentication
 	if err := c.Auth.Validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
@@ -75,6 +94,28 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// IsLocalPath returns true if the URL uses the file:// protocol (local filesystem).
+func (c *Config) IsLocalPath() bool {
+	return strings.HasPrefix(c.URL, "file://")
+}
+
+// GetLocalPath returns the filesystem path from a file:// URL.
+// Returns an error if not a local path or if the path is invalid.
+// The path is cleaned to prevent directory traversal attacks.
+func (c *Config) GetLocalPath() (string, error) {
+	if !c.IsLocalPath() {
+		return "", fmt.Errorf("not a local file:// URL: %s", c.URL)
+	}
+	path := strings.TrimPrefix(c.URL, "file://")
+	// Clean the path to resolve ".." and other traversal attempts
+	path = filepath.Clean(path)
+	// Ensure the path is absolute to prevent relative path attacks
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("file:// URL must use absolute path, got: %s", path)
+	}
+	return path, nil
 }
 
 // GetBranch returns the configured branch or DefaultBranch as default.
@@ -144,6 +185,19 @@ func (a *AuthConfig) GetToken() (string, error) {
 	}
 
 	return token, nil
+}
+
+// RedactedCopy returns a copy of the Config with sensitive fields removed.
+// The auth block is replaced with a placeholder, suitable for writing to
+// the gitops repo without leaking credentials.
+func (c *Config) RedactedCopy() *Config {
+	return &Config{
+		URL:    c.URL,
+		Branch: c.Branch,
+		Path:   c.Path,
+		// Auth and ArgoCDAuth are intentionally omitted (zero values)
+		// to prevent accidentally committing credentials
+	}
 }
 
 // GetAuth returns the configured transport.AuthMethod for git operations.

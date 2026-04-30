@@ -541,13 +541,14 @@ func setupLocalGitRepo(t *testing.T, branch string) (string, func()) {
 	// Cleanup work dir, keep bare
 	_ = os.RemoveAll(workDir)
 
-	repoURL := "file://" + bareDir
-
+	// Return the bare dir path directly (not file:// URL).
+	// file:// URLs are now treated as local development paths by IsLocalPath(),
+	// but these tests simulate remote repos that need clone/push behavior.
 	cleanup := func() {
 		_ = os.RemoveAll(bareDir)
 	}
 
-	return repoURL, cleanup
+	return bareDir, cleanup
 }
 
 // createClientWithLocalRepo creates a ClientImpl configured to use a local file:// repo.
@@ -678,7 +679,7 @@ func TestClientInitPullsWhenRepoExists(t *testing.T) {
 }
 
 func TestClientInitInvalidURL(t *testing.T) {
-	client := createClientWithLocalRepo(t, "file:///nonexistent/path", "main", "")
+	client := createClientWithLocalRepo(t, "/nonexistent/path/to/repo", "main", "")
 	defer func() { _ = client.Cleanup() }()
 
 	err := client.Init(context.Background())
@@ -771,6 +772,56 @@ func TestClientCommitAndPush(t *testing.T) {
 	}
 }
 
+func TestClientCommitLocalOnFreshRepo(t *testing.T) {
+	// Exercise CommitAndPush on a freshly PlainInit'd local repo with zero commits.
+	// This is the path taken when the auto-generated /tmp/nebari-gitops-{name}
+	// directory is brand new.
+	tmpDir, err := os.MkdirTemp("", "test-fresh-local-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	cfg := &Config{
+		URL:    "file://" + tmpDir,
+		Branch: "main",
+	}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+
+	// Init — this calls initLocalPath which does PlainInit but no initial commit
+	if err := client.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	// Write a file into the working directory
+	filePath := filepath.Join(client.WorkDir(), "test.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// CommitAndPush should succeed even with zero prior commits
+	if err := client.CommitAndPush(context.Background(), "First commit on fresh repo"); err != nil {
+		t.Errorf("CommitAndPush() on fresh local repo error: %v", err)
+	}
+
+	// Verify the commit was created
+	head, err := client.repo.Head()
+	if err != nil {
+		t.Fatalf("Head() error after commit: %v", err)
+	}
+	commit, err := client.repo.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject() error: %v", err)
+	}
+	if commit.Message != "First commit on fresh repo" {
+		t.Errorf("commit message = %q, want %q", commit.Message, "First commit on fresh repo")
+	}
+}
+
 func TestClientCommitAndPushNotInitialized(t *testing.T) {
 	client := &ClientImpl{
 		cfg:     &Config{URL: "file:///test"},
@@ -828,7 +879,7 @@ func TestClientValidateAuthWithLocalRepo(t *testing.T) {
 }
 
 func TestClientValidateAuthInvalidURL(t *testing.T) {
-	client := createClientWithLocalRepo(t, "file:///nonexistent/path/to/repo", "main", "")
+	client := createClientWithLocalRepo(t, "/nonexistent/path/to/repo", "main", "")
 	defer func() { _ = client.Cleanup() }()
 
 	err := client.ValidateAuth(context.Background())

@@ -57,6 +57,11 @@ type InfraSettings struct {
 	// Empty when EFS is not enabled. Software packs can use this for ReadWriteMany
 	// volumes (e.g., shared model storage for LLM serving).
 	EFSStorageClass string
+
+	// SupportsLocalGitOps indicates whether this provider can use local file:// git repos.
+	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).
+	// Cloud providers (AWS, GCP, Azure) return false - their nodes can't see the dev machine's FS.
+	SupportsLocalGitOps bool
 }
 
 // Provider defines the interface that all cloud providers must implement.

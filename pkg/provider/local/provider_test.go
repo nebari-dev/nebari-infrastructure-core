@@ -110,6 +110,12 @@ func TestInfraSettings(t *testing.T) {
 			wantPool:      "192.168.1.100-192.168.1.110",
 			wantHTTPSPort: 0,
 		},
+		{"StorageClass", settings.StorageClass, "standard"},
+		{"NeedsMetalLB", settings.NeedsMetalLB, true},
+		{"MetalLBAddressPool", settings.MetalLBAddressPool, "192.168.1.100-192.168.1.110"},
+		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
+		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
+		{"SupportsLocalGitOps", settings.SupportsLocalGitOps, true},
 	}
 
 	for _, tt := range tests {

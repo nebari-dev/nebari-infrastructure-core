@@ -63,7 +63,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	span.SetAttributes(attribute.String("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Verify kubeconfig file exists
@@ -195,7 +199,11 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		WithMetadata("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Load the kubeconfig file
@@ -265,9 +273,10 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // tests), we return valid defaults.
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
-		StorageClass:       "standard",
-		NeedsMetalLB:       true,
-		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+		StorageClass:        "standard",
+		NeedsMetalLB:        true,
+		MetalLBAddressPool:  "192.168.1.100-192.168.1.110",
+		SupportsLocalGitOps: true,
 	}
 
 	rawCfg := cfg.ProviderConfig()

@@ -2,9 +2,6 @@ package hetzner
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -164,19 +161,8 @@ func TestProvider_Deploy_DryRun(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	// Set up a fake k3s releases API
-	releases := []ghRelease{
-		{TagName: "v1.32.12+k3s1", Prerelease: false},
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(releases)
-	}))
-	defer server.Close()
-
-	// We need to test the dry-run path. Since Deploy calls resolveK3sVersion
-	// with the real GitHub API URL, we test the components individually.
-	// The Deploy integration requires network access, so we verify the dry-run
-	// logic through the Validate + DryRun flag path.
+	// We test the Validate + DryRun flag path. The actual Deploy flow
+	// requires hetzner-k3s binary and network access.
 	cfg := validHetznerClusterConfig()
 
 	// Validate should pass
