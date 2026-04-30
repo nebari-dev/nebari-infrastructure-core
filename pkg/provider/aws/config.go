@@ -7,16 +7,6 @@ import "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 // lives in pkg/storage/longhorn so non-AWS providers can share install logic.
 type LonghornConfig = longhorn.Config
 
-// Helpers for tests that need to construct a LonghornConfig without exporting
-// internals from the shared package.
-func newLonghornCfgWithEnabled(enabled *bool) *LonghornConfig {
-	return &LonghornConfig{Enabled: enabled}
-}
-
-func newLonghornCfgWithReplicas(n int) *LonghornConfig {
-	return &LonghornConfig{ReplicaCount: n}
-}
-
 type Config struct {
 	Region                   string               `yaml:"region"`
 	StateBucket              string               `yaml:"state_bucket,omitempty"`

@@ -15,14 +15,14 @@ func TestAWSConfigLonghornDefaults(t *testing.T) {
 
 	t.Run("explicit disabled honours user", func(t *testing.T) {
 		disabled := false
-		cfg := &Config{Longhorn: newLonghornCfgWithEnabled(&disabled)}
+		cfg := &Config{Longhorn: &LonghornConfig{Enabled: &disabled}}
 		if cfg.LonghornEnabled() {
 			t.Error("LonghornEnabled() = true with explicit Enabled=false")
 		}
 	})
 
 	t.Run("explicit replica count overrides default", func(t *testing.T) {
-		cfg := &Config{Longhorn: newLonghornCfgWithReplicas(5)}
+		cfg := &Config{Longhorn: &LonghornConfig{ReplicaCount: 5}}
 		if got := cfg.LonghornReplicaCount(); got != 5 {
 			t.Errorf("LonghornReplicaCount() = %d, want 5", got)
 		}
