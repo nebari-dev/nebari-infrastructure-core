@@ -14,6 +14,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -25,9 +26,6 @@ const (
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
-
-	// storageClassLonghorn is the StorageClass name used when Longhorn is enabled.
-	storageClassLonghorn = "longhorn"
 
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
@@ -319,7 +317,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 
-		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+		if err := longhorn.Install(ctx, kubeconfigBytes, awsCfg.Longhorn); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
 		}
@@ -640,7 +638,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
 // EFSStorageClass is set when EFS is enabled.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	sc := storageClassLonghorn
+	sc := longhorn.StorageClassName
 	var efsSC string
 
 	rawCfg := clusterConfig.ProviderConfig()
