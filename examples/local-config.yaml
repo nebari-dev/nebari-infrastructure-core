@@ -14,6 +14,20 @@ cluster:
       worker:
         kubernetes.io/os: linux
 
+  # Storage class for persistent volumes (default: "standard")
+  # Use "local-path" for k3s clusters
+  # storage_class: local-path
+
+  # HTTPS port for Gateway listener (default: 443)
+  # Override if 443 is already in use or requires root
+  # https_port: 8443
+
+  # MetalLB configuration (default: enabled with 192.168.1.100-192.168.1.110 pool)
+  # Disable for k3s which ships with ServiceLB
+  # metallb:
+  #   enabled: false
+  #   address_pool: 172.18.255.100-172.18.255.110
+
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
 #
