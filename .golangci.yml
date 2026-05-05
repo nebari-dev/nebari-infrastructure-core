@@ -29,7 +29,11 @@ linters:
       # Bump to 4 so only repeated strings that clearly warrant a constant get flagged.
       min-occurrences: 4
       # Skip strings that are too generic to meaningfully name as constants.
-      ignore-string-values: "^(true|false|Config|name)$"
+      ignore-string-values:
+        - "true"
+        - "false"
+        - "Config"
+        - "name"
 
   exclusions:
     rules:
