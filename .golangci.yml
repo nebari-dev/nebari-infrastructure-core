@@ -23,6 +23,14 @@ linters:
     - unconvert
     - unused
 
+  settings:
+    goconst:
+      # Default is 3, which flags many genuinely-incidental repeats.
+      # Bump to 4 so only repeated strings that clearly warrant a constant get flagged.
+      min-occurrences: 4
+      # Skip strings that are too generic to meaningfully name as constants.
+      ignore-string-values: "^(true|false|Config|name)$"
+
   exclusions:
     rules:
       # Test files can have repeated strings for readability

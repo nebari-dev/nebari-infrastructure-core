@@ -18,6 +18,8 @@ const (
 	gitRepoType = "git"
 	// gitTokenUsername is the username used with token-based auth for git providers (GitHub, GitLab, etc.)
 	gitTokenUsername = "git"
+	// argoCDSecretTypeRepository is the value for the argocd.argoproj.io/secret-type label on repository secrets.
+	argoCDSecretTypeRepository = "repository"
 )
 
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
@@ -59,7 +61,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 			Name:      "gitops-repo-creds",
 			Namespace: namespace,
 			Labels: map[string]string{
-				"argocd.argoproj.io/secret-type": "repository",
+				"argocd.argoproj.io/secret-type": argoCDSecretTypeRepository,
 			},
 		},
 		Type:       corev1.SecretTypeOpaque,
@@ -109,7 +111,7 @@ func ConfigureOCIAccess(ctx context.Context, client kubernetes.Interface, namesp
 			Name:      "docker-oci-repo",
 			Namespace: namespace,
 			Labels: map[string]string{
-				"argocd.argoproj.io/secret-type": "repository",
+				"argocd.argoproj.io/secret-type": argoCDSecretTypeRepository,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

@@ -7,6 +7,13 @@ import "embed"
 //go:embed all:templates
 var tofuTemplates embed.FS
 
+// Security group rule keys for Longhorn webhook traffic between the EKS control plane
+// and worker nodes.
+const (
+	longhornWebhookAdmissionKey  = "longhorn_webhook_admission"
+	longhornWebhookConversionKey = "longhorn_webhook_conversion"
+)
+
 type TFVars struct {
 	Region                        string               `json:"region"`
 	ProjectName                   string               `json:"project_name,omitempty"`
@@ -100,7 +107,7 @@ func (c *Config) toTFVars(projectName string) TFVars {
 
 	if c.LonghornEnabled() {
 		vars.NodeSGAdditionalRules = map[string]any{
-			"longhorn_webhook_admission": map[string]any{
+			longhornWebhookAdmissionKey: map[string]any{
 				"description":                   "Cluster API to Longhorn admission webhook",
 				"protocol":                      "tcp",
 				"from_port":                     9502,
@@ -108,7 +115,7 @@ func (c *Config) toTFVars(projectName string) TFVars {
 				"type":                          "ingress",
 				"source_cluster_security_group": true,
 			},
-			"longhorn_webhook_conversion": map[string]any{
+			longhornWebhookConversionKey: map[string]any{
 				"description":                   "Cluster API to Longhorn conversion webhook",
 				"protocol":                      "tcp",
 				"from_port":                     9501,

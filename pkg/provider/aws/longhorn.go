@@ -23,6 +23,10 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+// nodeStorageLabel is the node label Longhorn uses to identify nodes that should
+// host its storage components.
+const nodeStorageLabel = "node.longhorn.io/storage"
+
 const (
 	longhornRepoName     = "longhorn"
 	longhornRepoURL      = "https://charts.longhorn.io"
@@ -247,14 +251,14 @@ func longhornHelmValues(cfg *Config) map[string]any {
 	if cfg.Longhorn != nil && cfg.Longhorn.DedicatedNodes {
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		nodeSelector := map[string]string{"node.longhorn.io/storage": "true"}
+		nodeSelector := map[string]string{nodeStorageLabel: "true"}
 		if cfg.Longhorn.NodeSelector != nil {
 			nodeSelector = cfg.Longhorn.NodeSelector
 		}
 
 		tolerations := []map[string]string{
 			{
-				"key":      "node.longhorn.io/storage",
+				"key":      nodeStorageLabel,
 				"operator": "Exists",
 				"effect":   "NoSchedule",
 			},
