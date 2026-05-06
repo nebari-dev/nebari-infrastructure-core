@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// allCIDRs is the default CIDR allowlist that opens access to the entire internet.
+const allCIDRs = "0.0.0.0/0"
+
 // Config holds Hetzner-specific provider configuration.
 // Parsed from the "hetzner_cloud" key in nebari-config.yaml.
 type Config struct {
@@ -116,7 +119,7 @@ func (c *Config) SSHAllowedNetworks() []string {
 	if c.Network != nil && len(c.Network.SSHAllowedCIDRs) > 0 {
 		return c.Network.SSHAllowedCIDRs
 	}
-	return []string{"0.0.0.0/0"}
+	return []string{allCIDRs}
 }
 
 // APIAllowedNetworks returns the configured API CIDR ranges, defaulting to 0.0.0.0/0.
@@ -124,7 +127,7 @@ func (c *Config) APIAllowedNetworks() []string {
 	if c.Network != nil && len(c.Network.APIAllowedCIDRs) > 0 {
 		return c.Network.APIAllowedCIDRs
 	}
-	return []string{"0.0.0.0/0"}
+	return []string{allCIDRs}
 }
 
 // IsExplicitK3sVersion returns true if the kubernetes_version already contains

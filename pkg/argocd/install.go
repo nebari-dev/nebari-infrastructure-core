@@ -17,6 +17,11 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	argoCDServerDeployment = "argocd-server"
+	localGitopsVolumeName  = "local-gitops"
+)
+
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
 // If cfg.GitRepository is a local file:// path, the directory is mounted into the repo-server pod.
@@ -311,7 +316,7 @@ func waitForArgoCDReadyWithLister(ctx context.Context, listDeployments Deploymen
 // waitForArgoCDReady waits for Argo CD deployments to be ready using a Kubernetes client.
 func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, namespace string, timeout time.Duration) error {
 	requiredDeployments := []string{
-		"argocd-server",
+		argoCDServerDeployment,
 		"argocd-repo-server",
 	}
 
@@ -346,7 +351,7 @@ func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath s
 
 	// Append to existing volumes (handle both []map[string]any and []any from YAML parsing)
 	newVolume := map[string]any{
-		"name": "local-gitops",
+		"name": localGitopsVolumeName,
 		"hostPath": map[string]any{
 			"path": localPath,
 			"type": "Directory",
@@ -356,7 +361,7 @@ func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath s
 
 	// Append to existing volumeMounts
 	newMount := map[string]any{
-		"name":      "local-gitops",
+		"name":      localGitopsVolumeName,
 		"mountPath": localPath,
 		"readOnly":  true,
 	}
