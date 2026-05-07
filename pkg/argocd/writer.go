@@ -25,7 +25,12 @@ import (
 //go:embed templates
 var templates embed.FS
 
-const templateDir = "templates"
+const (
+	templateDir = "templates"
+	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
+	// not configured a real ACME provider.
+	certificateIssuerSelfSigned = "selfsigned-issuer"
+)
 
 // TemplateData holds the dynamic values for template processing
 type TemplateData struct {
@@ -111,10 +116,10 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 				}
 			}
 		} else {
-			data.CertificateIssuer = "selfsigned-issuer"
+			data.CertificateIssuer = certificateIssuerSelfSigned
 		}
 	} else {
-		data.CertificateIssuer = "selfsigned-issuer"
+		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
 
 	// Default domain if not set
