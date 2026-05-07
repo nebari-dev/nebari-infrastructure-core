@@ -47,7 +47,7 @@ func (te *TerraformExecutor) streamThroughSlog(ctx context.Context, op func(io.W
 	go func() { defer wg.Done(); emitJSONStream(ctx, stdoutR, slog.Default()) }()
 	go func() { defer wg.Done(); emitRawStream(ctx, stderrR, slog.Default(), slog.LevelError) }()
 
-	te.Terraform.SetStderr(stderrW)
+	te.SetStderr(stderrW)
 	err := op(stdoutW)
 
 	_ = stdoutW.Close()
@@ -60,7 +60,7 @@ func (te *TerraformExecutor) streamThroughSlog(ctx context.Context, op func(io.W
 func (te *TerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption) error {
 	ctx = signalSafeContext(ctx)
 	return te.streamThroughSlog(ctx, func(w io.Writer) error {
-		return te.Terraform.InitJSON(ctx, w, opts...)
+		return te.InitJSON(ctx, w, opts...)
 	})
 }
 
@@ -70,7 +70,7 @@ func (te *TerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOption
 	var hasChanges bool
 	err := te.streamThroughSlog(ctx, func(w io.Writer) error {
 		var perr error
-		hasChanges, perr = te.Terraform.PlanJSON(ctx, w, opts...)
+		hasChanges, perr = te.PlanJSON(ctx, w, opts...)
 		return perr
 	})
 	return hasChanges, err
@@ -80,7 +80,7 @@ func (te *TerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOption
 func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
 	ctx = signalSafeContext(ctx)
 	return te.streamThroughSlog(ctx, func(w io.Writer) error {
-		return te.Terraform.ApplyJSON(ctx, w, opts...)
+		return te.ApplyJSON(ctx, w, opts...)
 	})
 }
 
@@ -88,7 +88,7 @@ func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOpti
 func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.DestroyOption) error {
 	ctx = signalSafeContext(ctx)
 	return te.streamThroughSlog(ctx, func(w io.Writer) error {
-		return te.Terraform.DestroyJSON(ctx, w, opts...)
+		return te.DestroyJSON(ctx, w, opts...)
 	})
 }
 
