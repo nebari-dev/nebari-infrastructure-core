@@ -93,7 +93,6 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 			WithAction("configuring"))
 	}
 
-
 	// Create namespace
 	if err := createNamespace(ctx, k8sClient, argoCDCfg.Namespace); err != nil {
 		span.RecordError(err)

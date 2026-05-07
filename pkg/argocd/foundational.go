@@ -28,6 +28,9 @@ const (
 
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
+
+	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
+	NebariFoundationalPartOf = "nebari-foundational"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -282,7 +285,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    "nebari-foundational",
+					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
 					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
 				},
 			},
@@ -303,7 +306,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    "nebari-foundational",
+					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
 					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
 				},
 			},
@@ -330,7 +333,7 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    "nebari-foundational",
+				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
 				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
 			},
 		},
