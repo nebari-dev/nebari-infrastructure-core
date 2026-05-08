@@ -36,7 +36,7 @@ const (
 func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string) map[string]any {
 	return map[string]any{
 		"clusterName": clusterName,
-		"region":      cfg.Region,
+		attrKeyRegion: cfg.Region,
 		"vpcId":       vpcID,
 		"serviceAccount": map[string]any{
 			"create": true,

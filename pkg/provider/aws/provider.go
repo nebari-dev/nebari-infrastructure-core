@@ -31,6 +31,9 @@ const (
 
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
+
+	// attrKeyRegion is the attribute / Helm value key for AWS region.
+	attrKeyRegion = "region"
 )
 
 // Provider implements the AWS provider
@@ -434,7 +437,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", projectName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 		attribute.Bool("dry_run", opts.DryRun),
 		attribute.Bool("force", opts.Force),
 	)
@@ -585,7 +588,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", clusterName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 	)
 
 	// Verify the state bucket exists before attempting to read outputs
