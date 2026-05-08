@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"github.com/opentofu/tofudl"
 	"github.com/spf13/afero"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // Conservative timeout for network download
@@ -33,42 +33,39 @@ func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
 }
 
-// streamThroughSlog wires stdout/stderr to slog.Default() for the duration of
-// op. The op callback receives the writer to pass into a tfexec *JSON method
-// (which handles SetStdout itself); stderr is set on the executor directly
-// since the JSON variants only touch stdout. Pipes close and goroutines drain
-// before the function returns, so subsequent calls see fresh wiring.
-func (te *TerraformExecutor) streamThroughSlog(ctx context.Context, op func(io.Writer) error) error {
-	stdoutR, stdoutW := io.Pipe()
-	stderrR, stderrW := io.Pipe()
+// streamThroughStatus wires stdout/stderr to the status channel attached to
+// ctx for the duration of op. The op callback receives the stdout writer to
+// pass into a tfexec *JSON method (which handles SetStdout itself); stderr
+// is set on the executor directly since the JSON variants only touch stdout.
+// Both writers buffer partial lines, so we Flush both after op returns to
+// drain any final non-newline-terminated content.
+func (te *TerraformExecutor) streamThroughStatus(ctx context.Context, op func(io.Writer) error) error {
+	stdout := status.NewWriter(ctx, jsonLineMapper)
+	stderr := status.NewWriter(ctx, status.RawMapper(status.LevelError))
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); emitJSONStream(ctx, stdoutR, slog.Default()) }()
-	go func() { defer wg.Done(); emitRawStream(ctx, stderrR, slog.Default(), slog.LevelError) }()
+	te.SetStderr(stderr)
+	err := op(stdout)
 
-	te.SetStderr(stderrW)
-	err := op(stdoutW)
-
-	_ = stdoutW.Close()
-	_ = stderrW.Close()
-	wg.Wait()
+	stdout.Flush()
+	stderr.Flush()
 	return err
 }
 
-// Init wraps tfexec.Terraform.InitJSON, streaming output through slog.Default().
+// Init wraps tfexec.Terraform.InitJSON, streaming output through the status
+// channel attached to ctx.
 func (te *TerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption) error {
 	ctx = signalSafeContext(ctx)
-	return te.streamThroughSlog(ctx, func(w io.Writer) error {
+	return te.streamThroughStatus(ctx, func(w io.Writer) error {
 		return te.InitJSON(ctx, w, opts...)
 	})
 }
 
-// Plan wraps tfexec.Terraform.PlanJSON, streaming output through slog.Default().
+// Plan wraps tfexec.Terraform.PlanJSON, streaming output through the status
+// channel attached to ctx.
 func (te *TerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOption) (bool, error) {
 	ctx = signalSafeContext(ctx)
 	var hasChanges bool
-	err := te.streamThroughSlog(ctx, func(w io.Writer) error {
+	err := te.streamThroughStatus(ctx, func(w io.Writer) error {
 		var perr error
 		hasChanges, perr = te.PlanJSON(ctx, w, opts...)
 		return perr
@@ -76,25 +73,27 @@ func (te *TerraformExecutor) Plan(ctx context.Context, opts ...tfexec.PlanOption
 	return hasChanges, err
 }
 
-// Apply wraps tfexec.Terraform.ApplyJSON, streaming output through slog.Default().
+// Apply wraps tfexec.Terraform.ApplyJSON, streaming output through the status
+// channel attached to ctx.
 func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
 	ctx = signalSafeContext(ctx)
-	return te.streamThroughSlog(ctx, func(w io.Writer) error {
+	return te.streamThroughStatus(ctx, func(w io.Writer) error {
 		return te.ApplyJSON(ctx, w, opts...)
 	})
 }
 
-// Destroy wraps tfexec.Terraform.DestroyJSON, streaming output through slog.Default().
+// Destroy wraps tfexec.Terraform.DestroyJSON, streaming output through the
+// status channel attached to ctx.
 func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.DestroyOption) error {
 	ctx = signalSafeContext(ctx)
-	return te.streamThroughSlog(ctx, func(w io.Writer) error {
+	return te.streamThroughStatus(ctx, func(w io.Writer) error {
 		return te.DestroyJSON(ctx, w, opts...)
 	})
 }
 
 // Output wraps tfexec.Terraform.Output with a signal-safe context. Output uses
 // its own internal stdout buffer to parse the JSON result, so it does not
-// interact with the slog stream.
+// interact with the status writers.
 func (te *TerraformExecutor) Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error) {
 	return te.Terraform.Output(signalSafeContext(ctx), opts...)
 }
@@ -262,8 +261,9 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 // Setup prepares the OpenTofu environment by extracting provider-specific templates,
 // downloading the binary, configuring provider plugin caching, and writing tfvars.
 // The returned executor's Init/Plan/Apply/Destroy methods stream tofu output
-// through slog.Default() as structured records; configure a custom slog handler
-// to redirect or reformat that output.
+// as status updates on the status channel attached to ctx; the caller is
+// responsible for starting a status handler (status.StartHandler) before
+// invoking those methods.
 // The caller is responsible for calling Init() and Apply() with appropriate options and
 // deferring Cleanup() to remove the temporary working directory.
 // Downloaded archives are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
