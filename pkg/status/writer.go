@@ -6,15 +6,9 @@ import (
 	"io"
 )
 
-// MetadataKeySource is the conventional Metadata key on Updates whose value
-// identifies the producing component (e.g. "tofu", "aws", "argocd"). Consumers
-// dispatching by source — pretty-printers, UI bridges, filters — read this key.
-const MetadataKeySource = "source"
-
 // MetadataKeyPayload is the conventional Metadata key on Updates carrying a
 // structured per-source payload (typically a json.RawMessage). The shape of
-// the payload depends on the source; consumers read MetadataKeySource first
-// to know how to decode it.
+// the payload depends on the producer.
 const MetadataKeyPayload = "payload"
 
 // LineMapper converts one line of subprocess output into a status.Update.
