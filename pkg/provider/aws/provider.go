@@ -484,6 +484,27 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
+	// Longhorn-backed PVs left in the cluster can block EKS node group
+	// deletion via CSI finalizers.
+	if awsCfg.LonghornEnabled() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("longhorn").WithAction("uninstalling"))
+		default:
+			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
+					WithResource("longhorn").WithAction("uninstalling"))
+			}
+		}
+	}
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)

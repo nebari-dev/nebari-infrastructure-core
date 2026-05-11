@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -21,17 +22,17 @@ func TestLonghornEnabled(t *testing.T) {
 		},
 		{
 			name:     "empty LonghornConfig defaults to enabled",
-			config:   Config{Longhorn: &LonghornConfig{}},
+			config:   Config{Longhorn: &longhorn.Config{}},
 			expected: true,
 		},
 		{
 			name:     "explicitly enabled",
-			config:   Config{Longhorn: &LonghornConfig{Enabled: boolPtr(true)}},
+			config:   Config{Longhorn: &longhorn.Config{Enabled: boolPtr(true)}},
 			expected: true,
 		},
 		{
 			name:     "explicitly disabled",
-			config:   Config{Longhorn: &LonghornConfig{Enabled: boolPtr(false)}},
+			config:   Config{Longhorn: &longhorn.Config{Enabled: boolPtr(false)}},
 			expected: false,
 		},
 	}
@@ -59,12 +60,12 @@ func TestLonghornReplicaCount(t *testing.T) {
 		},
 		{
 			name:     "zero replica count defaults to 2",
-			config:   Config{Longhorn: &LonghornConfig{}},
+			config:   Config{Longhorn: &longhorn.Config{}},
 			expected: 2,
 		},
 		{
 			name:     "custom replica count",
-			config:   Config{Longhorn: &LonghornConfig{ReplicaCount: 3}},
+			config:   Config{Longhorn: &longhorn.Config{ReplicaCount: 3}},
 			expected: 3,
 		},
 	}

@@ -21,10 +21,13 @@ const installTimeout = 10 * time.Minute
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
 //
+// cfg may be nil; receiver methods on *Config are nil-safe and a nil cfg
+// means "use defaults" (the AWS provider relies on this).
+//
 // On a fresh cluster, the iSCSI prerequisite DaemonSet is deployed and waited
-// on before the Helm install. On clusters with an existing release, the iSCSI
-// step is skipped (it was already provisioned on first install) and the Helm
-// release is upgraded in place.
+// on before the Helm install. The iSCSI step also runs on the upgrade path —
+// the DaemonSet is idempotent and re-asserting it protects against drift
+// (e.g., manual cleanup that left the release behind).
 //
 // Install is idempotent: re-running on an installed cluster is a no-op modulo
 // any Config changes that would shift the rendered Helm values.
@@ -33,10 +36,14 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 	ctx, span := tracer.Start(ctx, "longhorn.Install")
 	defer span.End()
 
+	if cfg == nil {
+		cfg = &Config{}
+	}
+
 	span.SetAttributes(
 		attribute.String("chart_version", ChartVersion),
 		attribute.Int("replica_count", cfg.Replicas()),
-		attribute.Bool("dedicated_nodes", cfg != nil && cfg.DedicatedNodes),
+		attribute.Bool("dedicated_nodes", cfg.DedicatedNodes),
 	)
 
 	kubeconfigPath, cleanup, err := helm.WriteTempKubeconfig(kubeconfigBytes)
@@ -57,20 +64,24 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		return fmt.Errorf("failed to create Helm action config: %w", err)
 	}
 
-	histClient := action.NewHistory(actionConfig)
-	histClient.Max = 1
-	if _, err := histClient.Run(ReleaseName); err == nil {
-		// Release exists — iSCSI was provisioned on initial install, so skip
-		// the 3-minute DaemonSet readiness wait and go straight to upgrade.
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Longhorn already installed, upgrading").
-			WithResource("longhorn").
-			WithAction("upgrading"))
-		return upgrade(ctx, actionConfig, cfg)
-	}
-
+	// Re-assert the iSCSI DaemonSet on every Install call (install and upgrade
+	// alike). The DaemonSet apply is idempotent and the readiness wait is
+	// near-instant when the DS is already healthy on every node, so the cost
+	// on the upgrade path is small. Running it unconditionally protects
+	// against drift (e.g. someone manually deleted the DaemonSet while the
+	// Helm release stayed intact).
 	if err := ensureISCSI(ctx, kubeconfigBytes); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to install iSCSI prerequisites: %w", err)
+	}
+
+	histClient := action.NewHistory(actionConfig)
+	histClient.Max = 1
+	if _, err := histClient.Run(ReleaseName); err == nil {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Longhorn already installed, upgrading").
+			WithResource("longhorn").
+			WithAction("upgrading"))
+		return upgrade(ctx, actionConfig, kubeconfigBytes, cfg)
 	}
 
 	helmValues := buildHelmValues(cfg)
@@ -105,6 +116,11 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		attribute.Int("release_version", release.Version),
 	)
 
+	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage installed").
 		WithResource("longhorn").
 		WithAction("installed").
@@ -113,7 +129,7 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 	return nil
 }
 
-func upgrade(ctx context.Context, actionConfig *action.Configuration, cfg *Config) error {
+func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfigBytes []byte, cfg *Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "longhorn.upgrade")
 	defer span.End()
@@ -142,6 +158,11 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, cfg *Confi
 		attribute.String("release_status", string(release.Info.Status)),
 		attribute.Int("release_version", release.Version),
 	)
+
+	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage upgraded").
 		WithResource("longhorn").

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed (2026-02-13) · Amended (2026-05) — scope expanded beyond AWS; see [Update](#update-2026-05-longhorn-as-shared-package).
 
 ## Date
 
@@ -257,3 +257,22 @@ longhornDriver:
 - [Longhorn: restrict storage to specific nodes](https://longhorn.io/kb/tip-only-use-storage-on-a-set-of-nodes/)
 - [CNCF Longhorn project page](https://www.cncf.io/projects/longhorn/)
 - [MADR Format](https://adr.github.io/madr/)
+
+## Update (2026-05): shared package, extra providers
+
+PR #270 moved install/uninstall from `pkg/provider/aws/` to
+`pkg/storage/longhorn/`. Providers now call `longhorn.Install` / `Uninstall`.
+
+| Provider | Default    | Why                                                       |
+|----------|------------|-----------------------------------------------------------|
+| AWS      | opt-out    | cross-AZ resilience (EBS is single-AZ).                   |
+| Hetzner  | opt-out    | `hcloud-volumes` is RWO-only; Longhorn provides RWX.      |
+| existing | opt-in     | user's cluster may already have a StorageClass.           |
+
+Behavioural changes: `Uninstall` runs before infra teardown (ADR's "Destroy
+Flow" is now implemented); installer demotes any pre-existing default
+StorageClass; `ensureISCSI` runs on the upgrade path too; chart pinned to
+`1.11.2` (fixes longhorn/longhorn#12081).
+
+Original AWS-only decision and tuning (replica count, anti-affinity, ext4,
+dedicated-nodes topology) unchanged.

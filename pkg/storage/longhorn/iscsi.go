@@ -21,7 +21,9 @@ import (
 const iscsiDaemonSetTimeout = 3 * time.Minute
 
 // iscsiDaemonSetYAML is the Longhorn iSCSI prerequisite DaemonSet.
-// Source: https://github.com/longhorn/longhorn/blob/v1.8.1/deploy/prerequisite/longhorn-iscsi-installation.yaml
+// Source: https://github.com/longhorn/longhorn/blob/v1.9.2/deploy/prerequisite/longhorn-iscsi-installation.yaml
+// (removed upstream in v1.10.0; see longhorn/longhorn@600801b5 — the
+// embedded DaemonSet content still works against newer engine versions.)
 // Embedded to avoid runtime HTTP fetches and support air-gapped installs.
 const iscsiDaemonSetYAML = `apiVersion: apps/v1
 kind: DaemonSet
@@ -99,18 +101,19 @@ func ensureISCSI(ctx context.Context, kubeconfigBytes []byte) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	return ensureISCSIWithClient(ctx, client)
+	if err := ensureISCSIWithClient(ctx, client); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
 
 // ensureISCSIWithClient is the testable inner form of ensureISCSI; takes a
-// kubernetes.Interface so unit tests can inject a fake client.
+// kubernetes.Interface so unit tests can inject a fake client. Errors are
+// recorded against the parent span (longhorn.ensureISCSI) via the inherited
+// ctx — no separate span here since this is the same logical operation.
 func ensureISCSIWithClient(ctx context.Context, client kubernetes.Interface) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "longhorn.ensureISCSIWithClient")
-	defer span.End()
-
 	if err := ensureNamespace(ctx, client, Namespace); err != nil {
-		span.RecordError(err)
 		return fmt.Errorf("failed to ensure namespace %s: %w", Namespace, err)
 	}
 
@@ -118,7 +121,6 @@ func ensureISCSIWithClient(ctx context.Context, client kubernetes.Interface) err
 	if err := yaml.NewYAMLOrJSONDecoder(
 		strings.NewReader(iscsiDaemonSetYAML), 4096,
 	).Decode(&ds); err != nil {
-		span.RecordError(err)
 		return fmt.Errorf("failed to parse iSCSI DaemonSet YAML: %w", err)
 	}
 
@@ -129,11 +131,9 @@ func ensureISCSIWithClient(ctx context.Context, client kubernetes.Interface) err
 			WithResource("iscsi-daemonset").
 			WithAction("creating"))
 		if _, err := client.AppsV1().DaemonSets(Namespace).Create(ctx, &ds, metav1.CreateOptions{}); err != nil {
-			span.RecordError(err)
 			return fmt.Errorf("failed to create iSCSI DaemonSet: %w", err)
 		}
 	case err != nil:
-		span.RecordError(err)
 		return fmt.Errorf("failed to get iSCSI DaemonSet: %w", err)
 	default:
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Updating existing iSCSI prerequisite DaemonSet").
@@ -141,13 +141,11 @@ func ensureISCSIWithClient(ctx context.Context, client kubernetes.Interface) err
 			WithAction("updating"))
 		ds.ResourceVersion = existing.ResourceVersion
 		if _, err := client.AppsV1().DaemonSets(Namespace).Update(ctx, &ds, metav1.UpdateOptions{}); err != nil {
-			span.RecordError(err)
 			return fmt.Errorf("failed to update iSCSI DaemonSet: %w", err)
 		}
 	}
 
 	if err := waitForDaemonSetReady(ctx, client, Namespace, ds.Name, iscsiDaemonSetTimeout); err != nil {
-		span.RecordError(err)
 		return fmt.Errorf("iSCSI DaemonSet not ready: %w", err)
 	}
 

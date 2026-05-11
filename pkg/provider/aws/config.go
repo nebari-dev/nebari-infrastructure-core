@@ -2,11 +2,6 @@ package aws
 
 import "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 
-// LonghornConfig is kept as a package-local alias so existing yaml under
-// `longhorn:` still unmarshals into the same shape; the underlying type now
-// lives in pkg/storage/longhorn so non-AWS providers can share install logic.
-type LonghornConfig = longhorn.Config
-
 type Config struct {
 	Region                   string               `yaml:"region"`
 	StateBucket              string               `yaml:"state_bucket,omitempty"`
@@ -60,6 +55,9 @@ func (c *Config) LonghornEnabled() bool {
 }
 
 // LonghornReplicaCount returns the number of Longhorn volume replicas.
+// Safe to call when c.Longhorn is nil — Replicas() is a nil-receiver method
+// and returns the package default (this matches the LonghornEnabled() == true
+// path when no longhorn block is configured on AWS).
 func (c *Config) LonghornReplicaCount() int {
 	return c.Longhorn.Replicas()
 }

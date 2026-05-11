@@ -216,10 +216,10 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	// CSI is RWO-only; Longhorn provides the RWX StorageClass that downstream
 	// charts (e.g. jupyterhub shared-storage for group dirs) need.
 	if hCfg.LonghornEnabled() {
-		kubeconfigBytes, err := os.ReadFile(kubeconfigPath) //nolint:gosec // Path constructed from known cache dir + project name
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
 		if err != nil {
 			span.RecordError(err)
-			return fmt.Errorf("failed to read kubeconfig for Longhorn install: %w", err)
+			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 		if err := longhorn.Install(ctx, kubeconfigBytes, hCfg.Longhorn); err != nil {
 			span.RecordError(err)
@@ -290,6 +290,28 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
+	}
+
+	// Uninstall Longhorn before tearing down the cluster (ADR-0002 §"Destroy
+	// Flow"). Best-effort: if it fails, --force lets teardown continue and
+	// stranded PVs are cleaned up by hcloud-volume garbage collection below.
+	hCfg, hCfgErr := p.parseConfig(ctx, clusterConfig)
+	if hCfgErr == nil && hCfg.LonghornEnabled() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("longhorn").WithAction("uninstalling"))
+		default:
+			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
+					WithResource("longhorn").WithAction("uninstalling"))
+			}
+		}
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Hetzner k3s cluster").

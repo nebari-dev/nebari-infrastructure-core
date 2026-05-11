@@ -17,7 +17,9 @@ const (
 
 	// ChartVersion pins the upstream Longhorn Helm chart version. Bump
 	// together with iscsiDaemonSetYAML when upgrading.
-	ChartVersion = "1.8.1"
+	// v1.11.2 (released 2026-05-05) includes the (*Controller).Snapshot
+	// nil-pointer panic fix from longhorn/longhorn#12081.
+	ChartVersion = "1.11.2"
 
 	chartRepoName = "longhorn"
 	chartRepoURL  = "https://charts.longhorn.io"

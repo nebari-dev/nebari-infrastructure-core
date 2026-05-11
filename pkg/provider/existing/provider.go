@@ -10,6 +10,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -131,6 +132,8 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	)
 
 	if opts.DryRun {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would deploy to existing cluster").
+			WithResource("provider").WithAction("deploy"))
 		return nil
 	}
 

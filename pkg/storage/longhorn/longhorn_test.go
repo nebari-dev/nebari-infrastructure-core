@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -18,6 +19,7 @@ func TestBuildHelmValues(t *testing.T) {
 		name        string
 		config      *Config
 		checkValues map[string]any
+		wantAbsent  []string // top-level keys that must NOT be set
 	}{
 		{
 			name:   "default config produces base values",
@@ -60,6 +62,7 @@ func TestBuildHelmValues(t *testing.T) {
 			checkValues: map[string]any{
 				"persistence.defaultClassReplicaCount": 2,
 			},
+			wantAbsent: []string{"longhornManager", "longhornDriver"},
 		},
 	}
 
@@ -74,6 +77,11 @@ func TestBuildHelmValues(t *testing.T) {
 				}
 				if got != want {
 					t.Errorf("values[%q] = %v (%T), want %v (%T)", key, got, got, want, want)
+				}
+			}
+			for _, key := range tt.wantAbsent {
+				if _, ok := values[key]; ok {
+					t.Errorf("key %q should not be set", key)
 				}
 			}
 		})
@@ -126,17 +134,6 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 	}
 	if _, ok := driver["tolerations"].([]map[string]string); !ok {
 		t.Fatal("longhornDriver.tolerations not found or not a []map[string]string")
-	}
-}
-
-func TestBuildHelmValuesNonDedicatedOmitsNodeSelector(t *testing.T) {
-	cfg := &Config{DedicatedNodes: false}
-	values := buildHelmValues(cfg)
-	if _, ok := values["longhornManager"]; ok {
-		t.Error("longhornManager should not be set when DedicatedNodes is false")
-	}
-	if _, ok := values["longhornDriver"]; ok {
-		t.Error("longhornDriver should not be set when DedicatedNodes is false")
 	}
 }
 
@@ -355,6 +352,92 @@ func TestWaitForDaemonSetReady(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestEnsureSoleDefaultStorageClassWithClient(t *testing.T) {
+	const defaultAnnotation = "storageclass.kubernetes.io/is-default-class"
+
+	sc := func(name string, isDefault string) *storagev1.StorageClass {
+		annotations := map[string]string{}
+		if isDefault != "" {
+			annotations[defaultAnnotation] = isDefault
+		}
+		return &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
+			Provisioner: "test-provisioner",
+		}
+	}
+
+	tests := []struct {
+		name        string
+		existing    []runtime.Object
+		keep        string
+		wantDefault map[string]bool // SC name -> still default?
+	}{
+		{
+			name: "demotes previous default StorageClass",
+			existing: []runtime.Object{
+				sc("hcloud-volumes", "true"),
+				sc("longhorn", "true"),
+			},
+			keep: "longhorn",
+			wantDefault: map[string]bool{
+				"hcloud-volumes": false,
+				"longhorn":       true,
+			},
+		},
+		{
+			name: "no-op when kept SC is the only default",
+			existing: []runtime.Object{
+				sc("longhorn", "true"),
+				sc("local-path", ""),
+			},
+			keep: "longhorn",
+			wantDefault: map[string]bool{
+				"longhorn":   true,
+				"local-path": false,
+			},
+		},
+		{
+			name: "demotes multiple stale defaults",
+			existing: []runtime.Object{
+				sc("hcloud-volumes", "true"),
+				sc("vsphere-thin", "true"),
+				sc("longhorn", "true"),
+			},
+			keep: "longhorn",
+			wantDefault: map[string]bool{
+				"hcloud-volumes": false,
+				"vsphere-thin":   false,
+				"longhorn":       true,
+			},
+		},
+		{
+			name:        "no StorageClasses is not an error",
+			existing:    nil,
+			keep:        "longhorn",
+			wantDefault: map[string]bool{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(tt.existing...) //nolint:staticcheck
+			if err := ensureSoleDefaultStorageClassWithClient(context.Background(), client, tt.keep); err != nil {
+				t.Fatalf("ensureSoleDefaultStorageClassWithClient() error = %v", err)
+			}
+			for name, wantDefault := range tt.wantDefault {
+				got, err := client.StorageV1().StorageClasses().Get(context.Background(), name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("StorageClass %q not found: %v", name, err)
+				}
+				isDefault := got.Annotations[defaultAnnotation] == "true"
+				if isDefault != wantDefault {
+					t.Errorf("StorageClass %q default=%v, want %v (annotations=%v)", name, isDefault, wantDefault, got.Annotations)
+				}
 			}
 		})
 	}
