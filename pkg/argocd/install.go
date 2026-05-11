@@ -25,7 +25,7 @@ const (
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
 // If cfg.GitRepository is a local file:// path, the directory is mounted into the repo-server pod.
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -79,9 +79,6 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 			WithMetadata("error", err.Error()))
 		return fmt.Errorf("cluster not ready: %w", err)
 	}
-
-	// Get Argo CD configuration
-	argoCDCfg := DefaultConfig()
 
 	// If using a local file:// git repo, mount it into the repo-server pod
 	if cfg.GitRepository != nil && cfg.GitRepository.IsLocalPath() {
