@@ -8,7 +8,14 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
   annotations:
     argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # `BeforeHookCreation` deletes any existing Job before creating a new one
+    # on each sync. Without it, a Job that fails (bad image, network blip,
+    # kcc bug) sits in the cluster forever — Kubernetes Jobs are immutable
+    # post-create, so ArgoCD can't update the Job's pod template in place.
+    # This makes upgrades safe even from a stuck/failed previous run.
+    # `HookSucceeded` additionally deletes the Job after a successful run
+    # to avoid Job clutter in steady state.
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
 spec:
   ttlSecondsAfterFinished: 300
   template:
@@ -17,11 +24,11 @@ spec:
       containers:
         - name: realm-setup
           # Pinned to a kcc release verified in CI against the deployed
-          # Keycloak version (currently 26.5.5, set in
+          # Keycloak version (currently 26.5.4, set in
           # pkg/argocd/templates/apps/keycloak.yaml). Bumping the Keycloak
           # image requires bumping this tag in lock-step. See:
           # https://redirect.github.com/adorsys/keycloak-config-cli/blob/v6.5.0/.github/workflows/ci.yaml
-          image: quay.io/adorsys/keycloak-config-cli:6.5.0-26.5.5
+          image: quay.io/adorsys/keycloak-config-cli:6.5.0-26.5.4
           env:
             # Keycloak connection
             - name: KEYCLOAK_URL
