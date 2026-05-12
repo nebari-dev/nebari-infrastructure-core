@@ -25,7 +25,7 @@ spec:
           # keycloak-config-cli build that's verified against this exact
           # Keycloak version; bumping one means bumping the other.
           image:
-            tag: "26.5.5"
+            tag: "26.5.4"
           args:
             - start
           replicas: 1
