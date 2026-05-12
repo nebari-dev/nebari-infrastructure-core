@@ -48,9 +48,9 @@ func TestJSONLineMapper(t *testing.T) {
 		}
 	})
 
-	t.Run("forwards the full event as payload metadata", func(t *testing.T) {
-		// Drives one event per kind of payload through the mapper and
-		// confirms the entire JSON rides through as MetadataKeyPayload.
+	t.Run("forwards the full event as detail metadata", func(t *testing.T) {
+		// Drives one event per kind of detail through the mapper and
+		// confirms the entire JSON rides through as MetadataKeyDetail.
 		// We don't enumerate fields — consumers decode whatever they need.
 		cases := []struct {
 			name    string
@@ -82,14 +82,14 @@ func TestJSONLineMapper(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				got := jsonLineMapper([]byte(tc.line))
-				raw, ok := got.Metadata[status.MetadataKeyPayload].(json.RawMessage)
+				raw, ok := got.Metadata[status.MetadataKeyDetail].(json.RawMessage)
 				if !ok {
-					t.Fatalf("payload metadata type = %T, want json.RawMessage",
-						got.Metadata[status.MetadataKeyPayload])
+					t.Fatalf("detail metadata type = %T, want json.RawMessage",
+						got.Metadata[status.MetadataKeyDetail])
 				}
 				for _, needle := range tc.needles {
 					if !strings.Contains(string(raw), needle) {
-						t.Errorf("payload = %s, want substring %q", raw, needle)
+						t.Errorf("detail = %s, want substring %q", raw, needle)
 					}
 				}
 			})
@@ -104,15 +104,15 @@ func TestJSONLineMapper(t *testing.T) {
 		if got.Message != "this is not JSON" {
 			t.Errorf("message = %q", got.Message)
 		}
-		if _, ok := got.Metadata[status.MetadataKeyPayload]; ok {
-			t.Errorf("payload metadata should be absent for non-JSON input")
+		if _, ok := got.Metadata[status.MetadataKeyDetail]; ok {
+			t.Errorf("detail metadata should be absent for non-JSON input")
 		}
 	})
 
 	t.Run("unknown @level falls through to info", func(t *testing.T) {
 		// Forward-compatibility: if tofu introduces a new @level we don't
 		// recognise, the event still flows through (info level) with the
-		// full payload available for any consumer that does care.
+		// full detail available for any consumer that does care.
 		got := jsonLineMapper([]byte(`{"@level":"fancy","@message":"x","type":"log"}`))
 		if got.Level != status.LevelInfo {
 			t.Errorf("level = %v, want info", got.Level)

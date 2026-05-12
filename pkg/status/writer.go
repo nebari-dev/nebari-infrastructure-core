@@ -6,10 +6,11 @@ import (
 	"io"
 )
 
-// MetadataKeyPayload is the conventional Metadata key on Updates carrying a
-// structured per-source payload (typically a json.RawMessage). The shape of
-// the payload depends on the producer.
-const MetadataKeyPayload = "payload"
+// MetadataKeyDetail is the conventional Metadata key on Updates carrying
+// source-specific structured data (typically a json.RawMessage). The shape
+// of the value depends on the producer; matches the AWS EventBridge /
+// CloudWatch Events convention of "envelope plus detail".
+const MetadataKeyDetail = "detail"
 
 // LineMapper converts one line of subprocess output into a status.Update.
 // The line has trailing newline / carriage return stripped. Mappers should

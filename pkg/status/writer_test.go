@@ -131,7 +131,7 @@ func TestRawMapper(t *testing.T) {
 // TestConventionKeys pins the documented Metadata key names so a rename forces
 // a deliberate update across all consumers.
 func TestConventionKeys(t *testing.T) {
-	if MetadataKeyPayload != "payload" {
-		t.Errorf("MetadataKeyPayload = %q, want %q", MetadataKeyPayload, "payload")
+	if MetadataKeyDetail != "detail" {
+		t.Errorf("MetadataKeyDetail = %q, want %q", MetadataKeyDetail, "detail")
 	}
 }
