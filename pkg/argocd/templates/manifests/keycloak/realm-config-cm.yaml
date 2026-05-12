@@ -92,8 +92,17 @@ data:
           - https://argocd.{{ .Domain }}
         directAccessGrantsEnabled: false
         standardFlowEnabled: true
-        # Intentionally not setting `defaultClientScopes` here. Keycloak
-        # auto-applies the realm's `defaultDefaultClientScopes` to new
-        # clients, which already includes `groups` plus the built-in
-        # default scopes. Setting this field explicitly would replace that
-        # list and strip the built-ins.
+        # The realm's defaultDefaultClientScopes auto-apply only at client
+        # CREATION time, not on subsequent updates. So we must explicitly
+        # list the full set of default scopes here — otherwise kcc's
+        # replace semantics on this field would leave older clients with
+        # whatever they had at creation. Same content as the realm
+        # default-defaults above so kcc converges to the expected state.
+        defaultClientScopes:
+          - basic
+          - profile
+          - email
+          - roles
+          - web-origins
+          - acr
+          - groups
