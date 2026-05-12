@@ -2,267 +2,172 @@
 
 ### 4.1 Decision: Unified Deployment (Not Staged)
 
-**Context:** Old Nebari had 6+ stages (terraform-state, infrastructure, kubernetes-initialize, ingress, keycloak, etc.)
+**Context:** Old Nebari had six or more stages (terraform-state, infrastructure, kubernetes-initialize, ingress, keycloak, etc.).
 
-**Decision:** NIC deploys everything in one unified workflow.
+**Decision:** NIC deploys everything from `nic deploy -f config.yaml` in one workflow.
 
 **Rationale:**
 
-- Eliminates stage dependency complexity
+- Eliminates stage-dependency complexity
 - Faster deployment (parallel operations where possible)
-- Easier to reason about (one command: `nic deploy`)
+- Easier to reason about (one command)
 - Clearer error messages (no inter-stage state issues)
-- ArgoCD handles application-level dependencies
+- ArgoCD handles application-level dependencies via sync waves
 
-**Alternatives Considered:**
+### 4.2 Decision: Per-Provider Backing Tools (Not "OpenTofu Everywhere")
 
-| Alternative | Rejected Because |
-|-------------|------------------|
-| Keep staged approach | Complexity, state management issues, slower |
-| Makefile-based orchestration | Not portable, hard to debug, limited error handling |
-| Ansible playbooks | YAML hell, imperative, no true state management |
+**Context:** Different cluster providers have different idiomatic tooling. EKS has excellent Terraform support. Hetzner Cloud has a purpose-built tool (`hetzner-k3s`) that handles bootstrap better than tofu would. Kind is configured via a CLI flag and a YAML file.
 
-### 4.2 Decision: OpenTofu/Terraform Modules for Infrastructure
+**Decision:** The `provider.Provider` interface is the abstraction. Each provider implementation chooses the right backing tool for its environment:
 
-**Context:** Need to provision cloud infrastructure (VPC, EKS/GKE/AKS, storage) reliably.
+- **AWS:** OpenTofu, via the `terraform-exec` Go library, running the upstream `nebari-dev/eks-cluster` registry module
+- **Hetzner:** the `hetzner-k3s` binary, talking directly to the Hetzner Cloud API
+- **Local:** Kind, driven by `make localkind-up`. The local provider itself is a thin adapter; the CLI is responsible for cluster creation.
+- **Existing:** no IaC at all - the provider reads `kubeconfig` and `context` from config and adopts the cluster
 
-**Decision:** Use OpenTofu/Terraform modules orchestrated via the terraform-exec Go library.
-
-**Rationale:**
-
-- **Battle-tested modules**: Leverage existing, proven Terraform modules
-- **Community ecosystem**: Access to thousands of maintained modules
-- **Familiar to teams**: Most infrastructure engineers know Terraform/HCL
-- **Standard tooling**: Works with terraform-docs, tfsec, Atlantis, etc.
-- **Faster development**: Reuse modules instead of writing SDK code from scratch
-- **Standard state format**: Terraform state is well-understood and tooling-rich
-
-**How It Works:**
-
-```
-Every `nic deploy` run:
-1. Parse config.yaml (desired state)
-2. Convert config to Terraform variables
-3. Run terraform-exec: init, plan, apply
-4. OpenTofu provisions infrastructure via provider plugins
-5. State file updated in remote backend
-6. Go CLI waits for cluster readiness
-7. Deploy foundational software via ArgoCD
-```
-
-**Trade-offs:**
-
-- **External dependency**: Requires OpenTofu/Terraform binary installed
-- **State management**: Must configure and manage state backends
-- **Debugging layers**: Errors pass through Go → terraform-exec → OpenTofu → Cloud API
-
-See [State Management](05-state-management.md) for state backend configuration.
-
-### 4.3 Decision: terraform-exec for Go Orchestration
-
-**Context:** How to invoke OpenTofu from the Go CLI?
-
-**Decision:** Use HashiCorp's terraform-exec library for programmatic OpenTofu control.
+This direction is documented in [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md), which proposes formalizing the abstraction as out-of-tree gRPC plugins so that private and org-specific providers (e.g., OpenTeams' internal ASCOT DNS provider) have a supported integration path that isn't "fork NIC."
 
 **Rationale:**
 
-- Official Go library for Terraform/OpenTofu execution
-- Type-safe interface for init, plan, apply, destroy
-- Structured output parsing (JSON plan output)
-- Well-maintained and documented
-- Supports both Terraform and OpenTofu binaries
+- Honest about reality: not every provider fits a Terraform module
+- Each provider can use its strongest available tool
+- The `Provider` interface, not Terraform, is the contract
+- Future-proof for out-of-tree plugins (ADR-0004)
 
-**Implementation Pattern:**
+### 4.3 Decision: terraform-exec for the AWS Provider
+
+**Context:** How to invoke OpenTofu from Go for the AWS provider.
+
+**Decision:** Use HashiCorp's `terraform-exec` library wrapped by `pkg/tofu.TerraformExecutor`.
+
+**Implementation Pattern (real shape from `pkg/tofu/tofu.go`):**
 
 ```go
-// terraform-exec wrapper with OpenTelemetry instrumentation
-func (e *Executor) Apply(ctx context.Context, varFiles []string) error {
-    ctx, span := tracer.Start(ctx, "Executor.Apply")
-    defer span.End()
+type TerraformExecutor struct {
+    *tfexec.Terraform
+    workingDir string
+    appFs      afero.Fs
+}
 
-    slog.InfoContext(ctx, "applying infrastructure changes")
-
-    var opts []tfexec.ApplyOption
-    for _, vf := range varFiles {
-        opts = append(opts, tfexec.VarFile(vf))
-    }
-
-    if err := e.tf.Apply(ctx, opts...); err != nil {
-        span.RecordError(err)
-        return fmt.Errorf("terraform apply: %w", err)
-    }
-
-    return nil
+func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {
+    ctx = signalSafeContext(ctx)
+    return te.streamThroughStatus(ctx, func(w io.Writer) error {
+        return te.ApplyJSON(ctx, w, opts...)
+    })
 }
 ```
 
-See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md) for complete implementation.
+Two things to note:
 
-### 4.4 Decision: Terraform State with Remote Backends
+1. The wrapper calls `ApplyJSON`/`PlanJSON`/`InitJSON`/`DestroyJSON` and streams output through the **status channel** attached to `ctx` (see [System Overview §2.4](02-system-overview.md#24-the-status-channel-pkg--cmd-seam)). Library code does not call `slog` - that translation happens in `cmd/nic/status_handler.go`.
+2. `Setup(ctx, templates fs.FS, tfvars any)` (also in `pkg/tofu/tofu.go`) handles binary acquisition via `tofudl` with caching at `~/.cache/nic/tofu/`, extraction of embedded templates, and `terraform.tfvars.json` writing. Callers do not look up tofu in `PATH`.
 
-**Context:** Need to track infrastructure state across deployments.
+See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md).
 
-**Decision:** Use standard Terraform state files stored in remote backends (S3, GCS, Azure Blob).
+### 4.4 Decision: Terraform State in S3 with Native Lockfile-Based Locking (AWS)
 
-**Rationale:**
+**Context:** The AWS provider needs to track infrastructure state across deployments.
 
-- **Standard format**: Terraform state is industry-standard
-- **Team collaboration**: Remote backends support concurrent access with locking
-- **State versioning**: Backends like S3 support versioning for recovery
-- **Drift detection**: `terraform plan` compares state with actual infrastructure
-- **Ecosystem integration**: Works with Atlantis, Terraform Cloud, etc.
+**Decision:** Standard Terraform S3 backend with `use_lockfile = true`. No DynamoDB table is involved.
 
-**State Backend Configuration:**
+**State Backend Configuration (real `pkg/provider/aws/templates/backend.tf`):**
 
 ```hcl
-# AWS Backend (S3 + DynamoDB for locking)
 terraform {
   backend "s3" {
-    bucket         = "nebari-prod-terraform-state"
-    key            = "nic/terraform.tfstate"
-    region         = "us-west-2"
-    encrypt        = true
-    dynamodb_table = "nebari-prod-terraform-locks"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 ```
 
-**Trade-offs:**
+Bucket and key are populated dynamically at `tofu init` time. The bucket name is deterministic: `nic-tfstate-<project>-<region>-<8-hex-of-account-id-hash>`. NIC auto-creates the bucket (`pkg/provider/aws/state.go:ensureStateBucket`) with versioning and public-access-block enabled.
 
-- **Setup required**: Must create and configure state backend resources
-- **State drift risk**: State file can diverge from actual infrastructure
-- **Sensitive data**: State files contain credentials and must be secured
-- **Locking complexity**: Lock conflicts require manual resolution
+**Non-AWS providers manage state in tool-specific ways:**
 
-See [State Management](05-state-management.md) for complete backend configuration.
+- Hetzner: `hetzner-k3s` writes a cluster state file; the location is configured via the tool's own settings
+- Local: Kind manages its own cluster lifecycle
+- Existing: no NIC-owned state
+
+See [State Management](05-state-management.md).
 
 ### 4.5 Decision: ArgoCD for Foundational Software
 
-**Context:** How to deploy and manage foundational software (Keycloak, LGTM, etc.)?
+**Context:** How to deploy and manage foundational software (cert-manager, Envoy Gateway, Keycloak, etc.).
 
-**Decision:** Deploy ArgoCD first via Helm, then use ArgoCD applications for all other foundational software.
+**Decision:** NIC installs ArgoCD first via the **embedded Helm Go SDK** (`helm.sh/helm/v3/pkg/action`, wrapped in `pkg/helm`), then renders ArgoCD `Application` manifests into a Git repository for ArgoCD to sync.
 
 **Rationale:**
 
-- GitOps best practices (declarative, version-controlled)
-- Automatic sync and health checks
-- Dependency management (app-of-apps pattern)
-- Self-healing (detects and fixes drift)
-- Rollback capability
-- Clear audit trail (Git history)
+- GitOps best practices: declarative, version-controlled, self-healing
+- Sync waves manage cross-app dependencies (cert-manager before things that need certs, etc.)
+- ArgoCD itself can be installed without a separately-installed Helm CLI
 
-**Deployment Order:**
+**Deployment Order (real apps under `pkg/argocd/templates/apps/`):**
 
 ```
-1. ArgoCD (Helm chart via Terraform helm provider)
+1. ArgoCD (installed by NIC via the Helm Go SDK)
    ↓
-2. ArgoCD Applications (via Terraform kubernetes provider)
-   ├── cert-manager (first, for TLS)
-   ├── Envoy Gateway (depends on cert-manager)
-   ├── OpenTelemetry Collector
-   ├── Mimir, Loki, Tempo (parallel)
-   ├── Grafana (depends on Mimir/Loki/Tempo)
-   ├── Keycloak (depends on Envoy for ingress)
-   └── Nebari Operator (last, depends on all)
+2. App-of-apps root.yaml, then individual apps via sync waves:
+   ├── cert-manager + cluster-issuers + certificates
+   ├── Envoy Gateway + gateway-config + httproutes
+   ├── postgresql + Keycloak
+   ├── metallb + metallb-config (only when InfraSettings.NeedsMetalLB)
+   ├── opentelemetry-collector
+   ├── nebari-operator (Kustomized from nebari-dev/nebari-operator)
+   └── nebari-landingpage
 ```
 
-### 4.6 Decision: Nebari Kubernetes Operator
+A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not deployed today; that is roadmap work.
 
-**Context:** Applications need to integrate with auth, o11y, and routing.
+### 4.6 Decision: Nebari Operator Is Out-of-Tree
 
-**Decision:** Build a Kubernetes operator that watches `nebari-application` CRDs and automates integration.
+**Context:** Applications integrate with auth and routing via a `NebariApp` CRD.
+
+**Decision:** The Nebari Operator is its own product, developed in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). NIC deploys it as a foundational ArgoCD application via Kustomize (`pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`).
 
 **Rationale:**
 
-- Reduces manual configuration (no more copy-paste YAML)
-- Consistent integration across all apps
-- Self-service for developers
-- Automatic updates when foundational software changes
-- Native Kubernetes workflow
+- The operator has its own release cadence and CRD schema
+- NIC is an infrastructure tool; the operator is an application-integration tool
+- Keeps NIC's surface area focused on cluster provisioning and bootstrap
 
-**Example CRD Usage:**
+NIC passes `InfraSettings.KeycloakBasePath` and `InfraSettings.HTTPSPort` into the operator's Kustomize patch so it routes correctly per provider. NIC does not implement the reconciliation logic; that lives upstream.
 
-```yaml
-apiVersion: nebari.dev/v1alpha1
-kind: NebariApplication
-metadata:
-  name: jupyter-hub
-  namespace: jupyter
-spec:
-  displayName: "JupyterHub"
-  routing:
-    domain: jupyter.example.com
-    enableTLS: true
-    paths:
-      - path: /
-        service: jupyterhub
-        port: 8000
-  authentication:
-    enabled: true
-    allowedGroups:
-      - data-scientists
-      - admins
-  observability:
-    metrics:
-      enabled: true
-      port: 9090
-      path: /metrics
-    logs:
-      enabled: true
-    traces:
-      enabled: true
-    dashboards:
-      - name: "JupyterHub Overview"
-        source: "https://..."
+### 4.7 Decision: OpenTelemetry in Library Code, slog in the CLI
+
+**Context:** Need observability for NIC itself, without coupling library code to a specific logging backend.
+
+**Decision:**
+
+- All new functions in `pkg/` are wrapped in OpenTelemetry trace spans, with the documented exemptions in [`CLAUDE.md`](../../../CLAUDE.md) (e.g., per-line writers in `pkg/status` and byte/line helpers in `pkg/tofu`).
+- Library code never calls `slog`. User-visible progress goes through the status channel; `cmd/nic/status_handler.go` is the only translator into structured logs.
+- Exporters are configurable via `OTEL_EXPORTER` (`console` default, `otlp`, `both`, `none`) and `OTEL_ENDPOINT`.
+
+**Pattern:**
+
+```go
+func SomeFunction(ctx context.Context, ...) error {
+    tracer := otel.Tracer("nebari-infrastructure-core")
+    ctx, span := tracer.Start(ctx, "package.FunctionName")
+    defer span.End()
+
+    span.SetAttributes(attribute.String("key", value))
+
+    if err != nil {
+        span.RecordError(err)
+        return err
+    }
+    return nil
+}
 ```
 
-**Operator Actions:**
+### 4.8 Decision: Single Go Binary with Embedded Templates (Today); Out-of-Tree Plugins (Tomorrow)
 
-1. Creates Keycloak OAuth2 client
-2. Configures Envoy Gateway HTTPRoute
-3. Provisions cert-manager Certificate
-4. Creates Grafana Dashboard ConfigMap
-5. Configures OpenTelemetry ServiceMonitor
-6. Updates status with URLs and credentials
+**Context:** How to package and distribute NIC.
 
-### 4.7 Decision: OpenTelemetry Throughout
+**Decision (today):** Single Go binary. AWS templates are embedded via `go:embed` from `pkg/provider/aws/templates/`. OpenTofu itself is downloaded on first use into `~/.cache/nic/tofu/` and reused thereafter.
 
-**Context:** Need comprehensive observability for NIC itself.
-
-**Decision:** Instrument all NIC code with OpenTelemetry (traces, metrics, logs).
-
-**Rationale:**
-
-- Debugging deployment issues
-- Performance monitoring
-- Vendor-neutral (can export to any backend)
-- Unified observability story (NIC uses same stack it deploys)
-- Compliance with industry standards
-
-**Implementation:**
-
-- Every Go function wrapped in trace span
-- Structured logging via slog with trace context
-- Custom metrics for resource counts, deployment time, errors
-- Export to deployed LGTM stack
-
-### 4.8 Decision: Go CLI with Embedded Modules
-
-**Context:** How to package and distribute NIC?
-
-**Decision:** Single Go binary with OpenTofu modules embedded or cloned from git.
-
-**Rationale:**
-
-- Easy installation (go install or download binary)
-- Modules version-locked with NIC release
-- Predictable behavior across environments
-- No separate module download step
-
-**Module Delivery Options:**
-
-1. **Embedded** (default): Modules embedded in binary via Go embed
-2. **Git clone**: Modules cloned from versioned git tag
-3. **Local path**: Modules from local filesystem (development)
+**Decision (planned, [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md)):** Move providers (cluster, DNS, cert, git, software) to out-of-tree gRPC plugins discovered at runtime. The current in-tree layout is the bootstrap target; the plugin architecture is the long-term direction.
 
 ---
