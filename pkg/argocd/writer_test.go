@@ -739,3 +739,58 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }
+
+// TestKeycloakRealmConfigCM asserts the load-bearing fields of the rendered
+// realm-config ConfigMap: the kcc input is what makes the realm-setup-job
+// produce a valid Keycloak state. Regressions here are silent (the YAML
+// renders fine but Keycloak gets misconfigured), so we check structure.
+func TestKeycloakRealmConfigCM(t *testing.T) {
+	data := TemplateData{
+		Domain: "test.example.com",
+	}
+
+	content, err := templates.ReadFile("templates/manifests/keycloak/realm-config-cm.yaml")
+	if err != nil {
+		t.Fatalf("failed to read realm-config-cm.yaml template: %v", err)
+	}
+
+	processed, err := processTemplate("manifests/keycloak/realm-config-cm.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+
+	// ConfigMap shell
+	for _, want := range []string{
+		"kind: ConfigMap",
+		"name: keycloak-realm-config",
+		"namespace: keycloak",
+		"realm.yaml: |",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in rendered ConfigMap, got:\n%s", want, output)
+		}
+	}
+
+	// kcc realm payload — load-bearing fields the realm-setup-job depends on
+	for _, want := range []string{
+		"realm: nebari",
+		"defaultDefaultClientScopes:",
+		"- groups",
+		"- name: argocd-admins",
+		"- name: argocd-viewers",
+		"username: admin",
+		"$(env:REALM_ADMIN_PASSWORD)",
+		"- /argocd-admins",
+		"protocolMapper: oidc-group-membership-mapper",
+		"claim.name: groups",
+		"clientId: argocd",
+		"$(env:ARGOCD_CLIENT_SECRET)",
+		"https://argocd.test.example.com/auth/callback",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in rendered realm config, got:\n%s", want, output)
+		}
+	}
+}
