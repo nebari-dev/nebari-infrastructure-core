@@ -17,7 +17,9 @@ spec:
       containers:
         - name: realm-setup
           # Pinned to a kcc release verified in CI against the deployed
-          # Keycloak version. See:
+          # Keycloak version (currently 26.5.5, set in
+          # pkg/argocd/templates/apps/keycloak.yaml). Bumping the Keycloak
+          # image requires bumping this tag in lock-step. See:
           # https://redirect.github.com/adorsys/keycloak-config-cli/blob/v6.5.0/.github/workflows/ci.yaml
           image: quay.io/adorsys/keycloak-config-cli:6.5.0-26.5.5
           env:
@@ -33,8 +35,11 @@ spec:
                   key: admin-password
             - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
               value: "true"
+            # Matches the 5-minute readiness window of the previous shell
+            # script. Keycloak's first-start Quarkus augmentation can push
+            # past 2 minutes on slower runners.
             - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
-              value: 120s
+              value: 300s
 
             # kcc import behavior
             - name: IMPORT_FILES_LOCATIONS
