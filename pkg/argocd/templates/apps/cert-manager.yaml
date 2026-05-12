@@ -23,6 +23,13 @@ spec:
         installCRDs: true
         config:
           enableGatewayAPI: true
+        # Serialize ACME HTTP-01 challenges to avoid a race when two Certificates
+        # share a SAN (e.g. nebari-gateway-cert and nebari-landing-nebari-system-cert
+        # both list <baseDomain>). Concurrent challenges for the same hostname
+        # collide on Let's Encrypt's authorization record and one fails with
+        # "No such authorization", leaving the cert stuck on failedIssuanceAttempts.
+        # See nebari-dev/nebari-infrastructure-core#267.
+        maxConcurrentChallenges: 1
         prometheus:
           enabled: true
         resources:

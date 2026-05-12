@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,6 +11,8 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	elb "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing"
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancing/types"
+	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/aws/smithy-go"
 )
 
@@ -80,7 +83,152 @@ func (m *mockELBClient) DeleteLoadBalancer(ctx context.Context, params *elb.Dele
 	return &elb.DeleteLoadBalancerOutput{}, nil
 }
 
-func TestCleanupKubernetesLoadBalancers(t *testing.T) {
+// mockELBv2Client implements ELBv2Client for testing.
+type mockELBv2Client struct {
+	DescribeLoadBalancersFunc func(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error)
+	DescribeTagsFunc          func(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error)
+	DeleteLoadBalancerFunc    func(ctx context.Context, params *elbv2.DeleteLoadBalancerInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error)
+	DescribeTargetGroupsFunc  func(ctx context.Context, params *elbv2.DescribeTargetGroupsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error)
+	DeleteTargetGroupFunc     func(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error)
+}
+
+func (m *mockELBv2Client) DescribeLoadBalancers(ctx context.Context, params *elbv2.DescribeLoadBalancersInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error) {
+	if m.DescribeLoadBalancersFunc != nil {
+		return m.DescribeLoadBalancersFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeLoadBalancersOutput{}, nil
+}
+
+func (m *mockELBv2Client) DescribeTags(ctx context.Context, params *elbv2.DescribeTagsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+	if m.DescribeTagsFunc != nil {
+		return m.DescribeTagsFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeTagsOutput{}, nil
+}
+
+func (m *mockELBv2Client) DeleteLoadBalancer(ctx context.Context, params *elbv2.DeleteLoadBalancerInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error) {
+	if m.DeleteLoadBalancerFunc != nil {
+		return m.DeleteLoadBalancerFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DeleteLoadBalancerOutput{}, nil
+}
+
+func (m *mockELBv2Client) DescribeTargetGroups(ctx context.Context, params *elbv2.DescribeTargetGroupsInput, optFns ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error) {
+	if m.DescribeTargetGroupsFunc != nil {
+		return m.DescribeTargetGroupsFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DescribeTargetGroupsOutput{}, nil
+}
+
+func (m *mockELBv2Client) DeleteTargetGroup(ctx context.Context, params *elbv2.DeleteTargetGroupInput, optFns ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error) {
+	if m.DeleteTargetGroupFunc != nil {
+		return m.DeleteTargetGroupFunc(ctx, params, optFns...)
+	}
+	return &elbv2.DeleteTargetGroupOutput{}, nil
+}
+
+func TestCleanupELBv2LoadBalancers(t *testing.T) {
+	clusterTag := "elbv2.k8s.aws/cluster"
+	clusterName := "test-cluster"
+
+	tests := []struct {
+		name         string
+		lbs          []elbv2types.LoadBalancer
+		tagsByARN    map[string][]elbv2types.Tag
+		deleteErrors map[string]error
+		wantDeleted  []string
+		wantErr      bool
+	}{
+		{
+			name: "deletes only tagged NLBs",
+			lbs: []elbv2types.LoadBalancer{
+				{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-a"), LoadBalancerName: aws.String("a")},
+				{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-b"), LoadBalancerName: aws.String("b")},
+			},
+			tagsByARN: map[string][]elbv2types.Tag{
+				"arn:aws:elbv2::nlb-a": {{Key: aws.String(clusterTag), Value: aws.String(clusterName)}},
+				"arn:aws:elbv2::nlb-b": {{Key: aws.String("other"), Value: aws.String("x")}},
+			},
+			wantDeleted: []string{"arn:aws:elbv2::nlb-a"},
+		},
+		{
+			name:        "no load balancers returns no error",
+			lbs:         nil,
+			wantDeleted: nil,
+		},
+		{
+			name: "wrong cluster tag value is ignored",
+			lbs:  []elbv2types.LoadBalancer{{LoadBalancerArn: aws.String("arn:aws:elbv2::nlb-c"), LoadBalancerName: aws.String("c")}},
+			tagsByARN: map[string][]elbv2types.Tag{
+				"arn:aws:elbv2::nlb-c": {{Key: aws.String(clusterTag), Value: aws.String("different-cluster")}},
+			},
+			wantDeleted: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleted []string
+			mock := &mockELBv2Client{
+				DescribeLoadBalancersFunc: func(ctx context.Context, p *elbv2.DescribeLoadBalancersInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeLoadBalancersOutput, error) {
+					// When the waiter calls DescribeLoadBalancers with specific ARNs after
+					// deletion, return LoadBalancerNotFound so the waiter treats it as success.
+					if len(p.LoadBalancerArns) > 0 {
+						allDeleted := true
+						for _, arn := range p.LoadBalancerArns {
+							if !slices.Contains(deleted, arn) {
+								allDeleted = false
+								break
+							}
+						}
+						if allDeleted {
+							return nil, &mockAPIError{code: "LoadBalancerNotFound", message: "not found"}
+						}
+					}
+					return &elbv2.DescribeLoadBalancersOutput{LoadBalancers: tt.lbs}, nil
+				},
+				DescribeTagsFunc: func(ctx context.Context, p *elbv2.DescribeTagsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+					var out []elbv2types.TagDescription
+					for _, arn := range p.ResourceArns {
+						out = append(out, elbv2types.TagDescription{
+							ResourceArn: aws.String(arn),
+							Tags:        tt.tagsByARN[arn],
+						})
+					}
+					return &elbv2.DescribeTagsOutput{TagDescriptions: out}, nil
+				},
+				DeleteLoadBalancerFunc: func(ctx context.Context, p *elbv2.DeleteLoadBalancerInput, _ ...func(*elbv2.Options)) (*elbv2.DeleteLoadBalancerOutput, error) {
+					deleted = append(deleted, *p.LoadBalancerArn)
+					if err, ok := tt.deleteErrors[*p.LoadBalancerArn]; ok {
+						return nil, err
+					}
+					return &elbv2.DeleteLoadBalancerOutput{}, nil
+				},
+			}
+
+			count, err := cleanupELBv2LoadBalancers(context.Background(), mock, clusterName)
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if count != len(tt.wantDeleted) {
+				t.Errorf("deleted count = %d, want %d", count, len(tt.wantDeleted))
+			}
+			if len(deleted) != len(tt.wantDeleted) {
+				t.Errorf("DeleteLoadBalancer called %d times, want %d", len(deleted), len(tt.wantDeleted))
+			}
+			for i, arn := range tt.wantDeleted {
+				if i >= len(deleted) || deleted[i] != arn {
+					t.Errorf("deleted[%d] = %v, want %v", i, deleted, tt.wantDeleted)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanupAWSLoadBalancers(t *testing.T) {
 	clusterName := "my-cluster"
 	tagKey := "kubernetes.io/cluster/" + clusterName
 
@@ -147,7 +295,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 			},
 		}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -188,7 +336,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -205,7 +353,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -243,7 +391,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 
 		ec2Mock := &mockEC2Client{}
 
-		err := cleanupKubernetesLoadBalancers(context.Background(), elbMock, ec2Mock, clusterName)
+		err := cleanupAWSLoadBalancers(context.Background(), elbMock, &mockELBv2Client{}, ec2Mock, clusterName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -261,7 +409,7 @@ func TestCleanupKubernetesLoadBalancers(t *testing.T) {
 	})
 }
 
-func TestCleanupK8sELBSecurityGroups(t *testing.T) {
+func TestCleanupK8sSecurityGroupsByPrefix(t *testing.T) {
 	tagKey := "kubernetes.io/cluster/my-cluster"
 
 	t.Run("deletes matching security groups", func(t *testing.T) {
@@ -296,7 +444,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 			},
 		}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -329,7 +477,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 			},
 		}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -341,7 +489,7 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 	t.Run("no security groups found", func(t *testing.T) {
 		mock := &mockEC2Client{}
 
-		deleted, err := cleanupK8sELBSecurityGroups(context.Background(), mock, tagKey)
+		deleted, err := cleanupK8sSecurityGroupsByPrefix(context.Background(), mock, tagKey, "k8s-elb-")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -349,6 +497,102 @@ func TestCleanupK8sELBSecurityGroups(t *testing.T) {
 			t.Errorf("expected 0 deleted, got %d", deleted)
 		}
 	})
+}
+
+func TestCleanupLBCManagedSecurityGroups(t *testing.T) {
+	clusterName := "llmd-test"
+
+	tests := []struct {
+		name           string
+		sgs            []ec2types.SecurityGroup
+		wantDeletedIDs []string
+	}{
+		{
+			name: "deletes SG with both LBC tags",
+			sgs: []ec2types.SecurityGroup{
+				{
+					GroupId:   aws.String("sg-001"),
+					GroupName: aws.String("k8s-envoygat-envoyenv-1d571e2555"),
+					Tags: []ec2types.Tag{
+						{Key: aws.String(clusterTagELBv2), Value: aws.String(clusterName)},
+						{Key: aws.String("service.k8s.aws/resource"), Value: aws.String("ManagedLBSecurityGroup")},
+					},
+				},
+			},
+			wantDeletedIDs: []string{"sg-001"},
+		},
+		{
+			name:           "no SGs match - no deletes",
+			sgs:            nil,
+			wantDeletedIDs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deletedIDs []string
+			mock := &mockEC2Client{
+				DescribeSecurityGroupsFunc: func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+					// First call is the tag-filtered lookup; second call is from
+					// revokeReferencingRules which uses ip-permission.group-id.
+					for _, f := range params.Filters {
+						if f.Name != nil && *f.Name == "ip-permission.group-id" {
+							return &ec2.DescribeSecurityGroupsOutput{}, nil
+						}
+					}
+					return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: tt.sgs}, nil
+				},
+				DeleteSecurityGroupFunc: func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
+					deletedIDs = append(deletedIDs, *params.GroupId)
+					return &ec2.DeleteSecurityGroupOutput{}, nil
+				},
+			}
+
+			deleted, err := cleanupLBCManagedSecurityGroups(context.Background(), mock, clusterName)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if deleted != len(tt.wantDeletedIDs) {
+				t.Errorf("deleted = %d, want %d", deleted, len(tt.wantDeletedIDs))
+			}
+			if !slices.Equal(deletedIDs, tt.wantDeletedIDs) {
+				t.Errorf("deletedIDs = %v, want %v", deletedIDs, tt.wantDeletedIDs)
+			}
+		})
+	}
+}
+
+func TestCleanupLBCManagedSecurityGroups_PassesExpectedFilters(t *testing.T) {
+	clusterName := "llmd-test"
+	var capturedFilters []ec2types.Filter
+	mock := &mockEC2Client{
+		DescribeSecurityGroupsFunc: func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+			if capturedFilters == nil {
+				capturedFilters = params.Filters
+			}
+			return &ec2.DescribeSecurityGroupsOutput{}, nil
+		},
+	}
+
+	if _, err := cleanupLBCManagedSecurityGroups(context.Background(), mock, clusterName); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantFilterNames := map[string]string{
+		"tag:" + clusterTagELBv2:       clusterName,
+		"tag:service.k8s.aws/resource": "ManagedLBSecurityGroup",
+	}
+	gotFilterNames := map[string]string{}
+	for _, f := range capturedFilters {
+		if f.Name != nil && len(f.Values) == 1 {
+			gotFilterNames[*f.Name] = f.Values[0]
+		}
+	}
+	for k, v := range wantFilterNames {
+		if gotFilterNames[k] != v {
+			t.Errorf("filter %q = %q, want %q", k, gotFilterNames[k], v)
+		}
+	}
 }
 
 func TestRevokeReferencingRules(t *testing.T) {
@@ -436,6 +680,49 @@ func TestRevokeReferencingRules(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestCleanupELBv2TargetGroups(t *testing.T) {
+	clusterTag := "elbv2.k8s.aws/cluster"
+	clusterName := "test-cluster"
+
+	tgs := []elbv2types.TargetGroup{
+		{TargetGroupArn: aws.String("arn:aws:elbv2::tg-a"), TargetGroupName: aws.String("a")},
+		{TargetGroupArn: aws.String("arn:aws:elbv2::tg-b"), TargetGroupName: aws.String("b")},
+	}
+	tagsByARN := map[string][]elbv2types.Tag{
+		"arn:aws:elbv2::tg-a": {{Key: aws.String(clusterTag), Value: aws.String(clusterName)}},
+		"arn:aws:elbv2::tg-b": {{Key: aws.String("other"), Value: aws.String("x")}},
+	}
+
+	var deleted []string
+	mock := &mockELBv2Client{
+		DescribeTargetGroupsFunc: func(ctx context.Context, p *elbv2.DescribeTargetGroupsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTargetGroupsOutput, error) {
+			return &elbv2.DescribeTargetGroupsOutput{TargetGroups: tgs}, nil
+		},
+		DescribeTagsFunc: func(ctx context.Context, p *elbv2.DescribeTagsInput, _ ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error) {
+			var out []elbv2types.TagDescription
+			for _, arn := range p.ResourceArns {
+				out = append(out, elbv2types.TagDescription{ResourceArn: aws.String(arn), Tags: tagsByARN[arn]})
+			}
+			return &elbv2.DescribeTagsOutput{TagDescriptions: out}, nil
+		},
+		DeleteTargetGroupFunc: func(ctx context.Context, p *elbv2.DeleteTargetGroupInput, _ ...func(*elbv2.Options)) (*elbv2.DeleteTargetGroupOutput, error) {
+			deleted = append(deleted, *p.TargetGroupArn)
+			return &elbv2.DeleteTargetGroupOutput{}, nil
+		},
+	}
+
+	count, err := cleanupELBv2TargetGroups(context.Background(), mock, clusterName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("deleted count = %d, want 1", count)
+	}
+	if len(deleted) != 1 || deleted[0] != "arn:aws:elbv2::tg-a" {
+		t.Errorf("deleted = %v, want [arn:aws:elbv2::tg-a]", deleted)
+	}
 }
 
 func TestDeleteSecurityGroupWithRetry(t *testing.T) {

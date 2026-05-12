@@ -31,6 +31,9 @@ const (
 
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
+
+	// attrKeyRegion is the attribute / Helm value key for AWS region.
+	attrKeyRegion = "region"
 )
 
 // Provider implements the AWS provider
@@ -325,6 +328,40 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Install AWS Load Balancer Controller if enabled.
+	// Must run before any workload that relies on Service type=LoadBalancer.
+	if awsCfg.LoadBalancerControllerEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for AWS Load Balancer Controller install: %w", err)
+		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for AWS Load Balancer Controller: %w", err)
+		}
+
+		vpcIDOutput, ok := outputs["vpc_id"]
+		if !ok {
+			err := fmt.Errorf("vpc_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var vpcID string
+		if err := json.Unmarshal(vpcIDOutput.Value, &vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal vpc_id: %w", err)
+		}
+
+		if err := installAWSLoadBalancerController(ctx, kubeconfigBytes, awsCfg, projectName, vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install AWS Load Balancer Controller: %w", err)
+		}
+	}
+
 	// Create EFS StorageClass if EFS is enabled
 	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
@@ -400,7 +437,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", projectName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 		attribute.Bool("dry_run", opts.DryRun),
 		attribute.Bool("force", opts.Force),
 	)
@@ -460,9 +497,22 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	// Clean up Kubernetes-created load balancers before destroying infrastructure.
-	// These are not managed by Terraform and will block VPC/subnet deletion.
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up Kubernetes-created load balancers for cluster: %s", projectName)).
+	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
+	// falls through to the Stage 2 SDK sweep below.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Attempting graceful Kubernetes-side load balancer cleanup").
+		WithResource("load-balancer").WithAction("cleanup"))
+	kubeconfigBytes, kcErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+	if kcErr != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kubernetes API unreachable; skipping graceful LB cleanup: %v", kcErr)).
+			WithResource("load-balancer").WithAction("cleanup"))
+	} else {
+		if err := cleanupKubernetesResources(ctx, kubeconfigBytes, projectName, awsCfg.LoadBalancerControllerDestroyTimeout()); err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Graceful LB cleanup incomplete: %v", err)).
+				WithResource("load-balancer").WithAction("cleanup"))
+		}
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up AWS load balancers for cluster: %s", projectName)).
 		WithResource("load-balancer").
 		WithAction("cleanup"))
 	elbClient, err := newELBClient(ctx, region)
@@ -470,16 +520,20 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		span.RecordError(err)
 		return fmt.Errorf("failed to create ELB client: %w", err)
 	}
+	elbv2Client, err := newELBv2Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create ELBv2 client: %w", err)
+	}
 	ec2ClientForCleanup, err := newEC2Client(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
-	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, projectName); err != nil {
+	if err := cleanupAWSLoadBalancers(ctx, elbClient, elbv2Client, ec2ClientForCleanup, projectName); err != nil {
 		if opts.Force {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
-				WithResource("load-balancer").
-				WithAction("cleanup"))
+				WithResource("load-balancer").WithAction("cleanup"))
 		} else {
 			span.RecordError(err)
 			return fmt.Errorf("failed to clean up load balancers: %w", err)
@@ -534,7 +588,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", clusterName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 	)
 
 	// Verify the state bucket exists before attempting to read outputs
@@ -639,6 +693,11 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
 // EFSStorageClass is set when EFS is enabled.
+//
+// LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
+// Controller (type=external) and request a public, IP-targeted NLB. Without
+// aws-load-balancer-scheme=internet-facing, LBC creates an internal NLB by
+// default, which is not reachable from outside the VPC.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := storageClassLonghorn
 	var efsSC string
@@ -660,5 +719,10 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LoadBalancerAnnotations: map[string]string{
+			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
+			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":          "internet-facing",
+		},
 	}
 }
