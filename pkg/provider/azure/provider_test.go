@@ -12,9 +12,8 @@ var _ provider.Provider = (*Provider)(nil)
 
 func TestInfraSettings(t *testing.T) {
 	p := NewProvider()
-	cfg := &config.NebariConfig{
-		Provider:    "azure",
-		ProjectName: "test",
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{"azure": map[string]any{}},
 	}
 
 	settings := p.InfraSettings(cfg)

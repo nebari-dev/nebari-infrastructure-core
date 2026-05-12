@@ -14,10 +14,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-const (
-	providerName = "hetzner"
-	configKey    = "hetzner_cloud"
-)
+const providerName = "hetzner"
 
 // Provider implements the Hetzner Cloud provider using hetzner-k3s.
 type Provider struct{}
@@ -27,36 +24,35 @@ func NewProvider() *Provider {
 	return &Provider{}
 }
 
-func (p *Provider) Name() string      { return providerName }
-func (p *Provider) ConfigKey() string { return configKey }
+func (p *Provider) Name() string { return providerName }
 
-// parseConfig extracts and validates the Hetzner config from NebariConfig.
-func (p *Provider) parseConfig(ctx context.Context, cfg *config.NebariConfig) (*Config, error) {
+// parseConfig extracts and validates the Hetzner config from ClusterConfig.
+func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	var hCfg Config
-	rawCfg := cfg.ProviderConfig[configKey]
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
-		return nil, fmt.Errorf("missing %s configuration block", configKey)
+		return nil, fmt.Errorf("missing %s configuration block", clusterConfig.ProviderName())
 	}
 	if err := config.UnmarshalProviderConfig(ctx, rawCfg, &hCfg); err != nil {
-		return nil, fmt.Errorf("failed to parse %s config: %w", configKey, err)
+		return nil, fmt.Errorf("failed to parse %s config: %w", clusterConfig.ProviderName(), err)
 	}
 	return &hCfg, nil
 }
 
-func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Validate")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", providerName),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Validating Hetzner provider configuration").
 		WithResource("provider").WithAction("validate"))
 
-	hCfg, err := p.parseConfig(ctx, cfg)
+	hCfg, err := p.parseConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -86,20 +82,20 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	return nil
 }
 
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", providerName),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
 	// Apply deployment timeout if configured
-	if cfg.Timeout > 0 {
+	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
@@ -110,7 +106,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
-	hCfg, err := p.parseConfig(ctx, cfg)
+	hCfg, err := p.parseConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -152,7 +148,13 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Resolving k3s version").
 		WithResource("provider").WithAction("deploy"))
 
-	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, "")
+	releases, err := getHetznerK3sReleases(ctx, binaryPath)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get k3s releases: %w", err)
+	}
+
+	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, releases)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve k3s version: %w", err)
@@ -160,7 +162,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	span.SetAttributes(attribute.String("k3s_version", k3sVersion))
 
 	// Set up working directory
-	projectDir := filepath.Join(cacheDir, cfg.ProjectName)
+	projectDir := filepath.Join(cacheDir, projectName)
 	if err := os.MkdirAll(projectDir, 0750); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create project directory: %w", err)
@@ -170,7 +172,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 
 	// Generate cluster.yaml
 	params := clusterParams{
-		ClusterName:    cfg.ProjectName,
+		ClusterName:    projectName,
 		K3sVersion:     k3sVersion,
 		SSHPublicKey:   pubKey,
 		SSHPrivateKey:  privKey,
@@ -190,7 +192,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would create Hetzner k3s cluster").
 			WithResource("provider").WithAction("deploy").
 			WithMetadata("cluster_yaml", clusterYAMLPath))
@@ -224,20 +226,20 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	return nil
 }
 
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", providerName),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
 	// Apply timeout if configured
-	if cfg.Timeout > 0 {
+	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 
@@ -253,14 +255,14 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 		return err
 	}
 
-	projectDir := filepath.Join(cacheDir, cfg.ProjectName)
+	projectDir := filepath.Join(cacheDir, projectName)
 	clusterYAMLPath := filepath.Join(projectDir, "cluster.yaml")
 
 	if _, err := os.Stat(clusterYAMLPath); os.IsNotExist(err) {
 		return fmt.Errorf("cluster.yaml not found at %s - was this cluster created by NIC?", clusterYAMLPath)
 	}
 
-	if cfg.DryRun {
+	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Dry run: would destroy Hetzner k3s cluster").
 			WithResource("provider").WithAction("destroy").
 			WithMetadata("cluster_yaml", clusterYAMLPath))
@@ -316,7 +318,7 @@ func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error 
 	return nil
 }
 
-func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "hetzner.GetKubeconfig")
 	defer span.End()
@@ -327,7 +329,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 		return nil, err
 	}
 
-	kubeconfigPath := filepath.Join(cacheDir, cfg.ProjectName, "kubeconfig")
+	kubeconfigPath := filepath.Join(cacheDir, projectName, "kubeconfig")
 	data, err := os.ReadFile(kubeconfigPath) //nolint:gosec // Path constructed from known cache dir + project name
 	if err != nil {
 		span.RecordError(err)
@@ -337,7 +339,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	return data, nil
 }
 
-func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSettings {
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
 		StorageClass: "hcloud-volumes",
 		NeedsMetalLB: false,
@@ -347,7 +349,7 @@ func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSetting
 	// Parse errors are intentionally ignored here: InfraSettings is called after
 	// Validate() has already confirmed the config is parseable. If it somehow
 	// fails (e.g., nil config in tests), we return valid defaults without annotations.
-	rawCfg := cfg.ProviderConfig[configKey]
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
 		var hCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &hCfg); err == nil && hCfg.Location != "" {
@@ -360,12 +362,12 @@ func (p *Provider) InfraSettings(cfg *config.NebariConfig) provider.InfraSetting
 	return settings
 }
 
-func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := map[string]string{
 		"Provider": "Hetzner Cloud (k3s)",
 	}
 
-	rawCfg := cfg.ProviderConfig[configKey]
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}

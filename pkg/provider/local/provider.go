@@ -16,6 +16,15 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	// ProviderName is the identifier for the local provider.
+	ProviderName = "local"
+	// defaultStorageClass is the StorageClass name K3s installs by default.
+	defaultStorageClass = "standard"
+	// defaultMetalLBAddressPool is the address range for the default MetalLB pool.
+	defaultMetalLBAddressPool = "192.168.1.100-192.168.1.110"
+)
+
 // Provider implements the local K3s provider
 type Provider struct{}
 
@@ -26,44 +35,36 @@ func NewProvider() *Provider {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "local"
-}
-
-// ConfigKey returns the YAML key for this provider's configuration
-func (p *Provider) ConfigKey() string {
-	return "local"
+	return ProviderName
 }
 
 // Validate validates the local configuration
-func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Validate")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("provider", ProviderName),
+		attribute.String("project_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Validating local provider configuration").
 		WithResource("provider").
 		WithAction("validate").
-		WithMetadata("cluster_name", cfg.ProjectName))
+		WithMetadata("cluster_name", projectName))
 
 	// Parse local provider config
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := clusterConfig.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to unmarshal local config: %w", err)
 		}
 	}
 
-	// Get the context name: top-level kube_context takes precedence, then provider-specific
-	contextName := cfg.GetKubeContext()
-	if contextName == "" {
-		contextName = localCfg.KubeContext
-	}
+	// Get the context name from provider-specific config
+	contextName := localCfg.KubeContext
 	if contextName == "" {
 		contextName = "default"
 	}
@@ -71,7 +72,11 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	span.SetAttributes(attribute.String("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Verify kubeconfig file exists
@@ -110,24 +115,24 @@ func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Successfully validated local provider configuration with context: %s", contextName)).
 		WithResource("provider").
 		WithAction("validate").
-		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("cluster_name", projectName).
 		WithMetadata("kube_context", contextName))
 
 	return nil
 }
 
 // Deploy deploys local K3s infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("provider", ProviderName),
+		attribute.String("project_name", projectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := clusterConfig.ProviderConfig(); rawCfg != nil {
 		var localCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err == nil {
 			span.SetAttributes(attribute.String("local.kube_context", localCfg.KubeContext))
@@ -135,7 +140,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	}
 
 	// Marshal config to JSON for status message
-	configJSON, err := json.MarshalIndent(cfg, "", "  ")
+	configJSON, err := json.MarshalIndent(clusterConfig, "", "  ")
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -144,55 +149,52 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Local provider deployment (stub)").
 		WithResource("provider").
 		WithAction("deploy").
-		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("cluster_name", projectName).
 		WithMetadata("config", string(configJSON)))
 
 	return nil
 }
 
 // Destroy tears down local infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, _ provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("provider", ProviderName),
+		attribute.String("project_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying local provider infrastructure (stub)").
 		WithResource("provider").
 		WithAction("destroy").
-		WithMetadata("cluster_name", cfg.ProjectName))
+		WithMetadata("cluster_name", projectName))
 	return nil
 }
 
 // GetKubeconfig retrieves kubeconfig for the specified context
-func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
-		attribute.String("cluster_name", cfg.ProjectName),
+		attribute.String("provider", ProviderName),
+		attribute.String("cluster_name", projectName),
 	)
 
 	// Parse local provider config to get the kube context
 	var localCfg Config
-	if rawCfg := cfg.ProviderConfig["local"]; rawCfg != nil {
+	if rawCfg := clusterConfig.ProviderConfig(); rawCfg != nil {
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 			span.RecordError(err)
 			return nil, fmt.Errorf("failed to unmarshal local config: %w", err)
 		}
 	}
 
-	// Get the context name: top-level kube_context takes precedence, then provider-specific
-	contextName := cfg.GetKubeContext()
-	if contextName == "" {
-		contextName = localCfg.KubeContext
-	}
+	// Get the context name from provider-specific config
+	contextName := localCfg.KubeContext
 	if contextName == "" {
 		contextName = "default"
 	}
@@ -202,11 +204,15 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Retrieving kubeconfig for context: %s", contextName)).
 		WithResource("provider").
 		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("cluster_name", projectName).
 		WithMetadata("kube_context", contextName))
 
 	// Get kubeconfig file path
-	kubeconfigPath := kubeconfig.GetPath()
+	kubeconfigPath, err := kubeconfig.GetPath()
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 	span.SetAttributes(attribute.String("kubeconfig_path", kubeconfigPath))
 
 	// Load the kubeconfig file
@@ -243,24 +249,17 @@ func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Successfully retrieved kubeconfig for context: %s", contextName)).
 		WithResource("provider").
 		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("cluster_name", projectName).
 		WithMetadata("kube_context", contextName))
 
 	return kubeconfigBytes, nil
 }
 
 // Summary returns key configuration details for display purposes
-func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := make(map[string]string)
 
-	// Check top-level kube_context first
-	if cfg.GetKubeContext() != "" {
-		result["Kube Context"] = cfg.GetKubeContext()
-		return result
-	}
-
-	// Fall back to provider-specific config
-	rawCfg := cfg.ProviderConfig["local"]
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -277,10 +276,42 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 }
 
 // InfraSettings returns local provider Kubernetes infrastructure settings.
-func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
-	return provider.InfraSettings{
-		StorageClass:       "standard",
-		NeedsMetalLB:       true,
-		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+// Values are read from the local provider config block, falling back to defaults.
+// Parse errors are intentionally ignored: InfraSettings is called after Validate()
+// has confirmed the config is parseable. If it somehow fails (e.g., nil config in
+// tests), we return valid defaults.
+func (p *Provider) InfraSettings(cfg *config.ClusterConfig) provider.InfraSettings {
+	settings := provider.InfraSettings{
+		StorageClass:        defaultStorageClass,
+		NeedsMetalLB:        true,
+		MetalLBAddressPool:  defaultMetalLBAddressPool,
+		SupportsLocalGitOps: true,
 	}
+
+	rawCfg := cfg.ProviderConfig()
+	if rawCfg == nil {
+		return settings
+	}
+
+	var localCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &localCfg); err != nil {
+		return settings
+	}
+
+	if localCfg.StorageClass != "" {
+		settings.StorageClass = localCfg.StorageClass
+	}
+	if localCfg.HTTPSPort != 0 {
+		settings.HTTPSPort = localCfg.HTTPSPort
+	}
+	if localCfg.MetalLB != nil {
+		if localCfg.MetalLB.Enabled != nil {
+			settings.NeedsMetalLB = *localCfg.MetalLB.Enabled
+		}
+		if localCfg.MetalLB.AddressPool != "" {
+			settings.MetalLBAddressPool = localCfg.MetalLB.AddressPool
+		}
+	}
+
+	return settings
 }

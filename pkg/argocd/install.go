@@ -17,9 +17,15 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	argoCDServerDeployment = "argocd-server"
+	localGitopsVolumeName  = "local-gitops"
+)
+
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider) error {
+// If cfg.GitRepository is a local file:// path, the directory is mounted into the repo-server pod.
+func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -35,7 +41,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		WithMetadata("cluster_name", cfg.ProjectName))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get kubeconfig").
@@ -74,8 +80,18 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		return fmt.Errorf("cluster not ready: %w", err)
 	}
 
-	// Get Argo CD configuration
-	argoCDCfg := DefaultConfig()
+	// If using a local file:// git repo, mount it into the repo-server pod
+	if cfg.GitRepository != nil && cfg.GitRepository.IsLocalPath() {
+		localPath, err := cfg.GitRepository.GetLocalPath()
+		if err != nil {
+			return fmt.Errorf("invalid local git path: %w", err)
+		}
+		addLocalGitopsMount(ctx, argoCDCfg.Values, localPath)
+
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
+			WithResource("argocd").
+			WithAction("configuring"))
+	}
 
 	// Create namespace
 	if err := createNamespace(ctx, k8sClient, argoCDCfg.Namespace); err != nil {
@@ -297,7 +313,7 @@ func waitForArgoCDReadyWithLister(ctx context.Context, listDeployments Deploymen
 // waitForArgoCDReady waits for Argo CD deployments to be ready using a Kubernetes client.
 func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, namespace string, timeout time.Duration) error {
 	requiredDeployments := []string{
-		"argocd-server",
+		argoCDServerDeployment,
 		"argocd-repo-server",
 	}
 
@@ -314,4 +330,64 @@ func waitForArgoCDReady(ctx context.Context, client *kubernetes.Clientset, names
 	}
 
 	return waitForArgoCDReadyWithLister(ctx, listDeployments, requiredDeployments, timeout)
+}
+
+// addLocalGitopsMount adds a hostPath volume and volumeMount to the ArgoCD
+// repo-server Helm values so it can access a local file:// git repository.
+func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath string) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "argocd.addLocalGitopsMount")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("local_path", localPath))
+	repoServer, ok := values["repoServer"].(map[string]any)
+	if !ok {
+		repoServer = map[string]any{}
+		values["repoServer"] = repoServer
+	}
+
+	// Append to existing volumes (handle both []map[string]any and []any from YAML parsing)
+	newVolume := map[string]any{
+		"name": localGitopsVolumeName,
+		"hostPath": map[string]any{
+			"path": localPath,
+			"type": "Directory",
+		},
+	}
+	repoServer["volumes"] = appendToSlice(repoServer["volumes"], newVolume)
+
+	// Append to existing volumeMounts
+	newMount := map[string]any{
+		"name":      localGitopsVolumeName,
+		"mountPath": localPath,
+		"readOnly":  true,
+	}
+	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], newMount)
+}
+
+// appendToSlice appends a new item to an existing slice, handling both
+// []map[string]any and []any types that may come from YAML parsing.
+func appendToSlice(existing any, newItem map[string]any) []map[string]any {
+	if existing == nil {
+		return []map[string]any{newItem}
+	}
+
+	// Handle []map[string]any (typed slice)
+	if typed, ok := existing.([]map[string]any); ok {
+		return append(typed, newItem)
+	}
+
+	// Handle []any (untyped slice from YAML parsing)
+	if untyped, ok := existing.([]any); ok {
+		result := make([]map[string]any, 0, len(untyped)+1)
+		for _, item := range untyped {
+			if m, ok := item.(map[string]any); ok {
+				result = append(result, m)
+			}
+		}
+		return append(result, newItem)
+	}
+
+	// Fallback: just return new item
+	return []map[string]any{newItem}
 }

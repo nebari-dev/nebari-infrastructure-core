@@ -26,41 +26,36 @@ func (p *Provider) Name() string {
 	return "gcp"
 }
 
-// ConfigKey returns the YAML configuration key for GCP
-func (p *Provider) ConfigKey() string {
-	return "google_cloud_platform"
-}
-
 // Validate validates the GCP configuration (stub implementation)
-func (p *Provider) Validate(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, _ *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Validate")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", "gcp"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Validating GCP provider configuration").
 		WithResource("provider").
 		WithAction("validate").
-		WithMetadata("cluster_name", cfg.ProjectName))
+		WithMetadata("cluster_name", projectName))
 	return nil
 }
 
 // Deploy deploys GCP infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", "gcp"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
-	if rawCfg := cfg.ProviderConfig["google_cloud_platform"]; rawCfg != nil {
+	if rawCfg := clusterConfig.ProviderConfig(); rawCfg != nil {
 		var gcpCfg Config
 		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &gcpCfg); err == nil {
 			span.SetAttributes(
@@ -71,7 +66,7 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	}
 
 	// Marshal config to JSON for status message
-	configJSON, err := json.MarshalIndent(cfg, "", "  ")
+	configJSON, err := json.MarshalIndent(clusterConfig, "", "  ")
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -80,53 +75,53 @@ func (p *Provider) Deploy(ctx context.Context, cfg *config.NebariConfig) error {
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "GCP provider deployment (stub)").
 		WithResource("provider").
 		WithAction("deploy").
-		WithMetadata("cluster_name", cfg.ProjectName).
+		WithMetadata("cluster_name", projectName).
 		WithMetadata("config", string(configJSON)))
 
 	return nil
 }
 
 // Destroy tears down GCP infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, cfg *config.NebariConfig) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, _ provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", "gcp"),
-		attribute.String("project_name", cfg.ProjectName),
+		attribute.String("project_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying GCP provider infrastructure (stub)").
 		WithResource("provider").
 		WithAction("destroy").
-		WithMetadata("cluster_name", cfg.ProjectName))
+		WithMetadata("cluster_name", projectName))
 	return nil
 }
 
 // GetKubeconfig generates a kubeconfig file (stub implementation)
-func (p *Provider) GetKubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
+func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.GetKubeconfig")
 	defer span.End()
 
 	span.SetAttributes(
 		attribute.String("provider", "gcp"),
-		attribute.String("cluster_name", cfg.ProjectName),
+		attribute.String("cluster_name", projectName),
 	)
 
 	status.Send(ctx, status.NewUpdate(status.LevelWarning, "GetKubeconfig not yet implemented for GCP provider").
 		WithResource("provider").
 		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", cfg.ProjectName))
+		WithMetadata("cluster_name", projectName))
 	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
 }
 
 // Summary returns key configuration details for display purposes
-func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
+func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := make(map[string]string)
 
-	rawCfg := cfg.ProviderConfig["google_cloud_platform"]
+	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg == nil {
 		return result
 	}
@@ -142,7 +137,7 @@ func (p *Provider) Summary(cfg *config.NebariConfig) map[string]string {
 }
 
 // InfraSettings returns GCP-specific Kubernetes infrastructure settings.
-func (p *Provider) InfraSettings(_ *config.NebariConfig) provider.InfraSettings {
+func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
 	return provider.InfraSettings{
 		StorageClass: "standard-rwo",
 		NeedsMetalLB: false,

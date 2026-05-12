@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -9,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
 var (
@@ -55,21 +57,28 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	slog.Info("Configuration is valid",
-		"provider", cfg.Provider,
-		"project_name", cfg.ProjectName,
-	)
-
-	// Verify provider is registered
-	if _, err := registry.Get(ctx, cfg.Provider); err != nil {
+	// Validate configuration with registered providers
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
-		slog.Error("Provider not available", "error", err, "provider", cfg.Provider)
+		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err
 	}
 
+	slog.Info("Configuration is valid",
+		"provider", cfg.Cluster.ProviderName(),
+		"project_name", cfg.ProjectName,
+	)
+
 	fmt.Printf("✓ Configuration file is valid\n")
-	fmt.Printf("  Provider: %s\n", cfg.Provider)
+	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil
+}
+
+func getValidNames(ctx context.Context, reg *registry.Registry) config.ValidateOptions {
+	return config.ValidateOptions{
+		ClusterProviders: reg.ClusterProviders.List(ctx),
+		DNSProviders:     reg.DNSProviders.List(ctx),
+	}
 }

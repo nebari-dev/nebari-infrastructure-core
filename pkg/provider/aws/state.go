@@ -103,7 +103,7 @@ func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName 
 
 	span.SetAttributes(
 		attribute.String("bucket_name", bucketName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 	)
 
 	exists, err := stateBucketExists(ctx, client, bucketName)
@@ -170,7 +170,7 @@ func destroyStateBucket(ctx context.Context, client S3Client, region, bucketName
 
 	span.SetAttributes(
 		attribute.String("bucket_name", bucketName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 	)
 
 	exists, err := stateBucketExists(ctx, client, bucketName)

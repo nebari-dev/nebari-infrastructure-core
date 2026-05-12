@@ -18,11 +18,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/helm"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
+
+// nodeStorageLabel is the node label Longhorn uses to identify nodes that should
+// host its storage components.
+const nodeStorageLabel = "node.longhorn.io/storage"
 
 const (
 	longhornRepoName     = "longhorn"
@@ -100,7 +103,7 @@ func ensureISCSI(ctx context.Context, kubeconfigBytes []byte) error {
 		WithResource("iscsi-daemonset").
 		WithAction("installing"))
 
-	client, err := newLonghornK8sClient(kubeconfigBytes)
+	client, err := newK8sClient(kubeconfigBytes)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
@@ -224,15 +227,6 @@ func waitForDaemonSetReady(ctx context.Context, client kubernetes.Interface, nam
 	}
 }
 
-// newLonghornK8sClient creates a Kubernetes clientset from kubeconfig bytes.
-func newLonghornK8sClient(kubeconfigBytes []byte) (*kubernetes.Clientset, error) {
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse kubeconfig: %w", err)
-	}
-	return kubernetes.NewForConfig(restConfig)
-}
-
 // longhornHelmValues generates the Helm values map for the Longhorn chart
 // based on the AWS provider configuration.
 func longhornHelmValues(cfg *Config) map[string]any {
@@ -257,14 +251,14 @@ func longhornHelmValues(cfg *Config) map[string]any {
 	if cfg.Longhorn != nil && cfg.Longhorn.DedicatedNodes {
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		nodeSelector := map[string]string{"node.longhorn.io/storage": "true"}
+		nodeSelector := map[string]string{nodeStorageLabel: "true"}
 		if cfg.Longhorn.NodeSelector != nil {
 			nodeSelector = cfg.Longhorn.NodeSelector
 		}
 
 		tolerations := []map[string]string{
 			{
-				"key":      "node.longhorn.io/storage",
+				"key":      nodeStorageLabel,
 				"operator": "Exists",
 				"effect":   "NoSchedule",
 			},

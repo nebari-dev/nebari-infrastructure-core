@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -59,4 +60,130 @@ func TestGenerateSecurePasswordFallback(t *testing.T) {
 	if len(result) < 7 || result[:7] != "nebari-" {
 		t.Errorf("generateSecurePassword() fallback = %q, want prefix 'nebari-'", result)
 	}
+}
+
+func TestScrubSensitiveFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains []string // strings that should be in output
+		excludes []string // strings that should NOT be in output
+	}{
+		{
+			name: "scrubs auth block from git_repository",
+			input: `project_name: test
+git_repository:
+  url: "git@github.com:org/repo.git"
+  branch: main
+  auth:
+    ssh_key_env: MY_SSH_KEY
+    token_env: MY_TOKEN
+provider: aws`,
+			contains: []string{
+				"project_name: test",
+				"url: git@github.com:org/repo.git",
+				"branch: main",
+				"provider: aws",
+				"_auth_scrubbed: credentials removed for security",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"MY_SSH_KEY",
+				"token_env",
+				"MY_TOKEN",
+			},
+		},
+		{
+			name: "preserves config without auth block",
+			input: `project_name: test
+git_repository:
+  url: "file:///tmp/repo"
+  branch: main
+provider: local`,
+			contains: []string{
+				"project_name: test",
+				"url: file:///tmp/repo",
+				"branch: main",
+				"provider: local",
+			},
+			excludes: []string{},
+		},
+		{
+			name: "handles nested auth with multiple fields",
+			input: `git_repository:
+  url: test
+  auth:
+    ssh_key_env: KEY
+    token_env: TOKEN
+    other_field: value
+  path: clusters/prod`,
+			contains: []string{
+				"url: test",
+				"path: clusters/prod",
+				"_auth_scrubbed: credentials removed for security",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"token_env",
+				"other_field",
+				"KEY",
+				"TOKEN",
+				"value",
+			},
+		},
+		{
+			name:     "handles empty config",
+			input:    "",
+			contains: []string{},
+			excludes: []string{},
+		},
+		{
+			name: "preserves auth blocks outside git_repository",
+			input: `amazon_web_services:
+  auth:
+    role_arn: arn:aws:iam::123456:role/deploy
+git_repository:
+  url: "git@github.com:org/repo.git"
+  auth:
+    ssh_key_env: MY_SSH_KEY
+provider: aws`,
+			contains: []string{
+				"amazon_web_services:",
+				"role_arn: arn:aws:iam::123456:role/deploy",
+				"url: git@github.com:org/repo.git",
+				"_auth_scrubbed: credentials removed for security",
+				"provider: aws",
+			},
+			excludes: []string{
+				"ssh_key_env",
+				"MY_SSH_KEY",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scrubbed, err := scrubSensitiveFields([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("scrubSensitiveFields() unexpected error: %v", err)
+			}
+			result := string(scrubbed)
+
+			for _, s := range tt.contains {
+				if !containsString(result, s) {
+					t.Errorf("scrubSensitiveFields() should contain %q, got:\n%s", s, result)
+				}
+			}
+
+			for _, s := range tt.excludes {
+				if containsString(result, s) {
+					t.Errorf("scrubSensitiveFields() should NOT contain %q, got:\n%s", s, result)
+				}
+			}
+		})
+	}
+}
+
+func containsString(haystack, needle string) bool {
+	return strings.Contains(haystack, needle)
 }

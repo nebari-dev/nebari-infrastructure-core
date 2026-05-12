@@ -119,7 +119,6 @@ Longhorn is installed as the last step of the AWS provider's `Deploy()` method. 
 
 Skipped when:
 - `cfg.DryRun` is true
-- `cfg.IsExistingCluster()` is true
 - `longhorn.enabled` is explicitly false
 
 ### Destroy Flow

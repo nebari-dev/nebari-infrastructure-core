@@ -56,19 +56,26 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
-		"project_name", cfg.ProjectName,
-	)
-
-	provider, err := registry.Get(ctx, cfg.Provider)
-	if err != nil {
+	// Validate configuration with registered providers
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Configuration validation failed", "error", err, "file", kubeconfigConfigFile)
 		return err
 	}
 
-	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg)
+	slog.Info("Configuration parsed successfully",
+		"provider", cfg.Cluster.ProviderName(),
+		"project_name", cfg.ProjectName,
+	)
+
+	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
+		return err
+	}
+
+	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to generate kubeconfig", "error", err)

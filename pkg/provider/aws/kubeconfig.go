@@ -7,6 +7,16 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// AWS IAM Authenticator constants used to build EKS kubeconfigs.
+// See: https://docs.aws.amazon.com/eks/latest/userguide/create-kubeconfig.html
+const (
+	execAPIVersion  = "client.authentication.k8s.io/v1beta1"
+	eksSubcommand   = "eks"
+	eksGetTokenCmd  = "get-token"
+	clusterNameFlag = "--cluster-name"
+	regionFlag      = "--region"
+)
+
 // KubeconfigCluster represents the cluster section of kubeconfig
 type KubeconfigCluster struct {
 	Server                   string `yaml:"server"`
@@ -109,14 +119,14 @@ func buildKubeconfig(clusterName, endpoint, caData, region string) ([]byte, erro
 				Name: clusterName,
 				User: KubeconfigUser{
 					Exec: KubeconfigExec{
-						APIVersion: "client.authentication.k8s.io/v1beta1",
-						Command:    "aws",
+						APIVersion: execAPIVersion,
+						Command:    ProviderName,
 						Args: []string{
-							"eks",
-							"get-token",
-							"--cluster-name",
+							eksSubcommand,
+							eksGetTokenCmd,
+							clusterNameFlag,
 							clusterName,
-							"--region",
+							regionFlag,
 							region,
 						},
 					},

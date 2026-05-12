@@ -2,9 +2,6 @@ package hetzner
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -19,19 +16,12 @@ func TestProvider_Name(t *testing.T) {
 	}
 }
 
-func TestProvider_ConfigKey(t *testing.T) {
-	p := NewProvider()
-	if p.ConfigKey() != "hetzner_cloud" {
-		t.Errorf("ConfigKey() = %q, want %q", p.ConfigKey(), "hetzner_cloud")
-	}
-}
-
 func TestProvider_InfraSettings(t *testing.T) {
 	p := NewProvider()
 
 	tests := []struct {
 		name    string
-		cfg     *config.NebariConfig
+		cfg     *config.ClusterConfig
 		wantSC  string
 		wantLBA map[string]string
 		wantKBP string
@@ -39,10 +29,9 @@ func TestProvider_InfraSettings(t *testing.T) {
 	}{
 		{
 			name: "default settings with location",
-			cfg: &config.NebariConfig{
-				Provider: "hetzner",
-				ProviderConfig: map[string]any{
-					"hetzner_cloud": map[string]any{
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{
+					"hetzner": map[string]any{
 						"location": "ash",
 					},
 				},
@@ -54,8 +43,8 @@ func TestProvider_InfraSettings(t *testing.T) {
 		},
 		{
 			name: "nil provider config uses defaults",
-			cfg: &config.NebariConfig{
-				Provider: "hetzner",
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{"hetzner": map[string]any{}},
 			},
 			wantSC:  "hcloud-volumes",
 			wantKBP: "",
@@ -88,12 +77,10 @@ func TestProvider_InfraSettings(t *testing.T) {
 // Compile-time check that Provider implements the interface
 var _ provider.Provider = (*Provider)(nil)
 
-func validHetznerConfig() *config.NebariConfig {
-	return &config.NebariConfig{
-		ProjectName: "test-project",
-		Provider:    "hetzner",
-		ProviderConfig: map[string]any{
-			"hetzner_cloud": map[string]any{
+func validHetznerClusterConfig() *config.ClusterConfig {
+	return &config.ClusterConfig{
+		Providers: map[string]any{
+			"hetzner": map[string]any{
 				"location":           "ash",
 				"kubernetes_version": "1.32",
 				"node_groups": map[string]any{
@@ -116,7 +103,7 @@ func TestProvider_Validate_MissingToken(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "")
 
-	err := p.Validate(context.Background(), validHetznerConfig())
+	err := p.Validate(context.Background(), "test-project", validHetznerClusterConfig())
 	if err == nil {
 		t.Fatal("expected error when HETZNER_TOKEN is missing")
 	}
@@ -129,7 +116,7 @@ func TestProvider_Validate_Success(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	err := p.Validate(context.Background(), validHetznerConfig())
+	err := p.Validate(context.Background(), "test-project", validHetznerClusterConfig())
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -139,17 +126,15 @@ func TestProvider_Validate_InvalidConfig(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		Provider:    "hetzner",
-		ProviderConfig: map[string]any{
-			"hetzner_cloud": map[string]any{
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{
+			"hetzner": map[string]any{
 				"location": "", // missing required field
 			},
 		},
 	}
 
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
 		t.Fatal("expected validation error for missing location")
 	}
@@ -159,12 +144,11 @@ func TestProvider_Validate_MissingConfigBlock(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	cfg := &config.NebariConfig{
-		ProjectName: "test",
-		Provider:    "hetzner",
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{"hetzner": map[string]any{}},
 	}
 
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
 		t.Fatal("expected error for missing hetzner_cloud block")
 	}
@@ -177,24 +161,12 @@ func TestProvider_Deploy_DryRun(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	// Set up a fake k3s releases API
-	releases := []ghRelease{
-		{TagName: "v1.32.12+k3s1", Prerelease: false},
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(releases)
-	}))
-	defer server.Close()
-
-	// We need to test the dry-run path. Since Deploy calls resolveK3sVersion
-	// with the real GitHub API URL, we test the components individually.
-	// The Deploy integration requires network access, so we verify the dry-run
-	// logic through the Validate + DryRun flag path.
-	cfg := validHetznerConfig()
-	cfg.DryRun = true
+	// We test the Validate + DryRun flag path. The actual Deploy flow
+	// requires hetzner-k3s binary and network access.
+	cfg := validHetznerClusterConfig()
 
 	// Validate should pass
-	err := p.Validate(context.Background(), cfg)
+	err := p.Validate(context.Background(), "test-project", cfg)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}

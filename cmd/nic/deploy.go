@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -47,6 +50,51 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
 	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	deployCmd.Flags().BoolVar(&deployRegenApps, "regen-apps", false, "Regenerate ArgoCD application manifests even if already bootstrapped")
+}
+
+// defaultGitConfig returns a default local git configuration for development workflows.
+// This is a pure function with no side effects — directory creation happens separately.
+func defaultGitConfig(projectName string) *git.Config {
+	localPath := filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	return &git.Config{
+		URL:    fmt.Sprintf("file://%s", localPath),
+		Branch: "main",
+		Path:   "",
+		Auth:   git.AuthConfig{},
+	}
+}
+
+// getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
+// For providers that support local gitops without explicit git_repository config, this auto-creates
+// /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
+// The supportsLocalGitOps parameter comes from provider.InfraSettings().SupportsLocalGitOps.
+func getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
+	if cfg.GitRepository != nil {
+		return cfg.GitRepository, nil
+	}
+
+	// Only auto-create local gitops for providers that support it (e.g., local, kind, k3s)
+	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
+	if !supportsLocalGitOps {
+		slog.Info("No git_repository configured and provider does not support local gitops, skipping GitOps bootstrap",
+			"provider", cfg.Cluster.ProviderName())
+		return nil, nil
+	}
+
+	gitCfg := defaultGitConfig(cfg.ProjectName)
+	localPath, err := gitCfg.GetLocalPath()
+	if err != nil {
+		return nil, fmt.Errorf("invalid local path in auto-generated git config: %w", err)
+	}
+
+	slog.Info("No git_repository configured, using auto-generated local directory",
+		"path", localPath)
+
+	if err := os.MkdirAll(localPath, 0750); err != nil {
+		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
+	}
+
+	return gitCfg, nil
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -101,39 +149,44 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate configuration with registered providers
+	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", deployConfigFile)
+		return err
+	}
+
 	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Provider,
+		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
-	// Set runtime options from CLI flags
-	cfg.DryRun = deployDryRun
-
-	// Apply custom timeout if specified
+	// Parse custom timeout if specified
+	var timeout time.Duration
 	if deployTimeout != "" {
-		duration, err := time.ParseDuration(deployTimeout)
+		var err error
+		timeout, err = time.ParseDuration(deployTimeout)
 		if err != nil {
 			span.RecordError(err)
 			slog.Error("Invalid timeout duration", "error", err, "timeout", deployTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", deployTimeout, err)
 		}
-		cfg.Timeout = duration
 		span.SetAttributes(attribute.String("timeout", deployTimeout))
-		slog.Info("Using custom timeout", "timeout", duration)
+		slog.Info("Using custom timeout", "timeout", timeout)
 	}
 
 	// Get the appropriate provider
-	provider, err := registry.Get(ctx, cfg.Provider)
+	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Provider)
+		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
 		return err
 	}
 
 	slog.Info("Provider selected", "provider", provider.Name())
 
 	// Deploy infrastructure
-	if err := provider.Deploy(ctx, cfg); err != nil {
+	if err := provider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, providerPkg.DeployOptions{DryRun: deployDryRun, Timeout: timeout}); err != nil {
 		span.RecordError(err)
 		slog.Error("Deployment failed", "error", err, "provider", provider.Name())
 		return err
@@ -142,9 +195,19 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	slog.Info("Infrastructure deployment completed", "provider", provider.Name())
 
 	// Get provider infrastructure settings for GitOps and foundational services
-	infraSettings := provider.InfraSettings(cfg)
+	infraSettings := provider.InfraSettings(cfg.Cluster)
 
-	// Bootstrap GitOps repository if configured
+	// Bootstrap GitOps (auto-create local directory for providers that support it)
+	gitConfig, err := getOrCreateGitConfig(cfg, infraSettings.SupportsLocalGitOps)
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("GitOps configuration failed", "error", err)
+		return err
+	}
+	if gitConfig != nil {
+		// Set on cfg so downstream code (Install, InstallFoundationalServices) can use cfg.GitRepository
+		cfg.GitRepository = gitConfig
+	}
 	if cfg.GitRepository != nil && !deployDryRun {
 		if err := bootstrapGitOps(ctx, cfg, deployRegenApps, infraSettings); err != nil {
 			span.RecordError(err)
@@ -159,9 +222,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	var argoCDInstalled, keycloakInstalled bool
 
 	// Install Argo CD (skip in dry-run mode)
-	if !cfg.DryRun {
+	if !deployDryRun {
 		slog.Info("Installing Argo CD on cluster")
-		if err := argocd.Install(ctx, cfg, provider); err != nil {
+
+		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
+		// and the Keycloak realm-setup job
+		argoCDClientSecret := generateSecurePassword(rand.Reader)
+
+		// Build ArgoCD config with Keycloak OIDC SSO
+		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
+
+		if err := argocd.Install(ctx, cfg, provider, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			slog.Warn("Failed to install Argo CD", "error", err)
 			slog.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -182,6 +253,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 					RealmAdminUsername:    "admin",
 					RealmAdminPassword:    generateSecurePassword(rand.Reader),
 					Hostname:              "", // Will be auto-generated from domain
+				},
+				ArgoCD: argocd.ArgoCDSSOConfig{
+					ClientSecret: argoCDClientSecret,
+				},
+				LandingPage: argocd.LandingPageConfig{
+					RedisPassword: generateSecurePassword(rand.Reader),
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
@@ -233,7 +310,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
 func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov providerPkg.Provider) *endpoint.LoadBalancerEndpoint {
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg)
+	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		slog.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
 		return nil
@@ -277,7 +354,7 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 		return lbEndpoint
 	}
 
-	dnsProvider, err := dnsRegistry.Get(ctx, cfg.DNS.ProviderName())
+	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
 		slog.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
 		return lbEndpoint
@@ -296,27 +373,40 @@ func lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
+// cfg.GitRepository must be set before calling this function.
 func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings providerPkg.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.bootstrapGitOps")
 	defer span.End()
 
+	gitConfig := cfg.GitRepository
 	span.SetAttributes(
-		attribute.String("git.url", cfg.GitRepository.URL),
+		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	slog.Info("Initializing GitOps repository", "url", cfg.GitRepository.URL)
+	isLocal := gitConfig.IsLocalPath()
+	var localPath string
+	if isLocal {
+		var err error
+		localPath, err = gitConfig.GetLocalPath()
+		if err != nil {
+			return fmt.Errorf("invalid local git path: %w", err)
+		}
+		slog.Info("Initializing local GitOps directory", "path", localPath)
+	} else {
+		slog.Info("Initializing GitOps repository", "url", gitConfig.URL)
+	}
 
 	// Create git client
-	gitClient, err := git.NewClient(cfg.GitRepository)
+	gitClient, err := git.NewClient(gitConfig)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create git client: %w", err)
 	}
 	defer func() { _ = gitClient.Cleanup() }()
 
-	// Validate authentication before proceeding
+	// Validate authentication before proceeding (skipped for local paths)
 	if err := gitClient.ValidateAuth(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("git authentication failed: %w", err)
@@ -347,6 +437,11 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		slog.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
+	if err := writeConfigToRepo(deployConfigFile, gitClient.WorkDir()); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	slog.Info("Writing ArgoCD application manifests to git repository")
 	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
@@ -360,18 +455,74 @@ func bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bo
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
 
-	// Commit and push
+	// Commit (and push for remote repos)
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
 	}
 	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
 		span.RecordError(err)
+		if isLocal {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	slog.Info("GitOps repository bootstrapped successfully")
+	if isLocal {
+		slog.Info("Local GitOps directory bootstrapped successfully", "path", localPath)
+	} else {
+		slog.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
+	}
 	return nil
+}
+
+// writeConfigToRepo copies the NIC config file into the git working directory,
+// scrubbing sensitive fields (auth block) before writing.
+func writeConfigToRepo(configFile, workDir string) error {
+	configBytes, err := os.ReadFile(configFile) //nolint:gosec // G304: path is from CLI flag
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Scrub sensitive fields from the config before writing to the repo
+	scrubbedBytes, err := scrubSensitiveFields(configBytes)
+	if err != nil {
+		return fmt.Errorf("failed to scrub sensitive fields: %w", err)
+	}
+
+	configDest := filepath.Join(workDir, "nic-config.yaml")
+	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(configDest, scrubbedBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write config to repository: %w", err)
+	}
+	slog.Info("Wrote NIC config to repository (auth fields scrubbed)", "path", configDest)
+	return nil
+}
+
+// scrubSensitiveFields removes auth blocks from git_repository and argocd_auth to prevent
+// accidentally committing credentials. Uses proper YAML parsing to handle all valid YAML
+// formats (flow style, tabs, block scalars) and only scrubs fields under git_repository.
+func scrubSensitiveFields(configBytes []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(configBytes, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse config YAML: %w", err)
+	}
+
+	// Scrub auth fields only under git_repository
+	if gitRepo, ok := doc["git_repository"].(map[string]any); ok {
+		delete(gitRepo, "auth")
+		delete(gitRepo, "argocd_auth")
+		// Add a comment placeholder (YAML doesn't preserve comments, so add as a field)
+		gitRepo["_auth_scrubbed"] = "credentials removed for security"
+	}
+
+	scrubbed, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal scrubbed config: %w", err)
+	}
+	return scrubbed, nil
 }
 
 // printDNSGuidance prints instructions for manual DNS configuration
@@ -431,9 +582,9 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 // printArgoCDInstructions prints instructions for accessing Argo CD
 func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println("  ARGO CD INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println()
 	fmt.Println("  Argo CD has been successfully installed on your cluster.")
 	fmt.Println()
@@ -448,16 +599,20 @@ func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
 	fmt.Println("    Then visit: https://localhost:8080")
 	fmt.Println()
-	fmt.Println("  Get the admin password:")
+	fmt.Println("  SSO Login:")
+	fmt.Println("    Click 'Log in via Keycloak' to authenticate with your Nebari account.")
+	fmt.Println("    Users in the 'argocd-admins' group get full admin access.")
+	fmt.Println("    Users in the 'argocd-viewers' group get read-only access.")
+	fmt.Println()
+	fmt.Println("  Admin fallback (break-glass):")
 	fmt.Println()
 	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
 	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
 	fmt.Println()
-	fmt.Println("  Login credentials:")
 	fmt.Println("    Username: admin")
 	fmt.Println("    Password: <from command above>")
 	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("===============================================================================")
 	fmt.Println()
 }
 

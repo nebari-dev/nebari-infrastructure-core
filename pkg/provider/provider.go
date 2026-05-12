@@ -2,9 +2,23 @@ package provider
 
 import (
 	"context"
+	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
+
+// DeployOptions holds runtime flags for infrastructure deployment.
+type DeployOptions struct {
+	DryRun  bool
+	Timeout time.Duration
+}
+
+// DestroyOptions holds runtime flags for infrastructure destruction.
+type DestroyOptions struct {
+	DryRun  bool
+	Force   bool
+	Timeout time.Duration
+}
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.
 // The ArgoCD writer and deploy command use these to configure templates
@@ -38,6 +52,16 @@ type InfraSettings struct {
 	// Providers running behind a non-standard HTTPS port (e.g., development on 8443)
 	// can override this.
 	HTTPSPort int
+
+	// EFSStorageClass is the name of the EFS-backed StorageClass, if available.
+	// Empty when EFS is not enabled. Software packs can use this for ReadWriteMany
+	// volumes (e.g., shared model storage for LLM serving).
+	EFSStorageClass string
+
+	// SupportsLocalGitOps indicates whether this provider can use local file:// git repos.
+	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).
+	// Cloud providers (AWS, GCP, Azure) return false - their nodes can't see the dev machine's FS.
+	SupportsLocalGitOps bool
 }
 
 // Provider defines the interface that all cloud providers must implement.
@@ -46,37 +70,35 @@ type InfraSettings struct {
 // provider implementations. CLI commands depend only on this interface, never on
 // concrete provider types, enabling new providers to be added without modifying
 // CLI code (Open/Closed Principle).
+//
+// Methods receive only the data they need (projectName, ClusterConfig, options)
+// rather than the full NebariConfig, so providers never see DNS, certificate,
+// or git repository settings.
 type Provider interface {
 	// Name returns the short provider identifier used in CLI output, logging,
 	// and OpenTelemetry span attributes (e.g., "aws", "gcp", "azure", "local").
 	Name() string
 
-	// ConfigKey returns the YAML key used for this provider's configuration block.
-	// This allows providers to extract their own config from NebariConfig.ProviderConfig
-	// without the config package needing to know about provider-specific types.
-	// Examples: "amazon_web_services", "google_cloud_platform", "azure", "local"
-	ConfigKey() string
-
 	// Validate checks that the configuration is valid before any infrastructure
 	// operations. This includes verifying required fields, validating formats,
 	// and checking cloud-specific constraints (e.g., valid regions, instance types).
-	Validate(ctx context.Context, config *config.NebariConfig) error
+	Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error
 
 	// Deploy creates or updates infrastructure to match the desired configuration.
 	// Backed by OpenTofu, this operation is idempotent - running Deploy multiple
 	// times with the same config results in the same infrastructure state.
-	// Use --dry-run flag to preview changes without applying them (runs tofu plan).
-	Deploy(ctx context.Context, config *config.NebariConfig) error
+	// Use DeployOptions.DryRun to preview changes without applying them (runs tofu plan).
+	Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
 
 	// Destroy tears down all infrastructure resources in the correct order,
 	// respecting dependencies (e.g., node groups before cluster, cluster before VPC).
 	// Backed by OpenTofu's tofu destroy command.
-	Destroy(ctx context.Context, config *config.NebariConfig) error
+	Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DestroyOptions) error
 
 	// GetKubeconfig generates a kubeconfig file for authenticating with the
 	// Kubernetes cluster. The returned bytes can be written to a file or used
 	// directly with Kubernetes client libraries.
-	GetKubeconfig(ctx context.Context, config *config.NebariConfig) ([]byte, error)
+	GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error)
 
 	// Summary returns key-value pairs describing provider-specific configuration
 	// for display purposes. This allows CLI commands to show details like region
@@ -84,10 +106,10 @@ type Provider interface {
 	// Used in destructive operations to help users confirm they're targeting
 	// the correct infrastructure (e.g., distinguishing clusters with the same
 	// name in different regions).
-	Summary(config *config.NebariConfig) map[string]string
+	Summary(clusterConfig *config.ClusterConfig) map[string]string
 
 	// InfraSettings returns provider-specific Kubernetes infrastructure settings.
 	// CLI commands and the ArgoCD writer use these to configure templates
 	// without importing provider packages or switching on provider names.
-	InfraSettings(config *config.NebariConfig) InfraSettings
+	InfraSettings(clusterConfig *config.ClusterConfig) InfraSettings
 }
