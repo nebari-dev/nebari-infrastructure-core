@@ -15,20 +15,25 @@ spec:
 
   source:
     repoURL: https://github.com/nebari-dev/nebari-landing
-    targetRevision: v0.1.0-alpha.4
+    targetRevision: v0.1.0-alpha.5
     path: charts/nebari-landing
     helm:
       releaseName: nebari-landing
       values: |
         frontend:
+          # Pin the image tag to the chart release. The chart defaults to
+          # ":latest", which floats with every upstream release and would
+          # silently change the running image on the next pod restart.
+          image:
+            tag: "0.1.0-alpha.5"
           keycloak:
             # External public Keycloak URL - used by the browser for OIDC login.
             url: "{{ .KeycloakIssuerURL }}"
             realm: "{{ .KeycloakRealm }}"
-          oauth2Proxy:
-            oidcIssuerUrl: "{{ .KeycloakIssuerURL }}/realms/{{ .KeycloakRealm }}"
 
         webapi:
+          image:
+            tag: "0.1.0-alpha.5"
           keycloak:
             # In-cluster URL for JWK fetching (fast, no TLS hop).
             url: "{{ .KeycloakServiceURL }}"
