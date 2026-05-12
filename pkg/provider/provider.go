@@ -85,14 +85,15 @@ type Provider interface {
 	Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error
 
 	// Deploy creates or updates infrastructure to match the desired configuration.
-	// Backed by OpenTofu, this operation is idempotent - running Deploy multiple
-	// times with the same config results in the same infrastructure state.
-	// Use DeployOptions.DryRun to preview changes without applying them (runs tofu plan).
+	// Implementations are responsible for idempotency: running Deploy multiple times
+	// with the same config should converge to the same infrastructure state. The
+	// backing tool is provider-specific (e.g., OpenTofu for AWS, hetzner-k3s for
+	// Hetzner). Use DeployOptions.DryRun to preview changes without applying them.
 	Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
 
 	// Destroy tears down all infrastructure resources in the correct order,
 	// respecting dependencies (e.g., node groups before cluster, cluster before VPC).
-	// Backed by OpenTofu's tofu destroy command.
+	// The backing tool is provider-specific.
 	Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DestroyOptions) error
 
 	// GetKubeconfig generates a kubeconfig file for authenticating with the
