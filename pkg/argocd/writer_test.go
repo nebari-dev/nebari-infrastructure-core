@@ -777,6 +777,14 @@ func TestKeycloakRealmConfigCM(t *testing.T) {
 	for _, want := range []string{
 		"realm: nebari",
 		"defaultDefaultClientScopes:",
+		// kcc applies list fields as full-replace, so the built-in default
+		// scopes must be present here or tokens lose email/profile/roles.
+		"- basic",
+		"- profile",
+		"- email",
+		"- roles",
+		"- web-origins",
+		"- acr",
 		"- groups",
 		"- name: argocd-admins",
 		"- name: argocd-viewers",
@@ -792,5 +800,12 @@ func TestKeycloakRealmConfigCM(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Errorf("expected %q in rendered realm config, got:\n%s", want, output)
 		}
+	}
+
+	// The argocd client must NOT set `defaultClientScopes` explicitly.
+	// Doing so replaces the realm's default scopes for that client and strips
+	// the built-ins. Realm `defaultDefaultClientScopes` auto-applies.
+	if strings.Contains(output, "defaultClientScopes:") {
+		t.Errorf("argocd client should not set defaultClientScopes (realm defaults apply), got:\n%s", output)
 	}
 }

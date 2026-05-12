@@ -21,7 +21,17 @@ data:
     resetPasswordAllowed: true
     bruteForceProtected: true
 
+    # kcc applies list fields as a full replace, not a merge. We must
+    # include the built-in default scopes (Keycloak auto-creates these on
+    # realm creation) here so they survive the import — otherwise tokens
+    # would be missing email/profile/roles/etc. claims.
     defaultDefaultClientScopes:
+      - basic
+      - profile
+      - email
+      - roles
+      - web-origins
+      - acr
       - groups
 
     roles:
@@ -82,5 +92,8 @@ data:
           - https://argocd.{{ .Domain }}
         directAccessGrantsEnabled: false
         standardFlowEnabled: true
-        defaultClientScopes:
-          - groups
+        # Intentionally not setting `defaultClientScopes` here. Keycloak
+        # auto-applies the realm's `defaultDefaultClientScopes` to new
+        # clients, which already includes `groups` plus the built-in
+        # default scopes. Setting this field explicitly would replace that
+        # list and strip the built-ins.
