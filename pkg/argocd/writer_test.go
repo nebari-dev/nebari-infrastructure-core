@@ -802,10 +802,12 @@ func TestKeycloakRealmConfigCM(t *testing.T) {
 		}
 	}
 
-	// The argocd client must NOT set `defaultClientScopes` explicitly.
-	// Doing so replaces the realm's default scopes for that client and strips
-	// the built-ins. Realm `defaultDefaultClientScopes` auto-applies.
-	if strings.Contains(output, "defaultClientScopes:") {
-		t.Errorf("argocd client should not set defaultClientScopes (realm defaults apply), got:\n%s", output)
+	// The argocd client must explicitly list the full set of default
+	// scopes. Keycloak's realm default-defaults auto-apply only at client
+	// creation, not on subsequent updates — so we need this redundancy to
+	// keep kcc's replace semantics from stripping scopes on existing
+	// clients during a re-run.
+	if !strings.Contains(output, "        defaultClientScopes:\n          - basic") {
+		t.Errorf("argocd client must explicitly list defaultClientScopes starting with built-ins, got:\n%s", output)
 	}
 }
