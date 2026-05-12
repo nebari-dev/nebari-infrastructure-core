@@ -83,6 +83,11 @@ spec:
               mountPath: /config
               readOnly: true
       volumes:
+        # The kcc input lives in an in-cluster Secret created by NIC at
+        # bootstrap (see pkg/argocd/foundational.go createKeycloakImportSecret).
+        # Using a Secret rather than a ConfigMap keeps realm structure and any
+        # inline credentials out of the gitops repo entirely; only this Job
+        # manifest sits there.
         - name: realm-config
-          configMap:
-            name: keycloak-realm-config
+          secret:
+            secretName: keycloak-config-import
