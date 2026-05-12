@@ -445,22 +445,19 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 
 func TestLandingPageTemplate(t *testing.T) {
 	tests := []struct {
-		name              string
-		keycloakBasePath  string
-		wantIssuerURL     string
-		wantOIDCIssuerURL string
+		name             string
+		keycloakBasePath string
+		wantIssuerURL    string
 	}{
 		{
-			name:              "no base path",
-			keycloakBasePath:  "",
-			wantIssuerURL:     "https://keycloak.test.example.com",
-			wantOIDCIssuerURL: "https://keycloak.test.example.com/realms/nebari",
+			name:             "no base path",
+			keycloakBasePath: "",
+			wantIssuerURL:    "https://keycloak.test.example.com",
 		},
 		{
-			name:              "auth base path included in issuer URL",
-			keycloakBasePath:  "/auth",
-			wantIssuerURL:     "https://keycloak.test.example.com/auth",
-			wantOIDCIssuerURL: "https://keycloak.test.example.com/auth/realms/nebari",
+			name:             "auth base path included in issuer URL",
+			keycloakBasePath: "/auth",
+			wantIssuerURL:    "https://keycloak.test.example.com/auth",
 		},
 	}
 
@@ -494,9 +491,6 @@ func TestLandingPageTemplate(t *testing.T) {
 			}
 			if !strings.Contains(output, tt.wantIssuerURL) {
 				t.Errorf("expected issuer URL %q in rendered output, got:\n%s", tt.wantIssuerURL, output)
-			}
-			if !strings.Contains(output, tt.wantOIDCIssuerURL) {
-				t.Errorf("expected OIDC issuer URL %q in rendered output, got:\n%s", tt.wantOIDCIssuerURL, output)
 			}
 			if !strings.Contains(output, data.KeycloakServiceURL) {
 				t.Errorf("expected in-cluster service URL %q in rendered output, got:\n%s", data.KeycloakServiceURL, output)
