@@ -16,137 +16,61 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: realm-setup
-          image: quay.io/keycloak/keycloak:24.0
+          # Pinned to a kcc release verified in CI against the deployed
+          # Keycloak version. See:
+          # https://redirect.github.com/adorsys/keycloak-config-cli/blob/v6.5.0/.github/workflows/ci.yaml
+          image: quay.io/adorsys/keycloak-config-cli:6.5.0-26.5.5
           env:
-            - name: KEYCLOAK_ADMIN_PASSWORD
+            # Keycloak connection
+            - name: KEYCLOAK_URL
+              value: {{ .KeycloakServiceURL }}
+            - name: KEYCLOAK_USER
+              value: admin
+            - name: KEYCLOAK_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .KeycloakAdminSecretName }}
                   key: admin-password
+            - name: KEYCLOAK_AVAILABILITYCHECK_ENABLED
+              value: "true"
+            - name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT
+              value: 120s
+
+            # kcc import behavior
+            - name: IMPORT_FILES_LOCATIONS
+              value: /config/realm.yaml
+            - name: IMPORT_VARSUBSTITUTION_ENABLED
+              value: "true"
+            - name: IMPORT_VARSUBSTITUTION_UNDEFINEDISERROR
+              value: "true"
+            # Default is true since kcc v6.x; explicit here for review
+            # clarity. kcc tracks resources it created in a Keycloak realm
+            # attribute, so re-runs only touch resources kcc itself manages.
+            - name: IMPORT_REMOTESTATE_ENABLED
+              value: "true"
+            # Belt-and-braces: never delete clients on re-run, even ones
+            # that disappear from the input. Protects operator-managed
+            # OAuth2 clients (created at runtime via NebariApplication CRDs)
+            # if the input config ever changes shape.
+            - name: IMPORT_MANAGED_CLIENT
+              value: "no-delete"
+
+            # Substituted into realm.yaml at kcc apply time
             - name: REALM_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: nebari-realm-admin-credentials
                   key: password
-            - name: KEYCLOAK_URL
-              value: {{ .KeycloakServiceURL }}
             - name: ARGOCD_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: argocd-oidc-client-secret
                   key: client-secret
-            - name: DOMAIN
-              value: {{ .Domain }}
-          command:
-            - /bin/bash
-            - -c
-            - |
-              set -e
-              KCADM="/opt/keycloak/bin/kcadm.sh"
-
-              echo "Waiting for Keycloak to be ready..."
-              for i in $(seq 1 60); do
-                if $KCADM config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" 2>/dev/null; then
-                  echo "Keycloak is ready"
-                  break
-                fi
-                echo "Keycloak not ready, waiting... ($i/60)"
-                sleep 5
-              done
-
-              echo "Creating nebari realm..."
-              $KCADM create realms \
-                -s realm=nebari \
-                -s enabled=true \
-                -s displayName="Nebari" \
-                -s sslRequired=external \
-                -s registrationAllowed=false \
-                -s loginWithEmailAllowed=true \
-                -s resetPasswordAllowed=true \
-                -s bruteForceProtected=true || echo "Realm may already exist"
-
-              echo "Creating realm roles..."
-              $KCADM create roles -r nebari -s name=admin -s description="Administrator role" || true
-              $KCADM create roles -r nebari -s name=user -s description="Regular user role" || true
-
-              echo "Creating admin user in nebari realm..."
-              $KCADM create users -r nebari \
-                -s username=admin \
-                -s enabled=true \
-                -s emailVerified=true \
-                -s firstName=Admin \
-                -s lastName=User \
-                -s email=admin@nebari.local || echo "User may already exist"
-
-              echo "Setting admin user password..."
-              $KCADM set-password -r nebari \
-                --username admin \
-                --new-password "$REALM_ADMIN_PASSWORD"
-
-              echo "Assigning roles to admin user..."
-              $KCADM add-roles -r nebari --uusername admin --rolename admin || true
-              $KCADM add-roles -r nebari --uusername admin --rolename user || true
-
-              echo "Configuring groups client scope with group-membership mapper..."
-              # Look up the groups client scope ID using grep/sed (no python3 in keycloak image)
-              GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
-                grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-
-              if [ -z "$GROUPS_SCOPE_ID" ]; then
-                echo "Creating groups client scope..."
-                $KCADM create client-scopes -r nebari \
-                  -s name=groups \
-                  -s protocol=openid-connect \
-                  -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"true"}' || true
-                GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
-                  grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-              fi
-
-              if [ -n "$GROUPS_SCOPE_ID" ]; then
-                echo "Adding group-membership mapper to groups scope (id=$GROUPS_SCOPE_ID)..."
-                $KCADM create client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models -r nebari \
-                  -s name=group-membership \
-                  -s protocol=openid-connect \
-                  -s protocolMapper=oidc-group-membership-mapper \
-                  -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || echo "Mapper may already exist"
-
-                echo "Ensuring groups is a realm default client scope..."
-                $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
-              fi
-
-              echo "Creating ArgoCD OIDC client..."
-              $KCADM create clients -r nebari \
-                -s clientId=argocd \
-                -s enabled=true \
-                -s protocol=openid-connect \
-                -s publicClient=false \
-                -s "secret=$ARGOCD_CLIENT_SECRET" \
-                -s "redirectUris=[\"https://argocd.$DOMAIN/auth/callback\"]" \
-                -s directAccessGrantsEnabled=false \
-                -s standardFlowEnabled=true || echo "Client may already exist"
-
-              # Add groups scope to argocd client as a default scope
-              ARGOCD_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
-                grep -B1 '"clientId" *: *"argocd"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-
-              if [ -n "$ARGOCD_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
-                echo "Adding groups scope to argocd client..."
-                $KCADM update clients/$ARGOCD_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
-              fi
-
-              echo "Creating ArgoCD access groups..."
-              $KCADM create groups -r nebari -s name=argocd-admins || echo "Group may already exist"
-              $KCADM create groups -r nebari -s name=argocd-viewers || echo "Group may already exist"
-
-              echo "Adding admin user to argocd-admins group..."
-              ADMIN_USER_ID=$($KCADM get users -r nebari -q username=admin --fields id | \
-                sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-              ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \
-                grep -B1 '"name" *: *"argocd-admins"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-
-              if [ -n "$ADMIN_USER_ID" ] && [ -n "$ADMINS_GROUP_ID" ]; then
-                $KCADM update users/$ADMIN_USER_ID/groups/$ADMINS_GROUP_ID -r nebari \
-                  -s realm=nebari -s userId=$ADMIN_USER_ID -s groupId=$ADMINS_GROUP_ID -n || true
-              fi
-
-              echo "Realm setup complete!"
+          volumeMounts:
+            - name: realm-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm-config
