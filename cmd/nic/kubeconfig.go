@@ -53,7 +53,13 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	kubeconfigBytes, err := nic.NewClient().Kubeconfig(ctx, cfg)
+	client, err := nic.NewClient()
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to create NIC client", "error", err)
+		return err
+	}
+	kubeconfigBytes, err := client.Kubeconfig(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
 		return err

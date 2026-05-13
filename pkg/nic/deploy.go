@@ -73,11 +73,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		c.logger.Info("Starting deployment")
 	}
 
-	reg, err := defaultRegistry(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("build default registry: %w", err)
-	}
+	reg := c.registry
 
 	// Setup status handler for progress updates
 	ctx, cleanup := status.StartHandler(ctx, c.statusLogHandler())

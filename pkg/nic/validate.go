@@ -17,13 +17,7 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	ctx, span := tracer.Start(ctx, "nic.Validate")
 	defer span.End()
 
-	reg, err := defaultRegistry(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("build default registry: %w", err)
-	}
-
-	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
+	if err := cfg.Validate(validateOptions(ctx, c.registry)); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}

@@ -37,10 +37,11 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
-	providers, err := nic.NewClient().ProviderNames(ctx)
+	client, err := nic.NewClient()
 	if err != nil {
 		return err
 	}
+	providers := client.ProviderNames(ctx)
 	fmt.Printf("Registered cloud providers: %v\n", providers.Cluster)
 	fmt.Printf("Registered DNS providers: %v\n", providers.DNS)
 

@@ -74,7 +74,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := nic.NewClient()
+	client, err := nic.NewClient()
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to create NIC client", "error", err)
+		return err
+	}
 	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
 		Timeout:   timeout,

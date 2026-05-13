@@ -83,7 +83,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := nic.NewClient()
+	client, err := nic.NewClient()
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to create NIC client", "error", err)
+		return err
+	}
 	opts := nic.DestroyOptions{
 		DryRun:  destroyDryRun,
 		Force:   destroyForce,

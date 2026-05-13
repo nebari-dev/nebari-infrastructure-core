@@ -18,11 +18,7 @@ func (c *Client) Kubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]by
 	ctx, span := tracer.Start(ctx, "nic.Kubeconfig")
 	defer span.End()
 
-	reg, err := defaultRegistry(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("build default registry: %w", err)
-	}
+	reg := c.registry
 
 	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)

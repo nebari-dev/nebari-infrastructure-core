@@ -79,11 +79,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		c.logger.Info("Starting destruction")
 	}
 
-	reg, err := defaultRegistry(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("build default registry: %w", err)
-	}
+	reg := c.registry
 
 	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)

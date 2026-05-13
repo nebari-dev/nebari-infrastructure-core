@@ -26,15 +26,11 @@ type Providers struct {
 // ProviderNames returns the providers bundled with this build. Intended for
 // diagnostic output (e.g. a `version` command); operational work should go
 // through the Client's methods.
-func (c *Client) ProviderNames(ctx context.Context) (*Providers, error) {
-	reg, err := defaultRegistry(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (c *Client) ProviderNames(ctx context.Context) *Providers {
 	return &Providers{
-		Cluster: reg.ClusterProviders.List(ctx),
-		DNS:     reg.DNSProviders.List(ctx),
-	}, nil
+		Cluster: c.registry.ClusterProviders.List(ctx),
+		DNS:     c.registry.DNSProviders.List(ctx),
+	}
 }
 
 // defaultRegistry builds a Registry with all in-tree cluster and DNS

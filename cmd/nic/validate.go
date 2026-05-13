@@ -50,7 +50,13 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := nic.NewClient().Validate(ctx, cfg); err != nil {
+	client, err := nic.NewClient()
+	if err != nil {
+		span.RecordError(err)
+		slog.Error("Failed to create NIC client", "error", err)
+		return err
+	}
+	if err := client.Validate(ctx, cfg); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err
