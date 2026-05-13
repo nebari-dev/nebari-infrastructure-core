@@ -69,23 +69,21 @@ func TestGenerateSecurePasswordFallback(t *testing.T) {
 
 func TestScrubbedConfig(t *testing.T) {
 	t.Run("zeros Auth and nils ArgoCDAuth in GitRepository", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			ProjectName: "test",
-			GitRepository: &git.Config{
-				URL:    "git@github.com:org/repo.git",
-				Branch: "main",
-				Path:   "clusters/prod",
-				Auth: git.AuthConfig{
-					SSHKeyEnv: "MY_SSH_KEY",
-					TokenEnv:  "MY_TOKEN",
-				},
-				ArgoCDAuth: &git.AuthConfig{
-					TokenEnv: "ARGOCD_TOKEN",
-				},
+		cfg := &config.NebariConfig{ProjectName: "test"}
+		gitConfig := &git.Config{
+			URL:    "git@github.com:org/repo.git",
+			Branch: "main",
+			Path:   "clusters/prod",
+			Auth: git.AuthConfig{
+				SSHKeyEnv: "MY_SSH_KEY",
+				TokenEnv:  "MY_TOKEN",
+			},
+			ArgoCDAuth: &git.AuthConfig{
+				TokenEnv: "ARGOCD_TOKEN",
 			},
 		}
 
-		scrubbed := scrubbedConfig(cfg)
+		scrubbed := scrubbedConfig(cfg, gitConfig)
 
 		if scrubbed.GitRepository.Auth != (git.AuthConfig{}) {
 			t.Errorf("Auth should be zeroed, got %+v", scrubbed.GitRepository.Auth)
@@ -107,64 +105,74 @@ func TestScrubbedConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("does not mutate the input cfg", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{
-				URL: "git@github.com:org/repo.git",
-				Auth: git.AuthConfig{
-					SSHKeyEnv: "MY_SSH_KEY",
-					TokenEnv:  "MY_TOKEN",
-				},
-				ArgoCDAuth: &git.AuthConfig{TokenEnv: "ARGOCD_TOKEN"},
+	t.Run("does not mutate the input cfg or gitConfig", func(t *testing.T) {
+		cfg := &config.NebariConfig{}
+		gitConfig := &git.Config{
+			URL: "git@github.com:org/repo.git",
+			Auth: git.AuthConfig{
+				SSHKeyEnv: "MY_SSH_KEY",
+				TokenEnv:  "MY_TOKEN",
 			},
+			ArgoCDAuth: &git.AuthConfig{TokenEnv: "ARGOCD_TOKEN"},
 		}
 
-		_ = scrubbedConfig(cfg)
+		_ = scrubbedConfig(cfg, gitConfig)
 
-		if cfg.GitRepository.Auth.SSHKeyEnv != "MY_SSH_KEY" {
-			t.Errorf("input cfg.Auth.SSHKeyEnv mutated: %q", cfg.GitRepository.Auth.SSHKeyEnv)
+		if cfg.GitRepository != nil {
+			t.Errorf("input cfg.GitRepository should remain nil, got %+v", cfg.GitRepository)
 		}
-		if cfg.GitRepository.Auth.TokenEnv != "MY_TOKEN" {
-			t.Errorf("input cfg.Auth.TokenEnv mutated: %q", cfg.GitRepository.Auth.TokenEnv)
+		if gitConfig.Auth.SSHKeyEnv != "MY_SSH_KEY" {
+			t.Errorf("input gitConfig.Auth.SSHKeyEnv mutated: %q", gitConfig.Auth.SSHKeyEnv)
 		}
-		if cfg.GitRepository.ArgoCDAuth == nil || cfg.GitRepository.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
-			t.Errorf("input cfg.ArgoCDAuth mutated")
+		if gitConfig.Auth.TokenEnv != "MY_TOKEN" {
+			t.Errorf("input gitConfig.Auth.TokenEnv mutated: %q", gitConfig.Auth.TokenEnv)
+		}
+		if gitConfig.ArgoCDAuth == nil || gitConfig.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
+			t.Errorf("input gitConfig.ArgoCDAuth mutated")
 		}
 	})
 
-	t.Run("handles nil GitRepository", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			ProjectName:   "test",
-			GitRepository: nil,
-		}
+	t.Run("handles nil gitConfig", func(t *testing.T) {
+		cfg := &config.NebariConfig{ProjectName: "test"}
 
-		scrubbed := scrubbedConfig(cfg)
+		scrubbed := scrubbedConfig(cfg, nil)
 
 		if scrubbed.GitRepository != nil {
-			t.Errorf("GitRepository should remain nil, got %+v", scrubbed.GitRepository)
+			t.Errorf("GitRepository should be nil, got %+v", scrubbed.GitRepository)
 		}
 		if scrubbed.ProjectName != "test" {
 			t.Errorf("ProjectName altered: %q", scrubbed.ProjectName)
 		}
 	})
 
-	t.Run("marshalled output excludes sensitive strings", func(t *testing.T) {
+	t.Run("ignores cfg.GitRepository in favor of gitConfig argument", func(t *testing.T) {
 		cfg := &config.NebariConfig{
-			ProjectName: "test",
-			GitRepository: &git.Config{
-				URL:    "git@github.com:org/repo.git",
-				Branch: "main",
-				Auth: git.AuthConfig{
-					SSHKeyEnv: "MY_SSH_KEY",
-					TokenEnv:  "MY_TOKEN",
-				},
-				ArgoCDAuth: &git.AuthConfig{
-					TokenEnv: "ARGOCD_TOKEN",
-				},
+			GitRepository: &git.Config{URL: "should-be-overridden"},
+		}
+		gitConfig := &git.Config{URL: "effective"}
+
+		scrubbed := scrubbedConfig(cfg, gitConfig)
+
+		if scrubbed.GitRepository == nil || scrubbed.GitRepository.URL != "effective" {
+			t.Errorf("scrubbed.GitRepository.URL = %+v, want %q", scrubbed.GitRepository, "effective")
+		}
+	})
+
+	t.Run("marshalled output excludes sensitive strings", func(t *testing.T) {
+		cfg := &config.NebariConfig{ProjectName: "test"}
+		gitConfig := &git.Config{
+			URL:    "git@github.com:org/repo.git",
+			Branch: "main",
+			Auth: git.AuthConfig{
+				SSHKeyEnv: "MY_SSH_KEY",
+				TokenEnv:  "MY_TOKEN",
+			},
+			ArgoCDAuth: &git.AuthConfig{
+				TokenEnv: "ARGOCD_TOKEN",
 			},
 		}
 
-		out, err := yaml.Marshal(scrubbedConfig(cfg))
+		out, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}

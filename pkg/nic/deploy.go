@@ -125,19 +125,18 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// Get provider infrastructure settings for GitOps and foundational services
 	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
-	// Bootstrap GitOps (auto-create local directory for providers that support it)
+	// Resolve the effective GitOps configuration. This may auto-create a
+	// local directory for providers that support it, or fall back to the
+	// caller's cfg.GitRepository. We never mutate cfg — the resolved value
+	// is threaded explicitly into every downstream call that needs it.
 	gitConfig, err := c.getOrCreateGitConfig(cfg, infraSettings.SupportsLocalGitOps)
 	if err != nil {
 		span.RecordError(err)
 		c.logger.Error("GitOps configuration failed", "error", err)
 		return nil, err
 	}
-	if gitConfig != nil {
-		// Set on cfg so downstream code (Install, InstallFoundationalServices) can use cfg.GitRepository
-		cfg.GitRepository = gitConfig
-	}
-	if cfg.GitRepository != nil && !opts.DryRun {
-		if err := c.bootstrapGitOps(ctx, cfg, opts.RegenApps, infraSettings); err != nil {
+	if gitConfig != nil && !opts.DryRun {
+		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings); err != nil {
 			span.RecordError(err)
 			c.logger.Error("GitOps bootstrap failed", "error", err)
 			return nil, err
@@ -159,7 +158,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
-		if err := argocd.Install(ctx, cfg, clusterProvider, argoCDConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			c.logger.Warn("Failed to install Argo CD", "error", err)
 			c.logger.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
@@ -194,7 +193,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				},
 			}
 
-			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, foundationalCfg); err != nil {
+			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				c.logger.Warn("Failed to install foundational services", "error", err)
 				c.logger.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
@@ -327,13 +326,13 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
 // This is the orchestrator function that handles all I/O operations.
-// cfg.GitRepository must be set before calling this function.
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, regenApps bool, settings provider.InfraSettings) error {
+// gitConfig must be non-nil and represents the effective GitOps configuration
+// (either cfg.GitRepository or an auto-generated local config).
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings provider.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
 
-	gitConfig := cfg.GitRepository
 	span.SetAttributes(
 		attribute.String("git.url", gitConfig.URL),
 		attribute.Bool("regen_apps", regenApps),
@@ -391,14 +390,14 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		c.logger.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(cfg, gitClient.WorkDir()); err != nil {
+	if err := c.writeConfigToRepo(cfg, gitConfig, gitClient.WorkDir()); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	c.logger.Info("Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, settings); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
@@ -430,12 +429,12 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	return nil
 }
 
-// writeConfigToRepo serialises cfg (with sensitive fields scrubbed) and
-// writes the result into the git working directory. Sourcing from the
-// parsed config keeps this feature available to library consumers who
-// don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(cfg *config.NebariConfig, workDir string) error {
-	configBytes, err := yaml.Marshal(scrubbedConfig(cfg))
+// writeConfigToRepo serialises cfg (with sensitive fields scrubbed and the
+// effective gitConfig substituted in) and writes the result into the git
+// working directory. Sourcing from the parsed config keeps this feature
+// available to library consumers who don't construct cfg from a file.
+func (c *Client) writeConfigToRepo(cfg *config.NebariConfig, gitConfig *git.Config, workDir string) error {
+	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
 	if err != nil {
 		return fmt.Errorf("marshal scrubbed config to YAML: %w", err)
 	}
@@ -452,14 +451,18 @@ func (c *Client) writeConfigToRepo(cfg *config.NebariConfig, workDir string) err
 }
 
 // scrubbedConfig returns a copy of cfg with sensitive fields zeroed (or
-// nilled out where the schema supports omitempty). Operating on the typed
+// nilled out where the schema supports omitempty). The gitConfig argument
+// supplies the effective GitOps configuration to persist (may differ from
+// cfg.GitRepository when the local default was auto-generated); when nil,
+// the resulting GitRepository field is also nil. Operating on the typed
 // struct means renaming a sensitive field on the source type fails to
 // compile here, instead of silently leaking once a deny-list of string
 // keys drifts out of sync.
-func scrubbedConfig(cfg *config.NebariConfig) *config.NebariConfig {
+func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.NebariConfig {
 	out := *cfg
-	if cfg.GitRepository != nil {
-		gitRepo := *cfg.GitRepository
+	out.GitRepository = nil
+	if gitConfig != nil {
+		gitRepo := *gitConfig
 		gitRepo.Auth = git.AuthConfig{} // value type with no omitempty: zero the env-var names
 		gitRepo.ArgoCDAuth = nil        // *AuthConfig with omitempty: nil → omitted
 		out.GitRepository = &gitRepo
