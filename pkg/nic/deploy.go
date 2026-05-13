@@ -379,7 +379,11 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		span.RecordError(err)
 		return fmt.Errorf("failed to create git client: %w", err)
 	}
-	defer func() { _ = gitClient.Cleanup() }()
+	defer func() {
+		if err := gitClient.Cleanup(); err != nil {
+			c.logger.Warn("Failed to clean up git client temp directory", "error", err)
+		}
+	}()
 
 	// Validate authentication before proceeding (skipped for local paths)
 	if err := gitClient.ValidateAuth(ctx); err != nil {
