@@ -1,1387 +1,334 @@
 # Configuration Reference
 
-This document provides a complete reference for all configuration options in NIC, based on the actual struct definitions
-in `pkg/config/config.go`.
+This is the authoritative reference for `nebari-config.yaml`. Field-level source of truth is the Go code; this document is updated as code changes. Ground-truth file references are inline.
 
 ## Table of Contents
 
-1. [Global Configuration](#global-configuration)
-2. [AWS Provider Configuration](#aws-provider-configuration)
-3. [GCP Provider Configuration](#gcp-provider-configuration)
-4. [Azure Provider Configuration](#azure-provider-configuration)
-5. [Hetzner Provider Configuration](#hetzner-provider-configuration)
-6. [Local Provider Configuration](#local-provider-configuration)
-7. [DNS Provider Configuration](#dns-provider-configuration)
-8. [Complete Examples](#complete-examples)
+1. [Top-Level Schema](#1-top-level-schema)
+2. [Cluster Providers](#2-cluster-providers)
+   1. [`cluster.aws`](#21-clusteraws-amazon-eks)
+   2. [`cluster.hetzner`](#22-clusterhetzner-hetzner-cloud-k3s)
+   3. [`cluster.local`](#23-clusterlocal-kind-for-development)
+   4. [`cluster.existing`](#24-clusterexisting-adopt-a-pre-provisioned-cluster)
+   5. [`cluster.gcp` / `cluster.azure`](#25-clustergcp--clusterazure-stubs)
+3. [DNS Providers](#3-dns-providers)
+4. [Certificate](#4-certificate)
+5. [Git Repository](#5-git-repository)
+6. [Environment Variables](#6-environment-variables)
 
+---
 
+## 1. Top-Level Schema
 
-## Global Configuration
-
-These fields apply to all providers and are defined in `NebariConfig` (pkg/config/config.go:4-22).
-
-```yaml
-# REQUIRED: Unique name for your Nebari deployment
-# Used for resource naming and tagging
-project_name: my-nebari
-
-# REQUIRED: Cloud provider to use
-# Valid values: aws, gcp, azure, hetzner, local
-provider: aws
-
-# OPTIONAL: Domain name for your Nebari deployment
-# Required if you want to enable TLS/HTTPS access
-# Example: nebari.example.com
-domain: nebari.example.com
-
-# OPTIONAL: DNS provider configuration
-# The provider name is the key, its config is the value
-# Only one DNS provider can be configured at a time
-# See "DNS Provider Configuration" section for details
-dns:
-  cloudflare:
-    zone_name: example.com
-```
-
-**Field Descriptions:**
-
-- **project_name** (string, required): Unique identifier for your Nebari deployment. Used in resource naming and tagging
-  across all cloud resources.
-- **provider** (string, required): Cloud provider to deploy infrastructure on. Must be one of: `aws`, `gcp`, `azure`,
-  `hetzner`, `local`.
-- **domain** (string, optional): Fully qualified domain name for accessing Nebari services. Required for TLS/Let's
-  Encrypt integration.
-- **dns** (object, optional): DNS provider configuration. The provider name is the key (e.g., `cloudflare`), and its
-  config is the value. Only one provider can be configured. See DNS Provider Configuration section.
-
-
-
-## AWS Provider Configuration
-
-AWS-specific configuration defined in `AWSConfig` (pkg/config/config.go:24-39).
+Defined by `NebariConfig` in `pkg/config/config.go`:
 
 ```yaml
-provider: aws
+project_name: my-nebari        # required, [a-zA-Z0-9][a-zA-Z0-9_-]*
+domain: nebari.example.com     # optional, but needed for routable services
 
-amazon_web_services:
-  # REQUIRED: AWS region to deploy infrastructure
-  # Example: us-west-2, us-east-1, eu-west-1
-  region: us-west-2
+cluster:                       # required, exactly one provider
+  <provider-name>:
+    ...
 
-  # REQUIRED: Kubernetes version for EKS cluster
-  # Example: "1.28", "1.29", "1.30"
-  # Must be a string (quoted) to preserve minor version
-  kubernetes_version: "1.28"
+dns:                           # optional, exactly one provider
+  <provider-name>:
+    ...
 
-  # OPTIONAL: List of availability zones to use
-  # If not specified, AWS will automatically select zones in the region
-  # Must be valid AZs within the specified region
-  availability_zones:
-    - us-west-2a
-    - us-west-2b
-    - us-west-2c
+git_repository:                # required on cloud providers; optional on local
+  url: ...
+  ...
 
-  # OPTIONAL: CIDR block for VPC creation
-  # Default: AWS default VPC CIDR
-  # Must be a valid RFC 1918 private network range
-  vpc_cidr_block: "10.10.0.0/16"
-
-  # OPTIONAL: Enable private EKS API endpoint (accessible from within VPC only)
-  # Default: false
-  endpoint_private_access: false
-
-  # OPTIONAL: Enable public EKS API endpoint (accessible from internet)
-  # Default: false
-  endpoint_public_access: true
-
-  # OPTIONAL: ARN of KMS key for EKS secrets encryption
-  # If specified, Kubernetes secrets will be encrypted with this key
-  # Example: arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012
-  eks_kms_arn: ""
-
-  # OPTIONAL: Use existing subnet IDs instead of creating new VPC
-  # Provide list of subnet IDs that span multiple AZs
-  # If specified, VPC creation is skipped
-  existing_subnet_ids:
-    - subnet-12345678
-    - subnet-87654321
-
-  # OPTIONAL: Use existing security group ID
-  # If specified, this security group will be used for EKS cluster
-  existing_security_group_id: sg-12345678
-
-  # OPTIONAL: IAM permissions boundary ARN
-  # Applied to all IAM roles created by NIC
-  # Required in enterprise environments with mandatory permission boundaries
-  # Example: arn:aws:iam::123456789012:policy/PermissionsBoundary
-  permissions_boundary: ""
-
-  # OPTIONAL: AWS resource tags
-  # Applied to all AWS resources created by NIC
-  # Useful for cost allocation, compliance, and organization
-  tags:
-    Environment: production
-    Project: nebari
-    ManagedBy: nic
-    CostCenter: engineering
-
-  # REQUIRED: Node groups (worker node pools) configuration
-  # At least one node group is required for a functional cluster
-  # Map of node group name to configuration
-  node_groups:
-    # General purpose node group (typically required)
-    general:
-      # REQUIRED: EC2 instance type
-      # Example: m5.2xlarge, m6i.4xlarge, c5.xlarge
-      # Choose based on workload requirements (CPU, memory, network)
-      instance: m5.2xlarge
-
-      # OPTIONAL: Minimum number of nodes in this group
-      # Default: 0
-      # Autoscaler will not scale below this number
-      min_nodes: 1
-
-      # OPTIONAL: Maximum number of nodes in this group
-      # Default: 1
-      # Autoscaler will not scale above this number
-      max_nodes: 5
-
-      # OPTIONAL: Kubernetes taints for this node group
-      # Prevents pods from being scheduled unless they have matching tolerations
-      # Useful for dedicated workloads (GPU, high-memory, etc.)
-      taints:
-        - key: workload
-          value: general
-          effect: NoSchedule  # NoSchedule, PreferNoSchedule, or NoExecute
-
-      # OPTIONAL: Enable GPU support for this node group
-      # Default: false
-      # Set to true for GPU instance types (p3, p4, g4, g5)
-      gpu: false
-
-      # OPTIONAL: Deploy nodes in a single subnet only
-      # Default: false
-      # Set to true if node group should not span multiple AZs
-      single_subnet: false
-
-      # OPTIONAL: IAM permissions boundary for this node group's IAM role
-      # Overrides the global permissions_boundary for this specific node group
-      permissions_boundary: ""
-
-      # OPTIONAL: Use EC2 Spot instances for cost savings
-      # Default: false
-      # Spot instances are cheaper but can be interrupted
-      # Not recommended for critical workloads
-      spot: false
-
-    # User workload node group example
-    user:
-      instance: m5.xlarge
-      min_nodes: 0
-      max_nodes: 10
-      taints: []
-
-    # GPU node group example
-    gpu:
-      instance: g5.2xlarge
-      min_nodes: 0
-      max_nodes: 5
-      gpu: true
-      spot: false
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-
-    # Spot instance node group example
-    spot-workers:
-      instance: m5.4xlarge
-      min_nodes: 0
-      max_nodes: 20
-      spot: true
-      taints:
-        - key: workload
-          value: spot
-          effect: NoSchedule
+certificate:                   # optional, defaults to selfsigned
+  type: ...
 ```
 
-**AWS Environment Variables (Secrets):**
+Anti-pattern: there is no top-level `provider:`, `version:`, `name:`, `kubernetes:`, `node_pools:`, `tls:`, `foundational_software:`, `images:`, or `features:` field. If older documentation shows those, it is out of date.
 
-NIC requires AWS credentials via environment variables or IAM roles:
+| Field | Type | Required | Source |
+|-------|------|----------|--------|
+| `project_name` | string | ✅ | `NebariConfig.ProjectName` |
+| `domain` | string | optional | `NebariConfig.Domain` |
+| `cluster` | map | ✅ | `NebariConfig.Cluster` (`ClusterConfig`) |
+| `dns` | map | optional | `NebariConfig.DNS` (`DNSConfig`) |
+| `git_repository` | object | conditional | `NebariConfig.GitRepository` (`git.Config`) |
+| `certificate` | object | optional | `NebariConfig.Certificate` (`CertificateConfig`) |
 
-```bash
-# Option 1: Long-term credentials (development only)
-AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+---
 
-# Option 2: Temporary credentials (recommended)
-AWS_ACCESS_KEY_ID=ASIAIOSFODNN7EXAMPLE
-AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-AWS_SESSION_TOKEN=FwoGZXIvYXdzEBYaDJH...
+## 2. Cluster Providers
 
-# Option 3: AWS Profile (recommended for local development)
-AWS_PROFILE=nebari-admin
+`cluster:` takes exactly one key, the provider name. The shape of the nested object is provider-specific.
 
-# Option 4: IAM Role (recommended for CI/CD)
-# No environment variables needed - uses instance/pod IAM role
-```
+Valid provider names (registered in `cmd/nic/main.go`): `aws`, `hetzner`, `local`, `existing`, `gcp`, `azure`.
 
+### 2.1 `cluster.aws` (Amazon EKS)
 
-
-## GCP Provider Configuration
-
-GCP-specific configuration defined in `GCPConfig` (pkg/config/config.go:41-57).
+Source: `pkg/provider/aws/config.go`. Status: **implemented**.
 
 ```yaml
-provider: gcp
+cluster:
+  aws:
+    region: us-west-2                          # required
+    kubernetes_version: "1.34"                 # required (string)
+    availability_zones:                        # optional (defaults to []; module picks)
+      - us-west-2a
+      - us-west-2b
+    vpc_cidr_block: "10.10.0.0/16"             # optional, default: "10.0.0.0/16"
+    endpoint_private_access: true
+    endpoint_public_access: true
 
-google_cloud_platform:
-  # REQUIRED: GCP project ID where resources will be created
-  # Example: my-project-123456
-  # Must be an existing GCP project with billing enabled
-  project: my-gcp-project-id
+    # Optional: adopt existing VPC infrastructure
+    # existing_vpc_id: vpc-...
+    # existing_private_subnet_ids: [subnet-..., subnet-...]
+    # existing_security_group_id: sg-...
 
-  # REQUIRED: GCP region to deploy infrastructure
-  # Example: us-central1, us-east1, europe-west1
-  region: us-central1
+    # Optional: pin to existing IAM roles
+    # existing_cluster_role_arn: arn:aws:iam::...
+    # existing_node_role_arn:    arn:aws:iam::...
+    # permissions_boundary:      arn:aws:iam::...:policy/...
 
-  # REQUIRED: Kubernetes version for GKE cluster
-  # Example: "1.28", "1.29", "1.30"
-  # Must be a string (quoted) to preserve minor version
-  kubernetes_version: "1.28"
+    # Optional: EKS KMS key + log types
+    # eks_kms_arn: arn:aws:kms:...
+    enabled_log_types: ["api", "audit"]
 
-  # OPTIONAL: List of availability zones (GCP zones) to use
-  # If not specified, GCP will automatically select zones in the region
-  # Must be valid zones within the specified region
-  # Example: us-central1-a, us-central1-b, us-central1-c
-  availability_zones:
-    - us-central1-a
-    - us-central1-b
-    - us-central1-c
+    node_groups:                                # map keyed by node-group name
+      user:
+        instance: m7i.xlarge
+        min_nodes: 1
+        max_nodes: 5
+        # ami_type: AL2023_x86_64_STANDARD     # defaults to AL2023 STANDARD
+        # gpu: true                            # uses AL2023_x86_64_NVIDIA AMI
+        # spot: true
+        # disk_size: 100
+        # labels:
+        #   workload: user
+        # taints:
+        #   - key: nebari.example/dedicated
+        #     value: user
+        #     effect: NO_SCHEDULE              # NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
 
-  # OPTIONAL: GKE release channel for automatic version management
-  # Valid values: "RAPID", "REGULAR", "STABLE", "UNSPECIFIED"
-  # Default: "REGULAR"
-  # - RAPID: Bleeding edge, frequent updates
-  # - REGULAR: Balanced updates (recommended)
-  # - STABLE: Conservative updates, well-tested
-  # - UNSPECIFIED: Manual version management
-  release_channel: "REGULAR"
+    tags:                                       # optional map[string]string
+      Environment: development
 
-  # OPTIONAL: GKE networking mode
-  # Valid values: "ROUTE", "VPC_NATIVE"
-  # Default: "VPC_NATIVE"
-  # - ROUTE: Routes-based networking (legacy)
-  # - VPC_NATIVE: IP aliasing, recommended for new clusters
-  networking_mode: "VPC_NATIVE"
+    # Optional: AWS Load Balancer Controller (default: enabled)
+    # aws_load_balancer_controller:
+    #   enabled: true
+    #   chart_version: "3.2.1"
+    #   destroy_timeout: 5m
 
-  # OPTIONAL: VPC network to use for cluster
-  # Default: "default"
-  # Can specify existing VPC network name
-  network: "default"
+    # Optional: EFS shared storage
+    efs:
+      enabled: true
+      performance_mode: generalPurpose          # generalPurpose | maxIO
+      throughput_mode: bursting                 # bursting | provisioned | elastic
+      encrypted: true
+      # provisioned_throughput_mibps: 100        # required if throughput_mode is provisioned
+      # kms_key_arn: arn:aws:kms:...
+      # storage_class_name: efs-sc
 
-  # OPTIONAL: VPC subnetwork to use for cluster
-  # Required if using custom VPC network
-  # Example: projects/my-project/regions/us-central1/subnetworks/my-subnet
-  subnetwork: ""
-
-  # OPTIONAL: IP allocation policy for VPC-native clusters
-  # Defines secondary IP ranges for pods and services
-  # Only applies when networking_mode is "VPC_NATIVE"
-  ip_allocation_policy:
-    cluster_secondary_range_name: gke-pods
-    services_secondary_range_name: gke-services
-    cluster_ipv4_cidr_block: "10.4.0.0/14"
-    services_ipv4_cidr_block: "10.0.32.0/20"
-
-  # OPTIONAL: Master authorized networks configuration
-  # Restricts access to GKE control plane
-  # Map of CIDR name to CIDR block
-  master_authorized_networks_config:
-    office-network: "203.0.113.0/24"
-    vpn-network: "198.51.100.0/24"
-
-  # OPTIONAL: Private cluster configuration
-  # Enables GKE private cluster mode
-  private_cluster_config:
-    enable_private_nodes: true
-    enable_private_endpoint: false
-    master_ipv4_cidr_block: "172.16.0.0/28"
-
-  # OPTIONAL: GCP network tags (labels)
-  # Applied to all GCE instances (nodes)
-  # Used for firewall rules and organization
-  # Note: GCP uses tags as strings, not key-value pairs
-  tags:
-    - production
-    - nebari
-    - data-science
-
-  # REQUIRED: Node groups (node pools) configuration
-  # At least one node group is required for a functional cluster
-  # Map of node group name to configuration
-  node_groups:
-    # General purpose node pool
-    general:
-      # REQUIRED: GCE machine type
-      # Example: n1-standard-8, n2-standard-16, e2-standard-8
-      # Choose based on workload requirements (CPU, memory)
-      instance: e2-standard-8
-
-      # OPTIONAL: Minimum number of nodes per zone
-      # Default: 0
-      # Autoscaler will not scale below this number (per zone)
-      min_nodes: 1
-
-      # OPTIONAL: Maximum number of nodes per zone
-      # Default: 1
-      # Autoscaler will not scale above this number (per zone)
-      max_nodes: 5
-
-      # OPTIONAL: Kubernetes taints for this node pool
-      # Prevents pods from being scheduled unless they have matching tolerations
-      taints:
-        - key: workload
-          value: general
-          effect: NoSchedule  # NoSchedule, PreferNoSchedule, or NoExecute
-
-      # OPTIONAL: Use preemptible VMs for cost savings
-      # Default: false
-      # Preemptible VMs are cheaper but can be terminated at any time
-      # Not recommended for critical workloads
-      preemptible: false
-
-      # OPTIONAL: Kubernetes labels for this node pool
-      # Applied to all nodes in this pool
-      # Used for node affinity and pod scheduling
-      labels:
-        workload: general
-        environment: production
-
-      # OPTIONAL: GPU configuration for this node pool
-      # Required for GPU workloads (TensorFlow, PyTorch, etc.)
-      # Must use GPU-enabled machine types (n1-standard-* with GPUs)
-      guest_accelerators:
-        - name: nvidia-tesla-t4  # GPU type
-          count: 1               # Number of GPUs per node
-
-    # User workload node pool example
-    user:
-      instance: e2-standard-4
-      min_nodes: 0
-      max_nodes: 10
-      labels:
-        workload: user
-
-    # GPU node pool example
-    gpu:
-      instance: n1-standard-8
-      min_nodes: 0
-      max_nodes: 5
-      labels:
-        workload: gpu
-        nvidia.com/gpu: "true"
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-      guest_accelerators:
-        - name: nvidia-tesla-v100
-          count: 2
-
-    # Preemptible node pool example
-    preemptible-workers:
-      instance: n2-standard-16
-      min_nodes: 0
-      max_nodes: 20
-      preemptible: true
-      labels:
-        workload: batch
-        preemptible: "true"
-      taints:
-        - key: preemptible
-          value: "true"
-          effect: NoSchedule
+    # Optional: Longhorn distributed storage (default: enabled when nil)
+    # longhorn:
+    #   enabled: true
+    #   replica_count: 2
+    #   dedicated_nodes: false
+    #   node_selector: { workload: storage }
 ```
 
-**GCP Environment Variables (Secrets):**
+Fields not in `aws.NodeGroup`: `single_subnet`, per-node-group `permissions_boundary`. If you see them in older docs, they are not real.
 
-NIC requires GCP credentials via environment variables or service account:
+State backend: S3 with `use_lockfile = true`, bucket auto-created per [§5.2 of State Management](../architecture/05-state-management.md). No DynamoDB.
 
-```bash
-# Option 1: Service account key file (development only)
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+### 2.2 `cluster.hetzner` (Hetzner Cloud k3s)
 
-# Option 2: Service account key JSON (CI/CD)
-GOOGLE_CREDENTIALS='{"type":"service_account","project_id":"my-project",...}'
-
-# Option 3: Workload Identity (recommended for GKE)
-# No environment variables needed - uses pod service account
-
-# GCP Project ID (optional, can be in config)
-GOOGLE_PROJECT=my-gcp-project-id
-```
-
-
-
-## Azure Provider Configuration
-
-Azure-specific configuration defined in `AzureConfig` (pkg/config/config.go:59-76).
+Source: `pkg/provider/hetzner/config.go`. Status: **implemented**. Backed by the `hetzner-k3s` binary - **not** OpenTofu.
 
 ```yaml
-provider: azure
+cluster:
+  hetzner:
+    location: ash                              # required: Hetzner location (ash, fsn1, nbg1, ...)
+    kubernetes_version: "1.32"                 # required: "1.32", "1.32.0", or "v1.32.0+k3s1"
 
-azure:
-  # REQUIRED: Azure region to deploy infrastructure
-  # Example: eastus, westus2, westeurope
-  region: eastus
+    # Optional: prevent application pods on control-plane nodes.
+    # Default: true (single-node clusters and small instances work better).
+    # Set to false for production with dedicated masters.
+    # schedule_workloads_on_masters: false
 
-  # OPTIONAL: Kubernetes version for AKS cluster
-  # Example: "1.28", "1.29", "1.30"
-  # Must be a string (quoted) to preserve minor version
-  # If not specified, uses latest available version in region
-  kubernetes_version: "1.28"
+    # Optional: preserve CSI volumes through destroy.
+    # When true, deploy labels volumes persist=true and destroy skips them.
+    # persist_data: false
 
-  # REQUIRED: Storage account name postfix
-  # Used to create unique storage account names
-  # Must be lowercase alphanumeric, 3-24 characters
-  # Final name: <project_name><storage_account_postfix>
-  storage_account_postfix: "nebari"
+    node_groups:                                # map keyed by node-group name; exactly one must have master: true
+      master:
+        instance_type: cpx31
+        count: 1                                # for k3s HA, count should be 1, 3, or 5 (odd)
+        master: true
+      workers:
+        instance_type: cpx31
+        count: 2
+        # autoscaling:
+        #   enabled: true
+        #   min_instances: 2
+        #   max_instances: 6
 
-  # OPTIONAL: Resource group name for all resources
-  # If not specified, NIC will create: <project_name>-<region>
-  # Must be unique within your Azure subscription
-  resource_group_name: "nebari-resources"
+    # Optional: provide your own SSH keys (else NIC generates ed25519 keys in ~/.cache/nic/hetzner-k3s/ssh/)
+    # ssh:
+    #   public_key_path:  ~/.ssh/id_ed25519.pub
+    #   private_key_path: ~/.ssh/id_ed25519
 
-  # OPTIONAL: Node resource group name
-  # Separate resource group for AKS node resources (VMs, disks, NICs)
-  # If not specified, Azure creates: MC_<resource_group>_<cluster_name>_<region>
-  node_resource_group_name: "nebari-node-resources"
-
-  # OPTIONAL: VNet subnet ID for AKS cluster
-  # Use existing subnet instead of creating new VNet
-  # Example: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
-  vnet_subnet_id: ""
-
-  # OPTIONAL: Enable private cluster mode
-  # Default: false
-  # If true, AKS API server is not publicly accessible
-  # Requires VPN or ExpressRoute for management access
-  private_cluster_enabled: false
-
-  # OPTIONAL: Maximum pods per node
-  # Default: 30 (Azure default)
-  # Maximum: 250
-  # Affects IP address requirements in subnet
-  max_pods: 30
-
-  # OPTIONAL: Enable Azure Workload Identity
-  # Default: false
-  # Allows pods to authenticate to Azure services using managed identities
-  # Recommended for secure access to Azure resources
-  workload_identity_enabled: true
-
-  # OPTIONAL: Enable Azure Policy for Kubernetes
-  # Default: false
-  # Enables policy-based governance for AKS cluster
-  # Useful for compliance and security enforcement
-  azure_policy_enabled: false
-
-  # OPTIONAL: Azure resource tags
-  # Applied to all Azure resources created by NIC
-  # Useful for cost allocation, compliance, and organization
-  tags:
-    Environment: production
-    Project: nebari
-    ManagedBy: nic
-    CostCenter: engineering
-
-  # OPTIONAL: Network profile configuration
-  # Defines networking settings for AKS cluster
-  network_profile:
-    network_plugin: azure       # azure (Azure CNI) or kubenet
-    network_policy: azure       # azure, calico, or none
-    service_cidr: "10.0.0.0/16"
-    dns_service_ip: "10.0.0.10"
-    docker_bridge_cidr: "172.17.0.1/16"
-
-  # OPTIONAL: Authorized IP ranges for API server access
-  # Only these IPs can access the AKS API server
-  # Empty list = allow all (not recommended for production)
-  authorized_ip_ranges:
-    - "203.0.113.0/24"
-    - "198.51.100.0/24"
-
-  # REQUIRED: Node groups (node pools) configuration
-  # At least one node group is required for a functional cluster
-  # Map of node group name to configuration
-  node_groups:
-    # General purpose node pool (system pool)
-    general:
-      # REQUIRED: Azure VM size
-      # Example: Standard_D8_v3, Standard_D16s_v3, Standard_E8s_v3
-      # Choose based on workload requirements (CPU, memory)
-      instance: Standard_D8_v3
-
-      # OPTIONAL: Minimum number of nodes in this pool
-      # Default: 0
-      # Autoscaler will not scale below this number
-      # First node pool (system pool) should have min_nodes >= 1
-      min_nodes: 1
-
-      # OPTIONAL: Maximum number of nodes in this pool
-      # Default: 1
-      # Autoscaler will not scale above this number
-      max_nodes: 5
-
-      # OPTIONAL: Kubernetes taints for this node pool
-      # Prevents pods from being scheduled unless they have matching tolerations
-      taints:
-        - key: CriticalAddonsOnly
-          value: "true"
-          effect: NoSchedule  # NoSchedule, PreferNoSchedule, or NoExecute
-
-    # User workload node pool example
-    user:
-      instance: Standard_D4_v3
-      min_nodes: 0
-      max_nodes: 10
-
-    # High-memory node pool example
-    highmem:
-      instance: Standard_E16s_v3
-      min_nodes: 0
-      max_nodes: 5
-      taints:
-        - key: workload
-          value: highmem
-          effect: NoSchedule
-
-    # GPU node pool example (requires GPU-enabled VM sizes)
-    gpu:
-      instance: Standard_NC6s_v3
-      min_nodes: 0
-      max_nodes: 3
-      taints:
-        - key: sku
-          value: gpu
-          effect: NoSchedule
+    # Optional: restrict SSH and API CIDRs (defaults to 0.0.0.0/0; NIC warns at validate time)
+    # network:
+    #   ssh_allowed_cidrs: [203.0.113.0/24]
+    #   api_allowed_cidrs: [203.0.113.0/24]
 ```
 
-**Azure Environment Variables (Secrets):**
+The Hetzner provider requires the `HCLOUD_TOKEN` environment variable.
 
-NIC requires Azure credentials via environment variables or managed identity:
+### 2.3 `cluster.local` (Kind for development)
 
-```bash
-# Option 1: Service Principal (recommended for automation)
-AZURE_CLIENT_ID=12345678-1234-1234-1234-123456789012
-AZURE_CLIENT_SECRET=your-client-secret
-AZURE_TENANT_ID=87654321-4321-4321-4321-210987654321
-AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111
-
-# Option 2: Managed Identity (recommended for Azure VMs/AKS)
-# No environment variables needed - uses VM/pod managed identity
-
-# Option 3: Azure CLI authentication (development only)
-# Run: az login
-# NIC will use credentials from Azure CLI
-```
-
-
-
-## Hetzner Provider Configuration
-
-Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on
-Hetzner Cloud using the hetzner-k3s CLI tool.
+Source: `pkg/provider/local/config.go`. Status: **implemented as a stub**. The local provider does not create the cluster itself; `make localkind-up` does. The provider is a thin adapter that runs the bootstrap (ArgoCD + foundational apps) against the Kind cluster.
 
 ```yaml
-provider: hetzner
+cluster:
+  local:
+    kube_context: "kind-nebari-local"          # context name from kubeconfig
+    # storage_class: standard                   # default: "standard"; use "local-path" for k3s
+    # https_port: 443                           # override e.g. 8443 if 443 is in use
 
-hetzner_cloud:
-  # REQUIRED: Hetzner datacenter location
-  # Examples: ash (Ashburn), fsn1 (Falkenstein), nbg1 (Nuremberg), hel1 (Helsinki)
-  location: ash
+    # MetalLB defaults to enabled with pool 192.168.1.100-192.168.1.110
+    # metallb:
+    #   enabled: false                          # disable for k3s (ships with ServiceLB)
+    #   address_pool: 172.18.255.100-172.18.255.110
 
-  # REQUIRED: Kubernetes version for the k3s cluster
-  # Short form ("1.32", "1.32.0") is resolved to the latest k3s release via GitHub API
-  # Explicit form ("v1.32.0+k3s1") is used as-is (useful for air-gapped or pinned scenarios)
-  kubernetes_version: "1.32"
-
-  # OPTIONAL: Allow application pods on control-plane nodes
-  # Default: true (enables single-node clusters and better utilization of small instances)
-  # Set to false for production clusters where you want dedicated masters that
-  # only run etcd and the Kubernetes API server. When false, at least one
-  # non-master node group is required.
-  schedule_workloads_on_masters: true
-
-  # REQUIRED: Node groups - at least one group must have master: true
-  # Uses the same map[string]NodeGroup pattern as AWS, GCP, and Azure providers.
-  # Exactly one group must be marked as the master (k3s control plane).
-  node_groups:
-    # Control plane node group - exactly one group must have master: true
-    master:
-      # REQUIRED: Hetzner server type
-      # Examples: cpx11, cpx21, cpx31, cpx41, cpx51, cx22, cax11 (ARM)
-      instance_type: cpx31
-
-      # REQUIRED: Number of control-plane nodes
-      # Must be odd (1, 3, 5) for k3s HA with embedded etcd
-      count: 1
-
-      # REQUIRED for one group: marks this as the k3s control plane
-      master: true
-
-    # Worker node groups (zero or more)
-    workers:
-      instance_type: cpx31
-      count: 2
-
-      # OPTIONAL: Override location for this worker group
-      # Only valid for worker (non-master) groups
-      # location: fsn1
-
-      # OPTIONAL: Autoscaling configuration
-      # autoscaling:
-      #   enabled: true
-      #   min_instances: 1
-      #   max_instances: 10
-
-  # OPTIONAL: Provide your own SSH keys instead of auto-generated ones
-  # If omitted, NIC generates an ed25519 key pair in ~/.cache/nic/hetzner-k3s/ssh/
-  # ssh:
-  #   public_key_path: "~/.ssh/id_ed25519.pub"
-  #   private_key_path: "~/.ssh/id_ed25519"
-
-  # OPTIONAL: Restrict SSH and Kubernetes API access
-  # Defaults to 0.0.0.0/0 (open to all) if omitted - restrict these in production
-  # network:
-  #   ssh_allowed_cidrs:
-  #     - 203.0.113.0/24
-  #   api_allowed_cidrs:
-  #     - 203.0.113.0/24
+    # Optional: per-node-group selectors used by software packs
+    # node_selectors:
+    #   general:
+    #     kubernetes.io/os: linux
+    #   user:
+    #     kubernetes.io/os: linux
 ```
 
-**Hetzner Environment Variables (Secrets):**
+The local provider sets `InfraSettings.SupportsLocalGitOps = true`, which lets NIC auto-create `/tmp/nebari-gitops-<project_name>` when `git_repository:` is not specified.
 
-```bash
-# REQUIRED: Hetzner Cloud API token
-# Create at: https://console.hetzner.cloud/ -> Project -> Security -> API Tokens
-# Needs Read & Write permissions
-HETZNER_TOKEN=your-hetzner-api-token
-```
+### 2.4 `cluster.existing` (adopt a pre-provisioned cluster)
 
-**Accessing the cluster after deploy:**
-
-The kubeconfig is written to `~/.cache/nic/hetzner-k3s/<project_name>/kubeconfig`:
-
-```bash
-export KUBECONFIG=~/.cache/nic/hetzner-k3s/my-nebari/kubeconfig
-kubectl get nodes
-```
-
-**SSH access to nodes:**
-
-NIC auto-generates an ed25519 key pair in `~/.cache/nic/hetzner-k3s/ssh/` (or uses your custom keys if configured via
-`ssh:` in the config). To SSH into a node:
-
-```bash
-# Get node IPs
-kubectl get nodes -o wide
-
-# SSH as root using the auto-generated key
-ssh -i ~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519 root@<node-ip>
-```
-
-**Important: SSH key portability**
-
-Unlike managed Kubernetes providers (EKS, GKE, AKS) where authentication is handled by cloud IAM, Hetzner uses
-hetzner-k3s which provisions clusters over SSH. The SSH key pair used during `nic deploy` is required for all subsequent
-cluster operations (redeploy, destroy, scale) from any machine.
-
-If you auto-generate keys (the default), they are stored in `~/.cache/nic/hetzner-k3s/ssh/`. To manage the cluster from
-a different computer, you must copy these files:
-
-```bash
-# On the original machine, copy both files:
-~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519
-~/.cache/nic/hetzner-k3s/ssh/hetzner_ed25519.pub
-```
-
-Alternatively, use your own SSH keys by configuring the `ssh:` block in your config, so the same key is available on all
-machines without manual copying.
-
-**Key differences from managed Kubernetes providers (AWS/GCP/Azure):**
-
-- Uses k3s instead of a managed Kubernetes service (EKS/GKE/AKS)
-- Requires exactly one `master: true` node group for the k3s control plane
-- Master count must be odd (1, 3, 5) for etcd quorum
-- `schedule_workloads_on_masters` controls whether app pods run on masters (defaults to true)
-- Worker groups can override the top-level location for multi-region deployments
-- SSH and API access CIDRs default to 0.0.0.0/0 if not restricted
-
-
-
-## Local Provider Configuration
-
-Local K3s provider configuration defined in `LocalConfig` (pkg/config/config.go:78-83).
+Source: `pkg/provider/existing/config.go`. Status: **implemented**. No provisioning happens; NIC just runs the bootstrap against whatever cluster the kubeconfig points at.
 
 ```yaml
-provider: local
+cluster:
+  existing:
+    # Path to the kubeconfig file. May be absolute or relative; tilde is NOT expanded.
+    # When empty: falls back to $KUBECONFIG env var, then $HOME/.kube/config.
+    kubeconfig: path/to/kubeconfig
 
-local:
-  # OPTIONAL: Kubernetes context to use from kubeconfig
-  # Default: current context from ~/.kube/config
-  # Use to specify which cluster to deploy to when you have multiple contexts
-  kube_context: "k3d-nebari-local"
+    # Required: context name within that kubeconfig.
+    context: "arn:aws:eks:us-west-2:123456789012:cluster/my-nebari"
 
-  # OPTIONAL: Node selectors for workload placement
-  # Map of workload type to Kubernetes node selector labels
-  # Used to target specific nodes in the local cluster
-  # Useful when running multi-node K3s/K3d/Kind clusters
-  node_selectors:
-    # General workloads node selector
-    general:
-      kubernetes.io/os: linux
-      node-role.kubernetes.io/worker: "true"
+    # Optional: default StorageClass for foundational PVCs (default: "standard")
+    storage_class: gp2
 
-    # User workloads node selector
-    user:
-      kubernetes.io/os: linux
-      workload: user
-
-    # Worker/batch workloads node selector
-    worker:
-      kubernetes.io/os: linux
-      workload: batch
-
-    # GPU workloads node selector (if you have GPU nodes locally)
-    gpu:
-      kubernetes.io/os: linux
-      nvidia.com/gpu: "true"
+    # Optional: annotations applied to the Envoy Gateway LoadBalancer Service
+    # load_balancer_annotations:
+    #   load-balancer.hetzner.cloud/location: ash
 ```
 
-**Local Provider Notes:**
+### 2.5 `cluster.gcp` / `cluster.azure` (stubs)
 
-- **Purpose**: Deploy Nebari to existing local Kubernetes cluster (K3s, K3d, Kind, Minikube, Docker Desktop)
-- **No cloud credentials required**: Uses local kubeconfig for authentication
-- **No infrastructure provisioning**: Assumes cluster already exists
-- **Node selectors only**: No node group creation, only workload placement control
-- **Development/testing use case**: Not recommended for production deployments
+Sources: `pkg/provider/gcp/config.go`, `pkg/provider/azure/config.go`. Status: **registered but not implemented**. The struct fields exist for forward compatibility; calling `Validate`, `Deploy`, `Destroy`, or `GetKubeconfig` on these providers returns "not yet implemented" today.
 
-**Local Provider Environment Variables:**
+The GCP struct accepts: `project`, `region`, `kubernetes_version`, `availability_zones`, `release_channel`, `node_groups` (map), `tags`, `networking_mode`, `network`, `subnetwork`, `ip_allocation_policy`, `master_authorized_networks_config`, `private_cluster_config`.
 
-```bash
-# OPTIONAL: Custom kubeconfig location
-KUBECONFIG=/path/to/custom/kubeconfig
+The Azure struct accepts: `region`, `kubernetes_version`, `storage_account_postfix`, `authorized_ip_ranges`, `resource_group_name`, `node_resource_group_name`, `node_groups` (map), `vnet_subnet_id`, `private_cluster_enabled`, `tags`, `network_profile`, `max_pods`, `workload_identity_enabled`, `azure_policy_enabled`.
 
-# If not set, uses default: ~/.kube/config
-```
+See [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) and [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) for schemas. Don't try to deploy with them.
 
+---
 
+## 3. DNS Providers
 
-## DNS Provider Configuration
+`dns:` takes exactly one key. The shape is provider-specific.
 
-DNS provider configuration for managing DNS records and Let's Encrypt integration.
+Valid provider names: `cloudflare` (the only DNS provider implemented today).
 
-### Cloudflare DNS Provider
+### 3.1 `dns.cloudflare`
 
-Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-8).
+Source: `pkg/dnsprovider/cloudflare/config.go`.
 
 ```yaml
 dns:
   cloudflare:
-    # REQUIRED: Cloudflare zone name (your domain)
-    # This is the domain you manage in Cloudflare
-    # Example: example.com, mycompany.com
-    # NIC will create DNS records under this zone
-    zone_name: example.com
+    zone_name: example.com                     # the Cloudflare zone hosting `domain`
 ```
 
-**Cloudflare Environment Variables (Secrets):**
+Behavior:
 
-Cloudflare API credentials must be provided via environment variables:
+- On deploy, NIC waits for the Envoy Gateway LB to receive a hostname or IP and then creates a root record and a wildcard record (`*.<domain>`) in the zone. Record type is A for IPs, CNAME for hostnames.
+- On destroy, both records are removed. Idempotent.
+- Failures are non-blocking: deploy/destroy continue with a warning.
 
-```bash
-# REQUIRED: Cloudflare API Token
-# Create at: https://dash.cloudflare.com/profile/api-tokens
-# Required permissions: Zone:Read, DNS:Edit
-CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
-```
+Credential: `CLOUDFLARE_API_TOKEN` env var, with Zone:Read and DNS:Edit permissions on the zone. Domain must be a suffix of `zone_name` (suffix check with a dot separator).
 
-**How to Create Cloudflare API Token:**
+Future DNS providers (Route53, Azure DNS, Google Cloud DNS) will follow the same shape and the same `DNSProvider` interface defined in `pkg/dnsprovider/provider.go`.
 
-1. Go to https://dash.cloudflare.com/profile/api-tokens
-2. Click "Create Token"
-3. Use "Edit zone DNS" template or create custom token
-4. Permissions required:
-   - Zone / DNS / Edit
-   - Zone / Zone / Read
-5. Zone Resources: Include / Specific zone / your-domain.com
-6. Copy token and add to `.env` file: `CLOUDFLARE_API_TOKEN=...`
+---
 
-**DNS Provider Integration:**
+## 4. Certificate
 
-When a `dns` block is configured, NIC will:
-- On deploy: create root domain and wildcard (`*.domain`) DNS records pointing to the load balancer endpoint
-- On destroy: remove those DNS records before tearing down infrastructure
-- DNS errors are treated as warnings and never block deploy or destroy
-
-**Known limitation:** If you change the `domain` field and redeploy, records for the old domain are not automatically
-removed. You must manually delete them from Cloudflare. See
-[DNS Provider Architecture](../implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change) for
-details.
-
-
-
-## Complete Examples
-
-### Minimal AWS Configuration
+Source: `pkg/config/config.go` (`CertificateConfig`, `ACMEConfig`).
 
 ```yaml
-# Minimal production-ready AWS deployment
-project_name: nebari-prod
-provider: aws
-domain: nebari.example.com
-
-amazon_web_services:
-  region: us-west-2
-  kubernetes_version: "1.28"
-
-  node_groups:
-    general:
-      instance: m5.2xlarge
-      min_nodes: 3
-      max_nodes: 10
+certificate:
+  type: letsencrypt                            # "selfsigned" (default) | "letsencrypt"
+  acme:                                        # required when type: letsencrypt
+    email: admin@example.com
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory  # use staging for testing
 ```
 
-### Full-Featured AWS Configuration
+When omitted, NIC behaves as if `type: selfsigned` was set. `selfsigned` is appropriate for local clusters, internal environments, and `existing` clusters where cert lifecycle is handled out-of-band. `letsencrypt` requires a publicly-routable `domain` (and typically a DNS provider).
+
+---
+
+## 5. Git Repository
+
+Source: `pkg/git/config.go` (`Config`, `AuthConfig`).
 
 ```yaml
-# Production AWS deployment with all common options
-project_name: nebari-production
-provider: aws
-domain: nebari.company.com
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"   # SSH, HTTPS, or file:// path
+  branch: main                                       # default: "main"
+  path: "clusters/my-nebari"                         # optional subdirectory
 
-amazon_web_services:
-  region: us-east-1
-  kubernetes_version: "1.29"
-  availability_zones:
-    - us-east-1a
-    - us-east-1b
-    - us-east-1c
-  vpc_cidr_block: "10.100.0.0/16"
-  endpoint_private_access: true
-  endpoint_public_access: true
-  permissions_boundary: "arn:aws:iam::123456789012:policy/DepartmentBoundary"
+  auth:                                              # NIC's write credentials
+    ssh_key_env: GIT_SSH_PRIVATE_KEY                 # name of env var holding the PEM-encoded key
+    # OR for HTTPS:
+    # token_env: GIT_TOKEN
 
-  tags:
-    Environment: production
-    Project: nebari
-    Team: data-science
-    CostCenter: engineering
-    ManagedBy: nic
-
-  node_groups:
-    general:
-      instance: m6i.4xlarge
-      min_nodes: 3
-      max_nodes: 10
-      taints:
-        - key: CriticalAddonsOnly
-          value: "true"
-          effect: NoSchedule
-
-    user:
-      instance: m6i.2xlarge
-      min_nodes: 2
-      max_nodes: 50
-
-    worker:
-      instance: c6i.8xlarge
-      min_nodes: 0
-      max_nodes: 20
-      taints:
-        - key: workload
-          value: batch
-          effect: NoSchedule
-
-    gpu:
-      instance: g5.2xlarge
-      min_nodes: 0
-      max_nodes: 10
-      gpu: true
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-
-    spot:
-      instance: m6i.8xlarge
-      min_nodes: 0
-      max_nodes: 30
-      spot: true
-      taints:
-        - key: spot
-          value: "true"
-          effect: NoSchedule
-
-dns:
-  cloudflare:
-    zone_name: company.com
+  # Optional: separate read-only credentials for ArgoCD (falls back to `auth` when unset)
+  # argocd_auth:
+  #   ssh_key_env: ARGOCD_SSH_KEY
 ```
 
-### Minimal GCP Configuration
-
-```yaml
-# Minimal production-ready GCP deployment
-project_name: nebari-prod
-provider: gcp
-domain: nebari.example.com
-
-google_cloud_platform:
-  project: my-gcp-project
-  region: us-central1
-  kubernetes_version: "1.28"
-
-  node_groups:
-    general:
-      instance: e2-standard-8
-      min_nodes: 3
-      max_nodes: 10
-```
-
-### Full-Featured GCP Configuration
-
-```yaml
-# Production GCP deployment with all common options
-project_name: nebari-production
-provider: gcp
-domain: nebari.company.com
-
-google_cloud_platform:
-  project: company-nebari-prod
-  region: us-central1
-  kubernetes_version: "1.29"
-  availability_zones:
-    - us-central1-a
-    - us-central1-b
-    - us-central1-c
-  release_channel: "REGULAR"
-  networking_mode: "VPC_NATIVE"
-  network: "nebari-network"
-
-  ip_allocation_policy:
-    cluster_secondary_range_name: gke-pods
-    services_secondary_range_name: gke-services
-    cluster_ipv4_cidr_block: "10.4.0.0/14"
-    services_ipv4_cidr_block: "10.0.32.0/20"
-
-  master_authorized_networks_config:
-    office: "203.0.113.0/24"
-    vpn: "198.51.100.0/24"
-
-  private_cluster_config:
-    enable_private_nodes: true
-    enable_private_endpoint: false
-    master_ipv4_cidr_block: "172.16.0.0/28"
-
-  tags:
-    - production
-    - nebari
-    - data-science
-
-  node_groups:
-    general:
-      instance: n2-standard-8
-      min_nodes: 3
-      max_nodes: 10
-      labels:
-        workload: system
-      taints:
-        - key: CriticalAddonsOnly
-          value: "true"
-          effect: NoSchedule
-
-    user:
-      instance: n2-standard-4
-      min_nodes: 2
-      max_nodes: 50
-      labels:
-        workload: user
-
-    worker:
-      instance: c2-standard-16
-      min_nodes: 0
-      max_nodes: 20
-      labels:
-        workload: batch
-      taints:
-        - key: workload
-          value: batch
-          effect: NoSchedule
-
-    gpu:
-      instance: n1-standard-8
-      min_nodes: 0
-      max_nodes: 10
-      labels:
-        workload: gpu
-      guest_accelerators:
-        - name: nvidia-tesla-t4
-          count: 1
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-
-    preemptible:
-      instance: n2-standard-16
-      min_nodes: 0
-      max_nodes: 30
-      preemptible: true
-      labels:
-        workload: preemptible
-      taints:
-        - key: preemptible
-          value: "true"
-          effect: NoSchedule
-
-dns:
-  cloudflare:
-    zone_name: company.com
-```
-
-### Minimal Azure Configuration
-
-```yaml
-# Minimal production-ready Azure deployment
-project_name: nebari-prod
-provider: azure
-domain: nebari.example.com
-
-azure:
-  region: eastus
-  kubernetes_version: "1.28"
-  storage_account_postfix: "nbri"
-
-  node_groups:
-    general:
-      instance: Standard_D8_v3
-      min_nodes: 3
-      max_nodes: 10
-```
-
-### Full-Featured Azure Configuration
-
-```yaml
-# Production Azure deployment with all common options
-project_name: nebari-production
-provider: azure
-domain: nebari.company.com
-
-azure:
-  region: eastus
-  kubernetes_version: "1.29"
-  storage_account_postfix: "nbriprod"
-  resource_group_name: "nebari-prod-rg"
-  node_resource_group_name: "nebari-prod-nodes-rg"
-  private_cluster_enabled: false
-  max_pods: 50
-  workload_identity_enabled: true
-  azure_policy_enabled: true
-
-  authorized_ip_ranges:
-    - "203.0.113.0/24"  # Office network
-    - "198.51.100.0/24"  # VPN network
-
-  network_profile:
-    network_plugin: azure
-    network_policy: azure
-    service_cidr: "10.0.0.0/16"
-    dns_service_ip: "10.0.0.10"
-    docker_bridge_cidr: "172.17.0.1/16"
-
-  tags:
-    Environment: production
-    Project: nebari
-    Team: data-science
-    CostCenter: engineering
-    ManagedBy: nic
-
-  node_groups:
-    general:
-      instance: Standard_D8s_v3
-      min_nodes: 3
-      max_nodes: 10
-      taints:
-        - key: CriticalAddonsOnly
-          value: "true"
-          effect: NoSchedule
-
-    user:
-      instance: Standard_D4s_v3
-      min_nodes: 2
-      max_nodes: 50
-
-    worker:
-      instance: Standard_F16s_v2
-      min_nodes: 0
-      max_nodes: 20
-      taints:
-        - key: workload
-          value: batch
-          effect: NoSchedule
-
-    highmem:
-      instance: Standard_E16s_v3
-      min_nodes: 0
-      max_nodes: 10
-      taints:
-        - key: workload
-          value: highmem
-          effect: NoSchedule
-
-    gpu:
-      instance: Standard_NC6s_v3
-      min_nodes: 0
-      max_nodes: 5
-      taints:
-        - key: sku
-          value: gpu
-          effect: NoSchedule
-
-dns:
-  cloudflare:
-    zone_name: company.com
-```
-
-### Minimal Hetzner Configuration
-
-```yaml
-# Single-node Hetzner cluster (dev/testing)
-project_name: nebari-dev
-provider: hetzner
-domain: nebari.example.com
-
-hetzner_cloud:
-  location: ash
-  kubernetes_version: "1.32"
-  node_groups:
-    master:
-      instance_type: cpx31
-      count: 1
-      master: true
-```
-
-### Production Hetzner Configuration
-
-```yaml
-# Multi-node Hetzner cluster with dedicated masters
-project_name: nebari-prod
-provider: hetzner
-domain: nebari.example.com
-
-hetzner_cloud:
-  location: fsn1
-  kubernetes_version: "1.32"
-  schedule_workloads_on_masters: false
-  node_groups:
-    master:
-      instance_type: cpx31
-      count: 3
-      master: true
-    general:
-      instance_type: cpx41
-      count: 3
-    gpu:
-      instance_type: ccx33
-      count: 1
-      autoscaling:
-        enabled: true
-        min_instances: 0
-        max_instances: 5
-  network:
-    ssh_allowed_cidrs:
-      - 203.0.113.0/24
-    api_allowed_cidrs:
-      - 203.0.113.0/24
-
-dns:
-  cloudflare:
-    zone_name: example.com
-```
-
-### Local Development Configuration
-
-```yaml
-# Local K3d/Kind cluster for development
-project_name: nebari-dev
-provider: local
-domain: nebari.local
-
-local:
-  kube_context: "k3d-nebari-local"
-  node_selectors:
-    general:
-      kubernetes.io/os: linux
-    user:
-      kubernetes.io/os: linux
-    worker:
-      kubernetes.io/os: linux
-```
-
-### Multi-Environment Setup (Separate Files)
-
-**base-production.yaml** (production baseline):
-```yaml
-project_name: nebari-prod
-provider: aws
-domain: nebari.company.com
-
-amazon_web_services:
-  region: us-east-1
-  kubernetes_version: "1.29"
-  vpc_cidr_block: "10.100.0.0/16"
-
-  tags:
-    Environment: production
-    ManagedBy: nic
-
-  node_groups:
-    general:
-      instance: m6i.4xlarge
-      min_nodes: 3
-      max_nodes: 10
-```
-
-**staging.yaml** (smaller staging environment):
-```yaml
-project_name: nebari-staging
-provider: aws
-domain: staging.nebari.company.com
-
-amazon_web_services:
-  region: us-west-2
-  kubernetes_version: "1.29"
-  vpc_cidr_block: "10.200.0.0/16"
-
-  tags:
-    Environment: staging
-    ManagedBy: nic
-
-  node_groups:
-    general:
-      instance: m5.xlarge
-      min_nodes: 1
-      max_nodes: 3
-```
-
-**development.yaml** (minimal dev environment):
-```yaml
-project_name: nebari-dev
-provider: local
-domain: nebari.local
-
-local:
-  kube_context: "k3d-nebari-dev"
-```
-
-
-
-## Configuration Validation
-
-Use `nic validate` to check your configuration before deployment:
-
-```bash
-# Validate configuration file
-nic validate -f config.yaml
-
-# Example output:
-# ✅ Configuration valid
-#
-# Summary:
-#   Provider: AWS (us-west-2)
-#   Project: nebari-prod
-#   Domain: nebari.example.com
-#   DNS: cloudflare
-#   Node Groups: 4 (general, user, worker, gpu)
-```
-
-
-
-## Environment Variables Reference
-
-### AWS Provider
-```bash
-AWS_ACCESS_KEY_ID=<access-key>
-AWS_SECRET_ACCESS_KEY=<secret-key>
-AWS_SESSION_TOKEN=<session-token>          # Optional, for temporary credentials
-AWS_PROFILE=<profile-name>                 # Optional, use named profile
-AWS_REGION=<region>                        # Optional, overrides config
-```
-
-### GCP Provider
-```bash
-GOOGLE_APPLICATION_CREDENTIALS=<path-to-key.json>
-GOOGLE_CREDENTIALS=<json-key-content>      # Alternative to file path
-GOOGLE_PROJECT=<project-id>                # Optional, overrides config
-```
-
-### Azure Provider
-```bash
-AZURE_CLIENT_ID=<client-id>
-AZURE_CLIENT_SECRET=<client-secret>
-AZURE_TENANT_ID=<tenant-id>
-AZURE_SUBSCRIPTION_ID=<subscription-id>
-```
-
-### Hetzner Provider
-```bash
-HETZNER_TOKEN=<api-token>                  # Required, Hetzner Cloud API token
-```
-
-### Cloudflare DNS Provider
-```bash
-CLOUDFLARE_API_TOKEN=<api-token>           # Recommended
-# OR (legacy)
-CLOUDFLARE_API_KEY=<api-key>
-CLOUDFLARE_EMAIL=<email>
-```
-
-### Local Provider
-```bash
-KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
-```
-
-
-
-## Best Practices
-
-### Security
-1. **Never commit secrets to git**: Use `.env` file (gitignored) or CI/CD secret management
-2. **Use restrictive CIDR blocks**: Limit `authorized_ip_ranges` to known networks
-3. **Enable private clusters**: Set `private_cluster_enabled: true` for production when possible
-4. **Use permissions boundaries**: Apply `permissions_boundary` in enterprise environments
-5. **Rotate credentials regularly**: Update API tokens and service account keys periodically
-
-### High Availability
-1. **Multi-AZ deployment**: Specify multiple `availability_zones` (minimum 3 for production)
-2. **Adequate min_nodes**: Set `min_nodes >= 3` for general node group in production
-3. **Node group redundancy**: Use multiple node groups for different workload types
-
-### Cost Optimization
-1. **Use spot/preemptible for batch workloads**: Save 60-90% on compute costs
-2. **Right-size instances**: Start small, scale up based on actual usage
-3. **Set appropriate max_nodes**: Prevent runaway scaling costs
-4. **Use tags for cost allocation**: Track spending by team, project, environment
-
-### Scalability
-1. **Autoscaling ranges**: Set `min_nodes` for baseline, `max_nodes` for peak capacity
-2. **Use taints for specialized workloads**: Ensure GPU/high-memory nodes only used when needed
-3. **Monitor node utilization**: Adjust instance types and scaling limits based on metrics
-
-
-
-**Last Updated**: 2026-03-27
-**NIC Version**: v0.1.0
-**Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
+Notes:
+
+- `file://` URLs are valid. Combined with `InfraSettings.SupportsLocalGitOps = true` (currently only the local provider), this enables a zero-credential GitOps workflow for development.
+- When `git_repository:` is omitted on a provider that supports local GitOps, NIC auto-creates `/tmp/nebari-gitops-<project_name>` and points ArgoCD at it.
+- When `git_repository:` is omitted on a provider that does **not** support local GitOps (e.g., AWS), the deploy continues but the GitOps bootstrap is skipped.
+- The CLI scrubs the `auth:` and `argocd_auth:` blocks from any copy of the config it writes into the repo (`scrubSensitiveFields` in `cmd/nic/deploy.go`).
+
+---
+
+## 6. Environment Variables
+
+Loaded by `godotenv` from `.env` (gitignored) at startup. Used for credentials and runtime options.
+
+| Variable | Used by | Purpose |
+|----------|---------|---------|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION` | AWS provider | Standard AWS SDK credentials |
+| `HCLOUD_TOKEN` | Hetzner provider | Hetzner Cloud API token |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare DNS | Zone:Read + DNS:Edit on the configured zone |
+| `GIT_SSH_PRIVATE_KEY` (or whatever you point `git_repository.auth.ssh_key_env` at) | `pkg/git` | SSH private key in PEM form |
+| `GIT_TOKEN` (or whatever you point `git_repository.auth.token_env` at) | `pkg/git` | Personal access token for HTTPS git URLs |
+| `KUBECONFIG` | `existing` provider, `nic kubeconfig` | Kubeconfig path (used when `cluster.existing.kubeconfig` is empty) |
+| `OTEL_EXPORTER` | `pkg/telemetry` | `console` (default), `otlp`, `both`, `none` |
+| `OTEL_ENDPOINT` | `pkg/telemetry` | OTLP endpoint (default: `localhost:4317`) |
+
+`.env.example` in the repo root lists the variables NIC looks at; copy to `.env` and fill in the values you need.

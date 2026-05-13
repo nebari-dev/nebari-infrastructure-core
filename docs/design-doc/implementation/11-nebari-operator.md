@@ -1,485 +1,107 @@
-# Nebari Kubernetes Operator
+# Nebari Operator
 
-### 10.1 Operator Purpose
+## 11.1 Scope (and What This Document Is Not)
 
-**Problem:** Applications need to integrate with auth, o11y, and routing - currently manual and error-prone.
+The Nebari Operator is **not implemented in this repository**. It lives in its own project at [`github.com/nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator) with its own release cadence, CRD schema, and reconciliation logic.
 
-**Solution:** Kubernetes operator that watches `NebariApplication` CRDs and automates:
-- OAuth2 client creation in Keycloak
-- HTTPRoute configuration in Envoy Gateway
-- TLS certificate provisioning via cert-manager
-- Grafana dashboard provisioning
-- OpenTelemetry ServiceMonitor creation
+NIC's only role with respect to the operator is to **deploy it as a foundational ArgoCD application** so that user-installed software packs can rely on its CRDs being present.
 
-### 10.2 NebariApplication CRD
+This document describes:
 
-**CRD Definition:**
-```yaml
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: nebariapplications.nebari.dev
-spec:
-  group: nebari.dev
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              required: [displayName, routing]
-              properties:
-                displayName:
-                  type: string
-                  description: "Human-readable application name"
+1. How NIC deploys the operator
+2. The contract NIC depends on the operator providing (the `NebariApp` CRD)
+3. The provider-shaped capabilities NIC passes into the operator
 
-                routing:
-                  type: object
-                  required: [domain, paths]
-                  properties:
-                    domain:
-                      type: string
-                      description: "Application domain (e.g., jupyter.example.com)"
-                    enableTLS:
-                      type: boolean
-                      default: true
-                    paths:
-                      type: array
-                      items:
-                        type: object
-                        required: [path, service, port]
-                        properties:
-                          path:
-                            type: string
-                          service:
-                            type: string
-                          port:
-                            type: integer
+For the operator's CRD schema, reconciliation rules, controller code, and release notes, see the upstream repository.
 
-                authentication:
-                  type: object
-                  properties:
-                    enabled:
-                      type: boolean
-                      default: true
-                    allowedGroups:
-                      type: array
-                      items:
-                        type: string
-                    allowedUsers:
-                      type: array
-                      items:
-                        type: string
-                    publicPaths:
-                      type: array
-                      description: "Paths that don't require auth"
-                      items:
-                        type: string
+## 11.2 How NIC Deploys the Operator
 
-                observability:
-                  type: object
-                  properties:
-                    metrics:
-                      type: object
-                      properties:
-                        enabled:
-                          type: boolean
-                          default: true
-                        port:
-                          type: integer
-                        path:
-                          type: string
-                          default: "/metrics"
-                    logs:
-                      type: object
-                      properties:
-                        enabled:
-                          type: boolean
-                          default: true
-                    traces:
-                      type: object
-                      properties:
-                        enabled:
-                          type: boolean
-                          default: true
-                    dashboards:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          name:
-                            type: string
-                          source:
-                            type: string
-                            description: "URL to dashboard JSON or ConfigMap reference"
+The operator is deployed as a foundational ArgoCD application from `pkg/argocd/templates/apps/nebari-operator.yaml`. The actual manifests are pulled from the upstream `nebari-operator` repository via Kustomize, with NIC-specific patches layered on top:
 
-            status:
-              type: object
-              properties:
-                phase:
-                  type: string
-                  enum: [Pending, Provisioning, Ready, Error]
-                url:
-                  type: string
-                  description: "Public URL of the application"
-                keycloakClientID:
-                  type: string
-                  description: "OAuth2 client ID in Keycloak"
-                conditions:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string
+```
+pkg/argocd/templates/manifests/nebari-operator/
+├── kustomization.yaml      # Points at github.com/nebari-dev/nebari-operator
+│                           # at a pinned ref (e.g. v0.1.0-alpha.19) and applies
+│                           # the deployment patch below
+└── deployment-patch.yaml   # Sets environment variables on the controller-manager
+                            # container: Keycloak integration (URL, realm, admin
+                            # secret name/namespace, issuer context path, external
+                            # URL) and the TLS cluster-issuer name
 ```
 
-### 10.3 Example Usage
+The operator runs in its own namespace and watches for `NebariApp` CRs across the cluster.
 
-**Deploy JupyterHub with Full Integration:**
+## 11.3 The `NebariApp` CRD
+
+The CRD shape is owned by the upstream operator. The relevant fields, at a high level (consult the upstream repo for the authoritative schema):
+
 ```yaml
-apiVersion: nebari.dev/v1alpha1
-kind: NebariApplication
+apiVersion: nebari.dev/v1
+kind: NebariApp
 metadata:
-  name: jupyterhub
+  name: jupyter-hub
   namespace: jupyter
 spec:
-  displayName: "JupyterHub"
-
+  hostname: jupyter.example.com
   routing:
-    domain: jupyter.nebari.example.com
-    enableTLS: true
-    paths:
+    routes:
       - path: /
-        service: jupyterhub
-        port: 8000
-
-  authentication:
-    enabled: true
-    allowedGroups:
-      - data-scientists
-      - admins
-    publicPaths:
-      - /hub/health  # Health check endpoint
-
-  observability:
-    metrics:
-      enabled: true
-      port: 9090
-      path: /metrics
-    logs:
-      enabled: true
-    traces:
-      enabled: true
-    dashboards:
-      - name: "JupyterHub Overview"
-        source: "https://raw.githubusercontent.com/jupyterhub/grafana-dashboards/main/jupyterhub.json"
-      - name: "JupyterHub User Activity"
-        source: "configmap://jupyter/jupyterhub-dashboard"
-```
-
-**Operator Creates:**
-
-1. **Keycloak OAuth2 Client:**
-```json
-{
-  "clientId": "jupyterhub-jupyter",
-  "name": "JupyterHub",
-  "redirectUris": [
-    "https://jupyter.nebari.example.com/hub/oauth_callback"
-  ],
-  "webOrigins": [
-    "https://jupyter.nebari.example.com"
-  ],
-  "protocol": "openid-connect",
-  "publicClient": false,
-  "directAccessGrantsEnabled": false,
-  "serviceAccountsEnabled": false,
-  "authorizationServicesEnabled": false
-}
-```
-
-2. **Envoy Gateway HTTPRoute:**
-```yaml
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: jupyterhub
-  namespace: jupyter
-spec:
-  parentRefs:
-    - name: nebari-gateway
-      namespace: envoy-gateway-system
-  hostnames:
-    - jupyter.nebari.example.com
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: jupyterhub
+        backend:
+          name: jupyterhub
           port: 8000
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: gateway.envoyproxy.io
-            kind: SecurityPolicy
-            name: jupyterhub-oauth
+    publicRoutes: []           # Paths that should bypass OIDC
+    tls: { ... }
+  auth:
+    enforceAtGateway: true     # If true, operator creates a SecurityPolicy
+  landingPage:
+    displayName: "JupyterHub"
+    icon: "..."
 ```
 
-3. **cert-manager Certificate:**
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: jupyterhub-tls
-  namespace: jupyter
-spec:
-  secretName: jupyterhub-tls
-  issuerRef:
-    name: letsencrypt-prod
-    kind: ClusterIssuer
-  dnsNames:
-    - jupyter.nebari.example.com
-```
+Critically:
 
-4. **OpenTelemetry ServiceMonitor:**
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: jupyterhub-metrics
-  namespace: jupyter
-  labels:
-    app: jupyterhub
-  annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9090"
-    prometheus.io/path: "/metrics"
-spec:
-  selector:
-    app: jupyterhub
-  ports:
-    - name: metrics
-      port: 9090
-      targetPort: 9090
-```
+- **`spec.routing.routes`** drives the main `HTTPRoute` that the operator creates. The operator's `SecurityPolicy` targets this main route when `auth.enforceAtGateway` is true.
+- **`spec.routing.publicRoutes`** drives a *second*, separate `HTTPRoute` that is intentionally not protected by the SecurityPolicy.
+- **`auth.enforceAtGateway`** is orthogonal to `publicRoutes`. The operator creates the SecurityPolicy if and only if `enforceAtGateway` is true (or unset, since it defaults to true).
+- **Cert and landing page** depend on `spec.hostname` (for the cert) and `spec.landingPage` + `spec.hostname` (for the landing page entry), independent of any `routes` block.
 
-5. **Grafana Dashboard ConfigMap:**
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: jupyterhub-dashboard
-  namespace: monitoring
-  labels:
-    grafana_dashboard: "1"
-data:
-  jupyterhub.json: |
-    {
-      "dashboard": {
-        "title": "JupyterHub Overview",
-        "panels": [ ... ]
-      }
-    }
-```
+Operators of Nebari clusters and software-pack authors should treat the upstream operator's docs as authoritative.
 
-6. **Status Update:**
-```yaml
-status:
-  phase: Ready
-  url: https://jupyter.nebari.example.com
-  keycloakClientID: jupyterhub-jupyter
-  conditions:
-    - type: RoutingConfigured
-      status: "True"
-      lastTransitionTime: "2025-01-30T12:00:00Z"
-    - type: AuthenticationConfigured
-      status: "True"
-      lastTransitionTime: "2025-01-30T12:01:00Z"
-    - type: ObservabilityConfigured
-      status: "True"
-      lastTransitionTime: "2025-01-30T12:02:00Z"
-    - type: Ready
-      status: "True"
-      lastTransitionTime: "2025-01-30T12:02:00Z"
-      reason: AllComponentsReady
-      message: "Application is fully configured and accessible"
-```
+## 11.4 Values Rendered Into the Operator Patch
 
-### 10.4 Operator Implementation
+The deployment patch is a Go template rendered by `pkg/argocd` with values that come from a mix of `provider.InfraSettings(cfg)`, `cfg.Domain`, and NIC-internal Keycloak/cert-manager defaults. The fields below correspond to env vars set on the `nebari-operator-controller-manager` container.
 
-**Controller Logic:**
-```go
-package operator
+| Template field | Source | Operator use |
+|----------------|--------|--------------|
+| `KeycloakBasePath` | `InfraSettings.KeycloakBasePath` | Path prefix appended to the in-cluster Keycloak URL (`/auth` for the keycloakx chart used today; empty for upstream/Bitnami). Surfaces as `KEYCLOAK_ISSUER_CONTEXT_PATH`. |
+| `Domain` | `cfg.Domain` | Used to compute `KEYCLOAK_EXTERNAL_URL` (`https://keycloak.<domain><base-path>`). |
+| `KeycloakServiceURL` | NIC default (`http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080<base-path>`) | In-cluster URL the operator uses to reach Keycloak. Surfaces as `KEYCLOAK_URL`. |
+| `KeycloakRealm` | NIC default (`nebari`) | Realm the operator talks to. Surfaces as `KEYCLOAK_REALM`. |
+| `KeycloakAdminSecretName` | NIC default | Name of the K8s secret the operator reads for Keycloak admin credentials. Surfaces as `KEYCLOAK_ADMIN_SECRET_NAME`. |
+| `KeycloakNamespace` | NIC default (`keycloak`) | Namespace containing the admin secret. Surfaces as `KEYCLOAK_ADMIN_SECRET_NAMESPACE`. |
+| `CertificateIssuer` | NIC choice (`selfsigned-issuer` or `letsencrypt-issuer`, based on whether `dns.<provider>` is set) | cert-manager `ClusterIssuer` name the operator should reference when creating Certificate resources. Surfaces as `TLS_CLUSTER_ISSUER_NAME`. |
 
-import (
-    "context"
-    "fmt"
+The operator does not see any other parts of `NebariConfig`. In particular, it does not know which cluster provider is in use.
 
-    nebaridevv1alpha1 "github.com/nebari-dev/nic/api/v1alpha1"
-    ctrl "sigs.k8s.io/controller-runtime"
-    "sigs.k8s.io/controller-runtime/pkg/client"
-    "sigs.k8s.io/controller-runtime/pkg/log"
-)
+## 11.5 NIC's Responsibilities (Summary)
 
-type NebariApplicationReconciler struct {
-    client.Client
-    KeycloakClient *keycloak.Client
-    EnvoyClient    *envoy.Client
-    GrafanaClient  *grafana.Client
-}
+- Pin a known-good operator release in `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`
+- Render the operator's ArgoCD Application into the GitOps repo with the correct sync wave (after Keycloak, cert-manager, and Envoy Gateway are ready)
+- Render `deployment-patch.yaml` with the Keycloak integration env vars and TLS issuer name listed in §11.4
 
-func (r *NebariApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-    ctx, span := tracer.Start(ctx, "Reconcile")
-    defer span.End()
+That's it. NIC does not reconcile `NebariApp` CRs, does not implement the operator's controller, and does not ship any `api/v1alpha1/` package. If you find documentation that says otherwise, it is out of date.
 
-    log := log.FromContext(ctx)
+## 11.6 Operator Upgrade Path
 
-    // Fetch NebariApplication
-    var app nebaridevv1alpha1.NebariApplication
-    if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-        return ctrl.Result{}, client.IgnoreNotFound(err)
-    }
+Bumping the operator version:
 
-    // Update status to Provisioning
-    app.Status.Phase = "Provisioning"
-    if err := r.Status().Update(ctx, &app); err != nil {
-        return ctrl.Result{}, err
-    }
+1. Update the `ref:` in `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml` to the new upstream tag.
+2. Verify the operator's CRD schema hasn't broken NIC's Kustomize patches.
+3. Land the change; on next `nic deploy` or `argocd app sync`, the new operator version rolls out.
 
-    // 1. Configure routing (Envoy HTTPRoute + cert-manager Certificate)
-    if err := r.configureRouting(ctx, &app); err != nil {
-        log.Error(err, "failed to configure routing")
-        return ctrl.Result{}, err
-    }
-    r.updateCondition(&app, "RoutingConfigured", "True", "RoutingReady", "Routing configured successfully")
+## 11.7 References
 
-    // 2. Configure authentication (Keycloak OAuth client)
-    if app.Spec.Authentication.Enabled {
-        clientID, err := r.configureAuthentication(ctx, &app)
-        if err != nil {
-            log.Error(err, "failed to configure authentication")
-            return ctrl.Result{}, err
-        }
-        app.Status.KeycloakClientID = clientID
-        r.updateCondition(&app, "AuthenticationConfigured", "True", "AuthReady", "OAuth client created")
-    }
-
-    // 3. Configure observability (metrics, dashboards)
-    if err := r.configureObservability(ctx, &app); err != nil {
-        log.Error(err, "failed to configure observability")
-        return ctrl.Result{}, err
-    }
-    r.updateCondition(&app, "ObservabilityConfigured", "True", "ObservabilityReady", "Observability configured")
-
-    // 4. Update final status
-    app.Status.Phase = "Ready"
-    app.Status.URL = fmt.Sprintf("https://%s", app.Spec.Routing.Domain)
-    r.updateCondition(&app, "Ready", "True", "AllComponentsReady", "Application fully configured")
-
-    if err := r.Status().Update(ctx, &app); err != nil {
-        return ctrl.Result{}, err
-    }
-
-    log.Info("reconciliation complete", "app", app.Name, "url", app.Status.URL)
-    return ctrl.Result{}, nil
-}
-
-func (r *NebariApplicationReconciler) configureRouting(ctx context.Context, app *nebaridevv1alpha1.NebariApplication) error {
-    ctx, span := tracer.Start(ctx, "configureRouting")
-    defer span.End()
-
-    // Create cert-manager Certificate
-    if app.Spec.Routing.EnableTLS {
-        if err := r.createCertificate(ctx, app); err != nil {
-            return fmt.Errorf("creating certificate: %w", err)
-        }
-    }
-
-    // Create Envoy HTTPRoute
-    if err := r.createHTTPRoute(ctx, app); err != nil {
-        return fmt.Errorf("creating HTTPRoute: %w", err)
-    }
-
-    return nil
-}
-
-func (r *NebariApplicationReconciler) configureAuthentication(ctx context.Context, app *nebaridevv1alpha1.NebariApplication) (string, error) {
-    ctx, span := tracer.Start(ctx, "configureAuthentication")
-    defer span.End()
-
-    redirectURI := fmt.Sprintf("https://%s/oauth_callback", app.Spec.Routing.Domain)
-
-    clientID, clientSecret, err := r.KeycloakClient.CreateOAuthClient(ctx, keycloak.OAuthClientRequest{
-        Name:         app.Spec.DisplayName,
-        RedirectURIs: []string{redirectURI},
-        AllowedGroups: app.Spec.Authentication.AllowedGroups,
-    })
-
-    if err != nil {
-        return "", fmt.Errorf("creating Keycloak client: %w", err)
-    }
-
-    // Store client secret in Kubernetes Secret
-    if err := r.createOAuthSecret(ctx, app, clientID, clientSecret); err != nil {
-        return "", fmt.Errorf("creating OAuth secret: %w", err)
-    }
-
-    return clientID, nil
-}
-
-func (r *NebariApplicationReconciler) configureObservability(ctx context.Context, app *nebaridevv1alpha1.NebariApplication) error {
-    ctx, span := tracer.Start(ctx, "configureObservability")
-    defer span.End()
-
-    // Create ServiceMonitor for metrics
-    if app.Spec.Observability.Metrics.Enabled {
-        if err := r.createServiceMonitor(ctx, app); err != nil {
-            return fmt.Errorf("creating ServiceMonitor: %w", err)
-        }
-    }
-
-    // Provision Grafana dashboards
-    for _, dashboard := range app.Spec.Observability.Dashboards {
-        if err := r.provisionDashboard(ctx, app, dashboard); err != nil {
-            return fmt.Errorf("provisioning dashboard %s: %w", dashboard.Name, err)
-        }
-    }
-
-    return nil
-}
-```
-
-### 10.5 Operator Benefits
-
-**For Users:**
-- ✅ One manifest to deploy + integrate application
-- ✅ No manual OAuth client creation
-- ✅ No manual HTTPRoute configuration
-- ✅ No manual dashboard import
-- ✅ Automatic TLS certificate provisioning
-- ✅ Status updates show integration progress
-
-**For Platform Team:**
-- ✅ Consistent integration patterns
-- ✅ Centralized configuration management
-- ✅ Easier to update (change operator, all apps benefit)
-- ✅ Self-documenting (CRD schema is API contract)
-- ✅ Audit trail (Git history of CRDs)
-
----
+- Upstream operator repo: <https://github.com/nebari-dev/nebari-operator>
+- ArgoCD app manifest: `pkg/argocd/templates/apps/nebari-operator.yaml`
+- Kustomize patches: `pkg/argocd/templates/manifests/nebari-operator/`
+- Related discussion of `publicRoutes` + `enforceAtGateway` interaction: [`nebari-operator#118`](https://github.com/nebari-dev/nebari-operator/issues/118)

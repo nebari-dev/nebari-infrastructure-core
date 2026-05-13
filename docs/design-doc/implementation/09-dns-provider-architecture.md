@@ -83,23 +83,28 @@ The real implementation (`sdkClient`) wraps the `cloudflare-go/v4` SDK. Tests in
 
 ### Registry Pattern
 
-DNS providers use a separate registry from cloud providers:
+Cluster and DNS providers share a single `registry.Registry`, which holds two `ProviderList` instances (one per provider category). Registration is explicit in `cmd/nic/main.go`:
 
 ```go
 // cmd/nic/main.go
-var (
-    registry    *provider.Registry     // Cloud providers
-    dnsRegistry *dnsprovider.Registry  // DNS providers (separate)
-)
+var reg *registry.Registry
 
-func main() {
+func init() {
+    reg = registry.NewRegistry()
+
+    // Cluster providers
+    _ = reg.ClusterProviders.Register(ctx, "aws", aws.NewProvider())
+    _ = reg.ClusterProviders.Register(ctx, "hetzner", hetzner.NewProvider())
     // ...
-    dnsRegistry = dnsprovider.NewRegistry()
-    if err := dnsRegistry.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
+
+    // DNS providers
+    if err := reg.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
         log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
     }
 }
 ```
+
+`registry.Registry`, defined in `pkg/registry/registry.go`, is the single point of registration for all provider categories. The two `ProviderList` fields are typed (`ProviderList[provider.Provider]` and `ProviderList[dnsprovider.DNSProvider]`) so misuse is caught at compile time.
 
 ## Configuration
 
@@ -108,13 +113,14 @@ func main() {
 ```yaml
 # nebari-config.yaml
 project_name: my-nebari
-provider: aws
 domain: nebari.example.com
 
-# Cloud provider config...
-amazon_web_services:
-  region: us-west-2
-  # ...
+# Cluster provider config (single discriminator key)
+cluster:
+  aws:
+    region: us-west-2
+    kubernetes_version: "1.34"
+    # ...
 
 # DNS configuration (optional)
 dns:
@@ -313,7 +319,7 @@ require (
 )
 ```
 
-Note: Future providers (AWS Route53, Azure DNS, Google Cloud DNS) may be managed via OpenTofu modules rather than direct SDK calls.
+Note: Future providers (AWS Route53, Azure DNS, Google Cloud DNS) will likely be implemented via their native Go SDKs to keep behavior consistent with Cloudflare (idempotent, stateless, instrumented). See [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md) for the planned out-of-tree plugin path that will let private DNS integrations (e.g., OpenTeams' ASCOT) live outside this repo.
 
 ## Related Documentation
 
