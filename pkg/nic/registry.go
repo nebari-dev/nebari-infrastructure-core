@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
@@ -27,6 +29,10 @@ type Providers struct {
 // diagnostic output (e.g. a `version` command); operational work should go
 // through the Client's methods.
 func (c *Client) ProviderNames(ctx context.Context) *Providers {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.ProviderNames")
+	defer span.End()
+
 	return &Providers{
 		Cluster: c.registry.ClusterProviders.List(ctx),
 		DNS:     c.registry.DNSProviders.List(ctx),
