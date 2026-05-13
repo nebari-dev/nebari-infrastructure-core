@@ -151,9 +151,27 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	if !opts.DryRun {
 		c.logger.Info("Installing Argo CD on cluster")
 
+		// Generate all deployment secrets up front. genPwd shares a single
+		// err so the struct literal stays readable; we check pwErr at the
+		// end of each generation batch before any secret is consumed.
+		var pwErr error
+		genPwd := func() string {
+			if pwErr != nil {
+				return ""
+			}
+			var p string
+			p, pwErr = generateSecurePassword(rand.Reader)
+			return p
+		}
+
 		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
 		// and the Keycloak realm-setup job
-		argoCDClientSecret := generateSecurePassword(rand.Reader)
+		argoCDClientSecret := genPwd()
+		if pwErr != nil {
+			span.RecordError(pwErr)
+			c.logger.Error("Failed to generate ArgoCD client secret", "error", pwErr)
+			return nil, fmt.Errorf("generate ArgoCD client secret: %w", pwErr)
+		}
 
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
@@ -172,25 +190,30 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
 					AdminUsername:         "admin",
-					AdminPassword:         generateSecurePassword(rand.Reader),
-					DBPassword:            generateSecurePassword(rand.Reader),
-					PostgresAdminPassword: generateSecurePassword(rand.Reader),
-					PostgresUserPassword:  generateSecurePassword(rand.Reader),
+					AdminPassword:         genPwd(),
+					DBPassword:            genPwd(),
+					PostgresAdminPassword: genPwd(),
+					PostgresUserPassword:  genPwd(),
 					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    generateSecurePassword(rand.Reader),
+					RealmAdminPassword:    genPwd(),
 					Hostname:              "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
-					RedisPassword: generateSecurePassword(rand.Reader),
+					RedisPassword: genPwd(),
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
+			}
+			if pwErr != nil {
+				span.RecordError(pwErr)
+				c.logger.Error("Failed to generate foundational secrets", "error", pwErr)
+				return nil, fmt.Errorf("generate foundational secrets: %w", pwErr)
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
@@ -472,13 +495,14 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.Neb
 
 // generateSecurePassword generates a cryptographically secure random password.
 // It accepts an io.Reader to allow for deterministic testing with known bytes.
-func generateSecurePassword(r io.Reader) string {
-	// Generate 32 bytes of random data
+// Callers must propagate the error rather than substituting a weaker fallback:
+// these strings end up as Keycloak admin / Postgres / Redis credentials on the
+// installed cluster.
+func generateSecurePassword(r io.Reader) (string, error) {
 	b := make([]byte, 32)
-	if _, err := r.Read(b); err != nil {
-		// Fallback to timestamp-based generation (not ideal but better than nothing)
-		return fmt.Sprintf("nebari-%d", time.Now().UnixNano())
+	if _, err := io.ReadFull(r, b); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
 	}
 	// Encode to base64 and take first 43 characters (removes padding)
-	return base64.URLEncoding.EncodeToString(b)[:43]
+	return base64.URLEncoding.EncodeToString(b)[:43], nil
 }
