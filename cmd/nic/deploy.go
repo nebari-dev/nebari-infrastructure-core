@@ -9,9 +9,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -74,13 +74,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	deploy := action.Deploy{
+	client := nic.NewClient()
+	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
-	}
-
-	result, err := deploy.Run(ctx, cfg)
+	})
 	if err != nil {
 		span.RecordError(err)
 		return err

@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -83,16 +83,17 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	destroy := action.Destroy{
+	client := nic.NewClient()
+	opts := nic.DestroyOptions{
 		DryRun:  destroyDryRun,
 		Force:   destroyForce,
 		Timeout: timeout,
 	}
 	if !destroyAutoApprove {
-		destroy.Confirm = confirmDestruction
+		opts.Confirm = confirmDestruction
 	}
 
-	if err := destroy.Run(ctx, cfg); err != nil {
+	if err := client.Destroy(ctx, cfg, opts); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -102,8 +103,8 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 
 // confirmDestruction renders the destroy warning panel and reads a yes/no
 // response from stdin. Returns a non-nil error when the user does not type
-// "yes", which causes action.Destroy.Run to abort.
-func confirmDestruction(_ context.Context, s action.DestroySummary) error {
+// "yes", which causes Client.Destroy to abort.
+func confirmDestruction(_ context.Context, s nic.DestroySummary) error {
 	fmt.Println("\n⚠️  WARNING: You are about to destroy the following infrastructure:")
 	fmt.Printf("   Provider:     %s\n", s.Provider)
 	fmt.Printf("   Project Name: %s\n", s.ProjectName)

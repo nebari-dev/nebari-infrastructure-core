@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -37,7 +37,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
-	providers, err := action.ProviderNames(ctx)
+	providers, err := nic.NewClient().ProviderNames(ctx)
 	if err != nil {
 		return err
 	}

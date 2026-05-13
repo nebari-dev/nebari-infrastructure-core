@@ -8,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -50,7 +50,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := (&action.Validate{}).Run(ctx, cfg); err != nil {
+	if err := nic.NewClient().Validate(ctx, cfg); err != nil {
 		span.RecordError(err)
 		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
 		return err

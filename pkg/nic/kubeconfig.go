@@ -1,9 +1,8 @@
-package action
+package nic
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"go.opentelemetry.io/otel"
 
@@ -11,15 +10,12 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// Kubeconfig retrieves the kubeconfig for a deployed cluster.
-type Kubeconfig struct{}
-
-// Run returns the raw kubeconfig bytes for the cluster described by cfg. The
-// caller is responsible for deciding where to write them (stdout, file, or
-// merging into an existing kubeconfig).
-func (k *Kubeconfig) Run(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
+// Kubeconfig returns the raw kubeconfig bytes for the cluster described by
+// cfg. The caller decides where to write them (stdout, file, or merge into
+// an existing kubeconfig).
+func (c *Client) Kubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "action.Kubeconfig")
+	ctx, span := tracer.Start(ctx, "nic.Kubeconfig")
 	defer span.End()
 
 	reg, err := defaultRegistry(ctx)
@@ -33,12 +29,12 @@ func (k *Kubeconfig) Run(ctx context.Context, cfg *config.NebariConfig) ([]byte,
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
-	slog.Info("Configuration validated",
+	c.logger.Info("Configuration validated",
 		"provider", cfg.Cluster.ProviderName(),
 		"project_name", cfg.ProjectName,
 	)
 
-	ctx, cleanup := status.StartHandler(ctx, defaultStatusHandler())
+	ctx, cleanup := status.StartHandler(ctx, c.statusLogHandler())
 	defer cleanup()
 
 	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())

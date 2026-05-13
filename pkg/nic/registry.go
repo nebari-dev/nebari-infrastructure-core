@@ -1,21 +1,23 @@
-package action
+package nic
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/existing"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/hetzner"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
-// Providers lists the providers bundled with this build, grouped by category.
-// New categories (e.g. certificate, IP) can be added as fields without
-// breaking existing callers.
+// Providers lists the providers bundled with this build, grouped by
+// category. New categories (e.g. certificate, IP) can be added as fields
+// without breaking existing callers.
 type Providers struct {
 	Cluster []string
 	DNS     []string
@@ -23,8 +25,8 @@ type Providers struct {
 
 // ProviderNames returns the providers bundled with this build. Intended for
 // diagnostic output (e.g. a `version` command); operational work should go
-// through the action types instead.
-func ProviderNames(ctx context.Context) (*Providers, error) {
+// through the Client's methods.
+func (c *Client) ProviderNames(ctx context.Context) (*Providers, error) {
 	reg, err := defaultRegistry(ctx)
 	if err != nil {
 		return nil, err
@@ -35,7 +37,8 @@ func ProviderNames(ctx context.Context) (*Providers, error) {
 	}, nil
 }
 
-// defaultRegistry builds a Registry with all in-tree cluster and DNS providers registered.
+// defaultRegistry builds a Registry with all in-tree cluster and DNS
+// providers registered.
 func defaultRegistry(ctx context.Context) (*registry.Registry, error) {
 	r := registry.NewRegistry()
 
@@ -54,10 +57,22 @@ func defaultRegistry(ctx context.Context) (*registry.Registry, error) {
 	if err := r.ClusterProviders.Register(ctx, "hetzner", hetzner.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register hetzner cluster provider: %w", err)
 	}
+	if err := r.ClusterProviders.Register(ctx, "existing", existing.NewProvider()); err != nil {
+		return nil, fmt.Errorf("register existing cluster provider: %w", err)
+	}
 
 	if err := r.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register cloudflare dns provider: %w", err)
 	}
 
 	return r, nil
+}
+
+// validateOptions builds config.ValidateOptions from a registry. Shared by
+// operations that need to validate config against the registered providers.
+func validateOptions(ctx context.Context, reg *registry.Registry) config.ValidateOptions {
+	return config.ValidateOptions{
+		ClusterProviders: reg.ClusterProviders.List(ctx),
+		DNSProviders:     reg.DNSProviders.List(ctx),
+	}
 }

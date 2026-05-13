@@ -8,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/action"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -53,7 +53,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	kubeconfigBytes, err := (&action.Kubeconfig{}).Run(ctx, cfg)
+	kubeconfigBytes, err := nic.NewClient().Kubeconfig(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
 		return err
