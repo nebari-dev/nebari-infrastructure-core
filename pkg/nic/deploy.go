@@ -225,7 +225,7 @@ func defaultGitConfig(projectName string) *git.Config {
 	localPath := filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	return &git.Config{
 		URL:    fmt.Sprintf("file://%s", localPath),
-		Branch: "main",
+		Branch: git.DefaultBranch,
 		Path:   "",
 		Auth:   git.AuthConfig{},
 	}
