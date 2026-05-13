@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -36,10 +37,13 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
-	// Show registered providers
-	providers := getValidNames(ctx, reg)
-	fmt.Printf("Registered cloud providers: %v\n", providers.ClusterProviders)
-	fmt.Printf("Registered DNS providers: %v\n", providers.DNSProviders)
+	client, err := nic.NewClient()
+	if err != nil {
+		return err
+	}
+	providers := client.ProviderNames(ctx)
+	fmt.Printf("Registered cloud providers: %v\n", providers.Cluster)
+	fmt.Printf("Registered DNS providers: %v\n", providers.DNS)
 
 	return nil
 }

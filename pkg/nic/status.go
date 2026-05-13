@@ -1,4 +1,4 @@
-package main
+package nic
 
 import (
 	"context"
@@ -8,9 +8,11 @@ import (
 )
 
 // statusLogHandler returns a status.Handler that logs each Update as a slog
-// record whose msg is the Update's semantic message and whose level reflects
-// the Update's level. Resource, Action, and Metadata flow through as attrs.
-func statusLogHandler() status.Handler {
+// record on the client's logger. The Update's Message becomes the slog msg
+// and its Level maps to a slog level. Resource, Action, and Metadata flow
+// through as attrs.
+func (c *Client) statusLogHandler() status.Handler {
+	logger := c.logger
 	return func(update status.Update) {
 		attrs := make([]slog.Attr, 0, 2+len(update.Metadata))
 		if update.Resource != "" {
@@ -22,7 +24,9 @@ func statusLogHandler() status.Handler {
 		for key, value := range update.Metadata {
 			attrs = append(attrs, slog.Any(key, value))
 		}
-		slog.LogAttrs(context.Background(), mapSlogLevel(update.Level), update.Message, attrs...)
+		// Handler runs detached from the caller's ctx (in the goroutine
+		// started by status.StartHandler), so there's nothing to propagate.
+		logger.LogAttrs(context.Background(), mapSlogLevel(update.Level), update.Message, attrs...)
 	}
 }
 

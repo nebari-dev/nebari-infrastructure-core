@@ -153,7 +153,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: "test.example.com"}
-			data := NewTemplateData(cfg, tt.settings)
+			data := NewTemplateData(cfg, nil, tt.settings)
 			if data.StorageClass != tt.wantStorageClass {
 				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantStorageClass)
 			}
@@ -179,7 +179,7 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
-	data := NewTemplateData(cfg, settings)
+	data := NewTemplateData(cfg, nil, settings)
 
 	if !strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
 		t.Errorf("KeycloakServiceURL = %q, should end with /auth", data.KeycloakServiceURL)
@@ -187,7 +187,7 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 
 	// Without base path
 	settings.KeycloakBasePath = ""
-	data = NewTemplateData(cfg, settings)
+	data = NewTemplateData(cfg, nil, settings)
 	if strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
 		t.Errorf("KeycloakServiceURL = %q, should NOT end with /auth", data.KeycloakServiceURL)
 	}
@@ -601,7 +601,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: tt.domain}
 			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
-			data := NewTemplateData(cfg, settings)
+			data := NewTemplateData(cfg, nil, settings)
 
 			if data.KeycloakIssuerURL != tt.wantIssuerURL {
 				t.Errorf("KeycloakIssuerURL = %q, want %q", data.KeycloakIssuerURL, tt.wantIssuerURL)
@@ -622,7 +622,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 
 	mock := &mockGitClient{workDir: tmpDir}
-	err := WriteAllToGit(ctx, mock, cfg, settings)
+	err := WriteAllToGit(ctx, mock, cfg, nil, settings)
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
