@@ -132,7 +132,7 @@ A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not deployed today; that i
 - NIC is an infrastructure tool; the operator is an application-integration tool
 - Keeps NIC's surface area focused on cluster provisioning and bootstrap
 
-NIC passes `InfraSettings.KeycloakBasePath` and `InfraSettings.HTTPSPort` into the operator's Kustomize patch so it routes correctly per provider. NIC does not implement the reconciliation logic; that lives upstream.
+NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer context path, external URL) and the TLS cluster-issuer name into the operator's Kustomize patch. See [Nebari Operator §11.4](../implementation/11-nebari-operator.md) for the full list. NIC does not implement the reconciliation logic; that lives upstream.
 
 ### 4.7 Decision: OpenTelemetry in Library Code, slog in the CLI
 

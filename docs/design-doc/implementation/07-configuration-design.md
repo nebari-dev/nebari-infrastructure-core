@@ -88,11 +88,11 @@ type ACMEConfig struct {
 ```go
 // from pkg/git
 type Config struct {
-    URL    string     `yaml:"url"`              // git@..., https://..., or file://...
-    Branch string     `yaml:"branch,omitempty"` // default: main
-    Path   string     `yaml:"path,omitempty"`   // subdirectory for this cluster
-    Auth   AuthConfig `yaml:"auth,omitempty"`
-    ArgocdAuth AuthConfig `yaml:"argocd_auth,omitempty"` // optional read-only
+    URL        string      `yaml:"url"`              // git@..., https://..., or file://...
+    Branch     string      `yaml:"branch,omitempty"` // default: main
+    Path       string      `yaml:"path,omitempty"`   // subdirectory for this cluster
+    Auth       AuthConfig  `yaml:"auth"`
+    ArgoCDAuth *AuthConfig `yaml:"argocd_auth,omitempty"` // optional read-only; falls back to Auth
 }
 
 type AuthConfig struct {

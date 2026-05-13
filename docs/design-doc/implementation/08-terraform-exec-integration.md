@@ -83,10 +83,10 @@ There is **no** `findOpenTofuBinary()` in `PATH`. The binary is always the versi
 
 ## 8.5 AWS Provider Usage
 
-The AWS provider's `Deploy` and `Destroy` methods are the primary callers. The shape (simplified, with telemetry omitted):
+The AWS provider's `Deploy` and `Destroy` methods are the primary callers. The shape (simplified, with telemetry, dry-run/backend-override handling, and bucket-existence branching omitted - see `pkg/provider/aws/provider.go` for the authoritative version):
 
 ```go
-// pkg/provider/aws/tofu.go (illustrative)
+// pkg/provider/aws/provider.go (illustrative)
 func (p *Provider) Deploy(ctx context.Context, projectName string, cluster *config.ClusterConfig, opts provider.DeployOptions) error {
     awsCfg, err := decodeConfig(cluster)
     if err != nil { return err }

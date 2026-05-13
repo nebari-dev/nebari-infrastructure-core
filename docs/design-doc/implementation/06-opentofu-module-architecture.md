@@ -12,18 +12,23 @@ There is **no root-level `terraform/` directory**. AWS-specific templates live i
 
 ```
 pkg/provider/aws/
-├── config.go              # AWSConfig struct (yaml/json tags)
-├── provider.go            # Implements provider.Provider
-├── state.go               # S3 state-bucket lifecycle (ensure / destroy)
-├── longhorn.go            # Longhorn storage installation
-├── lbc.go                 # AWS Load Balancer Controller
-├── tofu.go                # Builds tfvars and invokes pkg/tofu.Setup
-└── templates/             # Embedded via go:embed
-    ├── main.tf            # Calls upstream nebari-dev/eks-cluster module
-    ├── variables.tf       # tfvars input schema
-    ├── outputs.tf         # Cluster name, endpoint, OIDC issuer, etc.
-    ├── provider.tf        # AWS provider config
-    └── backend.tf         # S3 backend with use_lockfile = true
+├── config.go                          # aws.Config struct (yaml/json tags)
+├── provider.go                        # Implements provider.Provider
+├── state.go                           # S3 state-bucket lifecycle (ensure / destroy)
+├── tofu.go                            # Builds tfvars and invokes pkg/tofu.Setup
+├── k8s.go                             # Shared kube-client construction
+├── kubeconfig.go                      # GetKubeconfig implementation
+├── efs.go                             # EFS storage-class wiring
+├── longhorn.go                        # Longhorn storage installation
+├── aws_load_balancer_controller.go    # AWS Load Balancer Controller install
+├── cleanup.go / cleanup_k8s.go        # Pre-destroy resource cleanup
+├── version.go                         # Provider-version probe
+└── templates/                         # Embedded via go:embed
+    ├── main.tf                        # Calls upstream nebari-dev/eks-cluster module
+    ├── variables.tf                   # tfvars input schema
+    ├── outputs.tf                     # Cluster name, endpoint, OIDC issuer, etc.
+    ├── provider.tf                    # AWS provider config
+    └── backend.tf                     # S3 backend with use_lockfile = true
 ```
 
 Other cluster providers do not use OpenTofu and therefore have no `templates/` directory:
@@ -32,8 +37,8 @@ Other cluster providers do not use OpenTofu and therefore have no `templates/` d
 pkg/provider/hetzner/      # Wraps the hetzner-k3s binary
 pkg/provider/local/        # Kind stub (Makefile creates the cluster)
 pkg/provider/existing/     # Adopts an existing kubeconfig
-pkg/provider/gcp/          # Stub: returns "not yet implemented"
-pkg/provider/azure/        # Stub: returns "not yet implemented"
+pkg/provider/gcp/          # Stub: emits a "(stub)" status message and returns nil
+pkg/provider/azure/        # Stub: emits a "(stub)" status message and returns nil
 ```
 
 ## 6.3 AWS Root Module
