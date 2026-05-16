@@ -138,6 +138,23 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
 		}
 
+		// Render the embedded keycloak-config-cli defaults and write them
+		// to the in-cluster Secret the realm-setup Job will mount. The
+		// gitops repo never holds realm content under this design.
+		domain := cfg.Domain
+		if domain == "" {
+			domain = "nebari.local"
+		}
+		importContent, err := RenderKeycloakDefaults(TemplateData{Domain: domain})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to render keycloak-config-cli defaults: %w", err)
+		}
+		if err := createKeycloakImportSecret(ctx, k8sClient, importContent); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create %s secret: %w", KeycloakImportSecretName, err)
+		}
+
 		// Create namespace for Nebari system services
 		if err := createNamespace(ctx, k8sClient, NebariSystemNamespace); err != nil {
 			span.RecordError(err)
@@ -320,6 +337,33 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	}
 
 	return nil
+}
+
+// createKeycloakImportSecret writes the keycloak-config-cli input to an
+// in-cluster Secret named `keycloak-config-import` in the `keycloak`
+// namespace. The realm-setup Job mounts this Secret read-only and applies
+// the file against Keycloak.
+//
+// The Secret carrier (rather than a gitops-repo ConfigMap) keeps realm
+// structure and any inline credentials out of git: only the Job manifest
+// lives in the gitops repo. Phase 1a writes only the embedded defaults;
+// Phase 1b will overwrite or replace this content with the user's
+// keycloak.yaml.
+func createKeycloakImportSecret(ctx context.Context, client kubernetes.Interface, importContent []byte) error {
+	return createSecret(ctx, client, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      KeycloakImportSecretName,
+			Namespace: KeycloakDefaultNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
+				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			KeycloakImportSecretKey: importContent,
+		},
+	})
 }
 
 // createLandingPageSecrets creates the required secrets for the nebari-landing service

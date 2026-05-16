@@ -739,3 +739,4 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }
+
