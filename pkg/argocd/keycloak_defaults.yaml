@@ -9,12 +9,16 @@
 # Keycloak.
 #
 # The gitops repo never sees this content. Realm structure and any
-# inline credentials (none currently — we use $(env:VAR) placeholders)
-# stay inside the cluster's Secret store.
+# inline credentials (none currently; secret-bearing fields use kcc's
+# variable-substitution syntax) stay inside the cluster's Secret store.
 #
-# `$(env:VAR)` placeholders are substituted by kcc at apply time from env
-# vars set on the Job (see templates/manifests/keycloak/realm-setup-job.yaml).
-# `{{ .Domain }}` is rendered by Go's text/template at NIC deploy time.
+# kcc resolves placeholders via Apache Commons StringSubstitutor BEFORE
+# parsing the file as YAML. That means even comments are scanned for
+# unresolved variables, so do NOT write the literal placeholder shape
+# inside any comment in this file or kcc will fail with
+# "Cannot resolve variable" before applying anything. The actual
+# placeholders live in field values below.
+# {{ .Domain }} is rendered by Go's text/template at NIC deploy time.
 realm: nebari
 enabled: true
 displayName: Nebari
