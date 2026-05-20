@@ -10,24 +10,25 @@ Proposed
 
 ## Context
 
-Nebari software packs that need PostgreSQL today depend on upstream Helm charts that bundle the Bitnami PostgreSQL sub-chart. That dependency is no longer viable:
+NIC has no managed-Postgres contract. Software packs that need a database today each handle it independently: pick an upstream chart, accept whatever sub-chart it bundles, configure values, hope it stays usable. The pack-level lifecycle and the platform-level lifecycle are not connected. Contributors with database-backed packs route through whichever individual previously set up shared infra, or stand up their own external database. The result is a sprawl of one-off instances, each owned by whoever set it up, each managed with whatever tooling they knew. Asking "who manages X?" becomes Slack archaeology, and adding capacity routes back to the original owner every time. Responsibilities silo around individuals rather than around the platform.
 
-- Effective 2025-08-28, Broadcom moved Bitnami container images behind a paywall (`Bitnami Secure Images`, starting at $72,000/year).
-- All versioned image tags were moved to `bitnamilegacy/` and receive no further updates. The public catalog was scheduled for deletion on 2025-09-29.
-- Only `:latest` tags remain freely available, which is unusable for reproducible deployments.
-- The chart source code on GitHub remains Apache-2 licensed, but the images those charts reference are not freely available.
+The Bitnami situation makes that structural gap concrete. On 2025-08-28, Broadcom moved Bitnami container images behind a paywall (`Bitnami Secure Images`, starting at $72,000/year). All versioned image tags were moved to a frozen `bitnamilegacy/` mirror that receives no further updates; the public catalog was scheduled for deletion on 2025-09-29. Only `:latest` tags remain freely available, which is unusable for reproducible deployments. The chart source code stays Apache-2 licensed, but the images those charts reference do not.
 
-Any pack depending on Bitnami sub-charts is building on a frozen mirror that will accumulate unpatched CVEs.
+This is already biting across the ecosystem, with each pack inventing its own workaround for the same upstream disruption:
 
-There is also a second, structural problem that surfaces independently of the Bitnami situation: NIC has no managed-Postgres contract. Contributors who need a database for their pack route through whichever individual previously set up a shared instance, or stand up their own external database. The result is a sprawl of one-off database instances, each owned by whoever set it up, each managed with whatever tooling that person knew. Asking "who manages X?" becomes Slack archaeology, and adding capacity routes back to the original owner every time. Responsibilities silo around individuals rather than around the platform.
+- [`nebari-superset-pack`](https://github.com/nebari-dev/nebari-superset-pack) pins its bundled Postgres and Redis to the `bitnamilegacy/` mirror, with an explicit comment in `chart/values.yaml` that upstream defaults now "reference removed tags." The pack is running on a frozen image set.
+- [`nebari-mlflow-pack`](https://github.com/nebari-dev/nebari-mlflow-pack) enables a bundled Postgres sub-chart from the upstream mlflow community chart, with values matching the standard Bitnami shape (`auth.existingSecret`, `primary.persistence`, `postgres-password` key).
+- NIC core's foundational Keycloak Postgres at `pkg/argocd/templates/apps/postgresql.yaml` uses the Bitnami chart at v18.2.0.
 
-Issue [#303](https://github.com/nebari-dev/nebari-infrastructure-core/issues/303) proposes adding [CloudNativePG](https://cloudnative-pg.io/) (CNPG) as an optional foundational service so packs can request a Postgres database through the existing NebariApp CRD, the same way they request Keycloak OIDC clients via `provisionClient: true`.
+Three packs, three independent responses to the same upstream change. The Bitnami paywall won't be the last disruption packs face; the next one will fragment the same way unless the platform owns the database contract.
+
+Issue [#303](https://github.com/nebari-dev/nebari-infrastructure-core/issues/303) proposes adding [CloudNativePG](https://cloudnative-pg.io/) (CNPG) as a foundational service so packs request a Postgres database through the existing NebariApp CRD, the same way they request Keycloak OIDC clients via `provisionClient: true` today. The contract belongs to the platform; the operator owns the lifecycle.
 
 ## Decision Drivers
 
-- Remove the Bitnami dependency from the platform's PostgreSQL story before frozen images start accumulating CVE exposure.
-- Provide self-service database provisioning for packs, with no person-in-the-loop for the routine case.
-- Centralize database lifecycle management around the platform rather than around individual contributors.
+- Give packs a self-service database contract owned by the platform, so the next upstream disruption (after Bitnami) doesn't fragment the same way.
+- Centralize database lifecycle management around the platform rather than around individual contributors; no person-in-the-loop for the routine "I need a Postgres" case.
+- Remove the dependency on `bitnamilegacy/` frozen images for the packs currently relying on it (`nebari-superset-pack`, NIC core's Keycloak Postgres, and the implicit Bitnami-derived sub-chart in `nebari-mlflow-pack`).
 - Match the existing per-pack provisioning pattern (Keycloak OIDC client) so the operator's responsibility surface stays consistent.
 - Preserve pack flexibility: any pack that has a reason to use its own database elsewhere (managed RDS, hosted DBaaS, self-managed cluster) must remain free to do that. This ADR establishes a default, not a mandate.
 
