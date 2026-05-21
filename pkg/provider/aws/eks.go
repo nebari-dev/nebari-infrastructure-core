@@ -8,6 +8,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // EKSClient defines the EKS operations needed to fetch cluster connection details.
@@ -16,8 +18,14 @@ type EKSClient interface {
 }
 
 func newEKSClient(ctx context.Context, region string) (EKSClient, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.newEKSClient")
+	defer span.End()
+	span.SetAttributes(attribute.String(attrKeyRegion, region))
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 	return eks.NewFromConfig(cfg), nil
