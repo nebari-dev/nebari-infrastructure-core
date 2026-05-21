@@ -667,8 +667,8 @@ git commit -m "feat: declare module outputs (placeholders)"
 locals {
   # Tags merged onto every resource so NIC's tag-based discovery works.
   tags = merge(var.tags, {
-    "nic.nebari.dev/cluster-name" = var.project_name
-    "nic.nebari.dev/managed-by"   = "nic"
+    "nic.nebari.dev_cluster-name" = var.project_name
+    "nic.nebari.dev_managed-by"   = "nic"
   })
 
   # Identify the system pool. If exactly one node group has mode="System",

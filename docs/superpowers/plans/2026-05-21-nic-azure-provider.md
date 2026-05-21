@@ -4,7 +4,7 @@
 
 **Goal:** Replace the stub at `pkg/provider/azure/` in `nebari-infrastructure-core` with a fully functional implementation that consumes the `terraform-azurerm-aks-cluster` module (Track A) and exposes `nic deploy --config azure-config.yaml` end-to-end. Mirrors the structure and conventions of `pkg/provider/aws/`.
 
-**Architecture:** The Azure provider parses YAML config → builds a `TFVars` struct → writes `terraform.tfvars.json` next to an embedded OpenTofu shim → invokes `pkg/tofu` to plan/apply against the Track A module. Kubeconfig is fetched via the Azure SDK (`armcontainerservice`), not from Terraform state, so it works even when state is gone. Tag-based discovery (`nic.nebari.dev/cluster-name`, `nic.nebari.dev/managed-by`) handles orphan cleanup after destroy. No NIC-side abstraction changes — the `Provider` interface, registry, and config dispatch already accommodate a third provider.
+**Architecture:** The Azure provider parses YAML config → builds a `TFVars` struct → writes `terraform.tfvars.json` next to an embedded OpenTofu shim → invokes `pkg/tofu` to plan/apply against the Track A module. Kubeconfig is fetched via the Azure SDK (`armcontainerservice`), not from Terraform state, so it works even when state is gone. Tag-based discovery (`nic.nebari.dev_cluster-name`, `nic.nebari.dev_managed-by`) handles orphan cleanup after destroy. No NIC-side abstraction changes — the `Provider` interface, registry, and config dispatch already accommodate a third provider.
 
 **Tech Stack:** Go 1.25+, `azidentity` (DefaultAzureCredential chain), `armcontainerservice/v6`, `armresources`, `armsubscription`, OpenTofu via `pkg/tofu`, OpenTelemetry tracing/status.
 
@@ -877,10 +877,10 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 	}
 	vars := cfg.toTFVars("nebari-x")
 
-	if got := vars.Tags["nic.nebari.dev/cluster-name"]; got != "nebari-x" {
+	if got := vars.Tags["nic.nebari.dev_cluster-name"]; got != "nebari-x" {
 		t.Errorf("cluster-name tag = %q, want nebari-x", got)
 	}
-	if got := vars.Tags["nic.nebari.dev/managed-by"]; got != "nic" {
+	if got := vars.Tags["nic.nebari.dev_managed-by"]; got != "nic" {
 		t.Errorf("managed-by tag = %q, want nic", got)
 	}
 	if got := vars.Tags["Env"]; got != "dev" {
@@ -933,8 +933,8 @@ Append to `pkg/provider/azure/tofu.go`:
 
 ```go
 const (
-	tagClusterName = "nic.nebari.dev/cluster-name"
-	tagManagedBy   = "nic.nebari.dev/managed-by"
+	tagClusterName = "nic.nebari.dev_cluster-name"
+	tagManagedBy   = "nic.nebari.dev_managed-by"
 )
 
 // toTFVars converts a parsed Config into the JSON-friendly TFVars accepted by
@@ -1834,13 +1834,13 @@ import (
 
 func TestBuildTagFilter(t *testing.T) {
 	got := buildTagFilter("my-cluster")
-	if !strings.Contains(got, "nic.nebari.dev/cluster-name") {
+	if !strings.Contains(got, "nic.nebari.dev_cluster-name") {
 		t.Errorf("filter missing cluster-name tag: %s", got)
 	}
 	if !strings.Contains(got, "my-cluster") {
 		t.Errorf("filter missing project name: %s", got)
 	}
-	if !strings.Contains(got, "nic.nebari.dev/managed-by") {
+	if !strings.Contains(got, "nic.nebari.dev_managed-by") {
 		t.Errorf("filter missing managed-by tag: %s", got)
 	}
 }
@@ -2482,7 +2482,7 @@ Expected: tofu destroy completes; cleanup reports either "no orphans" or a list 
 - [ ] **Step 6: Manually verify no leaked resources in the subscription**
 
 ```bash
-az resource list --tag nic.nebari.dev/cluster-name=my-nebari-azure --output table
+az resource list --tag nic.nebari.dev_cluster-name=my-nebari-azure --output table
 ```
 
 Expected: empty result.

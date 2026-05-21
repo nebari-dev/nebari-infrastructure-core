@@ -185,8 +185,8 @@ kubeconfig_command               # `az aks get-credentials ...` convenience
 
 - **Identify the system pool.** Pick the entry where `mode=="System"`. If none, default the first entry. Strip from the user-pools map passed to the `for_each` of `azurerm_kubernetes_cluster_node_pool.user`.
 - **Tag merging.** Combine `var.tags` with NIC-required tags:
-  - `nic.nebari.dev/cluster-name = var.project_name`
-  - `nic.nebari.dev/managed-by = "nic"`
+  - `nic.nebari.dev_cluster-name = var.project_name`
+  - `nic.nebari.dev_managed-by = "nic"`
 - **Subnet CIDR math.** Skipped for MVP (one node subnet). Hook is here for when multi-AZ subnets are added.
 
 ### `modules/identity/`
@@ -277,7 +277,7 @@ func (c *Config) toTFVars(projectName string) TFVars { /* … */ }
 
 1. **System-pool resolution.** Walk `NodeGroups`, find `mode=="System"` (or default the first), pass via a dedicated TF variable that maps to `azurerm_kubernetes_cluster.default_node_pool`. Strip it from the `node_groups` map sent to `azurerm_kubernetes_cluster_node_pool`. Cleaner to separate in Go than in HCL.
 2. **BYO resolution.** `create_resource_group` defaults to `c.ResourceGroupName == ""`. `create_vnet` defaults to `c.Network == nil || c.Network.ExistingVNetID == ""`. Same shape as `pkg/provider/aws/tofu.go:71`.
-3. **NIC tags injection.** `tags` always merges in `nic.nebari.dev/cluster-name` and `nic.nebari.dev/managed-by`.
+3. **NIC tags injection.** `tags` always merges in `nic.nebari.dev_cluster-name` and `nic.nebari.dev_managed-by`.
 
 ### Auth chain
 
@@ -288,8 +288,8 @@ func (c *Config) toTFVars(projectName string) TFVars { /* … */ }
 ### Tagging convention
 
 Every resource the module creates gets:
-- `nic.nebari.dev/cluster-name = <project_name>`
-- `nic.nebari.dev/managed-by = nic`
+- `nic.nebari.dev_cluster-name = <project_name>`
+- `nic.nebari.dev_managed-by = nic`
 
 Plus user-supplied `tags`. `state.go` queries by these tags via `armresources.NewClient().List()` with a `$filter` to enumerate orphans during cleanup. Direct analog to AWS's `pkg/provider/aws/state.go`.
 
