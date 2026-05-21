@@ -173,16 +173,33 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 | `provider.go` | Stub provider that prints operations |
 | `config.go` | GCP-specific config types: `Config`, `NodeGroup`, `Taint`, `GuestAccelerator` |
 
-### Azure Provider (pkg/provider/azure/) - **Stub**
+### Azure Provider (pkg/provider/azure/) - **Fully Implemented**
 
 **Location:** `pkg/provider/azure/`
 
-**Status:** Stub implementation - prints config as JSON
+**Status:** Complete implementation that drives the Track A Terraform module `nebari-dev/terraform-azurerm-aks-cluster` via OpenTofu. Implements all `Provider` methods: `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, and `InfraSettings`.
+
+**Module sourcing:** Currently pinned to the module via a git ref; flips to the Terraform Registry once Track A tags `v0.1.0`.
+
+**State backend:** Uses the `azurerm` backend with a bootstrapped storage account/container for Terraform state (see `state_backend.go`).
+
+**Discovery:** Tag-based cleanup driven by `state.go` (`nic.nebari.dev/cluster-name`, `nic.nebari.dev/managed-by`), mirroring the AWS provider's stateless model.
+
+**Kubeconfig:** Fetched via the Azure SDK (`armcontainerservice`) rather than read from Terraform state, so it works even when the local tfstate is absent.
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Stub provider that prints operations |
+| `provider.go` | Provider implementation: orchestrates Validate/Deploy/Destroy/Summary/InfraSettings over OpenTofu |
 | `config.go` | Azure-specific config types: `Config`, `NodeGroup`, `Taint` |
+| `state.go` | Tag-based discovery and orphan cleanup helpers |
+| `state_backend.go` | Bootstraps the `azurerm` Terraform backend (resource group, storage account, container) |
+| `tofu.go` | OpenTofu invocation: init/plan/apply/destroy against the Track A module |
+| `kubeconfig.go` | Retrieves cluster admin kubeconfig via `armcontainerservice` |
+| `cleanup.go` | Post-destroy resource sweep (tag-based) |
+| `interfaces.go` | Azure SDK client interfaces for mocking |
+| `version.go` | Module version pin |
+| `templates/` | Rendered Terraform root module that wraps the Track A module |
+| `examples/azure-config.yaml` | Working config (at repo root `examples/`) |
 
 ### Local Provider (pkg/provider/local/) - **Stub**
 
