@@ -26,8 +26,6 @@ type managedClustersAPI interface {
 }
 
 // managedClusterVersionsAPI exposes the AKS-supported-versions lookup.
-//
-//nolint:unused // consumed by provider.go in Tasks 12-18
 type managedClusterVersionsAPI interface {
 	ListKubernetesVersions(
 		ctx context.Context,
