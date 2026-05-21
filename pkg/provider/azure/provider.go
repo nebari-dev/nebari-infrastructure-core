@@ -105,12 +105,6 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		span.RecordError(err)
 		return err
 	}
-	// The azurerm provider reads ARM_SUBSCRIPTION_ID; map it from the
-	// user-facing AZURE_SUBSCRIPTION_ID so the tfexec child process picks it up.
-	if err := os.Setenv(armSubscriptionIDEnv, subID); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("set %s: %w", armSubscriptionIDEnv, err)
-	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring Terraform state backend resources").
 		WithResource("state-backend").
@@ -132,6 +126,14 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			span.RecordError(cleanupErr)
 		}
 	}()
+
+	// The azurerm provider reads ARM_SUBSCRIPTION_ID; map it from the
+	// user-facing AZURE_SUBSCRIPTION_ID and scope it to the child tofu
+	// process so the parent process env is left untouched.
+	if err := tf.SetExtraEnv(map[string]string{armSubscriptionIDEnv: subID}); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set tofu env: %w", err)
+	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Initializing OpenTofu working directory").
 		WithResource("tofu").
@@ -192,10 +194,6 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		span.RecordError(err)
 		return err
 	}
-	if err := os.Setenv(armSubscriptionIDEnv, subID); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("set %s: %w", armSubscriptionIDEnv, err)
-	}
 
 	// ensureStateBackend is idempotent; on Destroy it's a no-op when the
 	// RG/SA/container already exist (the common case) and reconstructs them
@@ -222,6 +220,14 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 			span.RecordError(cleanupErr)
 		}
 	}()
+
+	// The azurerm provider reads ARM_SUBSCRIPTION_ID; map it from the
+	// user-facing AZURE_SUBSCRIPTION_ID and scope it to the child tofu
+	// process so the parent process env is left untouched.
+	if err := tf.SetExtraEnv(map[string]string{armSubscriptionIDEnv: subID}); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set tofu env: %w", err)
+	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Initializing OpenTofu working directory").
 		WithResource("tofu").
