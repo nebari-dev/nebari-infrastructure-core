@@ -18,6 +18,10 @@ import (
 
 const installTimeout = 10 * time.Minute
 
+// nodeStorageLabel is the node label Longhorn uses to identify nodes that
+// should host its storage components when DedicatedNodes is enabled.
+const nodeStorageLabel = "node.longhorn.io/storage"
+
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
 //
@@ -208,14 +212,14 @@ func buildHelmValues(cfg *Config) map[string]any {
 	if cfg != nil && cfg.DedicatedNodes {
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		nodeSelector := map[string]string{"node.longhorn.io/storage": "true"}
+		nodeSelector := map[string]string{nodeStorageLabel: "true"}
 		if cfg.NodeSelector != nil {
 			nodeSelector = cfg.NodeSelector
 		}
 
 		tolerations := []map[string]string{
 			{
-				"key":      "node.longhorn.io/storage",
+				"key":      nodeStorageLabel,
 				"operator": "Exists",
 				"effect":   "NoSchedule",
 			},
