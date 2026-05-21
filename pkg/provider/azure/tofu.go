@@ -76,7 +76,7 @@ func (c *Config) toTFVars(projectName string) TFVars {
 		PrivateClusterEnabled: c.PrivateClusterEnabled,
 		AuthorizedIPRanges:    c.AuthorizedIPRanges,
 		SKUTier:               defaultIfEmpty(c.SKUTier, "Free"),
-		IdentityType:          "SystemAssigned",
+		IdentityType:          "UserAssigned",
 		NodeGroups:            convertNodeGroups(c.NodeGroups),
 	}
 

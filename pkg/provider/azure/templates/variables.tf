@@ -93,7 +93,7 @@ variable "sku_tier" {
 
 variable "identity_type" {
   type    = string
-  default = "SystemAssigned"
+  default = "UserAssigned"
 }
 
 variable "node_groups" {
