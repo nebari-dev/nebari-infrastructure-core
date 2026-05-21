@@ -443,6 +443,14 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	region := awsCfg.Region
 
+	// Drop any cached kubeconfig for this cluster at the end on every
+	// exit path (success, error, panic), so callers reusing the same
+	// Provider after a destroy don't get a stale entry The call is 
+	// idempotent: a missing entry is a no-op.
+	if !opts.DryRun {
+		defer p.invalidateKubeconfigCache(projectName, region)
+	}
+
 	// Get bucket name from config or generate one
 	bucketName := awsCfg.StateBucket
 	if bucketName == "" {
@@ -569,11 +577,6 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		span.RecordError(err)
 		return err
 	}
-
-	// Drop any cached kubeconfig so a follow-up Deploy with the same project name and
-	// region fetches fresh credentials rather than reusing stale ones from the previously
-	// destroyed cluster.
-	p.invalidateKubeconfigCache(projectName, region)
 
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
 		span.RecordError(err)
