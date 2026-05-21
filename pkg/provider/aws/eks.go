@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 )
