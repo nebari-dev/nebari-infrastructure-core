@@ -51,9 +51,12 @@ type TFNodeGroup struct {
 	Zones        []string          `json:"zones,omitempty"`
 }
 
+// Azure tag names disallow these reserved chars: < > % & \ ? /
+// (the Kubernetes-style "domain/key" convention doesn't survive on Azure), so
+// we substitute "_" for "/" while keeping the nic.nebari.dev namespace.
 const (
-	tagClusterName = "nic.nebari.dev/cluster-name"
-	tagManagedBy   = "nic.nebari.dev/managed-by"
+	tagClusterName = "nic.nebari.dev_cluster-name"
+	tagManagedBy   = "nic.nebari.dev_managed-by"
 )
 
 // toTFVars converts a parsed Config into the JSON-friendly TFVars accepted by

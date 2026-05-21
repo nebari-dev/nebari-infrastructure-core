@@ -73,10 +73,10 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 	}
 	vars := cfg.toTFVars("nebari-x")
 
-	if got := vars.Tags["nic.nebari.dev/cluster-name"]; got != "nebari-x" {
+	if got := vars.Tags["nic.nebari.dev_cluster-name"]; got != "nebari-x" {
 		t.Errorf("cluster-name tag = %q, want nebari-x", got)
 	}
-	if got := vars.Tags["nic.nebari.dev/managed-by"]; got != "nic" {
+	if got := vars.Tags["nic.nebari.dev_managed-by"]; got != "nic" {
 		t.Errorf("managed-by tag = %q, want nic", got)
 	}
 	if got := vars.Tags["Env"]; got != "dev" {
