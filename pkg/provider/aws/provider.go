@@ -37,9 +37,10 @@ const (
 	attrKeyRegion = "region"
 )
 
-// Provider implements the AWS provider
+// Provider implements the AWS provider. Not safe to copy once constructed
+// (embeds a mutex). Always pass *Provider.
 type Provider struct {
-	kubeconfigMu    sync.Mutex
+	kubeconfigMu    sync.RWMutex
 	kubeconfigCache map[kubeconfigCacheKey][]byte
 }
 
@@ -608,13 +609,13 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		attribute.String(attrKeyRegion, region),
 	)
 
-	p.kubeconfigMu.Lock()
+	p.kubeconfigMu.RLock()
 	if cached, ok := p.kubeconfigCache[cacheKey]; ok {
-		p.kubeconfigMu.Unlock()
+		p.kubeconfigMu.RUnlock()
 		span.SetAttributes(attribute.Bool("cache_hit", true))
 		return cached, nil
 	}
-	p.kubeconfigMu.Unlock()
+	p.kubeconfigMu.RUnlock()
 	span.SetAttributes(attribute.Bool("cache_hit", false))
 
 	eksClient, err := newEKSClient(ctx, region)
