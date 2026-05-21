@@ -523,30 +523,43 @@ No structural changes. Existing `golangci-lint run`, `make test`, race-detected 
 
 ## Section 7 — Implementation phasing
 
-Sequenced: module first, then NIC. NIC has nothing to consume until the module exists, so the work doesn't parallelize meaningfully.
+Work runs in **two parallel tracks** — one per repo — that converge at the end. The NIC track pins its shim `source` to a git ref of the module track's working branch (e.g. `git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=main`) during development, and flips to the Registry-versioned source after the module is tagged `v0.1.0`.
 
-**Phase 1 — Module scaffolding (no Azure code).**
-Empty `terraform-azurerm-aks-cluster` repo with meta files (`versions.tf`, `Makefile`, `.tflint.hcl`, `.terraform-docs.yml`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `LICENSE`, `.gitignore`). Skeleton `main.tf` / `variables.tf` / `outputs.tf` / `locals.tf` / `providers.tf` with variable declarations but no resources. `tofu init` and `tofu validate` pass; CI green.
+### Track A — `terraform-azurerm-aks-cluster`
 
-**Phase 2 — Module resources.**
+**A1 — Module scaffolding (no Azure code).**
+Empty repo with meta files (`versions.tf`, `Makefile`, `.tflint.hcl`, `.terraform-docs.yml`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `LICENSE`, `.gitignore`). Skeleton `main.tf` / `variables.tf` / `outputs.tf` / `locals.tf` / `providers.tf` with variable declarations but no resources. `tofu init` and `tofu validate` pass; CI green.
+
+**A2 — Module resources.**
 Implement RG, VNet, subnet (with BYO toggles). AKS cluster + system node pool inline. User node pools loop. User-assigned kubelet identity + role assignments. `examples/complete/` and `examples/existing-resources/`. README auto-generated.
 
-**Phase 3 — Module tests.**
-`test/module_test.go` with Terratest; `fixtures/disk-csi/*.yaml`. `.github/workflows/test.yml` with Azure OIDC. End-to-end against a real subscription; disk-CSI test passes. Tag `v0.1.0`. Verify Registry auto-publishes.
+**A3 — Module tests + release.**
+`test/module_test.go` with Terratest; `fixtures/disk-csi/*.yaml`. `.github/workflows/test.yml` with Azure OIDC. End-to-end against a real subscription; disk-CSI test passes. Tag `v0.1.0`. Verify Registry auto-publishes at `nebari-dev/aks-cluster/azurerm`.
 
-**Phase 4 — NIC Azure provider: scaffolding + config.**
-Extend `pkg/provider/azure/config.go` with full struct + `Validate()`. Add `pkg/provider/azure/templates/*`. Shim `source` initially `git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=v0.1.0`. `tofu.go` with `TFVars` + `toTFVars()`. Unit tests for config validation and `toTFVars`.
+### Track B — `nebari-infrastructure-core` (`pkg/provider/azure/`)
 
-**Phase 5 — NIC Azure provider: Deploy/Destroy.**
+**B1 — Provider scaffolding + config.**
+Extend `pkg/provider/azure/config.go` with full struct + `Validate()`. Add `pkg/provider/azure/templates/*`. Shim `source` initially `git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=main`. `tofu.go` with `TFVars` + `toTFVars()`. Unit tests for config validation and `toTFVars`. Until Track A's A2 lands, B1 can rely on a stub module (matching variable signatures, no resources) so `tofu validate` still passes in B1's tests.
+
+**B2 — Deploy / Destroy.**
 Rewrite `provider.go`: real `Validate()` (env check, Azure auth probe), `Deploy()` and `Destroy()` via `pkg/tofu`. Status updates through `pkg/status`. `state.go` for tag-based discovery. `cleanup.go` for orphan-resource cleanup. Unit tests with mocked Azure SDK clients.
 
-**Phase 6 — NIC Azure provider: Kubeconfig + Summary + polish.**
+**B3 — Kubeconfig + Summary + polish.**
 `kubeconfig.go` using `armcontainerservice.ManagedClustersClient.ListClusterAdminCredentials`. `Summary()` returns Region / ResourceGroup / ClusterName / NodeGroupCount. `InfraSettings()` finalized. `version.go` for AKS supported-versions negotiation. `examples/azure-config.yaml` updated to reflect final schema.
 
-**Phase 7 — Real-subscription end-to-end + docs.**
-Deploy via `nic deploy --config examples/azure-config.yaml` against a real subscription. Verify Nebari workloads can be installed on top using the standard GitOps flow. Destroy and confirm no leaked resources. Update NIC `ARCHITECTURE.md`, `WALKTHROUGH.md`, `CLAUDE.md` to drop "Azure stub" language and document the now-real provider.
+### Convergence
 
-**Cross-repo coupling.** Phase 4 *can* start as soon as Phase 1 is done — NIC can point at `?ref=main` during dev — but Phase 3 → Phase 4 dependency on the tagged version is what unblocks Registry-based pinning. Both repos go to PR review independently.
+**C1 — Registry pin flip.**
+Once Track A's `v0.1.0` is tagged and the Registry has the module, NIC's `pkg/provider/azure/templates/main.tf` is updated: `source = "nebari-dev/aks-cluster/azurerm"`, `version = "0.1.0"`. Replaces the git-ref source.
+
+**C2 — Real-subscription end-to-end + docs.**
+Deploy via `nic deploy --config examples/azure-config.yaml` against a real subscription. Verify Nebari workloads can be installed on top using the standard GitOps flow. Destroy and confirm no leaked resources. Update NIC `ARCHITECTURE.md`, `WALKTHROUGH.md`, `CLAUDE.md` to drop "Azure stub" language.
+
+### Cross-track coordination
+
+- The module's `variables.tf` signature is the contract between the tracks. Any change to it from Track A must be communicated to Track B (and vice versa). Locking the variable signature early — in A1 — keeps the tracks from drifting.
+- Track B's integration tests stay disabled until Track A's A3 publishes a working `v0.1.0`; B1/B2/B3 unit tests run against mocks throughout.
+- C1 is gated on A3. C2 is gated on B3 + C1.
 
 ---
 
