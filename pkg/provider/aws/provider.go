@@ -88,7 +88,7 @@ func containsSubstring(slice []string, substr string) bool {
 }
 
 // invalidateKubeconfigCache removes any cached kubeconfig for the given
-// project/region. Called on Destroy so a follow-up Deploy in the same process 
+// project/region. Called on Destroy so a follow-up Deploy in the same process
 // doesn't return stale data for a cluster that has been torn down and recreated.
 func (p *Provider) invalidateKubeconfigCache(projectName, region string) {
 	p.kubeconfigMu.Lock()
