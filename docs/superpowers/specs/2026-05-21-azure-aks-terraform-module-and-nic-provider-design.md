@@ -1,0 +1,567 @@
+# Azure AKS Terraform Module + NIC Azure Provider — Design
+
+**Date:** 2026-05-21
+**Status:** Approved (pre-implementation)
+**Scope:** Two coupled deliverables, MVP only.
+
+## Goal
+
+Bring Azure to first-class status in Nebari Infrastructure Core, on par with the existing AWS path. Deploying Nebari on Azure should be the same UX as `nic deploy --config aws-config.yaml`, just with `cluster.azure:` in the YAML.
+
+This requires:
+1. A new public Terraform module — `github.com/nebari-dev/terraform-azurerm-aks-cluster`, published to the Terraform Registry as `nebari-dev/aks-cluster/azurerm`. Mirrors the structure and conventions of `terraform-aws-eks-cluster`.
+2. Filling in the existing `pkg/provider/azure/` stub in NIC to consume that module via an embedded OpenTofu shim — mirroring the structure and conventions of `pkg/provider/aws/`.
+
+## Non-goals (deferred to follow-up specs)
+
+- Azure Files / `azurefile-csi` shared storage (EFS analog).
+- Workload Identity / user-assigned managed identity beyond the kubelet identity.
+- Application Gateway Ingress Controller (ALB Controller analog).
+- Longhorn integration. AKS uses a konnectivity tunnel for control plane → node traffic, so the EKS-style security-group webhook rules aren't needed; the real Longhorn pain points on AKS (open-iscsi, replica disks) sit outside MVP. Defer entirely.
+- Key Vault encryption at rest (KMS analog).
+- Log Analytics Workspace + diagnostic settings (`cluster_enabled_log_types` analog).
+- Multi-zone / multi-subnet networking math (one node subnet is enough for MVP).
+- GCP and `local` provider stubs (unchanged by this work).
+
+## Architecture overview
+
+Two repos, coupled through a Terraform Registry version pin.
+
+```
+nebari-dev/                            nebari-dev/
+nebari-infrastructure-core             terraform-azurerm-aks-cluster (NEW)
+(existing)                  embeds ───►
+                                       Standalone Terraform module.
+pkg/provider/azure/                    Registry: nebari-dev/aks-cluster/azurerm
+├── config.go            (extend)
+├── provider.go          (rewrite)     Resources:
+├── tofu.go              (new)         • Resource Group (BYO or create)
+├── kubeconfig.go        (new)         • VNet + node subnet
+├── state.go             (new)         • AKS cluster (Azure CNI Overlay)
+├── cleanup.go           (new)         • System + user node pools
+├── version.go           (new)         • User-assigned kubelet identity
+└── templates/           (new)
+    ├── main.tf  ◄──── source ─────────┐
+    ├── variables.tf                   │
+    ├── outputs.tf                     │
+    ├── provider.tf                    │
+    └── backend.tf                     │
+                                       └─ source = "nebari-dev/aks-cluster/azurerm"
+                                          version = "0.1.0"
+```
+
+Runtime flow:
+
+1. User writes a YAML config with `cluster.azure:` (already accepted by NIC's config layer — the dispatch is provider-name → registry lookup).
+2. `nic deploy` calls `Provider.Deploy()` on the Azure provider.
+3. Azure provider parses config → builds `TFVars` struct → marshals to JSON → drops it next to the embedded `templates/*` in a temp working dir.
+4. `pkg/tofu` runs OpenTofu `init`/`plan`/`apply`. The shim calls the public Registry module with the user's vars. OpenTofu output streams through `pkg/status` for live progress.
+5. Post-apply: `kubeconfig.go` uses `armcontainerservice` SDK (not the Terraform output, so it works even if local state is gone) to fetch admin kubeconfig and write it.
+6. `nic destroy` reverses via `tofu destroy`, then `cleanup.go` removes any tag-matched orphans (auto-created `MC_*` RG, leaked LBs from `Service` type=LoadBalancer, dangling managed disks).
+
+**Dev-time module sourcing:** During phases 4–6 before the module's `v0.1.0` tag is published, NIC's shim points at `git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=main`. After the Registry publishes, flip to `source = "nebari-dev/aks-cluster/azurerm"` + `version = "0.1.0"`.
+
+**Why this works without changing NIC's abstraction:** The `Provider` interface, registry, and config dispatch already accommodate a third provider. Both Hetzner's hetzner-k3s-shell-out pattern and AWS's embedded-TF-shim pattern coexist today; Azure just adds another implementation behind the same interface. The only file in NIC outside `pkg/provider/azure/` and `examples/` that changes is `go.mod`.
+
+---
+
+## Section 2 — Terraform module shape
+
+### Layout
+
+```
+terraform-azurerm-aks-cluster/
+├── main.tf              # composes resources
+├── variables.tf         # all user inputs
+├── outputs.tf           # cluster outputs
+├── locals.tf            # subnet math, defaults, transformations
+├── providers.tf         # placeholder; consumer configures azurerm
+├── versions.tf          # Terraform >= 1.9, azurerm >= 4.0
+├── Makefile
+├── README.md            # auto-generated by terraform-docs
+├── LICENSE              # BSD-3-Clause (matches AWS sibling)
+├── .terraform-docs.yml
+├── .tflint.hcl
+├── .pre-commit-config.yaml
+├── .gitignore
+├── modules/
+│   └── identity/        # user-assigned managed identity + role assignment helpers
+├── examples/
+│   ├── complete/        # all features, default settings
+│   └── existing-resources/  # BYO resource group + BYO VNet/subnet
+├── test/
+│   ├── module_test.go   # Terratest entry
+│   └── fixtures/
+│       └── disk-csi/    # storageclass.yaml, pvc.yaml, pod.yaml
+├── docs/
+└── .github/workflows/
+    ├── ci.yml           # fmt + validate + tflint + terraform-docs
+    └── test.yml         # Terratest, Azure OIDC auth
+```
+
+### Composed resources in `main.tf`
+
+| Resource | Purpose | Notes |
+|---|---|---|
+| `azurerm_resource_group.this` (conditional) | Container for everything if `create_resource_group=true` | Else `data.azurerm_resource_group.existing` |
+| `azurerm_virtual_network.this` (conditional) | `/16` VNet, BYO via `existing_vnet_id` | Default CIDR `10.0.0.0/16` |
+| `azurerm_subnet.nodes` (conditional) | `/22` subnet for node IPs | Pods get overlay IPs, not VNet IPs |
+| `azurerm_user_assigned_identity.kubelet` | Kubelet identity (cluster-wide) | Pre-assigned so future ACR Pull etc. is easy |
+| `azurerm_role_assignment.network_contributor` | AKS cluster identity → VNet | Required when BYO networking |
+| `azurerm_kubernetes_cluster.this` | The AKS cluster | System node pool inline (required by AKS) |
+| `azurerm_kubernetes_cluster_node_pool.user[*]` | Additional user pools | One per entry in `var.node_groups` (System pool excluded) |
+
+### `variables.tf` — initial set (MVP)
+
+```hcl
+# Common
+project_name              string  (required)
+location                  string  (required, e.g. "eastus")
+tags                      map(string)  default {}
+
+# Resource group
+create_resource_group     bool    default true
+existing_resource_group_name string default null
+
+# Networking
+create_vnet               bool    default true
+vnet_cidr_block           string  default "10.0.0.0/16"
+node_subnet_cidr_block    string  default "10.0.0.0/22"
+existing_vnet_id          string  default null
+existing_node_subnet_id   string  default null
+network_plugin            string  default "azure"          # azure | kubenet
+network_plugin_mode       string  default "overlay"        # overlay | null
+pod_cidr                  string  default "10.244.0.0/16"
+service_cidr              string  default "10.0.16.0/22"
+dns_service_ip            string  default "10.0.16.10"
+
+# Cluster
+kubernetes_version        string  default null  # AKS picks latest stable when null
+private_cluster_enabled   bool    default false
+authorized_ip_ranges      list(string)  default []
+sku_tier                  string  default "Free"           # Free | Standard | Premium
+
+# Identity
+identity_type             string  default "SystemAssigned"
+# user-assigned + workload identity deferred; variable stays so future work is non-breaking
+
+# Node groups
+node_groups               map(object({
+                            vm_size       = string
+                            min_count     = number
+                            max_count     = number
+                            mode          = optional(string, "User")   # System | User
+                            os_disk_size_gb = optional(number, 128)
+                            labels        = optional(map(string), {})
+                            taints        = optional(list(string), [])
+                            zones         = optional(list(string), [])
+                          }))
+                          # Exactly one entry must have mode="System".
+                          # If none specified, the first entry is defaulted to System.
+```
+
+Defaults: Azure CNI Overlay (modern AKS default, avoids subnet IP exhaustion); public API endpoint (`private_cluster_enabled=false`) with optional `authorized_ip_ranges`.
+
+### `outputs.tf` — initial set
+
+```
+cluster_id                       # AKS resource ID
+cluster_name
+cluster_fqdn                     # for kubeconfig server
+host                             # API server URL
+kube_admin_config_raw   (sensitive)  # ready-to-use kubeconfig
+cluster_ca_certificate  (sensitive)
+oidc_issuer_url                  # for future workload-identity work
+kubelet_identity_object_id       # for ACR role assignments later
+kubelet_identity_client_id
+node_resource_group              # the auto-created MC_* RG
+resource_group_name              # whichever RG holds the cluster
+vnet_id
+node_subnet_id
+kubeconfig_command               # `az aks get-credentials ...` convenience
+```
+
+### `locals.tf` responsibilities
+
+- **Identify the system pool.** Pick the entry where `mode=="System"`. If none, default the first entry. Strip from the user-pools map passed to the `for_each` of `azurerm_kubernetes_cluster_node_pool.user`.
+- **Tag merging.** Combine `var.tags` with NIC-required tags:
+  - `nic.nebari.dev/cluster-name = var.project_name`
+  - `nic.nebari.dev/managed-by = "nic"`
+- **Subnet CIDR math.** Skipped for MVP (one node subnet). Hook is here for when multi-AZ subnets are added.
+
+### `modules/identity/`
+
+Kept as a sub-module from day one — initially exposes role assignment helpers. Avoids a refactor when the planned user-assigned-identity / Workload Identity follow-up lands.
+
+---
+
+## Section 3 — NIC Azure provider shape
+
+### File layout (mirrors `pkg/provider/aws/`)
+
+```
+pkg/provider/azure/
+├── config.go              extend   # full struct; Validate() method
+├── config_test.go         new
+├── provider.go            rewrite  # full Provider interface
+├── provider_test.go       extend
+├── tofu.go                new      # TFVars struct + embed.FS for templates/
+├── tofu_test.go           new
+├── kubeconfig.go          new      # via armcontainerservice SDK
+├── kubeconfig_test.go     new
+├── state.go               new      # tag-based discovery
+├── state_test.go          new
+├── cleanup.go             new      # orphan-resource cleanup
+├── cleanup_test.go        new
+├── version.go             new      # AKS supported-versions helper
+├── version_test.go        new
+├── interfaces.go          new      # mock-friendly SDK interfaces
+└── templates/             new
+    ├── main.tf            # module "aks_cluster" { source = "..." }
+    ├── variables.tf       # re-declares all module inputs
+    ├── outputs.tf         # re-exposes module outputs
+    ├── provider.tf        # provider "azurerm" { features {} }
+    └── backend.tf         # backend "local" {} — same as AWS for MVP
+```
+
+### Provider method behavior
+
+| Method | Behavior |
+|---|---|
+| `Name()` | Returns `"azure"`. |
+| `Validate(ctx, projectName, clusterConfig)` | Parse config; `Config.Validate()` (required fields, region in valid list, node-group invariants: exactly one System mode or auto-default, CIDR parsing); probe Azure auth via `azidentity.DefaultAzureCredential` + cheap `subscriptions.NewClient().Get()` to fail fast. |
+| `Deploy(ctx, ...)` | Build `TFVars` → write `terraform.tfvars.json` into a temp working dir → extract embedded `templates/*` into the same dir → call `pkg/tofu` to run init + apply. Stream OpenTofu output through `pkg/status`. |
+| `Destroy(ctx, ...)` | Same setup → `tofu destroy`. After destroy, run `cleanup.go` to remove orphaned resources tagged for this cluster but not in TF state (auto-created `MC_*` RG, leaked LBs from `Service` type=LoadBalancer, dangling PV disks). |
+| `GetKubeconfig(ctx, ...)` | Call `armcontainerservice.ManagedClustersClient.ListClusterAdminCredentials()` directly. Bypasses TF state, works even if local state is gone. |
+| `Summary(clusterConfig)` | Returns map with Region, ResourceGroup, ClusterName, NodeGroupCount. Display-only. |
+| `InfraSettings(clusterConfig)` | `StorageClass: "managed-csi"`, `NeedsMetalLB: false`, no LB annotations. AKS gives a real LB out of the box. |
+
+### `tofu.go` — embedding pattern
+
+```go
+package azure
+
+import "embed"
+
+//go:embed all:templates
+var tofuTemplates embed.FS
+
+type TFVars struct {
+    ProjectName               string               `json:"project_name"`
+    Location                  string               `json:"location"`
+    Tags                      map[string]string    `json:"tags,omitempty"`
+    CreateResourceGroup       bool                 `json:"create_resource_group"`
+    ExistingResourceGroupName *string              `json:"existing_resource_group_name,omitempty"`
+    CreateVNet                bool                 `json:"create_vnet"`
+    VNetCIDRBlock             string               `json:"vnet_cidr_block,omitempty"`
+    NodeSubnetCIDRBlock       string               `json:"node_subnet_cidr_block,omitempty"`
+    ExistingVNetID            *string              `json:"existing_vnet_id,omitempty"`
+    ExistingNodeSubnetID      *string              `json:"existing_node_subnet_id,omitempty"`
+    NetworkPlugin             string               `json:"network_plugin"`
+    NetworkPluginMode         string               `json:"network_plugin_mode"`
+    PodCIDR                   string               `json:"pod_cidr,omitempty"`
+    ServiceCIDR               string               `json:"service_cidr,omitempty"`
+    DNSServiceIP              string               `json:"dns_service_ip,omitempty"`
+    KubernetesVersion         *string              `json:"kubernetes_version,omitempty"`
+    PrivateClusterEnabled     bool                 `json:"private_cluster_enabled"`
+    AuthorizedIPRanges        []string             `json:"authorized_ip_ranges,omitempty"`
+    SKUTier                   string               `json:"sku_tier"`
+    IdentityType              string               `json:"identity_type"`
+    NodeGroups                map[string]NodeGroup `json:"node_groups"`
+}
+
+func (c *Config) toTFVars(projectName string) TFVars { /* … */ }
+```
+
+`toTFVars` is responsible for three transforms:
+
+1. **System-pool resolution.** Walk `NodeGroups`, find `mode=="System"` (or default the first), pass via a dedicated TF variable that maps to `azurerm_kubernetes_cluster.default_node_pool`. Strip it from the `node_groups` map sent to `azurerm_kubernetes_cluster_node_pool`. Cleaner to separate in Go than in HCL.
+2. **BYO resolution.** `create_resource_group` defaults to `c.ResourceGroupName == ""`. `create_vnet` defaults to `c.Network == nil || c.Network.ExistingVNetID == ""`. Same shape as `pkg/provider/aws/tofu.go:71`.
+3. **NIC tags injection.** `tags` always merges in `nic.nebari.dev/cluster-name` and `nic.nebari.dev/managed-by`.
+
+### Auth chain
+
+`azidentity.NewDefaultAzureCredential(nil)` everywhere. Picks up (in order): env vars → workload identity → managed identity → Azure CLI. Subscription ID is **required from env** (`AZURE_SUBSCRIPTION_ID`), not from config — matches the AWS pattern of "creds from env, region from config." NIC exports `ARM_SUBSCRIPTION_ID=$AZURE_SUBSCRIPTION_ID` before invoking tofu, so users only need to set one var.
+
+`Provider.Validate()` fails fast with a clear error if `AZURE_SUBSCRIPTION_ID` is unset.
+
+### Tagging convention
+
+Every resource the module creates gets:
+- `nic.nebari.dev/cluster-name = <project_name>`
+- `nic.nebari.dev/managed-by = nic`
+
+Plus user-supplied `tags`. `state.go` queries by these tags via `armresources.NewClient().List()` with a `$filter` to enumerate orphans during cleanup. Direct analog to AWS's `pkg/provider/aws/state.go`.
+
+### `cmd/nic/main.go` change
+
+None. The existing line at `cmd/nic/main.go:64` already does `reg.ClusterProviders.Register(ctx, "azure", azure.NewProvider())`. The constructor stays the same; the implementation behind it gets real.
+
+### `go.mod` additions
+
+- `github.com/Azure/azure-sdk-for-go/sdk/azidentity`
+- `github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v6`
+- `github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources`
+- `github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription`
+
+Network SDK and others added only as needed; keep the dependency surface minimal.
+
+---
+
+## Section 4 — NIC config schema
+
+### Final YAML shape (MVP)
+
+```yaml
+project_name: my-nebari-azure
+domain: nebari.example.com
+
+cluster:
+  azure:
+    region: eastus
+    resource_group_name: my-rg              # if set, uses existing; else NIC creates "<project_name>-rg"
+
+    kubernetes_version: "1.34"              # optional; AKS picks latest stable if omitted
+    sku_tier: Free                          # Free | Standard | Premium
+    private_cluster_enabled: false
+    authorized_ip_ranges:
+      - 203.0.113.0/24
+
+    network:                                # all optional, sane defaults
+      vnet_cidr_block: "10.0.0.0/16"
+      node_subnet_cidr_block: "10.0.0.0/22"
+      pod_cidr: "10.244.0.0/16"
+      service_cidr: "10.0.16.0/22"
+      dns_service_ip: "10.0.16.10"
+      # existing_vnet_id: /subscriptions/.../virtualNetworks/foo
+      # existing_node_subnet_id: /subscriptions/.../subnets/foo
+
+    node_groups:
+      system:
+        instance: Standard_D4_v3
+        min_nodes: 1
+        max_nodes: 3
+        mode: System
+      user:
+        instance: Standard_D8_v3
+        min_nodes: 1
+        max_nodes: 5
+      worker:
+        instance: Standard_D4_v3
+        min_nodes: 0
+        max_nodes: 5
+
+    tags:
+      Environment: development
+      Project: nebari
+```
+
+### Go struct in `pkg/provider/azure/config.go`
+
+```go
+package azure
+
+type Config struct {
+    Region                string               `yaml:"region"`
+    ResourceGroupName     string               `yaml:"resource_group_name,omitempty"`
+    CreateResourceGroup   *bool                `yaml:"create_resource_group,omitempty"`
+    KubernetesVersion     string               `yaml:"kubernetes_version,omitempty"`
+    SKUTier               string               `yaml:"sku_tier,omitempty"`
+    PrivateClusterEnabled bool                 `yaml:"private_cluster_enabled,omitempty"`
+    AuthorizedIPRanges    []string             `yaml:"authorized_ip_ranges,omitempty"`
+    Network               *NetworkConfig       `yaml:"network,omitempty"`
+    NodeGroups            map[string]NodeGroup `yaml:"node_groups"`
+    Tags                  map[string]string    `yaml:"tags,omitempty"`
+}
+
+type NetworkConfig struct {
+    VNetCIDRBlock        string `yaml:"vnet_cidr_block,omitempty"`
+    NodeSubnetCIDRBlock  string `yaml:"node_subnet_cidr_block,omitempty"`
+    PodCIDR              string `yaml:"pod_cidr,omitempty"`
+    ServiceCIDR          string `yaml:"service_cidr,omitempty"`
+    DNSServiceIP         string `yaml:"dns_service_ip,omitempty"`
+    ExistingVNetID       string `yaml:"existing_vnet_id,omitempty"`
+    ExistingNodeSubnetID string `yaml:"existing_node_subnet_id,omitempty"`
+}
+
+type NodeGroup struct {
+    Instance     string            `yaml:"instance"`
+    MinNodes     int               `yaml:"min_nodes"`
+    MaxNodes     int               `yaml:"max_nodes"`
+    Mode         string            `yaml:"mode,omitempty"`         // "System" or "User"; defaults to "User"
+    OSDiskSizeGB int               `yaml:"os_disk_size_gb,omitempty"`
+    Labels       map[string]string `yaml:"labels,omitempty"`
+    Taints       []string          `yaml:"taints,omitempty"`
+    Zones        []string          `yaml:"zones,omitempty"`
+}
+
+func (c *Config) Validate() error {
+    // - region required, non-empty
+    // - at least one node group
+    // - exactly one node group with mode=="System" (or zero — auto-default first)
+    // - if existing_vnet_id is set, existing_node_subnet_id must also be set
+    // - all CIDR fields, if set, parse via net.ParseCIDR
+    // - if create_resource_group is explicitly false, resource_group_name must be set
+    // - kubernetes_version, if set, matches /^\d+\.\d+(\.\d+)?$/
+}
+```
+
+`templates/provider.tf`:
+
+```hcl
+provider "azurerm" {
+  features {}
+  # subscription_id picked up from ARM_SUBSCRIPTION_ID (set by NIC from AZURE_SUBSCRIPTION_ID)
+}
+```
+
+---
+
+## Section 5 — Testing strategy
+
+### Module: `terraform-azurerm-aks-cluster/test/` (Terratest)
+
+```
+test/
+├── go.mod
+├── module_test.go
+├── go.sum
+└── fixtures/
+    └── disk-csi/
+        ├── storageclass.yaml      # provisioner: disk.csi.azure.com
+        ├── pvc.yaml
+        └── pod.yaml
+```
+
+One end-to-end test runs against `examples/complete/`:
+
+1. `terraform.InitAndApply()` against a throwaway RG `nebari-test-<rand>`.
+2. Write `test_override.tf.json` to force `private_cluster_enabled=false` etc.
+3. Fetch admin kubeconfig from outputs.
+4. `testManagedDiskCSI()` — apply `storageclass.yaml`, then `pvc.yaml`, then a pod that mounts the PVC. `k8s.WaitUntilPodAvailable()` proves the CSI driver is operational.
+5. `terraform.Destroy()` in `defer`.
+
+Cost guardrails: smallest viable AKS-supported VM size (`Standard_B2s`), single-node system pool, no user pools in the test fixture. Test cycle ~15–20 min.
+
+CI auth: Azure OIDC via `azure/login@v2` with repo secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+
+### NIC: `pkg/provider/azure/*_test.go` (Go unit tests)
+
+Table-driven, no cloud calls. Mocks live behind interfaces in `interfaces.go` (mirrors AWS's `EC2ClientAPI` / `EKSClientAPI` pattern).
+
+| File | Coverage |
+|---|---|
+| `config_test.go` | `Validate()`: missing region, no node groups, multiple System modes, conflicting BYO flags, bad CIDRs, kubernetes_version format. |
+| `tofu_test.go` | `toTFVars()` correctness: System pool stripped from user pools, `create_resource_group` logic, tag merging, pointer fields omitted when unset. |
+| `kubeconfig_test.go` | Builds expected kubeconfig YAML from mock `armcontainerservice` responses. |
+| `state_test.go` | Tag-filter query construction; orphan-vs-managed classification. |
+| `cleanup_test.go` | Cleanup ordering (PVCs/LBs before `MC_*` RG before main RG); idempotency. |
+| `provider_test.go` | Top-level Provider contract: Name(), Summary() keys, InfraSettings() values. |
+
+Integration tests behind build-tag `integration`, real Azure subscription only. Document in `pkg/provider/azure/INTEGRATION_TESTING.md` mirroring the AWS sibling. Not part of CI default; gated behind `workflow_dispatch`. **No LocalStack equivalent for Azure** — Azurite covers Storage only; AKS/ARM have no comparable emulator. Accepted constraint.
+
+---
+
+## Section 6 — CI, docs, release
+
+### `terraform-azurerm-aks-cluster/.github/workflows/ci.yml`
+
+Parallel jobs, trigger: PRs + push to main, path filter `**.tf`.
+
+| Job | Tool | Command |
+|---|---|---|
+| format | OpenTofu 1.11+ | `tofu fmt -check -recursive` |
+| validate | OpenTofu | `tofu init -backend=false && tofu validate` |
+| lint | TFLint v0.60+ with `terraform-linters/tflint-ruleset-azurerm` v0.30+ | `tflint --recursive` |
+| docs | `terraform-docs` GH action | `--output-check` against README.md |
+
+### `terraform-azurerm-aks-cluster/.github/workflows/test.yml`
+
+- Trigger: `workflow_dispatch`, PRs marked ready-for-review, push to main.
+- Auth: Azure OIDC.
+- Setup: OpenTofu 1.11+, Go 1.25+.
+- `make test`, 60-minute timeout.
+
+### `.tflint.hcl`
+
+```hcl
+plugin "terraform" { enabled = true, preset = "recommended" }
+plugin "azurerm"   { enabled = true, version = "0.30.0",
+                     source = "github.com/terraform-linters/tflint-ruleset-azurerm" }
+```
+
+### `.terraform-docs.yml`
+
+Identical to AWS sibling: README.md output between `BEGIN_TF_DOCS` markers; sections Header → Usage → Requirements → Providers → Modules → Resources → Inputs → Outputs.
+
+### `Makefile`
+
+Same target names as AWS — `init`, `install-tools`, `fmt`, `validate`, `lint`, `test`, `docs`, `clean`, `ci`.
+
+### Versioning + Registry
+
+Manual tagging matches the AWS sibling (no release automation). Bootstrap:
+
+1. After spec approval, push the new module repo `github.com/nebari-dev/terraform-azurerm-aks-cluster`.
+2. Tag `v0.1.0` once Phase 3 (module tests green) lands.
+3. Connect the repo to the Terraform Registry. Registry auto-publishes at `nebari-dev/aks-cluster/azurerm`. The Registry convention is `terraform-<provider>-<name>`. For Azure the Terraform provider name is `azurerm` (not `azure`), so the repo is `terraform-azurerm-aks-cluster`. The AWS sibling `terraform-aws-eks-cluster` follows the same convention because the AWS provider name is literally `aws`.
+4. Flip NIC's shim `source` from `git::…?ref=v0.1.0` to `nebari-dev/aks-cluster/azurerm` with `version = "0.1.0"`.
+
+### Pre-commit
+
+Same hooks as AWS module — `terraform_fmt`, `terraform_validate`, `terraform_docs`, `terraform_tflint`, trailing-whitespace, end-of-file-fixer, check-yaml, check-added-large-files (100KB), detect-private-key.
+
+### `.gitignore`, `LICENSE`
+
+Copy from AWS sibling. License BSD-3-Clause.
+
+### NIC repo CI
+
+No structural changes. Existing `golangci-lint run`, `make test`, race-detected tests, and Codecov cover the new files automatically.
+
+---
+
+## Section 7 — Implementation phasing
+
+Sequenced: module first, then NIC. NIC has nothing to consume until the module exists, so the work doesn't parallelize meaningfully.
+
+**Phase 1 — Module scaffolding (no Azure code).**
+Empty `terraform-azurerm-aks-cluster` repo with meta files (`versions.tf`, `Makefile`, `.tflint.hcl`, `.terraform-docs.yml`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`, `LICENSE`, `.gitignore`). Skeleton `main.tf` / `variables.tf` / `outputs.tf` / `locals.tf` / `providers.tf` with variable declarations but no resources. `tofu init` and `tofu validate` pass; CI green.
+
+**Phase 2 — Module resources.**
+Implement RG, VNet, subnet (with BYO toggles). AKS cluster + system node pool inline. User node pools loop. User-assigned kubelet identity + role assignments. `examples/complete/` and `examples/existing-resources/`. README auto-generated.
+
+**Phase 3 — Module tests.**
+`test/module_test.go` with Terratest; `fixtures/disk-csi/*.yaml`. `.github/workflows/test.yml` with Azure OIDC. End-to-end against a real subscription; disk-CSI test passes. Tag `v0.1.0`. Verify Registry auto-publishes.
+
+**Phase 4 — NIC Azure provider: scaffolding + config.**
+Extend `pkg/provider/azure/config.go` with full struct + `Validate()`. Add `pkg/provider/azure/templates/*`. Shim `source` initially `git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=v0.1.0`. `tofu.go` with `TFVars` + `toTFVars()`. Unit tests for config validation and `toTFVars`.
+
+**Phase 5 — NIC Azure provider: Deploy/Destroy.**
+Rewrite `provider.go`: real `Validate()` (env check, Azure auth probe), `Deploy()` and `Destroy()` via `pkg/tofu`. Status updates through `pkg/status`. `state.go` for tag-based discovery. `cleanup.go` for orphan-resource cleanup. Unit tests with mocked Azure SDK clients.
+
+**Phase 6 — NIC Azure provider: Kubeconfig + Summary + polish.**
+`kubeconfig.go` using `armcontainerservice.ManagedClustersClient.ListClusterAdminCredentials`. `Summary()` returns Region / ResourceGroup / ClusterName / NodeGroupCount. `InfraSettings()` finalized. `version.go` for AKS supported-versions negotiation. `examples/azure-config.yaml` updated to reflect final schema.
+
+**Phase 7 — Real-subscription end-to-end + docs.**
+Deploy via `nic deploy --config examples/azure-config.yaml` against a real subscription. Verify Nebari workloads can be installed on top using the standard GitOps flow. Destroy and confirm no leaked resources. Update NIC `ARCHITECTURE.md`, `WALKTHROUGH.md`, `CLAUDE.md` to drop "Azure stub" language and document the now-real provider.
+
+**Cross-repo coupling.** Phase 4 *can* start as soon as Phase 1 is done — NIC can point at `?ref=main` during dev — but Phase 3 → Phase 4 dependency on the tagged version is what unblocks Registry-based pinning. Both repos go to PR review independently.
+
+---
+
+## Open risks
+
+- **No emulator.** Azure has no LocalStack equivalent for AKS/ARM. Every integration test costs real money and real time. Mitigation: aggressive use of unit tests with mocked SDK interfaces; integration tests gated behind `workflow_dispatch`.
+- **Auto-created `MC_*` resource group.** AKS creates a hidden resource group `MC_<rg>_<cluster>_<region>` that holds the VMSS, LBs, disks, etc. `tofu destroy` should clean it, but if any out-of-band resources (Service-type=LoadBalancer, PVCs) were created, they can prevent RG deletion. `cleanup.go` handles this — listed as a load-bearing component for MVP.
+- **Registry auto-publish naming.** Repo must be named `terraform-azurerm-aks-cluster` (not `terraform-azure-...`) for auto-publish, because the Terraform provider name is `azurerm`. See Section 6.
+- **AKS preview features.** Network plugin mode "overlay" is GA; identity types and Workload Identity are GA. No preview-feature flags needed for MVP.
+
+## Acceptance criteria
+
+1. `terraform-azurerm-aks-cluster` published at `nebari-dev/aks-cluster/azurerm` v0.1.0; Terratest disk-CSI test passes in CI.
+2. `nic deploy --config examples/azure-config.yaml` (MVP example) deploys an AKS cluster end-to-end against a real Azure subscription.
+3. `nic kubeconfig` writes a working kubeconfig fetched from the cluster.
+4. `nic destroy` removes all NIC-tagged resources, including the auto-created `MC_*` RG.
+5. NIC unit tests pass; `golangci-lint run` is clean.
+6. `ARCHITECTURE.md` / `WALKTHROUGH.md` / `CLAUDE.md` reflect Azure as fully implemented (no "stub" language).
