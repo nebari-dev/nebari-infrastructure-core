@@ -7,7 +7,7 @@ import "embed"
 // alongside a generated terraform.tfvars.json.
 //
 //go:embed all:templates
-var tofuTemplates embed.FS //nolint:unused // consumed by provider.go in a follow-up task
+var tofuTemplates embed.FS
 
 // TFVars is the JSON marshalling layer between the parsed Config and OpenTofu.
 // Field names use snake_case to match the Terraform module variables. Pointer

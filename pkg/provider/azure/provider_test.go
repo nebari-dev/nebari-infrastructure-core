@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
 
 func TestProviderName(t *testing.T) {
@@ -59,6 +60,30 @@ func TestProviderValidateRequiresSubscriptionID(t *testing.T) {
 	err := p.Validate(context.Background(), "myproj", cc)
 	if err == nil {
 		t.Fatal("expected error when AZURE_SUBSCRIPTION_ID is unset")
+	}
+}
+
+func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
+	p := NewProvider()
+	cc := &config.ClusterConfig{
+		Providers: map[string]any{
+			"azure": map[string]any{
+				"region": "eastus",
+				"node_groups": map[string]any{
+					"s": map[string]any{
+						"instance":  "Standard_D2_v3",
+						"min_nodes": 1,
+						"max_nodes": 1,
+						"mode":      "System",
+					},
+				},
+			},
+		},
+	}
+	t.Setenv("AZURE_SUBSCRIPTION_ID", "")
+	err := p.Deploy(context.Background(), "p", cc, provider.DeployOptions{})
+	if err == nil {
+		t.Fatal("expected Deploy to fail without subscription ID")
 	}
 }
 

@@ -12,9 +12,13 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
-const subscriptionIDEnv = "AZURE_SUBSCRIPTION_ID"
+const (
+	subscriptionIDEnv    = "AZURE_SUBSCRIPTION_ID"
+	armSubscriptionIDEnv = "ARM_SUBSCRIPTION_ID"
+)
 
 // Provider implements the Azure cloud provider for NIC.
 type Provider struct{}
@@ -72,9 +76,75 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	return nil
 }
 
-// Deploy is implemented in Task 13.
+// Deploy provisions the Azure AKS cluster by invoking the embedded OpenTofu
+// shim. It writes terraform.tfvars.json from the parsed Config, runs
+// `tofu init` and `tofu apply`, and streams output through the status channel.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
-	return fmt.Errorf("azure.Deploy: not implemented in this commit")
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "azure.Deploy")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("provider", "azure"),
+		attribute.String("project_name", projectName),
+	)
+
+	cfg, err := p.parseConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	subID := os.Getenv(subscriptionIDEnv)
+	if subID == "" {
+		err := fmt.Errorf("%s environment variable is required", subscriptionIDEnv)
+		span.RecordError(err)
+		return err
+	}
+	// The azurerm provider reads ARM_SUBSCRIPTION_ID; map it from the
+	// user-facing AZURE_SUBSCRIPTION_ID so the tfexec child process picks it up.
+	if err := os.Setenv(armSubscriptionIDEnv, subID); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set %s: %w", armSubscriptionIDEnv, err)
+	}
+
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu setup: %w", err)
+	}
+	defer func() {
+		if cleanupErr := tf.Cleanup(); cleanupErr != nil {
+			span.RecordError(cleanupErr)
+		}
+	}()
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Initializing OpenTofu working directory").
+		WithResource("tofu").
+		WithAction("init").
+		WithMetadata("cluster_name", projectName))
+	if err := tf.Init(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu init: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Applying Terraform plan").
+		WithResource("tofu").
+		WithAction("apply").
+		WithMetadata("cluster_name", projectName))
+	if err := tf.Apply(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu apply: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Azure cluster deployed").
+		WithResource("cluster").
+		WithAction("deploy").
+		WithMetadata("cluster_name", projectName))
+	return nil
 }
 
 // Destroy is implemented in Task 14.
