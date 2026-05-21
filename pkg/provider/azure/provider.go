@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/hashicorp/terraform-exec/tfexec"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -111,6 +112,16 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return fmt.Errorf("set %s: %w", armSubscriptionIDEnv, err)
 	}
 
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring Terraform state backend resources").
+		WithResource("state-backend").
+		WithAction("bootstrap").
+		WithMetadata("cluster_name", projectName))
+	backend, err := ensureStateBackend(ctx, subID, cfg.Region, projectName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("bootstrap state backend: %w", err)
+	}
+
 	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
 	if err != nil {
 		span.RecordError(err)
@@ -126,7 +137,12 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		WithResource("tofu").
 		WithAction("init").
 		WithMetadata("cluster_name", projectName))
-	if err := tf.Init(ctx); err != nil {
+	if err := tf.Init(ctx,
+		tfexec.BackendConfig(fmt.Sprintf("resource_group_name=%s", backend.RGName)),
+		tfexec.BackendConfig(fmt.Sprintf("storage_account_name=%s", backend.SAName)),
+		tfexec.BackendConfig(fmt.Sprintf("container_name=%s", backend.Container)),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", backend.Key)),
+	); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu init: %w", err)
 	}
