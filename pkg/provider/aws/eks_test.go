@@ -128,11 +128,26 @@ func TestFetchEKSKubeconfig_MissingCertificateAuthorityFails(t *testing.T) {
 	}
 }
 
+// setKubeconfigCacheEntry writes an entry under the provider's lock
+func setKubeconfigCacheEntry(p *Provider, key kubeconfigCacheKey, val []byte) {
+	p.kubeconfigMu.Lock()
+	p.kubeconfigCache[key] = val
+	p.kubeconfigMu.Unlock()
+}
+
+// hasKubeconfigCacheEntry reads under the provider's read lock
+func hasKubeconfigCacheEntry(p *Provider, key kubeconfigCacheKey) bool {
+	p.kubeconfigMu.RLock()
+	defer p.kubeconfigMu.RUnlock()
+	_, ok := p.kubeconfigCache[key]
+	return ok
+}
+
 func TestGetKubeconfig_ReturnsCachedValueWithoutHittingAWS(t *testing.T) {
 	p := NewProvider()
 	cached := []byte("preloaded-kubeconfig-bytes")
 	key := kubeconfigCacheKey{projectName: "proj", region: "us-west-2"}
-	p.kubeconfigCache[key] = cached
+	setKubeconfigCacheEntry(p, key, cached)
 
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{"aws": map[string]any{"region": "us-west-2"}},
@@ -150,11 +165,11 @@ func TestGetKubeconfig_ReturnsCachedValueWithoutHittingAWS(t *testing.T) {
 func TestInvalidateKubeconfigCache_RemovesEntry(t *testing.T) {
 	p := NewProvider()
 	key := kubeconfigCacheKey{projectName: "proj", region: "us-west-2"}
-	p.kubeconfigCache[key] = []byte("anything")
+	setKubeconfigCacheEntry(p, key, []byte("anything"))
 
 	p.invalidateKubeconfigCache("proj", "us-west-2")
 
-	if _, ok := p.kubeconfigCache[key]; ok {
+	if hasKubeconfigCacheEntry(p, key) {
 		t.Fatalf("expected cache entry to be removed, but it is still present")
 	}
 }
@@ -163,15 +178,15 @@ func TestInvalidateKubeconfigCache_OnlyTouchesMatchingKey(t *testing.T) {
 	p := NewProvider()
 	keyFoo := kubeconfigCacheKey{projectName: "foo", region: "us-west-2"}
 	keyBar := kubeconfigCacheKey{projectName: "bar", region: "us-west-2"}
-	p.kubeconfigCache[keyFoo] = []byte("foo-bytes")
-	p.kubeconfigCache[keyBar] = []byte("bar-bytes")
+	setKubeconfigCacheEntry(p, keyFoo, []byte("foo-bytes"))
+	setKubeconfigCacheEntry(p, keyBar, []byte("bar-bytes"))
 
 	p.invalidateKubeconfigCache("foo", "us-west-2")
 
-	if _, ok := p.kubeconfigCache[keyFoo]; ok {
+	if hasKubeconfigCacheEntry(p, keyFoo) {
 		t.Fatalf("foo entry should be gone")
 	}
-	if _, ok := p.kubeconfigCache[keyBar]; !ok {
+	if !hasKubeconfigCacheEntry(p, keyBar) {
 		t.Fatalf("bar entry should still be present")
 	}
 }
