@@ -16,6 +16,15 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+const (
+	// ProviderName is the identifier for the local provider.
+	ProviderName = "local"
+	// defaultStorageClass is the StorageClass name K3s installs by default.
+	defaultStorageClass = "standard"
+	// defaultMetalLBAddressPool is the address range for the default MetalLB pool.
+	defaultMetalLBAddressPool = "192.168.1.100-192.168.1.110"
+)
+
 // Provider implements the local K3s provider
 type Provider struct{}
 
@@ -26,7 +35,7 @@ func NewProvider() *Provider {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "local"
+	return ProviderName
 }
 
 // Validate validates the local configuration
@@ -36,7 +45,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -119,7 +128,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -153,7 +162,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.Cl
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -171,7 +180,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", "local"),
+		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", projectName),
 	)
 
@@ -267,10 +276,42 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns local provider Kubernetes infrastructure settings.
-func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
-	return provider.InfraSettings{
-		StorageClass:       "standard",
-		NeedsMetalLB:       true,
-		MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+// Values are read from the local provider config block, falling back to defaults.
+// Parse errors are intentionally ignored: InfraSettings is called after Validate()
+// has confirmed the config is parseable. If it somehow fails (e.g., nil config in
+// tests), we return valid defaults.
+func (p *Provider) InfraSettings(cfg *config.ClusterConfig) provider.InfraSettings {
+	settings := provider.InfraSettings{
+		StorageClass:        defaultStorageClass,
+		NeedsMetalLB:        true,
+		MetalLBAddressPool:  defaultMetalLBAddressPool,
+		SupportsLocalGitOps: true,
 	}
+
+	rawCfg := cfg.ProviderConfig()
+	if rawCfg == nil {
+		return settings
+	}
+
+	var localCfg Config
+	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &localCfg); err != nil {
+		return settings
+	}
+
+	if localCfg.StorageClass != "" {
+		settings.StorageClass = localCfg.StorageClass
+	}
+	if localCfg.HTTPSPort != 0 {
+		settings.HTTPSPort = localCfg.HTTPSPort
+	}
+	if localCfg.MetalLB != nil {
+		if localCfg.MetalLB.Enabled != nil {
+			settings.NeedsMetalLB = *localCfg.MetalLB.Enabled
+		}
+		if localCfg.MetalLB.AddressPool != "" {
+			settings.MetalLBAddressPool = localCfg.MetalLB.AddressPool
+		}
+	}
+
+	return settings
 }

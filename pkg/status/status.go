@@ -9,7 +9,7 @@ import (
 
 const (
 	// DefaultChannelSize is the default buffer size for the status channel
-	DefaultChannelSize = 100
+	DefaultChannelSize = 1000
 
 	// DefaultFlushTimeout is the default timeout for flushing remaining messages on shutdown
 	DefaultFlushTimeout = 5 * time.Second

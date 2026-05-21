@@ -41,8 +41,10 @@ func TestInfraSettings(t *testing.T) {
 	}{
 		{"StorageClass", settings.StorageClass, "longhorn"},
 		{"NeedsMetalLB", settings.NeedsMetalLB, false},
-		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
+		{"LB type annotation", settings.LoadBalancerAnnotations["service.beta.kubernetes.io/aws-load-balancer-type"], "external"},
+		{"LB target-type annotation", settings.LoadBalancerAnnotations["service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"], "ip"},
+		{"LB scheme annotation", settings.LoadBalancerAnnotations["service.beta.kubernetes.io/aws-load-balancer-scheme"], "internet-facing"},
 	}
 
 	for _, tt := range tests {

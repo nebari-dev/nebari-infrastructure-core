@@ -32,3 +32,25 @@ func TestAWSConfigLonghornDefaults(t *testing.T) {
 		}
 	})
 }
+
+// getNestedValue walks a dotted path through a nested map[string]any and
+// returns the leaf value, or nil if any segment is missing or not a map.
+// Test helper shared by aws_load_balancer_controller_test.go.
+func getNestedValue(m map[string]any, path string) any {
+	var current any = m
+	start := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '.' {
+			cm, ok := current.(map[string]any)
+			if !ok {
+				return nil
+			}
+			current, ok = cm[path[start:i]]
+			if !ok {
+				return nil
+			}
+			start = i + 1
+		}
+	}
+	return current
+}

@@ -61,14 +61,14 @@ spec:
 `
 
 // ApplyRootAppOfApps applies the root App-of-Apps Application which triggers
-// ArgoCD to sync all child applications from the git repository.
+// ArgoCD to sync all child applications from the git repository or local path.
 func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ApplyRootAppOfApps")
 	defer span.End()
 
 	if cfg.GitRepository == nil {
-		return fmt.Errorf("git repository configuration is required for root App-of-Apps")
+		return fmt.Errorf("git configuration is required for root App-of-Apps")
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Applying root App-of-Apps").

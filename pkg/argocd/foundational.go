@@ -28,12 +28,18 @@ const (
 
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
+
+	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
+	NebariFoundationalPartOf = "nebari-foundational"
 )
 
 // FoundationalConfig holds configuration for foundational services
 type FoundationalConfig struct {
 	// Keycloak configuration
 	Keycloak KeycloakConfig
+
+	// ArgoCD SSO configuration
+	ArgoCD ArgoCDSSOConfig
 
 	// LandingPage configuration
 	LandingPage LandingPageConfig
@@ -66,6 +72,11 @@ type MetalLBConfig struct {
 	AddressPool string // e.g., "192.168.1.100-192.168.1.110"
 }
 
+// ArgoCDSSOConfig holds ArgoCD SSO configuration
+type ArgoCDSSOConfig struct {
+	ClientSecret string // Pre-generated OIDC client secret for ArgoCD's Keycloak integration
+}
+
 // InstallFoundationalServices installs foundational services via GitOps.
 // This function handles the bootstrap phase:
 // 1. Creates the ArgoCD Project for foundational services
@@ -73,7 +84,7 @@ type MetalLBConfig struct {
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
-// via ArgoCD from the git repository.
+// via ArgoCD from the git repository. cfg.GitRepository may be either remote or local file:// path.
 func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
@@ -122,7 +133,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 
 		// Create secrets for Keycloak and PostgreSQL
-		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak); err != nil {
+		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak, foundationalCfg.ArgoCD); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
 		}
@@ -140,7 +151,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 	}
 
-	// 3. Apply root App-of-Apps if git repository is configured
+	// 3. Apply root App-of-Apps if git configuration is available
 	if cfg.GitRepository != nil {
 		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, cfg); err != nil {
 			span.RecordError(err)
@@ -220,7 +231,7 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 }
 
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
-func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig) error {
+func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig, argocdSSO ArgoCDSSOConfig) error {
 	namespace := KeycloakDefaultNamespace
 
 	// 1. Create admin credentials secret
@@ -274,7 +285,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    "nebari-foundational",
+					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
 					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
 				},
 			},
@@ -282,6 +293,26 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			StringData: map[string]string{
 				"username": keycloakCfg.RealmAdminUsername,
 				"password": keycloakCfg.RealmAdminPassword,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
+	// 5. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
+	if argocdSSO.ClientSecret != "" {
+		if err := createSecret(ctx, client, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-oidc-client-secret",
+				Namespace: namespace,
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
+					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"client-secret": argocdSSO.ClientSecret,
 			},
 		}); err != nil {
 			return err
@@ -302,7 +333,7 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    "nebari-foundational",
+				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
 				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
 			},
 		},

@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	repoName  = "argo"
-	repoURL   = "https://argoproj.github.io/argo-helm"
-	chartName = "argo/argo-cd"
+	repoName       = "argo"
+	repoURL        = "https://argoproj.github.io/argo-helm"
+	chartName      = "argo/argo-cd"
+	versionUnknown = "unknown"
 )
 
 // shouldSkipUpgrade determines if a Helm upgrade can be skipped because
@@ -38,10 +39,10 @@ func shouldSkipUpgrade(current *release.Release, targetVersion string) bool {
 }
 
 // getCurrentVersion safely extracts the chart version from a Helm release.
-// Returns "unknown" if the release, chart, or metadata is nil.
+// Returns versionUnknown if the release, chart, or metadata is nil.
 func getCurrentVersion(current *release.Release) string {
 	if current == nil || current.Chart == nil || current.Chart.Metadata == nil {
-		return "unknown"
+		return versionUnknown
 	}
 	return current.Chart.Metadata.Version
 }
