@@ -93,6 +93,10 @@ func ensureStateBackend(ctx context.Context, subscriptionID, location, projectNa
 		span.RecordError(err)
 		return stateBackendConfig{}, err
 	}
+	if err := ensureStateBlobVersioning(ctx, subscriptionID, cfg.RGName, cfg.SAName, cred); err != nil {
+		span.RecordError(err)
+		return stateBackendConfig{}, err
+	}
 	if err := ensureStateContainer(ctx, subscriptionID, cfg.RGName, cfg.SAName, cfg.Container, cred); err != nil {
 		span.RecordError(err)
 		return stateBackendConfig{}, err
@@ -164,6 +168,30 @@ func ensureStateStorageAccount(ctx context.Context, subscriptionID, location, rg
 	}
 	if _, err := poller.PollUntilDone(ctx, nil); err != nil {
 		return fmt.Errorf("create storage account %q: %w", saName, err)
+	}
+	return nil
+}
+
+// ensureStateBlobVersioning enables blob versioning on the storage account
+// backing Terraform state, matching AWS's S3 versioning posture. Blob
+// versioning is the Azure equivalent of S3 object versioning: every overwrite
+// of a state blob preserves the previous version, providing a recovery path
+// if a tofu apply produces a corrupt state file. The call is idempotent —
+// setting IsVersioningEnabled=true when it's already enabled is a no-op on
+// the service side.
+func ensureStateBlobVersioning(ctx context.Context, subscriptionID, rgName, saName string, cred azcore.TokenCredential) error {
+	client, err := armstorage.NewBlobServicesClient(subscriptionID, cred, nil)
+	if err != nil {
+		return fmt.Errorf("create blob services client: %w", err)
+	}
+
+	_, err = client.SetServiceProperties(ctx, rgName, saName, armstorage.BlobServiceProperties{
+		BlobServiceProperties: &armstorage.BlobServicePropertiesProperties{
+			IsVersioningEnabled: to.Ptr(true),
+		},
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("enable blob versioning on %q: %w", saName, err)
 	}
 	return nil
 }
