@@ -35,20 +35,38 @@ func newEKSClient(ctx context.Context, region string) (EKSClient, error) {
 // the returned endpoint and certificate authority data. ResourceNotFound is
 // translated into a friendly "run 'deploy' first" error.
 func fetchEKSKubeconfig(ctx context.Context, client EKSClient, clusterName, region string) ([]byte, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.fetchEKSKubeconfig")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.String(attrKeyRegion, region),
+	)
+
 	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{
 		Name: &clusterName,
 	})
 	if err != nil {
 		var notFound *ekstypes.ResourceNotFoundException
 		if errors.As(err, &notFound) {
-			return nil, fmt.Errorf("cluster %q not found in region %q: run 'deploy' first", clusterName, region)
+			err := fmt.Errorf("cluster %q not found in region %q: run 'deploy' first", clusterName, region)
+			span.RecordError(err)
+			return nil, err
 		}
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to describe EKS cluster: %w", err)
 	}
 
 	if out.Cluster == nil || out.Cluster.Endpoint == nil || out.Cluster.CertificateAuthority == nil || out.Cluster.CertificateAuthority.Data == nil {
-		return nil, fmt.Errorf("cluster %q is not ready: endpoint or CA data missing", clusterName)
+		err := fmt.Errorf("cluster %q is not ready: endpoint or CA data missing", clusterName)
+		span.RecordError(err)
+		return nil, err
 	}
 
-	return buildKubeconfig(clusterName, *out.Cluster.Endpoint, *out.Cluster.CertificateAuthority.Data, region)
+	kubeconfigBytes, err := buildKubeconfig(clusterName, *out.Cluster.Endpoint, *out.Cluster.CertificateAuthority.Data, region)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	return kubeconfigBytes, nil
 }
