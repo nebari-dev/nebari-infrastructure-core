@@ -2,8 +2,9 @@ package azure
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -13,126 +14,95 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// Provider implements the Azure provider
+const subscriptionIDEnv = "AZURE_SUBSCRIPTION_ID"
+
+// Provider implements the Azure cloud provider for NIC.
 type Provider struct{}
 
-// NewProvider creates a new Azure provider
+// NewProvider returns a fresh Azure provider. Registered in cmd/nic/main.go.
 func NewProvider() *Provider {
 	return &Provider{}
 }
 
-// Name returns the provider name
-func (p *Provider) Name() string {
-	return "azure"
+// Name returns the provider name used in cluster.azure: dispatch.
+func (p *Provider) Name() string { return "azure" }
+
+func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
+	raw := clusterConfig.ProviderConfig()
+	if raw == nil {
+		return nil, fmt.Errorf("cluster.azure block is missing")
+	}
+	var cfg Config
+	if err := config.UnmarshalProviderConfig(ctx, raw, &cfg); err != nil {
+		return nil, fmt.Errorf("parse azure config: %w", err)
+	}
+	return &cfg, nil
 }
 
-// Validate validates the Azure configuration (stub implementation)
-func (p *Provider) Validate(ctx context.Context, projectName string, _ *config.ClusterConfig) error {
+// Validate checks config integrity and probes Azure auth via env vars.
+func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "azure.Validate")
+	ctx, span := tracer.Start(ctx, "azure.Validate")
 	defer span.End()
-
 	span.SetAttributes(
 		attribute.String("provider", "azure"),
 		attribute.String("project_name", projectName),
 	)
 
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Validating Azure provider configuration").
+	cfg, err := p.parseConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if os.Getenv(subscriptionIDEnv) == "" {
+		err := fmt.Errorf("%s environment variable is required", subscriptionIDEnv)
+		span.RecordError(err)
+		return err
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Azure configuration validated").
 		WithResource("provider").
 		WithAction("validate").
 		WithMetadata("cluster_name", projectName))
 	return nil
 }
 
-// Deploy deploys Azure infrastructure (stub implementation)
+// Deploy is implemented in Task 13.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "azure.Deploy")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "azure"),
-		attribute.String("project_name", projectName),
-	)
-
-	if rawCfg := clusterConfig.ProviderConfig(); rawCfg != nil {
-		var azureCfg Config
-		if err := config.UnmarshalProviderConfig(ctx, rawCfg, &azureCfg); err == nil {
-			span.SetAttributes(attribute.String("azure.region", azureCfg.Region))
-		}
-	}
-
-	// Marshal config to JSON for status message
-	configJSON, err := json.MarshalIndent(clusterConfig, "", "  ")
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Azure provider deployment (stub)").
-		WithResource("provider").
-		WithAction("deploy").
-		WithMetadata("cluster_name", projectName).
-		WithMetadata("config", string(configJSON)))
-
-	return nil
+	return fmt.Errorf("azure.Deploy: not implemented in this commit")
 }
 
-// Destroy tears down Azure infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, _ provider.DestroyOptions) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "azure.Destroy")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "azure"),
-		attribute.String("project_name", projectName),
-	)
-
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Azure provider infrastructure (stub)").
-		WithResource("provider").
-		WithAction("destroy").
-		WithMetadata("cluster_name", projectName))
-	return nil
+// Destroy is implemented in Task 14.
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DestroyOptions) error {
+	return fmt.Errorf("azure.Destroy: not implemented in this commit")
 }
 
-// GetKubeconfig generates a kubeconfig file (stub implementation)
-func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *config.ClusterConfig) ([]byte, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "azure.GetKubeconfig")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("provider", "azure"),
-		attribute.String("cluster_name", projectName),
-	)
-
-	status.Send(ctx, status.NewUpdate(status.LevelWarning, "GetKubeconfig not yet implemented for Azure provider").
-		WithResource("provider").
-		WithAction("get-kubeconfig").
-		WithMetadata("cluster_name", projectName))
-	return nil, fmt.Errorf("GetKubeconfig not yet implemented")
+// GetKubeconfig is implemented in Task 17.
+func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
+	return nil, fmt.Errorf("azure.GetKubeconfig: not implemented in this commit")
 }
 
-// Summary returns key configuration details for display purposes
+// Summary returns display-only metadata about the cluster from config.
 func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
-	result := make(map[string]string)
-
-	rawCfg := clusterConfig.ProviderConfig()
-	if rawCfg == nil {
-		return result
+	out := make(map[string]string)
+	cfg, err := p.parseConfig(context.Background(), clusterConfig)
+	if err != nil {
+		return out
 	}
-
-	var azureCfg Config
-	if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &azureCfg); err != nil {
-		return result
+	out["Region"] = cfg.Region
+	if cfg.ResourceGroupName != "" {
+		out["ResourceGroup"] = cfg.ResourceGroupName
 	}
-
-	result["Region"] = azureCfg.Region
-	return result
+	out["NodeGroupCount"] = strconv.Itoa(len(cfg.NodeGroups))
+	return out
 }
 
-// InfraSettings returns Azure-specific Kubernetes infrastructure settings.
+// InfraSettings returns Azure-specific Kubernetes infra settings.
 func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
 	return provider.InfraSettings{
 		StorageClass: "managed-csi",
