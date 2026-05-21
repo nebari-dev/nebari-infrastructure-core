@@ -1,6 +1,10 @@
 package aws
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
+)
 
 func TestToTFVarsLonghornSGRules(t *testing.T) {
 	tests := []struct {
@@ -25,7 +29,7 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 				Region:            "us-west-2",
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
-				Longhorn:          &LonghornConfig{Enabled: boolPtr(true)},
+				Longhorn:          &longhorn.Config{Enabled: boolPtr(true)},
 			},
 			wantRuleCount: 2,
 			wantRuleKeys:  []string{"longhorn_webhook_admission", "longhorn_webhook_conversion"},
@@ -36,7 +40,7 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 				Region:            "us-west-2",
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
-				Longhorn:          &LonghornConfig{Enabled: boolPtr(false)},
+				Longhorn:          &longhorn.Config{Enabled: boolPtr(false)},
 			},
 			wantRuleCount: 0,
 		},

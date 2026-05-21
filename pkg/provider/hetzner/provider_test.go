@@ -28,7 +28,7 @@ func TestProvider_InfraSettings(t *testing.T) {
 		wantMLB bool
 	}{
 		{
-			name: "default settings with location",
+			name: "default settings with location use longhorn",
 			cfg: &config.ClusterConfig{
 				Providers: map[string]any{
 					"hetzner": map[string]any{
@@ -36,17 +36,32 @@ func TestProvider_InfraSettings(t *testing.T) {
 					},
 				},
 			},
-			wantSC:  "hcloud-volumes",
+			wantSC:  "longhorn",
 			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
 			wantMLB: false,
 		},
 		{
-			name: "nil provider config uses defaults",
+			name: "empty provider config defaults to longhorn",
 			cfg: &config.ClusterConfig{
 				Providers: map[string]any{"hetzner": map[string]any{}},
 			},
+			wantSC:  "longhorn",
+			wantKBP: "",
+			wantMLB: false,
+		},
+		{
+			name: "longhorn explicitly disabled falls back to hcloud-volumes",
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{
+					"hetzner": map[string]any{
+						"location": "ash",
+						"longhorn": map[string]any{"enabled": false},
+					},
+				},
+			},
 			wantSC:  "hcloud-volumes",
+			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
 			wantMLB: false,
 		},

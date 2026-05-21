@@ -14,6 +14,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -25,9 +26,6 @@ const (
 	// This includes VPC, IAM, EKS cluster, and node group operations
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
-
-	// storageClassLonghorn is the StorageClass name used when Longhorn is enabled.
-	storageClassLonghorn = "longhorn"
 
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
@@ -322,7 +320,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 
-		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+		if err := longhorn.Install(ctx, kubeconfigBytes, awsCfg.Longhorn); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
 		}
@@ -540,6 +538,27 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
+	// Longhorn-backed PVs left in the cluster can block EKS node group
+	// deletion via CSI finalizers.
+	if awsCfg.LonghornEnabled() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("longhorn").WithAction("uninstalling"))
+		default:
+			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
+					WithResource("longhorn").WithAction("uninstalling"))
+			}
+		}
+	}
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
@@ -699,7 +718,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // aws-load-balancer-scheme=internet-facing, LBC creates an internal NLB by
 // default, which is not reachable from outside the VPC.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	sc := storageClassLonghorn
+	sc := longhorn.StorageClassName
 	var efsSC string
 
 	rawCfg := clusterConfig.ProviderConfig()

@@ -1,6 +1,10 @@
 package aws
 
-import "time"
+import (
+	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
+)
 
 type Config struct {
 	Region                    string                           `yaml:"region"`
@@ -21,7 +25,7 @@ type Config struct {
 	NodeGroups                map[string]NodeGroup             `yaml:"node_groups"`
 	Tags                      map[string]string                `yaml:"tags,omitempty"`
 	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
-	Longhorn                  *LonghornConfig                  `yaml:"longhorn,omitempty"`
+	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 }
 
@@ -87,25 +91,23 @@ type Taint struct {
 }
 
 // LonghornEnabled returns whether Longhorn distributed block storage should
-// be deployed on this AWS cluster. Defaults to true when the Longhorn config
-// is nil or Enabled is not set.
+// be deployed on this AWS cluster. Defaults to true when the Longhorn block
+// is omitted entirely — Longhorn is the AWS storage default. The shared
+// longhorn.Config defaults to disabled-when-nil because non-AWS providers
+// require an explicit opt-in.
 func (c *Config) LonghornEnabled() bool {
 	if c.Longhorn == nil {
 		return true
 	}
-	if c.Longhorn.Enabled == nil {
-		return true
-	}
-	return *c.Longhorn.Enabled
+	return c.Longhorn.IsEnabled()
 }
 
 // LonghornReplicaCount returns the number of Longhorn volume replicas.
-// Defaults to 2 when not set.
+// Safe to call when c.Longhorn is nil — Replicas() is a nil-receiver method
+// and returns the package default (this matches the LonghornEnabled() == true
+// path when no longhorn block is configured on AWS).
 func (c *Config) LonghornReplicaCount() int {
-	if c.Longhorn == nil || c.Longhorn.ReplicaCount == 0 {
-		return 2
-	}
-	return c.Longhorn.ReplicaCount
+	return c.Longhorn.Replicas()
 }
 
 type EFSConfig struct {
@@ -128,11 +130,4 @@ func (c *Config) EFSStorageClassName() string {
 		return defaultEFSStorageClassName
 	}
 	return c.EFS.StorageClassName
-}
-
-type LonghornConfig struct {
-	Enabled        *bool             `yaml:"enabled,omitempty"`
-	ReplicaCount   int               `yaml:"replica_count,omitempty"`
-	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
-	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
 }
