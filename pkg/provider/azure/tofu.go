@@ -50,3 +50,93 @@ type TFNodeGroup struct {
 	Taints       []string          `json:"taints,omitempty"`
 	Zones        []string          `json:"zones,omitempty"`
 }
+
+const (
+	tagClusterName = "nic.nebari.dev/cluster-name"
+	tagManagedBy   = "nic.nebari.dev/managed-by"
+)
+
+// toTFVars converts a parsed Config into the JSON-friendly TFVars accepted by
+// the embedded Terraform shim. Performs three transforms:
+//  1. Default each node group's Mode to "User" if empty.
+//  2. Resolve create_resource_group / create_vnet flags from BYO presence.
+//  3. Inject NIC-required tags for tag-based discovery.
+func (c *Config) toTFVars(projectName string) TFVars {
+	vars := TFVars{
+		ProjectName:           projectName,
+		Location:              c.Region,
+		Tags:                  mergeTags(c.Tags, projectName),
+		CreateResourceGroup:   c.CreateResourceGroup == nil && c.ResourceGroupName == "" || (c.CreateResourceGroup != nil && *c.CreateResourceGroup),
+		CreateVNet:            c.Network == nil || c.Network.ExistingVNetID == "",
+		NetworkPlugin:         "azure",
+		NetworkPluginMode:     "overlay",
+		PrivateClusterEnabled: c.PrivateClusterEnabled,
+		AuthorizedIPRanges:    c.AuthorizedIPRanges,
+		SKUTier:               defaultIfEmpty(c.SKUTier, "Free"),
+		IdentityType:          "SystemAssigned",
+		NodeGroups:            convertNodeGroups(c.NodeGroups),
+	}
+
+	if c.ResourceGroupName != "" {
+		vars.CreateResourceGroup = false
+		vars.ExistingResourceGroupName = &c.ResourceGroupName
+	}
+
+	if c.KubernetesVersion != "" {
+		vars.KubernetesVersion = &c.KubernetesVersion
+	}
+
+	if c.Network != nil {
+		vars.VNetCIDRBlock = c.Network.VNetCIDRBlock
+		vars.NodeSubnetCIDRBlock = c.Network.NodeSubnetCIDRBlock
+		vars.PodCIDR = c.Network.PodCIDR
+		vars.ServiceCIDR = c.Network.ServiceCIDR
+		vars.DNSServiceIP = c.Network.DNSServiceIP
+		if c.Network.ExistingVNetID != "" {
+			vars.ExistingVNetID = &c.Network.ExistingVNetID
+		}
+		if c.Network.ExistingNodeSubnetID != "" {
+			vars.ExistingNodeSubnetID = &c.Network.ExistingNodeSubnetID
+		}
+	}
+
+	return vars
+}
+
+func convertNodeGroups(in map[string]NodeGroup) map[string]TFNodeGroup {
+	out := make(map[string]TFNodeGroup, len(in))
+	for name, ng := range in {
+		mode := ng.Mode
+		if mode == "" {
+			mode = "User"
+		}
+		out[name] = TFNodeGroup{
+			VMSize:       ng.Instance,
+			MinCount:     ng.MinNodes,
+			MaxCount:     ng.MaxNodes,
+			Mode:         mode,
+			OSDiskSizeGB: ng.OSDiskSizeGB,
+			Labels:       ng.Labels,
+			Taints:       ng.Taints,
+			Zones:        ng.Zones,
+		}
+	}
+	return out
+}
+
+func mergeTags(user map[string]string, projectName string) map[string]string {
+	out := make(map[string]string, len(user)+2)
+	for k, v := range user {
+		out[k] = v
+	}
+	out[tagClusterName] = projectName
+	out[tagManagedBy] = "nic"
+	return out
+}
+
+func defaultIfEmpty(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
