@@ -445,7 +445,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	// Drop any cached kubeconfig for this cluster at the end on every
 	// exit path (success, error, panic), so callers reusing the same
-	// Provider after a destroy don't get a stale entry The call is 
+	// Provider after a destroy don't get a stale entry The call is
 	// idempotent: a missing entry is a no-op.
 	if !opts.DryRun {
 		defer p.invalidateKubeconfigCache(projectName, region)
