@@ -60,7 +60,7 @@ The final repo will contain:
 | `.terraform-docs.yml` | terraform-docs config (README injection) |
 | `.pre-commit-config.yaml` | Pre-commit hooks |
 | `Makefile` | `init/fmt/validate/lint/test/docs/clean/ci` targets |
-| `.gitignore`, `LICENSE`, `README.md` | Repo meta |
+| `.gitignore`, `LICENSE` (Apache 2.0), `README.md` | Repo meta |
 
 ---
 
@@ -110,9 +110,9 @@ test/.terraform.lock.hcl
 *.swp
 ```
 
-- [ ] **Step 2: Add `LICENSE` (BSD-3-Clause matching AWS sibling)**
+- [ ] **Step 2: Add `LICENSE` (Apache 2.0 matching AWS sibling)**
 
-Copy verbatim from `~/gh/terraform-aws-eks-cluster/LICENSE`, only changing the year (`2026`) and copyright holder line if needed.
+Copy verbatim from `~/gh/terraform-aws-eks-cluster/LICENSE`. The AWS sibling uses the unmodified Apache License 2.0 template; no year/copyright-holder edits are needed.
 
 ```bash
 cp ~/gh/terraform-aws-eks-cluster/LICENSE ~/gh/terraform-azurerm-aks-cluster/LICENSE
