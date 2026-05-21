@@ -19,8 +19,6 @@ func buildTagFilter(projectName string) string {
 
 // listTaggedResources enumerates resources matching the NIC cluster tags.
 // Returns IDs suitable for cleanup.
-//
-//nolint:unused // consumed by cleanup.go in Task 16
 func listTaggedResources(ctx context.Context, client resourcesAPI, projectName string) ([]string, error) {
 	pager := client.NewListPager(&armresources.ClientListOptions{
 		Filter: to.Ptr(buildTagFilter(projectName)),

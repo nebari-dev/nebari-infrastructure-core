@@ -39,8 +39,6 @@ type managedClusterVersionsAPI interface {
 }
 
 // resourcesAPI is the subset of armresources.Client used by state.go / cleanup.go.
-//
-//nolint:unused // consumed by cleanup.go in Task 16
 type resourcesAPI interface {
 	NewListPager(
 		options *armresources.ClientListOptions,

@@ -164,8 +164,9 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 }
 
 // Destroy tears down the Azure AKS cluster by running `tofu destroy` against
-// the same state backend used by Deploy. Orphan-resource cleanup via the
-// Azure SDKs (mirroring AWS's cleanup.go) lands in Task 16.
+// the same state backend used by Deploy. After tofu completes, cleanupOrphans
+// reports any tagged resources tofu missed (e.g., AKS-managed MC_* siblings)
+// as a non-fatal warning so users can clean them up manually.
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Destroy")
@@ -243,6 +244,14 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	if err := tf.Destroy(ctx); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu destroy: %w", err)
+	}
+
+	// Best-effort orphan check (non-fatal — user can rerun nic destroy or az resource delete).
+	if err := cleanupOrphans(ctx, subID, projectName); err != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Orphan cleanup encountered issues").
+			WithResource("cleanup").
+			WithAction("destroy").
+			WithMetadata("error", err.Error()))
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Azure cluster destroyed").
