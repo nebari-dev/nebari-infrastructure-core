@@ -11,8 +11,6 @@ import (
 // managedClustersAPI is the subset of armcontainerservice.ManagedClustersClient
 // that the Azure provider uses. Tests inject a fake; production wires the real
 // client in NewProvider.
-//
-//nolint:unused // consumed by provider.go in Tasks 12-18
 type managedClustersAPI interface {
 	ListClusterAdminCredentials(
 		ctx context.Context,

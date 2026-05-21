@@ -267,9 +267,27 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	return nil
 }
 
-// GetKubeconfig is implemented in Task 17.
+// GetKubeconfig fetches the admin kubeconfig for the AKS cluster via the
+// armcontainerservice SDK (no shelling out to `az`).
 func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
-	return nil, fmt.Errorf("azure.GetKubeconfig: not implemented in this commit")
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "azure.GetKubeconfig")
+	defer span.End()
+	span.SetAttributes(attribute.String("provider", "azure"), attribute.String("project_name", projectName))
+
+	cfg, err := p.parseConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	kc, err := fetchKubeconfigForCluster(ctx, cfg, projectName)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Kubeconfig fetched from AKS API").
+		WithResource("cluster").WithAction("get-kubeconfig").WithMetadata("cluster_name", projectName))
+	return kc, nil
 }
 
 // Summary returns display-only metadata about the cluster from config.
