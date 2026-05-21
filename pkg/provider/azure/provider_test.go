@@ -87,6 +87,30 @@ func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
 	}
 }
 
+func TestProviderDestroyFailsWithoutSubscription(t *testing.T) {
+	p := NewProvider()
+	cc := &config.ClusterConfig{
+		Providers: map[string]any{
+			"azure": map[string]any{
+				"region": "eastus",
+				"node_groups": map[string]any{
+					"s": map[string]any{
+						"instance":  "Standard_D2_v3",
+						"min_nodes": 1,
+						"max_nodes": 1,
+						"mode":      "System",
+					},
+				},
+			},
+		},
+	}
+	t.Setenv("AZURE_SUBSCRIPTION_ID", "")
+	err := p.Destroy(context.Background(), "p", cc, provider.DestroyOptions{})
+	if err == nil {
+		t.Fatal("expected Destroy to fail without subscription ID")
+	}
+}
+
 func TestProviderInfraSettings(t *testing.T) {
 	p := NewProvider()
 	settings := p.InfraSettings(nil)

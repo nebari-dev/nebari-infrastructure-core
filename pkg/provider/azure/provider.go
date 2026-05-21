@@ -163,9 +163,93 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	return nil
 }
 
-// Destroy is implemented in Task 14.
+// Destroy tears down the Azure AKS cluster by running `tofu destroy` against
+// the same state backend used by Deploy. Orphan-resource cleanup via the
+// Azure SDKs (mirroring AWS's cleanup.go) lands in Task 16.
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DestroyOptions) error {
-	return fmt.Errorf("azure.Destroy: not implemented in this commit")
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "azure.Destroy")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("provider", "azure"),
+		attribute.String("project_name", projectName),
+	)
+
+	cfg, err := p.parseConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	subID := os.Getenv(subscriptionIDEnv)
+	if subID == "" {
+		err := fmt.Errorf("%s environment variable is required", subscriptionIDEnv)
+		span.RecordError(err)
+		return err
+	}
+	if err := os.Setenv(armSubscriptionIDEnv, subID); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set %s: %w", armSubscriptionIDEnv, err)
+	}
+
+	// ensureStateBackend is idempotent; on Destroy it's a no-op when the
+	// RG/SA/container already exist (the common case) and reconstructs them
+	// only if a partial-deploy left them missing — which would also mean
+	// there's nothing to destroy, but tofu init still needs the backend
+	// resources reachable to read state.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Verifying Terraform state backend resources").
+		WithResource("state-backend").
+		WithAction("verify").
+		WithMetadata("cluster_name", projectName))
+	backend, err := ensureStateBackend(ctx, subID, cfg.Region, projectName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("ensure state backend: %w", err)
+	}
+
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu setup: %w", err)
+	}
+	defer func() {
+		if cleanupErr := tf.Cleanup(); cleanupErr != nil {
+			span.RecordError(cleanupErr)
+		}
+	}()
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Initializing OpenTofu working directory").
+		WithResource("tofu").
+		WithAction("init").
+		WithMetadata("cluster_name", projectName))
+	if err := tf.Init(ctx,
+		tfexec.BackendConfig(fmt.Sprintf("resource_group_name=%s", backend.RGName)),
+		tfexec.BackendConfig(fmt.Sprintf("storage_account_name=%s", backend.SAName)),
+		tfexec.BackendConfig(fmt.Sprintf("container_name=%s", backend.Container)),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", backend.Key)),
+	); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu init: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Terraform-managed resources").
+		WithResource("tofu").
+		WithAction("destroy").
+		WithMetadata("cluster_name", projectName))
+	if err := tf.Destroy(ctx); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("tofu destroy: %w", err)
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Azure cluster destroyed").
+		WithResource("cluster").
+		WithAction("destroy").
+		WithMetadata("cluster_name", projectName))
+	return nil
 }
 
 // GetKubeconfig is implemented in Task 17.
