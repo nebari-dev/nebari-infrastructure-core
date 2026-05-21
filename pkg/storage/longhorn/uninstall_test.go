@@ -67,4 +67,3 @@ func TestUninstallReleaseRemovesExistingRelease(t *testing.T) {
 		t.Error("expected release to be gone after uninstallRelease(), still found in history")
 	}
 }
-

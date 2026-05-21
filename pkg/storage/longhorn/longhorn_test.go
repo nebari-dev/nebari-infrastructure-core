@@ -366,7 +366,7 @@ func TestEnsureSoleDefaultStorageClassWithClient(t *testing.T) {
 			annotations[defaultAnnotation] = isDefault
 		}
 		return &storagev1.StorageClass{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
+			ObjectMeta:  metav1.ObjectMeta{Name: name, Annotations: annotations},
 			Provisioner: "test-provisioner",
 		}
 	}
