@@ -15,8 +15,11 @@ output "host" {
   sensitive = true
 }
 
-output "kube_admin_config_raw" {
-  value     = module.aks_cluster.kube_admin_config_raw
+# The Track A module exposes kube_config_raw (local cluster-admin), not
+# kube_admin_config_raw — the latter is only populated when AAD integration
+# is enabled, which the module doesn't do.
+output "kube_config_raw" {
+  value     = module.aks_cluster.kube_config_raw
   sensitive = true
 }
 
