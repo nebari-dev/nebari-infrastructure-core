@@ -31,6 +31,15 @@ const (
 
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// LonghornDefaultNamespace is the namespace where Longhorn (and its UI) is deployed.
+	LonghornDefaultNamespace = "longhorn-system"
+
+	// LonghornOIDCClientSecretName is the name of the Kubernetes secret holding the
+	// pre-generated OIDC client secret for the Longhorn UI Keycloak client. The same
+	// value is written into both the keycloak namespace (read by realm-setup-job) and
+	// the longhorn-system namespace (read by the SecurityPolicy that fronts the UI).
+	LonghornOIDCClientSecretName = "longhorn-oidc-client-secret" //nolint:gosec // Secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -327,6 +336,37 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			},
 		}); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// createLonghornSecrets writes the OIDC client secret used to protect the
+// Longhorn UI into both the keycloak namespace (for realm-setup-job) and the
+// longhorn-system namespace (for the Envoy Gateway SecurityPolicy). When
+// longhornSSO.ClientSecret is empty, nothing is created.
+func createLonghornSecrets(ctx context.Context, client kubernetes.Interface, longhornSSO LonghornSSOConfig) error {
+	if longhornSSO.ClientSecret == "" {
+		return nil
+	}
+
+	for _, ns := range []string{KeycloakDefaultNamespace, LonghornDefaultNamespace} {
+		if err := createSecret(ctx, client, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      LonghornOIDCClientSecretName,
+				Namespace: ns,
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
+					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"client-secret": longhornSSO.ClientSecret,
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to create %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
 		}
 	}
 
