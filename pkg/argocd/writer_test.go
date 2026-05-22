@@ -872,6 +872,64 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("realm-setup includes Longhorn client creation when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{LonghornEnabled: true}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		jobPath := filepath.Join(tmpDir, "manifests", "keycloak", "realm-setup-job.yaml")
+		content, err := os.ReadFile(jobPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read realm-setup-job: %v", err)
+		}
+		out := string(content)
+		for _, want := range []string{
+			"LONGHORN_CLIENT_SECRET",
+			"longhorn-oidc-client-secret",
+			"clientId=longhorn",
+			"https://longhorn.$DOMAIN/oauth2/callback",
+			"name=longhorn-admins",
+			"name=longhorn-viewers",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("realm-setup-job missing %q\nfull contents:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("realm-setup does NOT mention Longhorn when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{LonghornEnabled: false}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		jobPath := filepath.Join(tmpDir, "manifests", "keycloak", "realm-setup-job.yaml")
+		content, err := os.ReadFile(jobPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read realm-setup-job: %v", err)
+		}
+		for _, dontWant := range []string{
+			"LONGHORN_CLIENT_SECRET",
+			"longhorn-oidc-client-secret",
+			"clientId=longhorn",
+		} {
+			if strings.Contains(string(content), dontWant) {
+				t.Errorf("realm-setup-job unexpectedly contains %q when LonghornEnabled=false", dontWant)
+			}
+		}
+	})
+}
+
 func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 	ctx := context.Background()
 
