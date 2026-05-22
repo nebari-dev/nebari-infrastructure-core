@@ -871,3 +871,45 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }
+
+func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cert includes longhorn dnsName when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{LonghornEnabled: true}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		certPath := filepath.Join(tmpDir, "manifests", "security", "certificates", "gateway-certificate.yaml")
+		content, err := os.ReadFile(certPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read gateway-certificate: %v", err)
+		}
+		if !strings.Contains(string(content), "longhorn.test.example.com") {
+			t.Errorf("expected longhorn.test.example.com in dnsNames, got:\n%s", string(content))
+		}
+	})
+
+	t.Run("cert does NOT include longhorn dnsName when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{LonghornEnabled: false}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		certPath := filepath.Join(tmpDir, "manifests", "security", "certificates", "gateway-certificate.yaml")
+		content, err := os.ReadFile(certPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read gateway-certificate: %v", err)
+		}
+		if strings.Contains(string(content), "longhorn.test.example.com") {
+			t.Errorf("expected NO longhorn.test.example.com in dnsNames, got:\n%s", string(content))
+		}
+	})
+}
