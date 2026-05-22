@@ -280,12 +280,14 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // Parse errors are intentionally ignored: InfraSettings is called after Validate()
 // has confirmed the config is parseable. If it somehow fails (e.g., nil config in
 // tests), we return valid defaults.
+// LonghornEnabled is false: Longhorn is not yet wired for the local provider.
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
 		StorageClass:        defaultStorageClass,
 		NeedsMetalLB:        true,
 		MetalLBAddressPool:  defaultMetalLBAddressPool,
 		SupportsLocalGitOps: true,
+		LonghornEnabled:     false,
 	}
 
 	rawCfg := cfg.ProviderConfig()

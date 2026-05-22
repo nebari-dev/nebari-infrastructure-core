@@ -719,13 +719,15 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // default, which is not reachable from outside the VPC.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := longhorn.StorageClassName
+	longhornEnabled := true // AWS default — see Config.LonghornEnabled
 	var efsSC string
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
-			if !awsCfg.LonghornEnabled() {
+			longhornEnabled = awsCfg.LonghornEnabled()
+			if !longhornEnabled {
 				sc = storageClassGP2
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
@@ -738,6 +740,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LonghornEnabled: longhornEnabled,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

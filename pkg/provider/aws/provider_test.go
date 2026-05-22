@@ -26,6 +26,37 @@ func TestNewProvider(t *testing.T) {
 	}
 }
 
+func TestProvider_InfraSettings_LonghornEnabled(t *testing.T) {
+	p := NewProvider()
+
+	t.Run("default config reports Longhorn enabled", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{"aws": map[string]any{}},
+		}
+		s := p.InfraSettings(cfg)
+		if !s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = false, want true (AWS default)")
+		}
+	})
+
+	t.Run("explicit Longhorn disabled reports false", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{
+				"aws": map[string]any{
+					"region": "us-east-1",
+					"longhorn": map[string]any{
+						"enabled": false,
+					},
+				},
+			},
+		}
+		s := p.InfraSettings(cfg)
+		if s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = true, want false")
+		}
+	})
+}
+
 func TestInfraSettings(t *testing.T) {
 	p := NewProvider()
 	cfg := &config.ClusterConfig{
