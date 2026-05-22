@@ -14,7 +14,7 @@ Longhorn ships with **no built-in authentication**. Routing the UI publicly with
 
 Expose `longhorn.<domain>` through the existing `nebari-gateway`, gated by Keycloak OIDC enforced via an Envoy Gateway `SecurityPolicy`. The integration mirrors the existing ArgoCD SSO design (`docs/superpowers/specs/2026-04-08-argocd-keycloak-sso-design.md`) layer-for-layer.
 
-The route is only created when **both** Longhorn and Keycloak are enabled. If Keycloak is disabled, no route ships — the UI remains reachable only via `kubectl port-forward`.
+The route is only created when Longhorn is enabled. Keycloak is mandatory infrastructure (always provisioned during foundational install), so the gate is `LonghornEnabled` alone.
 
 Authorization is **authentication-only** in this first cut: any logged-in Keycloak user can reach the UI. The realm-setup job creates `longhorn-admins` / `longhorn-viewers` groups so a future change can add group-based gating, but no gating is enforced now (Longhorn itself has no user/group model to map onto).
 
@@ -32,7 +32,7 @@ Store as Secret in two namespaces:      with pre-generated secret           Secu
       SecurityPolicy)                   Add admin user to longhorn-admins
 ```
 
-All three layers are skipped when `LonghornEnabled && KeycloakEnabled` is false.
+All three layers are skipped when `LonghornEnabled` is false.
 
 ### Layer 1: Go Code Changes
 
@@ -51,20 +51,20 @@ type FoundationalConfig struct {
 
 type LonghornSSOConfig struct {
     // ClientSecret is the pre-generated OIDC client secret for Longhorn's
-    // Keycloak integration. Empty when Longhorn UI exposure is disabled —
-    // either because Longhorn is not installed or Keycloak is not enabled.
+    // Keycloak integration. Empty when Longhorn UI exposure is disabled
+    // (i.e., Longhorn is not installed by this provider).
     ClientSecret string
 }
 ```
 
 #### 1b. Provision the client secret in `cmd/nic/deploy.go`
 
-Compute Longhorn-enabled state from the provider, then generate the secret only when both are enabled:
+Compute Longhorn-enabled state from the provider, then generate the secret when Longhorn is enabled (Keycloak is always present):
 
 ```go
 infraSettings := provider.InfraSettings(cfg.Cluster)
 // ...
-if infraSettings.LonghornEnabled && foundationalCfg.Keycloak.Enabled {
+if infraSettings.LonghornEnabled {
     foundationalCfg.Longhorn.ClientSecret = generateSecurePassword(rand.Reader)
 }
 ```
@@ -130,7 +130,7 @@ type templateData struct {
 }
 ```
 
-Set to `infraSettings.LonghornEnabled && foundationalCfg.Keycloak.Enabled` (or equivalently, `foundationalCfg.Longhorn.ClientSecret != ""`). The writer gates rendering of the new manifests on this flag.
+Set to `infraSettings.LonghornEnabled`. The writer gates rendering of the new manifests on this flag.
 
 ### Layer 2: Keycloak Realm-Setup Additions
 
@@ -269,13 +269,12 @@ dnsNames:
 
 ### Conditional Rendering Rules
 
-| Longhorn enabled? | Keycloak enabled? | Rendered? |
-|---|---|---|
-| No | * | Nothing Longhorn-UI-related ships |
-| Yes | No | Nothing Longhorn-UI-related ships (per design — auth required) |
-| Yes | Yes | HTTPRoute + SecurityPolicy + cert dnsName + realm-setup snippet + Secrets |
+| Longhorn enabled? | Rendered? |
+|---|---|
+| No | Nothing Longhorn-UI-related ships |
+| Yes | HTTPRoute + SecurityPolicy + cert dnsName + realm-setup snippet + Secrets |
 
-The single switch is `templateData.LonghornEnabled`, computed as `infraSettings.LonghornEnabled && foundationalCfg.Keycloak.Enabled`.
+The single switch is `templateData.LonghornEnabled`, mirrored from `infraSettings.LonghornEnabled`. Keycloak is mandatory infrastructure in this codebase (it is provisioned unconditionally during foundational install), so the "Longhorn enabled, Keycloak disabled" branch is unreachable by design.
 
 ## Data Flow (Request Path)
 
@@ -316,7 +315,7 @@ Service longhorn-frontend.longhorn-system:8080 → Longhorn UI
 | `TestFoundationalConfig_LonghornSSOConfig` | `pkg/argocd/foundational_test.go` | `LonghornSSOConfig` field exists; empty `ClientSecret` is treated as disabled |
 | `TestCreateKeycloakSecrets_LonghornSecret` | `pkg/argocd/foundational_test.go` | `longhorn-oidc-client-secret` Secret is created in `keycloak` + `longhorn-system` namespaces when `Longhorn.ClientSecret != ""`; not created when empty. `longhorn-system` namespace is also created when needed |
 | `TestInfraSettings_LonghornEnabled` | `pkg/provider/aws/provider_test.go`, `pkg/provider/hetzner/provider_test.go` | `InfraSettings().LonghornEnabled` reflects `LonghornEnabled()` on the parsed provider config |
-| `TestWriter_RendersLonghornManifests` | `pkg/argocd/writer_test.go` | Table test over `{LonghornEnabled, KeycloakEnabled, Domain}` matrix. Asserts presence/absence of HTTPRoute, SecurityPolicy, cert dnsName entry, realm-setup snippet exactly per the conditional rules |
+| `TestWriter_RendersLonghornManifests` | `pkg/argocd/writer_test.go` | Table test over `{LonghornEnabled, Domain}` matrix. Asserts presence/absence of HTTPRoute, SecurityPolicy, cert dnsName entry, realm-setup snippet exactly per the conditional rules |
 | `TestWriter_LonghornRouteContent` | `pkg/argocd/writer_test.go` | When rendered: hostname `longhorn.<domain>`, backendRef `longhorn-frontend:8080`, parentRef `nebari-gateway`/`https` section |
 | `TestWriter_LonghornSecurityPolicyContent` | `pkg/argocd/writer_test.go` | targetRef → `HTTPRoute/longhorn`; issuer `https://keycloak.<domain><BasePath>/realms/nebari`; clientID `longhorn`; redirect URL `https://longhorn.<domain>/oauth2/callback` |
 | `TestWriter_GatewayCertIncludesLonghorn` | `pkg/argocd/writer_test.go` | dnsNames contains `longhorn.<domain>` iff `LonghornEnabled` is true |
@@ -335,7 +334,6 @@ Smoke test, not automated:
 Negative paths:
 
 7. Set `aws.longhorn.enabled: false`, redeploy → no longhorn HTTPRoute / SecurityPolicy / cert dnsName / Keycloak client / Secret
-8. Disable Keycloak, redeploy → same as (7)
 
 `make check` must pass before commit.
 

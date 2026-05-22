@@ -72,10 +72,9 @@ type TemplateData struct {
 
 	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
 	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
-	// rendered. Keycloak/OIDC wiring for the UI is gated separately in
-	// cmd/nic/deploy.go: the OIDC client secret is only generated when Keycloak is
-	// enabled, and an empty secret short-circuits the dual-namespace Secret
-	// provisioning in foundational.go.
+	// rendered. Keycloak is mandatory infrastructure in this codebase (always
+	// provisioned during foundational install), so a separate Keycloak-enabled
+	// gate is not part of the conditional.
 	LonghornEnabled bool
 }
 

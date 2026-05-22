@@ -232,8 +232,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		// Generate a Longhorn OIDC client secret only when the provider installs
 		// Longhorn. When Longhorn is disabled, longhornClientSecret stays "" and
 		// createLonghornSecrets / the call site in InstallFoundationalServices
-		// no-op on the empty string. If Keycloak ever becomes optional, the same
-		// empty-string path will continue to work without changes here.
+		// no-op on the empty string.
 		var longhornClientSecret string
 		if infraSettings.LonghornEnabled {
 			longhornClientSecret = generateSecurePassword(rand.Reader)
