@@ -169,6 +169,19 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			span.RecordError(err)
 			return fmt.Errorf("failed to create landing page secrets: %w", err)
 		}
+
+		// Create namespace + dual OIDC client-secret Secret for Longhorn UI exposure.
+		// No-op when foundationalCfg.Longhorn.ClientSecret == "" (Longhorn disabled or Keycloak off).
+		if foundationalCfg.Longhorn.ClientSecret != "" {
+			if err := createNamespace(ctx, k8sClient, LonghornDefaultNamespace); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn namespace: %w", err)
+			}
+			if err := createLonghornSecrets(ctx, k8sClient, foundationalCfg.Longhorn); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn secrets: %w", err)
+			}
+		}
 	}
 
 	// 3. Apply root App-of-Apps if git configuration is available

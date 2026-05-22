@@ -405,6 +405,43 @@ func TestCreateLonghornSecrets(t *testing.T) {
 	})
 }
 
+func TestCreateKeycloakAndLonghornSecrets_Together(t *testing.T) {
+	ctx := context.Background()
+
+	nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+	nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+	client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+	kcCfg := KeycloakConfig{
+		Enabled:               true,
+		AdminUsername:         "admin",
+		AdminPassword:         "kcpw",
+		DBPassword:            "dbpw",
+		PostgresAdminPassword: "pgadmin",
+		PostgresUserPassword:  "pguser",
+	}
+	argoSSO := ArgoCDSSOConfig{ClientSecret: "argocd-secret-abc"}
+	longhornSSO := LonghornSSOConfig{ClientSecret: "longhorn-secret-xyz"}
+
+	if err := createKeycloakSecrets(ctx, client, kcCfg, argoSSO); err != nil {
+		t.Fatalf("createKeycloakSecrets() error = %v", err)
+	}
+	if err := createLonghornSecrets(ctx, client, longhornSSO); err != nil {
+		t.Fatalf("createLonghornSecrets() error = %v", err)
+	}
+
+	// ArgoCD client secret only lives in keycloak
+	if _, err := client.CoreV1().Secrets("keycloak").Get(ctx, "argocd-oidc-client-secret", metav1.GetOptions{}); err != nil {
+		t.Errorf("argocd-oidc-client-secret missing from keycloak ns: %v", err)
+	}
+	// Longhorn client secret lives in both
+	for _, ns := range []string{"keycloak", "longhorn-system"} {
+		if _, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{}); err != nil {
+			t.Errorf("longhorn-oidc-client-secret missing from %s ns: %v", ns, err)
+		}
+	}
+}
+
 func TestNewK8sClient(t *testing.T) {
 	t.Run("fails with invalid kubeconfig", func(t *testing.T) {
 		_, err := newK8sClient([]byte("invalid kubeconfig"))
