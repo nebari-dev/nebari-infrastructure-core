@@ -1,5 +1,6 @@
 module "aks_cluster" {
-  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=main"
+  source  = "nebari-dev/aks-cluster/azurerm"
+  version = "0.1.0"
 
   project_name                 = var.project_name
   location                     = var.location
