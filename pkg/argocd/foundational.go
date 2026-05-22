@@ -41,6 +41,9 @@ type FoundationalConfig struct {
 	// ArgoCD SSO configuration
 	ArgoCD ArgoCDSSOConfig
 
+	// Longhorn UI SSO configuration
+	Longhorn LonghornSSOConfig
+
 	// LandingPage configuration
 	LandingPage LandingPageConfig
 
@@ -75,6 +78,14 @@ type MetalLBConfig struct {
 // ArgoCDSSOConfig holds ArgoCD SSO configuration
 type ArgoCDSSOConfig struct {
 	ClientSecret string // Pre-generated OIDC client secret for ArgoCD's Keycloak integration
+}
+
+// LonghornSSOConfig holds Longhorn UI SSO configuration.
+// ClientSecret is the pre-generated OIDC client secret used by the Envoy Gateway
+// SecurityPolicy that protects longhorn.<domain>. Empty when Longhorn UI exposure
+// is disabled — either because Longhorn is not installed or Keycloak is not enabled.
+type LonghornSSOConfig struct {
+	ClientSecret string
 }
 
 // InstallFoundationalServices installs foundational services via GitOps.
