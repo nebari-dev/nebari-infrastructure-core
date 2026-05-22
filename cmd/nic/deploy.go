@@ -230,10 +230,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		argoCDClientSecret := generateSecurePassword(rand.Reader)
 
 		// Generate a Longhorn OIDC client secret only when the provider installs
-		// Longhorn. When Longhorn is not installed, the SecurityPolicy / HTTPRoute
-		// are never rendered, so we don't need a secret. Keycloak being disabled
-		// also short-circuits this entire branch (we're already inside the
-		// `if !deployDryRun` + argocd-install-succeeded block).
+		// Longhorn. When Longhorn is disabled, longhornClientSecret stays "" and
+		// createLonghornSecrets / the call site in InstallFoundationalServices
+		// no-op on the empty string. If Keycloak ever becomes optional, the same
+		// empty-string path will continue to work without changes here.
 		var longhornClientSecret string
 		if infraSettings.LonghornEnabled {
 			longhornClientSecret = generateSecurePassword(rand.Reader)
