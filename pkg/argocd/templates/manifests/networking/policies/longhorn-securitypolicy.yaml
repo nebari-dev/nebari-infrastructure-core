@@ -1,0 +1,28 @@
+{{- if .LonghornEnabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: longhorn-oidc
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/name: longhorn
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: longhorn
+  oidc:
+    provider:
+      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+    clientID: longhorn
+    clientSecret:
+      name: longhorn-oidc-client-secret
+    redirectURL: "https://longhorn.{{ .Domain }}/oauth2/callback"
+    logoutPath: "/oauth2/logout"
+    scopes:
+      - openid
+      - profile
+      - email
+      - groups
+{{- end }}

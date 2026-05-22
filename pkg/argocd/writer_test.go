@@ -765,6 +765,71 @@ func TestSyncWaveOrdering(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("includes SecurityPolicy when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{
+			StorageClass:    "longhorn",
+			LonghornEnabled: true,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
+		}
+		out := string(content)
+
+		for _, want := range []string{
+			"kind: SecurityPolicy",
+			"apiVersion: gateway.envoyproxy.io/v1alpha1",
+			"name: longhorn-oidc",
+			"namespace: longhorn-system",
+			"kind: HTTPRoute",
+			"name: longhorn",
+			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
+			"clientID: longhorn",
+			"name: longhorn-oidc-client-secret",
+			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
+			`logoutPath: "/oauth2/logout"`,
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("renders empty when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := provider.InfraSettings{
+			StorageClass:    "gp2",
+			LonghornEnabled: false,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, settings); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn-securitypolicy file: %v", err)
+		}
+		out := strings.TrimSpace(string(content))
+		if out != "" {
+			t.Errorf("longhorn-securitypolicy.yaml should render empty when LonghornEnabled=false, got:\n%s", out)
+		}
+	})
+}
+
 func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	ctx := context.Background()
 
