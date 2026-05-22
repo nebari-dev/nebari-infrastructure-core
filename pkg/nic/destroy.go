@@ -74,9 +74,9 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	if opts.DryRun {
-		c.logger.Info("Starting destruction (dry-run)")
+		status.Info(ctx, "Starting destruction (dry-run)")
 	} else {
-		c.logger.Info("Starting destruction")
+		status.Info(ctx, "Starting destruction")
 	}
 
 	reg := c.registry
@@ -86,10 +86,11 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
-	c.logger.Info("Configuration validated",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration validated").
+		WithResource("config").
+		WithAction("validated").
+		WithMetadata("provider", cfg.Cluster.ProviderName()).
+		WithMetadata("project_name", cfg.ProjectName))
 
 	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
@@ -97,7 +98,8 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		return fmt.Errorf("get cluster provider: %w", err)
 	}
 
-	c.logger.Info("Provider selected", "provider", prov.Name())
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
+		WithMetadata("provider", prov.Name()))
 
 	if opts.Confirm != nil && !opts.DryRun {
 		summary := DestroySummary{
@@ -111,13 +113,11 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
-	ctx, cleanup := status.StartHandler(ctx, c.statusLogHandler())
-	defer cleanup()
-
 	if cfg.DNS != nil {
 		if err := c.destroyDNS(ctx, cfg, reg, opts.DryRun); err != nil {
-			c.logger.Warn("Failed to clean up DNS records", "error", err)
-			c.logger.Warn("You may need to manually remove DNS records from your provider")
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to clean up DNS records").
+				WithMetadata("error", err.Error()))
+			status.Warning(ctx, "You may need to manually remove DNS records from your provider")
 		}
 	}
 
@@ -128,13 +128,15 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}); err != nil {
 		span.RecordError(err)
 		if opts.Force {
-			c.logger.Warn("Continuing despite errors due to Force=true", "error", err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Continuing despite errors due to Force=true").
+				WithMetadata("error", err.Error()))
 		} else {
 			return fmt.Errorf("provider destroy: %w", err)
 		}
 	}
 
-	c.logger.Info("Destruction completed successfully", "provider", prov.Name())
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
+		WithMetadata("provider", prov.Name()))
 	return nil
 }
 
@@ -143,7 +145,9 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 // the cluster teardown.
 func (c *Client) destroyDNS(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry, dryRun bool) error {
 	if dryRun {
-		c.logger.Info("Would clean up DNS records (dry-run)", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Would clean up DNS records (dry-run)").
+			WithMetadata("provider", cfg.DNS.ProviderName()).
+			WithMetadata("domain", cfg.Domain))
 		return nil
 	}
 
@@ -151,12 +155,17 @@ func (c *Client) destroyDNS(ctx context.Context, cfg *config.NebariConfig, reg *
 	if err != nil {
 		return err
 	}
-	c.logger.Info("Cleaning up DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Cleaning up DNS records").
+		WithResource("dns").
+		WithAction("destroying").
+		WithMetadata("provider", cfg.DNS.ProviderName()).
+		WithMetadata("domain", cfg.Domain))
 
 	if err := dnsProvider.DestroyRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig()); err != nil {
 		return err
 	}
 
-	c.logger.Info("DNS records cleaned up successfully", "domain", cfg.Domain)
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "DNS records cleaned up successfully").
+		WithMetadata("domain", cfg.Domain))
 	return nil
 }

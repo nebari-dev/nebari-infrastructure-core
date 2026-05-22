@@ -89,6 +89,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
+
+	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+	defer cleanup()
+
 	opts := nic.DestroyOptions{
 		DryRun:  destroyDryRun,
 		Force:   destroyForce,

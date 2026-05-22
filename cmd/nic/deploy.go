@@ -80,6 +80,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
+
+	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+	defer cleanup()
+
 	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
 		Timeout:   timeout,

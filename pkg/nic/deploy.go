@@ -68,21 +68,17 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	span.SetAttributes(attribute.Bool("dry_run", opts.DryRun))
 
 	if opts.DryRun {
-		c.logger.Info("Starting deployment (dry-run)")
+		status.Info(ctx, "Starting deployment (dry-run)")
 	} else {
-		c.logger.Info("Starting deployment")
+		status.Info(ctx, "Starting deployment")
 	}
 
 	reg := c.registry
 
-	// Setup status handler for progress updates
-	ctx, cleanup := status.StartHandler(ctx, c.statusLogHandler())
-	defer cleanup()
-
 	// Handle context cancellation (from signal interrupt)
 	defer func() {
 		if ctx.Err() == context.Canceled {
-			c.logger.Warn("Deployment interrupted by user")
+			status.Warning(ctx, "Deployment interrupted by user")
 		}
 	}()
 
@@ -92,34 +88,42 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
-	c.logger.Info("Configuration parsed successfully",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration parsed successfully").
+		WithResource("config").
+		WithAction("validated").
+		WithMetadata("provider", cfg.Cluster.ProviderName()).
+		WithMetadata("project_name", cfg.ProjectName))
 
 	if opts.Timeout > 0 {
 		span.SetAttributes(attribute.String("timeout", opts.Timeout.String()))
-		c.logger.Info("Using custom timeout", "timeout", opts.Timeout)
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Using custom timeout").
+			WithMetadata("timeout", opts.Timeout.String()))
 	}
 
 	// Get the appropriate provider
 	clusterProvider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
-		c.logger.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get provider").
+			WithMetadata("provider", cfg.Cluster.ProviderName()).
+			WithMetadata("error", err.Error()))
 		return nil, err
 	}
 
-	c.logger.Info("Provider selected", "provider", clusterProvider.Name())
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
+		WithMetadata("provider", clusterProvider.Name()))
 
 	// Deploy infrastructure
 	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, provider.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
 		span.RecordError(err)
-		c.logger.Error("Deployment failed", "error", err, "provider", clusterProvider.Name())
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
+			WithMetadata("provider", clusterProvider.Name()).
+			WithMetadata("error", err.Error()))
 		return nil, err
 	}
 
-	c.logger.Info("Infrastructure deployment completed", "provider", clusterProvider.Name())
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
+		WithMetadata("provider", clusterProvider.Name()))
 
 	// Get provider infrastructure settings for GitOps and foundational services
 	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
@@ -128,27 +132,30 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// local directory for providers that support it, or fall back to the
 	// caller's cfg.GitRepository. We never mutate cfg — the resolved value
 	// is threaded explicitly into every downstream call that needs it.
-	gitConfig, err := c.getOrCreateGitConfig(cfg, infraSettings.SupportsLocalGitOps)
+	gitConfig, err := c.getOrCreateGitConfig(ctx, cfg, infraSettings.SupportsLocalGitOps)
 	if err != nil {
 		span.RecordError(err)
-		c.logger.Error("GitOps configuration failed", "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps configuration failed").
+			WithMetadata("error", err.Error()))
 		return nil, err
 	}
 	if gitConfig != nil && !opts.DryRun {
 		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings); err != nil {
 			span.RecordError(err)
-			c.logger.Error("GitOps bootstrap failed", "error", err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
+				WithMetadata("error", err.Error()))
 			return nil, err
 		}
 	}
 
-	c.logger.Info("Deployment completed successfully", "provider", clusterProvider.Name())
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Deployment completed successfully").
+		WithMetadata("provider", clusterProvider.Name()))
 
 	result := &DeployResult{}
 
 	// Install Argo CD (skip in dry-run mode)
 	if !opts.DryRun {
-		c.logger.Info("Installing Argo CD on cluster")
+		status.Progress(ctx, "Installing Argo CD on cluster")
 
 		// Generate all deployment secrets up front. genPwd shares a single
 		// err so the struct literal stays readable; we check pwErr at the
@@ -168,7 +175,8 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		argoCDClientSecret := genPwd()
 		if pwErr != nil {
 			span.RecordError(pwErr)
-			c.logger.Error("Failed to generate ArgoCD client secret", "error", pwErr)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate ArgoCD client secret").
+				WithMetadata("error", pwErr.Error()))
 			return nil, fmt.Errorf("generate ArgoCD client secret: %w", pwErr)
 		}
 
@@ -177,14 +185,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
-			c.logger.Warn("Failed to install Argo CD", "error", err)
-			c.logger.Warn("You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
+				WithMetadata("error", err.Error()))
+			status.Warning(ctx, "You can install Argo CD manually with: helm install argocd argo/argo-cd --namespace argocd --create-namespace")
 		} else {
-			c.logger.Info("Argo CD installed successfully")
+			status.Success(ctx, "Argo CD installed successfully")
 			result.ArgoCDInstalled = true
 
 			// Install foundational services via Argo CD
-			c.logger.Info("Installing foundational services")
+			status.Progress(ctx, "Installing foundational services")
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
@@ -211,21 +220,23 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			}
 			if pwErr != nil {
 				span.RecordError(pwErr)
-				c.logger.Error("Failed to generate foundational secrets", "error", pwErr)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", pwErr.Error()))
 				return nil, fmt.Errorf("generate foundational secrets: %w", pwErr)
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
-				c.logger.Warn("Failed to install foundational services", "error", err)
-				c.logger.Warn("You can install foundational services manually with: kubectl apply -f pkg/foundational/")
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install foundational services").
+					WithMetadata("error", err.Error()))
+				status.Warning(ctx, "You can install foundational services manually with: kubectl apply -f pkg/foundational/")
 			} else {
-				c.logger.Info("Foundational services installed successfully")
+				status.Success(ctx, "Foundational services installed successfully")
 				result.KeycloakInstalled = true
 			}
 		}
 	} else {
-		c.logger.Info("Would install Argo CD and foundational services (dry-run mode)")
+		status.Info(ctx, "Would install Argo CD and foundational services (dry-run mode)")
 	}
 
 	// Look up LB endpoint and provision DNS records if configured
@@ -252,7 +263,7 @@ func defaultGitConfig(projectName string) *git.Config {
 // For providers that support local gitops without explicit git_repository config, this auto-creates
 // /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
 // The supportsLocalGitOps parameter comes from provider.InfraSettings().SupportsLocalGitOps.
-func (c *Client) getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
+func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
 		return cfg.GitRepository, nil
 	}
@@ -260,8 +271,8 @@ func (c *Client) getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGit
 	// Only auto-create local gitops for providers that support it (e.g., local, kind, k3s)
 	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
 	if !supportsLocalGitOps {
-		c.logger.Info("No git_repository configured and provider does not support local gitops, skipping GitOps bootstrap",
-			"provider", cfg.Cluster.ProviderName())
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured and provider does not support local gitops, skipping GitOps bootstrap").
+			WithMetadata("provider", cfg.Cluster.ProviderName()))
 		return nil, nil
 	}
 
@@ -271,8 +282,8 @@ func (c *Client) getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGit
 		return nil, fmt.Errorf("invalid local path in auto-generated git config: %w", err)
 	}
 
-	c.logger.Info("No git_repository configured, using auto-generated local directory",
-		"path", localPath)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
+		WithMetadata("path", localPath))
 
 	if err := os.MkdirAll(localPath, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
@@ -287,26 +298,30 @@ func (c *Client) getOrCreateGitConfig(cfg *config.NebariConfig, supportsLocalGit
 func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
 	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
-		c.logger.Warn("Could not get kubeconfig for endpoint lookup", "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not get kubeconfig for endpoint lookup").
+			WithMetadata("error", err.Error()))
 		return nil
 	}
 
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 	if err != nil {
-		c.logger.Warn("Could not parse kubeconfig for endpoint lookup", "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not parse kubeconfig for endpoint lookup").
+			WithMetadata("error", err.Error()))
 		return nil
 	}
 
 	k8sClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		c.logger.Warn("Could not create k8s client for endpoint lookup", "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not create k8s client for endpoint lookup").
+			WithMetadata("error", err.Error()))
 		return nil
 	}
 
-	c.logger.Info("Waiting for load balancer endpoint...")
+	status.Progress(ctx, "Waiting for load balancer endpoint...")
 	lbEndpoint, err := endpoint.GetLoadBalancerEndpoint(ctx, k8sClient)
 	if err != nil {
-		c.logger.Warn("Could not retrieve load balancer endpoint", "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not retrieve load balancer endpoint").
+			WithMetadata("error", err.Error()))
 		return nil
 	}
 
@@ -316,7 +331,7 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 	}
 
 	if lbEndpoint == nil {
-		c.logger.Warn("Skipping DNS provisioning: load balancer endpoint not available")
+		status.Warning(ctx, "Skipping DNS provisioning: load balancer endpoint not available")
 		return nil
 	}
 
@@ -325,22 +340,30 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 		lbEndpointStr = lbEndpoint.IP
 	}
 	if lbEndpointStr == "" {
-		c.logger.Warn("Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
+		status.Warning(ctx, "Load balancer endpoint has no hostname or IP, skipping DNS provisioning")
 		return lbEndpoint
 	}
 
 	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
 	if err != nil {
-		c.logger.Warn("DNS provider not found, skipping DNS provisioning", "provider", cfg.DNS.ProviderName(), "error", err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "DNS provider not found, skipping DNS provisioning").
+			WithMetadata("provider", cfg.DNS.ProviderName()).
+			WithMetadata("error", err.Error()))
 		return lbEndpoint
 	}
 
-	c.logger.Info("Provisioning DNS records", "provider", cfg.DNS.ProviderName(), "domain", cfg.Domain)
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Provisioning DNS records").
+		WithResource("dns").
+		WithAction("provisioning").
+		WithMetadata("provider", cfg.DNS.ProviderName()).
+		WithMetadata("domain", cfg.Domain))
 	if err := dnsProvider.ProvisionRecords(ctx, cfg.Domain, cfg.DNS.ProviderConfig(), lbEndpointStr); err != nil {
-		c.logger.Warn("Failed to provision DNS records", "error", err)
-		c.logger.Warn("You can configure DNS manually - see instructions below")
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to provision DNS records").
+			WithMetadata("error", err.Error()))
+		status.Warning(ctx, "You can configure DNS manually - see instructions below")
 	} else {
-		c.logger.Info("DNS records provisioned successfully", "domain", cfg.Domain)
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "DNS records provisioned successfully").
+			WithMetadata("domain", cfg.Domain))
 	}
 
 	return lbEndpoint
@@ -368,9 +391,11 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		if err != nil {
 			return fmt.Errorf("invalid local git path: %w", err)
 		}
-		c.logger.Info("Initializing local GitOps directory", "path", localPath)
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing local GitOps directory").
+			WithMetadata("path", localPath))
 	} else {
-		c.logger.Info("Initializing GitOps repository", "url", gitConfig.URL)
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing GitOps repository").
+			WithMetadata("url", gitConfig.URL))
 	}
 
 	// Create git client
@@ -381,7 +406,8 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	}
 	defer func() {
 		if err := gitClient.Cleanup(); err != nil {
-			c.logger.Warn("Failed to clean up git client temp directory", "error", err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to clean up git client temp directory").
+				WithMetadata("error", err.Error()))
 		}
 	}()
 
@@ -405,24 +431,24 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	if bootstrapped && !regenApps {
-		c.logger.Info("GitOps repository already bootstrapped, skipping manifest generation")
+		status.Info(ctx, "GitOps repository already bootstrapped, skipping manifest generation")
 		span.SetAttributes(attribute.Bool("skipped", true))
 		return nil
 	}
 
 	if regenApps {
-		c.logger.Info("Regenerating ArgoCD application manifests (--regen-apps)")
+		status.Progress(ctx, "Regenerating ArgoCD application manifests (--regen-apps)")
 	} else {
-		c.logger.Info("Bootstrapping GitOps repository with ArgoCD application manifests")
+		status.Progress(ctx, "Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(cfg, gitConfig, gitClient.WorkDir()); err != nil {
+	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir()); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
-	c.logger.Info("Writing ArgoCD application manifests to git repository")
+	status.Progress(ctx, "Writing ArgoCD application manifests to git repository")
 	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
@@ -448,9 +474,11 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	if isLocal {
-		c.logger.Info("Local GitOps directory bootstrapped successfully", "path", localPath)
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Local GitOps directory bootstrapped successfully").
+			WithMetadata("path", localPath))
 	} else {
-		c.logger.Info("GitOps repository bootstrapped successfully", "url", gitConfig.URL)
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "GitOps repository bootstrapped successfully").
+			WithMetadata("url", gitConfig.URL))
 	}
 	return nil
 }
@@ -459,7 +487,7 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 // effective gitConfig substituted in) and writes the result into the git
 // working directory. Sourcing from the parsed config keeps this feature
 // available to library consumers who don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(cfg *config.NebariConfig, gitConfig *git.Config, workDir string) error {
+func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string) error {
 	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
 	if err != nil {
 		return fmt.Errorf("marshal scrubbed config to YAML: %w", err)
@@ -472,7 +500,8 @@ func (c *Client) writeConfigToRepo(cfg *config.NebariConfig, gitConfig *git.Conf
 	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
-	c.logger.Info("Wrote NIC config to repository (auth fields scrubbed)", "path", configDest)
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
+		WithMetadata("path", configDest))
 	return nil
 }
 

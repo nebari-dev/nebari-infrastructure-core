@@ -25,13 +25,11 @@ func (c *Client) Kubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]by
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
-	c.logger.Info("Configuration validated",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
-
-	ctx, cleanup := status.StartHandler(ctx, c.statusLogHandler())
-	defer cleanup()
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration validated").
+		WithResource("config").
+		WithAction("validated").
+		WithMetadata("provider", cfg.Cluster.ProviderName()).
+		WithMetadata("project_name", cfg.ProjectName))
 
 	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {

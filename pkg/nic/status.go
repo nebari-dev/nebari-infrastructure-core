@@ -7,12 +7,11 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
-// statusLogHandler returns a status.Handler that logs each Update as a slog
-// record on the client's logger. The Update's Message becomes the slog msg
-// and its Level maps to a slog level. Resource, Action, and Metadata flow
-// through as attrs.
-func (c *Client) statusLogHandler() status.Handler {
-	logger := c.logger
+// SlogHandler renders status Updates as slog records on the supplied logger.
+// It returns the handler function itself, so callers can wrap it (e.g., to
+// filter, add fields, or fan out to a second sink) before passing the result
+// to status.StartHandler. For plain slog-only integration, use StartSlogHandler.
+func SlogHandler(logger *slog.Logger) status.Handler {
 	return func(update status.Update) {
 		attrs := make([]slog.Attr, 0, 2+len(update.Metadata))
 		if update.Resource != "" {
@@ -28,6 +27,14 @@ func (c *Client) statusLogHandler() status.Handler {
 		// started by status.StartHandler), so there's nothing to propagate.
 		logger.LogAttrs(context.Background(), mapSlogLevel(update.Level), update.Message, attrs...)
 	}
+}
+
+// StartSlogHandler wires Client progress to the supplied slog logger. Pass
+// the returned ctx to subsequent Client calls, and defer the returned
+// cleanup to flush in-flight updates. Consumers who want a non-slog sink
+// should call status.StartHandler with their own handler instead.
+func StartSlogHandler(ctx context.Context, logger *slog.Logger) (context.Context, status.CleanupFunc) {
+	return status.StartHandler(ctx, SlogHandler(logger))
 }
 
 func mapSlogLevel(l status.Level) slog.Level {

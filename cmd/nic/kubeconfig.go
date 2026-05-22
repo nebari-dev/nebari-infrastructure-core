@@ -59,6 +59,10 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
+
+	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+	defer cleanup()
+
 	kubeconfigBytes, err := client.Kubeconfig(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
