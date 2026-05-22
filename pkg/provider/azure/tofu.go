@@ -51,6 +51,20 @@ type TFNodeGroup struct {
 	Zones        []string          `json:"zones,omitempty"`
 }
 
+// providerName is the NIC provider name returned by Provider.Name() and used
+// as the value for the "provider" OTel span attribute. Distinct from the
+// AKS "azure" network-plugin literal in TFVars (which is the upstream
+// `azurerm_kubernetes_cluster.network_profile.network_plugin` value).
+const providerName = "azure"
+
+// modeSystem and modeUser are the AKS node-pool mode values. Each pool's
+// mode determines whether it can host critical system workloads or only
+// user workloads.
+const (
+	modeSystem = "System"
+	modeUser   = "User"
+)
+
 // Azure tag names disallow these reserved chars: < > % & \ ? /
 // (the Kubernetes-style "domain/key" convention doesn't survive on Azure), so
 // we substitute "_" for "/" while keeping the nic.nebari.dev namespace.
@@ -111,7 +125,7 @@ func convertNodeGroups(in map[string]NodeGroup) map[string]TFNodeGroup {
 	for name, ng := range in {
 		mode := ng.Mode
 		if mode == "" {
-			mode = "User"
+			mode = modeUser
 		}
 		out[name] = TFNodeGroup{
 			VMSize:       ng.Instance,

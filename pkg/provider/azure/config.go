@@ -63,7 +63,7 @@ func (c *Config) Validate() error {
 
 	systemCount := 0
 	for _, ng := range c.NodeGroups {
-		if ng.Mode == "System" {
+		if ng.Mode == modeSystem {
 			systemCount++
 		}
 	}

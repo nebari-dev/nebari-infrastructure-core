@@ -8,7 +8,7 @@ import (
 func ptrBool(b bool) *bool { return &b }
 
 func TestConfigValidate(t *testing.T) {
-	validNodeGroup := NodeGroup{Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 3, Mode: "System"}
+	validNodeGroup := NodeGroup{Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 3, Mode: modeSystem}
 
 	cases := []struct {
 		name      string
@@ -41,12 +41,12 @@ func TestConfigValidate(t *testing.T) {
 			cfg: Config{
 				Region: "eastus",
 				NodeGroups: map[string]NodeGroup{
-					"a": {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: "System"},
-					"b": {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: "System"},
+					"a": {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: modeSystem},
+					"b": {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: modeSystem},
 				},
 			},
 			wantErr:   true,
-			wantInErr: "System",
+			wantInErr: modeSystem,
 		},
 		{
 			name: "BYO vnet missing subnet",

@@ -9,14 +9,14 @@ func TestToTFVarsSystemPoolResolution(t *testing.T) {
 	cfg := Config{
 		Region: "eastus",
 		NodeGroups: map[string]NodeGroup{
-			"sys":  {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: "System"},
+			"sys":  {Instance: "Standard_D2_v3", MinNodes: 1, MaxNodes: 1, Mode: modeSystem},
 			"user": {Instance: "Standard_D4_v3", MinNodes: 0, MaxNodes: 5},
 		},
 	}
 	vars := cfg.toTFVars("myproj")
 
-	if got := vars.NodeGroups["sys"].Mode; got != "System" {
-		t.Errorf("sys.mode = %q, want System", got)
+	if got := vars.NodeGroups["sys"].Mode; got != modeSystem {
+		t.Errorf("sys.mode = %q, want %s", got, modeSystem)
 	}
 	if got := vars.NodeGroups["user"].Mode; got != "User" {
 		t.Errorf("user.mode defaulted = %q, want User", got)
@@ -25,7 +25,7 @@ func TestToTFVarsSystemPoolResolution(t *testing.T) {
 
 func TestToTFVarsCreateFlags(t *testing.T) {
 	t.Run("create RG by default", func(t *testing.T) {
-		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: "System"}}}
+		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
 		vars := cfg.toTFVars("p")
 		if !vars.CreateResourceGroup {
 			t.Error("CreateResourceGroup should default to true")
@@ -35,7 +35,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 		cfg := Config{
 			Region:            "eastus",
 			ResourceGroupName: "my-rg",
-			NodeGroups:        map[string]NodeGroup{"s": {Mode: "System"}},
+			NodeGroups:        map[string]NodeGroup{"s": {Mode: modeSystem}},
 		}
 		vars := cfg.toTFVars("p")
 		if vars.CreateResourceGroup {
@@ -46,7 +46,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 		}
 	})
 	t.Run("create VNet by default", func(t *testing.T) {
-		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: "System"}}}
+		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
 		vars := cfg.toTFVars("p")
 		if !vars.CreateVNet {
 			t.Error("CreateVNet should default to true")
@@ -55,7 +55,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 	t.Run("BYO VNet flips flag", func(t *testing.T) {
 		cfg := Config{
 			Region:     "eastus",
-			NodeGroups: map[string]NodeGroup{"s": {Mode: "System"}},
+			NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
 			Network:    &NetworkConfig{ExistingVNetID: "/subs/.../vn1", ExistingNodeSubnetID: "/subs/.../sub1"},
 		}
 		vars := cfg.toTFVars("p")
@@ -68,7 +68,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 func TestToTFVarsNICTagsInjected(t *testing.T) {
 	cfg := Config{
 		Region:     "eastus",
-		NodeGroups: map[string]NodeGroup{"s": {Mode: "System"}},
+		NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
 		Tags:       map[string]string{"Env": "dev"},
 	}
 	vars := cfg.toTFVars("nebari-x")
@@ -85,7 +85,7 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 }
 
 func TestToTFVarsOmitsEmptyPointers(t *testing.T) {
-	cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: "System"}}}
+	cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
 	vars := cfg.toTFVars("p")
 
 	b, err := json.Marshal(vars)

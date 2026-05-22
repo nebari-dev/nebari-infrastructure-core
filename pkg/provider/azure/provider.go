@@ -30,7 +30,7 @@ func NewProvider() *Provider {
 }
 
 // Name returns the provider name used in cluster.azure: dispatch.
-func (p *Provider) Name() string { return "azure" }
+func (p *Provider) Name() string { return providerName }
 
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	raw := clusterConfig.ProviderConfig()
@@ -50,7 +50,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	ctx, span := tracer.Start(ctx, "azure.Validate")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", "azure"),
+		attribute.String("provider", providerName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -85,7 +85,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	ctx, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", "azure"),
+		attribute.String("provider", providerName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -174,7 +174,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	ctx, span := tracer.Start(ctx, "azure.Destroy")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", "azure"),
+		attribute.String("provider", providerName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -273,7 +273,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.GetKubeconfig")
 	defer span.End()
-	span.SetAttributes(attribute.String("provider", "azure"), attribute.String("project_name", projectName))
+	span.SetAttributes(attribute.String("provider", providerName), attribute.String("project_name", projectName))
 
 	cfg, err := p.parseConfig(ctx, clusterConfig)
 	if err != nil {

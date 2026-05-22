@@ -10,7 +10,7 @@ import (
 
 func TestProviderName(t *testing.T) {
 	p := NewProvider()
-	if got := p.Name(); got != "azure" {
+	if got := p.Name(); got != providerName {
 		t.Errorf("Name() = %q, want \"azure\"", got)
 	}
 }
@@ -19,14 +19,14 @@ func TestProviderValidateRejectsBadConfig(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			"azure": map[string]any{
+			providerName: map[string]any{
 				// missing region — must fail
 				"node_groups": map[string]any{
 					"system": map[string]any{
 						"instance":  "Standard_D2_v3",
 						"min_nodes": 1,
 						"max_nodes": 1,
-						"mode":      "System",
+						"mode":      modeSystem,
 					},
 				},
 			},
@@ -43,14 +43,14 @@ func TestProviderValidateRequiresSubscriptionID(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			"azure": map[string]any{
+			providerName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"system": map[string]any{
 						"instance":  "Standard_D2_v3",
 						"min_nodes": 1,
 						"max_nodes": 1,
-						"mode":      "System",
+						"mode":      modeSystem,
 					},
 				},
 			},
@@ -67,14 +67,14 @@ func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			"azure": map[string]any{
+			providerName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"s": map[string]any{
 						"instance":  "Standard_D2_v3",
 						"min_nodes": 1,
 						"max_nodes": 1,
-						"mode":      "System",
+						"mode":      modeSystem,
 					},
 				},
 			},
@@ -91,14 +91,14 @@ func TestProviderDestroyFailsWithoutSubscription(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			"azure": map[string]any{
+			providerName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"s": map[string]any{
 						"instance":  "Standard_D2_v3",
 						"min_nodes": 1,
 						"max_nodes": 1,
-						"mode":      "System",
+						"mode":      modeSystem,
 					},
 				},
 			},
@@ -126,7 +126,7 @@ func TestProviderSummaryWithConfig(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			"azure": map[string]any{
+			providerName: map[string]any{
 				"region":              "eastus",
 				"resource_group_name": "rg-1",
 				"node_groups": map[string]any{
