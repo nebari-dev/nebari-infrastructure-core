@@ -894,7 +894,7 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 			"LONGHORN_CLIENT_SECRET",
 			"longhorn-oidc-client-secret",
 			"clientId=longhorn",
-			"https://longhorn.$DOMAIN/oauth2/callback",
+			`https://longhorn.$DOMAIN/oauth2/callback\"]`,
 			"name=longhorn-admins",
 			"name=longhorn-viewers",
 		} {
