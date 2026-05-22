@@ -70,10 +70,12 @@ type TemplateData struct {
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
 
-	// LonghornEnabled is true when the Longhorn UI should be exposed through the
-	// gateway. Computed as `InfraSettings.LonghornEnabled && KeycloakConfig.Enabled`
-	// — when false, no Longhorn HTTPRoute, SecurityPolicy, cert dnsName entry, or
-	// realm-setup snippet is rendered.
+	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
+	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
+	// rendered. Keycloak/OIDC wiring for the UI is gated separately in
+	// cmd/nic/deploy.go: the OIDC client secret is only generated when Keycloak is
+	// enabled, and an empty secret short-circuits the dual-namespace Secret
+	// provisioning in foundational.go.
 	LonghornEnabled bool
 }
 
