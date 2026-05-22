@@ -69,6 +69,12 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// LonghornEnabled is true when the Longhorn UI should be exposed through the
+	// gateway. Computed as `InfraSettings.LonghornEnabled && KeycloakConfig.Enabled`
+	// — when false, no Longhorn HTTPRoute, SecurityPolicy, cert dnsName entry, or
+	// realm-setup snippet is rendered.
+	LonghornEnabled bool
 }
 
 // NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
@@ -87,6 +93,7 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
+		LonghornEnabled:         settings.LonghornEnabled,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
