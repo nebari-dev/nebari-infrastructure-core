@@ -229,6 +229,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		// and the Keycloak realm-setup job
 		argoCDClientSecret := generateSecurePassword(rand.Reader)
 
+		// Generate a Longhorn OIDC client secret only when the provider installs
+		// Longhorn. When Longhorn is not installed, the SecurityPolicy / HTTPRoute
+		// are never rendered, so we don't need a secret. Keycloak being disabled
+		// also short-circuits this entire branch (we're already inside the
+		// `if !deployDryRun` + argocd-install-succeeded block).
+		var longhornClientSecret string
+		if infraSettings.LonghornEnabled {
+			longhornClientSecret = generateSecurePassword(rand.Reader)
+		}
+
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
@@ -256,6 +266,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
+				},
+				Longhorn: argocd.LonghornSSOConfig{
+					ClientSecret: longhornClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: generateSecurePassword(rand.Reader),
