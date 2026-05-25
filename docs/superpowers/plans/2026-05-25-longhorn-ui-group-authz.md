@@ -249,7 +249,6 @@ Replace it with:
 ```markdown
 ## Follow-ups (out of scope)
 
-- Read-only access for `longhorn-viewers` (Longhorn UI has no read-only mode; group remains a no-op for now)
 - Client-secret rotation on redeploy (same pre-existing divergence risk as today's ArgoCD client)
 ```
 
@@ -259,7 +258,7 @@ Also update the summary section to reflect the stricter access policy. Find the 
 
 Replace with:
 
-> Authorization gates the UI to members of the **`longhorn-admins` Keycloak group**. Non-members get HTTP 403 from the gateway. The `longhorn-viewers` group is created but currently a no-op (Longhorn has no read-only mode).
+> Authorization gates the UI to members of the **`longhorn-admins` Keycloak group**. Non-members get HTTP 403 from the gateway.
 
 Update the PR via:
 

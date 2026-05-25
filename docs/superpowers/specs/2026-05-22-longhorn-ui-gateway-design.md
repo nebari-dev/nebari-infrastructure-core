@@ -16,7 +16,7 @@ Expose `longhorn.<domain>` through the existing `nebari-gateway`, gated by Keycl
 
 The route is only created when Longhorn is enabled. Keycloak is mandatory infrastructure (always provisioned during foundational install), so the gate is `LonghornEnabled` alone.
 
-Authorization is **authentication-only** in this first cut: any logged-in Keycloak user can reach the UI. The realm-setup job creates `longhorn-admins` / `longhorn-viewers` groups so a future change can add group-based gating, but no gating is enforced now (Longhorn itself has no user/group model to map onto).
+Authorization is **authentication-only** in this first cut: any logged-in Keycloak user can reach the UI. The realm-setup job creates the `longhorn-admins` group so a future change can add group-based gating, but no gating is enforced now (Longhorn itself has no user/group model to map onto).
 
 ### Architecture
 
@@ -27,9 +27,9 @@ Go (foundational.go + deploy.go)        Keycloak (realm-setup-job)         Envoy
 ────────────────────────────────        ──────────────────────────         ─────────────────────────
 Generate longhorn client secret    -->  Create `longhorn` OIDC client  --> HTTPRoute longhorn.<domain>
 Store as Secret in two namespaces:      with pre-generated secret           SecurityPolicy → OIDC
-  - keycloak (read by realm-setup)      Create groups:                      Cert dnsName += longhorn.<domain>
-  - longhorn-system (read by              longhorn-admins, longhorn-viewers
-      SecurityPolicy)                   Add admin user to longhorn-admins
+  - keycloak (read by realm-setup)      Create longhorn-admins group        Cert dnsName += longhorn.<domain>
+  - longhorn-system (read by            Add admin user to longhorn-admins
+      SecurityPolicy)
 ```
 
 All three layers are skipped when `LonghornEnabled` is false.
@@ -165,7 +165,6 @@ $KCADM create clients -r nebari \
 
 echo "Creating Longhorn access groups..."
 $KCADM create groups -r nebari -s name=longhorn-admins || echo "Group may already exist"
-$KCADM create groups -r nebari -s name=longhorn-viewers || echo "Group may already exist"
 
 echo "Adding admin user to longhorn-admins group..."
 LONGHORN_ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \

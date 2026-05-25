@@ -985,7 +985,6 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 			"clientId=longhorn",
 			"https://longhorn.$DOMAIN/oauth2/callback",
 			"name=longhorn-admins",
-			"name=longhorn-viewers",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("realm-setup-job missing %q\nfull contents:\n%s", want, out)
@@ -1068,9 +1067,8 @@ Open `pkg/argocd/templates/manifests/keycloak/realm-setup-job.yaml`. Two edits:
                 $KCADM update clients/$LONGHORN_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
 
-              echo "Creating Longhorn access groups..."
+              echo "Creating Longhorn admins group..."
               $KCADM create groups -r nebari -s name=longhorn-admins || echo "Group may already exist"
-              $KCADM create groups -r nebari -s name=longhorn-viewers || echo "Group may already exist"
 
               echo "Adding admin user to longhorn-admins group..."
               LONGHORN_ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \

@@ -906,11 +906,13 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 			"clientId=longhorn",
 			`https://longhorn.$DOMAIN/oauth2/callback\"]`,
 			"name=longhorn-admins",
-			"name=longhorn-viewers",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("realm-setup-job missing %q\nfull contents:\n%s", want, out)
 			}
+		}
+		if strings.Contains(out, "longhorn-viewers") {
+			t.Errorf("realm-setup-job unexpectedly references longhorn-viewers (group removed); content:\n%s", out)
 		}
 	})
 

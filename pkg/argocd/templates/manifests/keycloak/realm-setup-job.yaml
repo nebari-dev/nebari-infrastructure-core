@@ -198,9 +198,8 @@ spec:
                 $KCADM update clients/$LONGHORN_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
 
-              echo "Creating Longhorn access groups..."
+              echo "Creating Longhorn admins group..."
               $KCADM create groups -r nebari -s name=longhorn-admins || echo "Group may already exist"
-              $KCADM create groups -r nebari -s name=longhorn-viewers || echo "Group may already exist"
 
               echo "Adding admin user to longhorn-admins group..."
               LONGHORN_ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \

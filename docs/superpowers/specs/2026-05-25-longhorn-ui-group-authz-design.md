@@ -201,7 +201,6 @@ Added to the PR #328 description (operator-driven, runs after deploy):
 
 ## Out of Scope
 
-- Read-only access for `longhorn-viewers` — Longhorn's UI has no read-only mode, so the viewers group remains a forward-compatibility no-op.
 - Per-route claim rules (e.g., gating only mutating endpoints) — Longhorn's UI mixes reads and writes on the same paths.
 - Group claim rules for other admin UIs (Grafana, etc.) — separate spec when those land.
 - Client-secret rotation on redeploy — pre-existing concern from PR #328, tracked separately.
