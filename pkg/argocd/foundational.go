@@ -32,6 +32,15 @@ const (
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
 
+	// LabelKeyPartOf is the standard Kubernetes label key identifying the higher-level app a resource belongs to.
+	LabelKeyPartOf = "app.kubernetes.io/part-of"
+
+	// LabelKeyManagedBy is the standard Kubernetes label key identifying the controller/tool that manages a resource.
+	LabelKeyManagedBy = "app.kubernetes.io/managed-by"
+
+	// LabelValueManagedBy is the value used for the app.kubernetes.io/managed-by label on resources NIC provisions.
+	LabelValueManagedBy = "nebari-infrastructure-core"
+
 	// LonghornDefaultNamespace is the namespace where Longhorn (and its UI) is deployed.
 	LonghornDefaultNamespace = "longhorn-system"
 
@@ -318,8 +327,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -339,8 +348,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -370,8 +379,8 @@ func createLonghornSecrets(ctx context.Context, client kubernetes.Interface, lon
 				Name:      LonghornOIDCClientSecretName,
 				Namespace: ns,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -397,8 +406,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				LabelKeyPartOf:    NebariFoundationalPartOf,
+				LabelKeyManagedBy: LabelValueManagedBy,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

@@ -18,6 +18,10 @@ import (
 // See https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
 const maxBucketNameLength = 63
 
+// awsRegionUSEast1 is special-cased in S3: CreateBucket rejects a
+// LocationConstraint of "us-east-1" because that region is the default.
+const awsRegionUSEast1 = "us-east-1"
+
 // S3Client defines the S3 operations needed for state bucket management.
 type S3Client interface {
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
@@ -119,7 +123,7 @@ func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName 
 	createInput := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}
-	if region != "us-east-1" {
+	if region != awsRegionUSEast1 {
 		createInput.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 			LocationConstraint: types.BucketLocationConstraint(region),
 		}
