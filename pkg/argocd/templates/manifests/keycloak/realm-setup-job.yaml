@@ -110,45 +110,23 @@ spec:
               fi
 
               if [ -n "$GROUPS_SCOPE_ID" ]; then
-                # Keycloak ships the "groups" scope template with a default
-                # group-membership mapper configured for full.path=true (groups
-                # claim emitted as "/group-name"). Our SecurityPolicy authorization
-                # rules want bare names ("group-name"), so we must replace the
-                # default mapper with one configured for full.path=false.
+                # We do NOT manage the group-membership mapper's config here.
+                # nebari-operator's data-science-pack RBAC bootstrap reconciles
+                # the mapper to full.path=true on every sync (it needs the path
+                # form for its own group-lookup-by-path logic). Anything we set
+                # here gets overwritten. Consumers of the groups claim (e.g.
+                # Envoy SecurityPolicy on the longhorn UI) must match against
+                # the path form ("/group-name") rather than the bare name.
                 #
-                # We use DELETE-then-CREATE rather than UPDATE because:
-                #   1. kcadm 'update -s config."dotted.key"=value' has subtle
-                #      escaping issues on first-realm-creation timing that left
-                #      live clusters with the default config (issue: groups claim
-                #      came out as "/longhorn-admins", broke Envoy RBAC rules).
-                #   2. delete+create is fully atomic from the consumer's POV --
-                #      either the mapper exists with our config or it doesn't.
-                #   3. The whole 'config' JSON blob is set in one shot, no
-                #      partial-update ambiguity.
-                EXISTING_MAPPER_ID=$($KCADM get "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari --fields id,name | \
-                  grep -B1 '"name" *: *"group-membership"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-
-                if [ -n "$EXISTING_MAPPER_ID" ]; then
-                  echo "Deleting default group-membership mapper (id=$EXISTING_MAPPER_ID) so we can recreate with full.path=false..."
-                  $KCADM delete "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models/$EXISTING_MAPPER_ID" -r nebari || true
-                fi
-
-                echo "Creating group-membership mapper with full.path=false on groups scope (id=$GROUPS_SCOPE_ID)..."
+                # Best-effort: create the mapper with sensible defaults if no
+                # mapper exists yet (e.g. brand-new groups scope we created
+                # ourselves), but don't fight existing config.
                 $KCADM create "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari \
                   -s name=group-membership \
                   -s protocol=openid-connect \
                   -s protocolMapper=oidc-group-membership-mapper \
-                  -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups","multivalued":"true"}' || echo "WARNING: failed to create group-membership mapper on groups scope"
-
-                # Verify the mapper now has full.path=false. If not, log loudly so
-                # operators see this in `kubectl logs job/keycloak-realm-setup`.
-                NEW_MAPPER_FULL_PATH=$($KCADM get "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari | \
-                  grep -A1 '"name" *: *"group-membership"' | grep -A20 '"config"' | grep '"full.path"' | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -1)
-                if [ "$NEW_MAPPER_FULL_PATH" != "false" ]; then
-                  echo "ERROR: group-membership mapper has full.path=$NEW_MAPPER_FULL_PATH (expected: false)."
-                  echo "ERROR: JWT 'groups' claim will be /group-name (with leading slash)."
-                  echo "ERROR: Envoy SecurityPolicy rules that match bare group names will deny all requests."
-                fi
+                  -s 'config={"full.path":"true","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups","multivalued":"true"}' \
+                  2>/dev/null || true
 
                 echo "Ensuring groups is a realm default client scope..."
                 $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true

@@ -808,7 +808,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"name: allow-longhorn-admins",
 			"action: Allow",
 			"valueType: StringArray",
-			"longhorn-admins",
+			"- /longhorn-admins",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)

@@ -41,8 +41,13 @@ spec:
           jwt:
             provider: keycloak
             claims:
+              # nebari-operator's data-science-pack RBAC bootstrap reconciles
+              # the realm-shared groups mapper to full.path=true on every sync,
+              # so JWTs always carry group names with a leading slash (e.g.
+              # "/longhorn-admins") regardless of what we set in realm-setup-job.
+              # Match against the path form rather than fighting the operator.
               - name: groups
                 valueType: StringArray
                 values:
-                  - longhorn-admins
+                  - /longhorn-admins
 {{- end }}
