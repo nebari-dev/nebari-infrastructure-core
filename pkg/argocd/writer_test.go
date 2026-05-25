@@ -683,7 +683,7 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 			"sectionName: https",
 			"longhorn.test.example.com",
 			"name: longhorn-frontend",
-			"port: 8080",
+			"port: 80",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("longhorn-httproute.yaml missing %q\ngot:\n%s", want, out)
