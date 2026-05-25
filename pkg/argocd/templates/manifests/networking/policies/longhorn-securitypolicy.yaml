@@ -25,4 +25,24 @@ spec:
       - profile
       - email
       - groups
+    forwardAccessToken: true
+  jwt:
+    providers:
+      - name: keycloak
+        issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+        remoteJWKS:
+          uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+  authorization:
+    defaultAction: Deny
+    rules:
+      - name: allow-longhorn-admins
+        action: Allow
+        principal:
+          jwt:
+            provider: keycloak
+            claims:
+              - name: groups
+                valueType: StringArray
+                values:
+                  - longhorn-admins
 {{- end }}

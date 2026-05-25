@@ -799,6 +799,16 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"name: longhorn-oidc-client-secret",
 			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
 			`logoutPath: "/oauth2/logout"`,
+			"forwardAccessToken: true",
+			"jwt:",
+			"name: keycloak",
+			"/realms/nebari/protocol/openid-connect/certs",
+			"authorization:",
+			"defaultAction: Deny",
+			"name: allow-longhorn-admins",
+			"action: Allow",
+			"valueType: StringArray",
+			"longhorn-admins",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
