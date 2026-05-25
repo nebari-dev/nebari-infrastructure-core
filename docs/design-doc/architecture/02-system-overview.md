@@ -136,7 +136,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 - `pkg/git` clones, commits, and pushes the GitOps repo (including `file://` local paths).
 - `pkg/helm` is a thin wrapper around `helm.sh/helm/v3/pkg/action` used by `pkg/argocd`.
 - `pkg/status` is the in-process status channel used to surface user-visible progress from library code without violating the "no `slog` in `pkg/`" rule.
-- `pkg/telemetry` wires up the OpenTelemetry tracer provider, with exporters selected via `OTEL_EXPORTER` (`console` default, `otlp`, `both`, `none`).
+- `pkg/telemetry` wires up the OpenTelemetry tracer provider, with exporters selected via `OTEL_EXPORTER` (`none` default, `console`, `otlp`, `both`).
 
 ### 2.3 Why This Architecture?
 

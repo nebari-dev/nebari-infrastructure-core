@@ -43,7 +43,7 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `git_repository.p
 <repo>/<path>/
 ├── root.yaml                        # App-of-apps root
 ├── nic-config.yaml                  # Scrubbed copy of nebari-config.yaml
-├── .nic-bootstrapped                # Marker file
+├── .bootstrapped                    # Marker file
 └── manifests/
     ├── cert-manager/                # Application + (optional) values
     ├── cluster-issuers/

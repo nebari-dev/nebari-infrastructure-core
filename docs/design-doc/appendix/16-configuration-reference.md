@@ -134,8 +134,6 @@ cluster:
     #   node_selector: { workload: storage }
 ```
 
-Fields not in `aws.NodeGroup`: `single_subnet`, per-node-group `permissions_boundary`. If you see them in older docs, they are not real.
-
 State backend: S3 with `use_lockfile = true`, bucket auto-created per [§5.2 of State Management](../architecture/05-state-management.md). No DynamoDB.
 
 ### 2.2 `cluster.hetzner` (Hetzner Cloud k3s)
@@ -328,7 +326,7 @@ Loaded by `godotenv` from `.env` (gitignored) at startup. Used for credentials a
 | `GIT_SSH_PRIVATE_KEY` (or whatever you point `git_repository.auth.ssh_key_env` at) | `pkg/git` | SSH private key in PEM form |
 | `GIT_TOKEN` (or whatever you point `git_repository.auth.token_env` at) | `pkg/git` | Personal access token for HTTPS git URLs |
 | `KUBECONFIG` | `existing` provider, `nic kubeconfig` | Kubeconfig path (used when `cluster.existing.kubeconfig` is empty) |
-| `OTEL_EXPORTER` | `pkg/telemetry` | `console` (default), `otlp`, `both`, `none` |
+| `OTEL_EXPORTER` | `pkg/telemetry` | `none` (default), `console`, `otlp`, `both` |
 | `OTEL_ENDPOINT` | `pkg/telemetry` | OTLP endpoint (default: `localhost:4317`) |
 
 `.env.example` in the repo root lists the variables NIC looks at; copy to `.env` and fill in the values you need.

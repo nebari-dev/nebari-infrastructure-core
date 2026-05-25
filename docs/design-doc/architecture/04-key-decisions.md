@@ -142,7 +142,7 @@ NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer cont
 
 - All new functions in `pkg/` are wrapped in OpenTelemetry trace spans, with the documented exemptions in [`CLAUDE.md`](../../../CLAUDE.md) (e.g., per-line writers in `pkg/status` and byte/line helpers in `pkg/tofu`).
 - Library code never calls `slog`. User-visible progress goes through the status channel; `cmd/nic/status_handler.go` is the only translator into structured logs.
-- Exporters are configurable via `OTEL_EXPORTER` (`console` default, `otlp`, `both`, `none`) and `OTEL_ENDPOINT`.
+- Exporters are configurable via `OTEL_EXPORTER` (`none` default, `console`, `otlp`, `both`) and `OTEL_ENDPOINT`.
 
 **Pattern:**
 

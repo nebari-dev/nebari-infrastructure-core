@@ -49,7 +49,6 @@ The specific commit dates for the 2026 entries can be reconstructed from git his
 - ⏳ LGTM observability backend deployed by NIC
 - ⏳ Documented upgrade paths between releases
 - ⏳ End-to-end test coverage across providers
-- ⏳ AWS cluster deploy under 20 minutes from a fresh account
 
 **User success criteria:**
 

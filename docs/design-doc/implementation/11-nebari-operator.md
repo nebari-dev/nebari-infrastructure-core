@@ -36,19 +36,19 @@ The operator runs in its own namespace and watches for `NebariApp` CRs across th
 The CRD shape is owned by the upstream operator. The relevant fields, at a high level (consult the upstream repo for the authoritative schema):
 
 ```yaml
-apiVersion: nebari.dev/v1
+apiVersion: reconcilers.nebari.dev/v1
 kind: NebariApp
 metadata:
   name: jupyter-hub
   namespace: jupyter
 spec:
   hostname: jupyter.example.com
+  service:
+    name: jupyterhub
+    port: 8000
   routing:
     routes:
-      - path: /
-        backend:
-          name: jupyterhub
-          port: 8000
+      - pathPrefix: /
     publicRoutes: []           # Paths that should bypass OIDC
     tls: { ... }
   auth:
