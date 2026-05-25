@@ -110,12 +110,32 @@ spec:
               fi
 
               if [ -n "$GROUPS_SCOPE_ID" ]; then
-                echo "Adding group-membership mapper to groups scope (id=$GROUPS_SCOPE_ID)..."
-                $KCADM create client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models -r nebari \
-                  -s name=group-membership \
-                  -s protocol=openid-connect \
-                  -s protocolMapper=oidc-group-membership-mapper \
-                  -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || echo "Mapper may already exist"
+                # Check whether the group-membership mapper already exists on the
+                # groups scope. If a default groups scope was pre-provisioned
+                # (Keycloak ships a "groups" scope template with full.path=true)
+                # we must UPDATE the existing mapper rather than create a new one
+                # alongside it, otherwise our config (full.path=false, all token
+                # claims enabled) never lands.
+                MAPPER_ID=$($KCADM get "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari --fields id,name | \
+                  grep -B1 '"name" *: *"group-membership"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+
+                if [ -n "$MAPPER_ID" ]; then
+                  echo "Updating existing group-membership mapper (id=$MAPPER_ID) on groups scope..."
+                  $KCADM update "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models/$MAPPER_ID" -r nebari \
+                    -s 'config."full.path"=false' \
+                    -s 'config."access.token.claim"=true' \
+                    -s 'config."id.token.claim"=true' \
+                    -s 'config."userinfo.token.claim"=true' \
+                    -s 'config."introspection.token.claim"=true' \
+                    -s 'config."claim.name"=groups' || true
+                else
+                  echo "Creating group-membership mapper on groups scope (id=$GROUPS_SCOPE_ID)..."
+                  $KCADM create "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari \
+                    -s name=group-membership \
+                    -s protocol=openid-connect \
+                    -s protocolMapper=oidc-group-membership-mapper \
+                    -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || true
+                fi
 
                 echo "Ensuring groups is a realm default client scope..."
                 $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
