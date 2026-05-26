@@ -157,27 +157,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	if !opts.DryRun {
 		status.Progress(ctx, "Installing Argo CD on cluster")
 
-		// Generate all deployment secrets up front. genPwd shares a single
-		// err so the struct literal stays readable; we check pwErr at the
-		// end of each generation batch before any secret is consumed.
-		var pwErr error
-		genPwd := func() string {
-			if pwErr != nil {
-				return ""
-			}
-			var p string
-			p, pwErr = generateSecurePassword(rand.Reader)
-			return p
-		}
-
 		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
 		// and the Keycloak realm-setup job
-		argoCDClientSecret := genPwd()
-		if pwErr != nil {
-			span.RecordError(pwErr)
+		argoCDClientSecret, err := generateSecurePassword(rand.Reader)
+		if err != nil {
+			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate ArgoCD client secret").
-				WithMetadata("error", pwErr.Error()))
-			return nil, fmt.Errorf("generate ArgoCD client secret: %w", pwErr)
+				WithMetadata("error", err.Error()))
+			return nil, fmt.Errorf("generate ArgoCD client secret: %w", err)
 		}
 
 		// Build ArgoCD config with Keycloak OIDC SSO
@@ -194,35 +181,74 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 			// Install foundational services via Argo CD
 			status.Progress(ctx, "Installing foundational services")
+
+			// Generate foundational secrets up front
+			keycloakAdminPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate Keycloak admin password: %w", err)
+			}
+			keycloakDBPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate Keycloak DB password: %w", err)
+			}
+			postgresAdminPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate Postgres admin password: %w", err)
+			}
+			postgresUserPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate Postgres user password: %w", err)
+			}
+			realmAdminPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate realm admin password: %w", err)
+			}
+			redisPassword, err := generateSecurePassword(rand.Reader)
+			if err != nil {
+				span.RecordError(err)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
+					WithMetadata("error", err.Error()))
+				return nil, fmt.Errorf("generate Redis password: %w", err)
+			}
+
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
 					AdminUsername:         "admin",
-					AdminPassword:         genPwd(),
-					DBPassword:            genPwd(),
-					PostgresAdminPassword: genPwd(),
-					PostgresUserPassword:  genPwd(),
+					AdminPassword:         keycloakAdminPassword,
+					DBPassword:            keycloakDBPassword,
+					PostgresAdminPassword: postgresAdminPassword,
+					PostgresUserPassword:  postgresUserPassword,
 					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    genPwd(),
+					RealmAdminPassword:    realmAdminPassword,
 					Hostname:              "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
-					RedisPassword: genPwd(),
+					RedisPassword: redisPassword,
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
-			}
-			if pwErr != nil {
-				span.RecordError(pwErr)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", pwErr.Error()))
-				return nil, fmt.Errorf("generate foundational secrets: %w", pwErr)
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
