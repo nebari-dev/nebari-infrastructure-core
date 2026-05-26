@@ -612,6 +612,12 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 		attribute.String(attrKeyRegion, region),
 	)
 
+	// Concurrent callers with the same cacheKey can both miss here and both
+	// fetch from EKS. The mutex keeps the cache itself race-free, but we
+	// accept the duplicate DescribeCluster call rather than wrapping the miss
+	// path in singleflight. The cost of an extra API call is relatively low
+	// and parallel kubeconfig reads on the same cluster are rare enough to
+	// not justify the dependency.
 	p.kubeconfigMu.RLock()
 	if cached, ok := p.kubeconfigCache[cacheKey]; ok {
 		p.kubeconfigMu.RUnlock()
