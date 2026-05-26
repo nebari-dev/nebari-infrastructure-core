@@ -94,6 +94,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Flush pending status messages before printing the panels so they don't
+	// interleave into the middle of the instructions (the deferred cleanup
+	// stays as a safety net; cleanup is idempotent).
+	cleanup()
+
 	if result.ArgoCDInstalled {
 		printArgoCDInstructions(cfg)
 	}
