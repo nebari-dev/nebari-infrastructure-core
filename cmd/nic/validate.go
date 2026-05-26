@@ -32,7 +32,7 @@ func init() {
 func runValidate(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	validateConfigFile, err := resolveConfigFile(validateConfigFile)
+	configFile, err := resolveConfigFile(validateConfigFile)
 	if err != nil {
 		return err
 	}
@@ -41,12 +41,12 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("config.file", validateConfigFile))
+	span.SetAttributes(attribute.String("config.file", configFile))
 
-	cfg, err := config.ParseConfig(ctx, validateConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		slog.Error("Configuration validation failed", "error", err, "file", configFile)
 		return err
 	}
 
@@ -58,7 +58,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 	if err := client.Validate(ctx, cfg); err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		slog.Error("Configuration validation failed", "error", err, "file", configFile)
 		return err
 	}
 

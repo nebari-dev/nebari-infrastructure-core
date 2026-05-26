@@ -35,7 +35,7 @@ func init() {
 func runKubeconfig(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	kubeconfigConfigFile, err := resolveConfigFile(kubeconfigConfigFile)
+	configFile, err := resolveConfigFile(kubeconfigConfigFile)
 	if err != nil {
 		return err
 	}
@@ -44,12 +44,12 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("config.file", kubeconfigConfigFile))
+	span.SetAttributes(attribute.String("config.file", configFile))
 
-	cfg, err := config.ParseConfig(ctx, kubeconfigConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", kubeconfigConfigFile)
+		slog.Error("Failed to parse configuration", "error", err, "file", configFile)
 		return err
 	}
 

@@ -42,7 +42,7 @@ func init() {
 func runDeploy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	deployConfigFile, err := resolveConfigFile(deployConfigFile)
+	configFile, err := resolveConfigFile(deployConfigFile)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("config.file", deployConfigFile),
+		attribute.String("config.file", configFile),
 		attribute.Bool("dry_run", deployDryRun),
 	)
 
@@ -67,10 +67,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		span.SetAttributes(attribute.String("timeout", deployTimeout))
 	}
 
-	cfg, err := config.ParseConfig(ctx, deployConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", deployConfigFile)
+		slog.Error("Failed to parse configuration", "error", err, "file", configFile)
 		return err
 	}
 

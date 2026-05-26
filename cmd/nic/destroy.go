@@ -49,7 +49,7 @@ func init() {
 func runDestroy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	destroyConfigFile, err := resolveConfigFile(destroyConfigFile)
+	configFile, err := resolveConfigFile(destroyConfigFile)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("config.file", destroyConfigFile),
+		attribute.String("config.file", configFile),
 		attribute.Bool("auto_approve", destroyAutoApprove),
 		attribute.Bool("force", destroyForce),
 		attribute.Bool("dry_run", destroyDryRun),
@@ -76,10 +76,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
 	}
 
-	cfg, err := config.ParseConfig(ctx, destroyConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", destroyConfigFile)
+		slog.Error("Failed to parse configuration", "error", err, "file", configFile)
 		return err
 	}
 
