@@ -27,7 +27,7 @@ var versionCmd = &cobra.Command{
 func runVersion(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "cmd.version")
+	ctx, span := tracer.Start(ctx, "cmd.version")
 	defer span.End()
 
 	slog.Info("Version command executed", "version", version, "commit", commit)
@@ -37,7 +37,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
-	client, err := nic.NewClient()
+	client, err := nic.NewClient(ctx)
 	if err != nil {
 		return err
 	}

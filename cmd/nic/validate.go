@@ -50,7 +50,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := nic.NewClient()
+	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		slog.Error("Failed to create NIC client", "error", err)

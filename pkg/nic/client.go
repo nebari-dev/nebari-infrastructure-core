@@ -13,10 +13,11 @@ type Client struct {
 	registry *registry.Registry
 }
 
-// NewClient returns a new NIC client. Returns an error if the default
-// provider registry fails to build.
-func NewClient() (*Client, error) {
-	reg, err := defaultRegistry(context.Background())
+// NewClient returns a new NIC client. The context governs the provider
+// registration step (currently used for trace propagation). Returns an
+// error if the default provider registry fails to build.
+func NewClient(ctx context.Context) (*Client, error) {
+	reg, err := defaultRegistry(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("build default registry: %w", err)
 	}
