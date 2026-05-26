@@ -593,7 +593,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 // and AWS LBC install) reuse the same fetched value.
 func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
+	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
 	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
