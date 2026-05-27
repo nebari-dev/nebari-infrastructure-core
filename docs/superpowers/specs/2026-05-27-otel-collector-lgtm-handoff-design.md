@@ -84,7 +84,7 @@ spec:
   ignoreDifferences:
     - group: ""
       kind: ConfigMap
-      name: opentelemetry-collector-opentelemetry-collector-agent
+      name: opentelemetry-collector-agent
       namespace: monitoring
       jsonPointers:
         - /data/relay
@@ -125,8 +125,8 @@ Five hook-annotated objects, all `helm.sh/hook: post-install,post-upgrade`, `hel
 
 1. **ServiceAccount** `{{ release }}-otel-patcher` in `monitoring`.
 2. **Role** — least-privilege:
-   - `configmaps`: `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent` (`resourceNames`-scoped)
-   - `daemonsets` (apps): `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent` (`resourceNames`-scoped)
+   - `configmaps`: `get`, `patch` on `opentelemetry-collector-agent` (`resourceNames`-scoped)
+   - `daemonsets` (apps): `get`, `patch` on `opentelemetry-collector-agent` (`resourceNames`-scoped)
    - `daemonsets` (apps): `list`, `watch` namespace-wide. `kubectl rollout status` uses an informer that requires `list`+`watch` on the collection; Kubernetes `resourceNames` does not apply to `list`/`watch` verbs, so this rule is namespace-scoped only. Still least-privilege at the namespace level.
 3. **RoleBinding** binding the SA to the Role.
 4. **ConfigMap** `{{ release }}-otel-overrides` holding `overrides.yaml`. Endpoints are templated using `{{ .Release.Name }}` so the chart survives custom release names:
@@ -186,8 +186,8 @@ Five hook-annotated objects, all `helm.sh/hook: post-install,post-upgrade`, `hel
 otelCollectorOverrides:
   enabled: true
   namespace: monitoring
-  configMapName: opentelemetry-collector-opentelemetry-collector-agent
-  daemonSetName: opentelemetry-collector-opentelemetry-collector-agent
+  configMapName: opentelemetry-collector-agent
+  daemonSetName: opentelemetry-collector-agent
   image: alpine/k8s:1.30.4
 ```
 
@@ -214,7 +214,7 @@ If NIC later drops a receiver or processor that LGTM's pipelines reference (e.g.
 
 ### NIC side
 
-- **Unit test** (`pkg/argocd/writer_test.go`): assert the rendered `opentelemetry-collector.yaml` contains `ignoreDifferences` for `ConfigMap/opentelemetry-collector-opentelemetry-collector-agent` with `jsonPointers: [/data/relay]`, and that `syncOptions` includes `RespectIgnoreDifferences=true`. Pure YAML-parse assertion, no cluster.
+- **Unit test** (`pkg/argocd/writer_test.go`): assert the rendered `opentelemetry-collector.yaml` contains `ignoreDifferences` for `ConfigMap/opentelemetry-collector-agent` with `jsonPointers: [/data/relay]`, and that `syncOptions` includes `RespectIgnoreDifferences=true`. Pure YAML-parse assertion, no cluster.
 - **Integration test** (`make test-integration-local`): after `nic deploy` and ArgoCD sync, manually `kubectl patch` the OTel collector ConfigMap's `data.relay` field. Force-trigger an ArgoCD sync. Assert the patched value persists (i.e., `RespectIgnoreDifferences` works).
 
 ### LGTM pack side
@@ -228,7 +228,7 @@ If NIC later drops a receiver or processor that LGTM's pipelines reference (e.g.
 |---|---|
 | LGTM installed before NIC's collector reconciles | Job wait-loop (60×5s = 5min) blocks for ConfigMap. Timeout → Job fails → `backoffLimit: 5` retries → surfaced to user. |
 | LGTM `helm upgrade` with new values | `post-upgrade` hook fires → Job re-patches → DaemonSet rolls. |
-| LGTM `helm uninstall` | ConfigMap `data.relay` keeps LGTM endpoints (now pointing at nonexistent Services). Documented reset: `kubectl -n monitoring delete cm opentelemetry-collector-opentelemetry-collector-agent`; ArgoCD recreates from Helm defaults. |
+| LGTM `helm uninstall` | ConfigMap `data.relay` keeps LGTM endpoints (now pointing at nonexistent Services). Documented reset: `kubectl -n monitoring delete cm opentelemetry-collector-agent`; ArgoCD recreates from Helm defaults. |
 | NIC chart version bump changes ConfigMap name | `ignoreDifferences` no longer matches → ArgoCD reverts LGTM overrides on next sync → caught by NIC integration test. |
 | Two software packs claim the same field | Whichever ran post-install/post-upgrade last wins. Document; out of scope. |
 | `yq` merge yields invalid OTel config | Collector pod CrashLoopBackOff → `rollout status` times out (3m) → Job non-zero → visible. |

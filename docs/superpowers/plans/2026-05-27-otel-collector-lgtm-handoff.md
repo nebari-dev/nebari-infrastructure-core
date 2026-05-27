@@ -63,7 +63,7 @@ func TestWriteApplication_OtelCollector_IgnoreDifferences(t *testing.T) {
 	requiredFragments := []string{
 		"ignoreDifferences:",
 		"kind: ConfigMap",
-		"name: opentelemetry-collector-opentelemetry-collector-agent",
+		"name: opentelemetry-collector-agent",
 		"namespace: monitoring",
 		"jsonPointers:",
 		"- /data/relay",
@@ -119,7 +119,7 @@ spec:
   ignoreDifferences:
     - group: ""
       kind: ConfigMap
-      name: opentelemetry-collector-opentelemetry-collector-agent
+      name: opentelemetry-collector-agent
       namespace: monitoring
       jsonPointers:
         - /data/relay
@@ -217,7 +217,7 @@ Spec: `docs/superpowers/specs/2026-05-27-otel-collector-lgtm-handoff-design.md`
 
 - [x] `go test ./pkg/argocd/...` passes
 - [x] `golangci-lint run ./pkg/argocd/...` clean
-- [ ] Reviewer confirms the chart's ConfigMap name (`opentelemetry-collector-opentelemetry-collector-agent`) still matches in the targeted chart version (0.143.0)
+- [ ] Reviewer confirms the chart's ConfigMap name (`opentelemetry-collector-agent`) still matches in the targeted chart version (0.143.0)
 
 Refs: https://github.com/nebari-dev/nebari-lgtm-pack/issues/8
 EOF
@@ -273,8 +273,8 @@ otelCollectorOverrides:
   # match what NIC's OTel collector ArgoCD Application produces with chart
   # release name "opentelemetry-collector" in daemonset mode.
   namespace: monitoring
-  configMapName: opentelemetry-collector-opentelemetry-collector-agent
-  daemonSetName: opentelemetry-collector-opentelemetry-collector-agent
+  configMapName: opentelemetry-collector-agent
+  daemonSetName: opentelemetry-collector-agent
   # Image bundling kubectl + yq + jq for the patch Job.
   image: alpine/k8s:1.30.4
   # Optional pull policy override.
@@ -654,7 +654,7 @@ When this chart is installed on a cluster deployed by [nebari-infrastructure-cor
 
 1. NIC ships an ArgoCD `Application` that deploys the upstream OTel collector with a default debug exporter. The Application has `ignoreDifferences` on the ConfigMap's `data.relay` field and `RespectIgnoreDifferences=true` in its sync options — meaning ArgoCD will not revert third-party changes to that field.
 2. This chart's `post-install,post-upgrade` hook runs a Job that:
-   - Reads the current `data.relay` from `opentelemetry-collector-opentelemetry-collector-agent` in `monitoring`.
+   - Reads the current `data.relay` from `opentelemetry-collector-agent` in `monitoring`.
    - Deep-merges the LGTM exporter and pipeline overrides via `yq`.
    - Patches the ConfigMap and stamps `nic.nebari.dev/managed-by=lgtm-pack`.
    - Rolls the collector DaemonSet so the new config is loaded.
@@ -668,7 +668,7 @@ Set `otelCollectorOverrides.enabled=false` if NIC is not managing the collector 
 `helm uninstall` does **not** revert the ConfigMap. The collector will keep its LGTM-wired endpoints, which will start failing once the LGTM services are gone. To reset to NIC defaults, delete the ConfigMap and let ArgoCD recreate it from Helm:
 
 ```bash
-kubectl -n monitoring delete configmap opentelemetry-collector-opentelemetry-collector-agent
+kubectl -n monitoring delete configmap opentelemetry-collector-agent
 ```
 
 ArgoCD's next sync will render a fresh debug-exporter ConfigMap from Helm.
@@ -711,7 +711,7 @@ Insert immediately before the "Deploy chart" step:
           apiVersion: v1
           kind: ConfigMap
           metadata:
-            name: opentelemetry-collector-opentelemetry-collector-agent
+            name: opentelemetry-collector-agent
             namespace: monitoring
           data:
             relay: |
@@ -740,7 +740,7 @@ Insert immediately before the "Deploy chart" step:
           apiVersion: apps/v1
           kind: DaemonSet
           metadata:
-            name: opentelemetry-collector-opentelemetry-collector-agent
+            name: opentelemetry-collector-agent
             namespace: monitoring
           spec:
             selector:
@@ -755,7 +755,7 @@ Insert immediately before the "Deploy chart" step:
                   - name: pause
                     image: registry.k8s.io/pause:3.9
           EOF
-          kubectl -n monitoring rollout status daemonset/opentelemetry-collector-opentelemetry-collector-agent --timeout=2m
+          kubectl -n monitoring rollout status daemonset/opentelemetry-collector-agent --timeout=2m
 ```
 
 - [ ] **Step 3: Update the "Deploy chart" step to enable auto-wire**
@@ -794,13 +794,13 @@ Insert immediately after the "Deploy chart" step:
         run: |
           set -e
           echo "=== ConfigMap annotations ==="
-          kubectl -n monitoring get cm opentelemetry-collector-opentelemetry-collector-agent \
+          kubectl -n monitoring get cm opentelemetry-collector-agent \
             -o jsonpath='{.metadata.annotations}' | tee /tmp/annotations.json
           echo
           grep -q '"nic.nebari.dev/managed-by":"lgtm-pack"' /tmp/annotations.json
 
           echo "=== Merged data.relay ==="
-          kubectl -n monitoring get cm opentelemetry-collector-opentelemetry-collector-agent \
+          kubectl -n monitoring get cm opentelemetry-collector-agent \
             -o jsonpath='{.data.relay}' | tee /tmp/relay.yaml
           echo
 
@@ -858,7 +858,7 @@ kubectl apply -n monitoring -f - <<'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: opentelemetry-collector-opentelemetry-collector-agent
+  name: opentelemetry-collector-agent
 data:
   relay: |
     exporters:
@@ -884,7 +884,7 @@ kubectl apply -n monitoring -f - <<'EOF'
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: opentelemetry-collector-opentelemetry-collector-agent
+  name: opentelemetry-collector-agent
 spec:
   selector: { matchLabels: { app: stub-otel } }
   template:
@@ -894,7 +894,7 @@ spec:
         - name: pause
           image: registry.k8s.io/pause:3.9
 EOF
-kubectl -n monitoring rollout status daemonset/opentelemetry-collector-opentelemetry-collector-agent --timeout=2m
+kubectl -n monitoring rollout status daemonset/opentelemetry-collector-agent --timeout=2m
 ```
 
 - [ ] **Step 3: Install the chart**
@@ -911,7 +911,7 @@ helm install lgtm-pack . --namespace default \
 - [ ] **Step 4: Verify the patch**
 
 ```bash
-kubectl -n monitoring get cm opentelemetry-collector-opentelemetry-collector-agent -o jsonpath='{.data.relay}'
+kubectl -n monitoring get cm opentelemetry-collector-agent -o jsonpath='{.data.relay}'
 ```
 
 Expected: contains `lgtm-pack-loki`, `lgtm-pack-tempo`, `lgtm-pack-mimir-gateway` AND preserves `memory_limiter` + `prometheus` receivers.
@@ -976,7 +976,7 @@ EOF
   - Edge cases (spec §"Edge cases") — covered by the Job's wait loop and `rollout status --timeout`, exercised by CI
 - [x] **Placeholder scan:** No "TBD", "TODO", "implement later". Every step has the exact code/command. Exception: PR body references `nebari-infrastructure-core/pull/XXX` — this is a real placeholder for the actual PR number, which is determined after Task A3 runs. The Task B9 step 3 explicitly handles the linkback.
 - [x] **Type/name consistency:**
-  - `opentelemetry-collector-opentelemetry-collector-agent` used for ConfigMap and DaemonSet across all tasks (matches `helm template` verification).
+  - `opentelemetry-collector-agent` used for ConfigMap and DaemonSet across all tasks (matches `helm template` verification).
   - `{{ include "nebari-lgtm-pack.fullname" . }}-otel-patcher` used consistently for SA / Role / RoleBinding / `serviceAccountName`.
   - `{{ include "nebari-lgtm-pack.fullname" . }}-otel-overrides` used consistently for the override ConfigMap and the Job's volume reference.
   - `{{ include "nebari-lgtm-pack.fullname" . }}-otel-patch` for the Job name.

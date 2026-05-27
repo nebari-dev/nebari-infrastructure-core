@@ -755,7 +755,7 @@ func TestWriteApplication_OtelCollector_IgnoreDifferences(t *testing.T) {
 	requiredFragments := []string{
 		"ignoreDifferences:",
 		"kind: ConfigMap",
-		"name: opentelemetry-collector-opentelemetry-collector-agent",
+		"name: opentelemetry-collector-agent",
 		"namespace: monitoring",
 		"jsonPointers:",
 		"- /data/relay",

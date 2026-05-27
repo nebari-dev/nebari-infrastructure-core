@@ -19,15 +19,19 @@ spec:
   # reconciles normally. Requires RespectIgnoreDifferences=true in syncOptions
   # below to be effective during sync (not just drift detection).
   #
-  # The ConfigMap name is rendered by the upstream chart as
-  # <release>-<chart>-agent in daemonset mode. If you bump targetRevision
-  # below, re-verify with `helm template` that the rendered name still
-  # matches — otherwise this rule silently stops applying and packs will
-  # start getting clobbered with no test failure.
+  # The ConfigMap name comes from the chart's fullname helper + "-agent".
+  # The fullname helper collapses when the release name contains the chart
+  # name — both are "opentelemetry-collector" here, so fullname is just
+  # "opentelemetry-collector" and the ConfigMap is "opentelemetry-collector-agent"
+  # (NOT the double-prefixed "opentelemetry-collector-opentelemetry-collector-agent"
+  # you'd see with a different release name). If you bump targetRevision
+  # below or rename the release, re-verify with `helm template` that the
+  # rendered name still matches — otherwise this rule silently stops
+  # applying and packs will start getting clobbered with no test failure.
   ignoreDifferences:
     - group: ""
       kind: ConfigMap
-      name: opentelemetry-collector-opentelemetry-collector-agent
+      name: opentelemetry-collector-agent
       namespace: monitoring
       jsonPointers:
         - /data/relay
