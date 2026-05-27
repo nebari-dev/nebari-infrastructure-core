@@ -13,6 +13,19 @@ metadata:
 spec:
   project: foundational
 
+  # Allow software packs (e.g. nebari-lgtm-pack) to overwrite the collector
+  # config without ArgoCD reverting it. The data.relay field holds the entire
+  # collector config; everything else (labels, annotations, existence) still
+  # reconciles normally. Requires RespectIgnoreDifferences=true in syncOptions
+  # below to be effective during sync (not just drift detection).
+  ignoreDifferences:
+    - group: ""
+      kind: ConfigMap
+      name: opentelemetry-collector-opentelemetry-collector-agent
+      namespace: monitoring
+      jsonPointers:
+        - /data/relay
+
   source:
     chart: opentelemetry-collector
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
@@ -115,6 +128,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
