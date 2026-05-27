@@ -138,6 +138,16 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 	}
 
+	// Validate load_balancer_scheme if specified
+	if awsCfg.LoadBalancerScheme != "" &&
+		awsCfg.LoadBalancerScheme != LoadBalancerSchemeInternetFacing &&
+		awsCfg.LoadBalancerScheme != LoadBalancerSchemeInternal {
+		err := fmt.Errorf("invalid load_balancer_scheme %q: must be %q or %q",
+			awsCfg.LoadBalancerScheme, LoadBalancerSchemeInternetFacing, LoadBalancerSchemeInternal)
+		span.RecordError(err)
+		return err
+	}
+
 	// Validate node groups
 	if len(awsCfg.NodeGroups) == 0 {
 		err := fmt.Errorf("at least one node group is required")
@@ -714,12 +724,14 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // EFSStorageClass is set when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
-// Controller (type=external) and request a public, IP-targeted NLB. Without
-// aws-load-balancer-scheme=internet-facing, LBC creates an internal NLB by
-// default, which is not reachable from outside the VPC.
+// Controller (type=external) and request an IP-targeted NLB. The
+// aws-load-balancer-scheme annotation defaults to "internet-facing" so the NLB
+// is reachable from outside the VPC; operators with private-only VPCs can
+// override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := longhorn.StorageClassName
 	var efsSC string
+	lbScheme := LoadBalancerSchemeInternetFacing
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
@@ -731,6 +743,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()
 			}
+			lbScheme = awsCfg.LoadBalancerSchemeOrDefault()
 		}
 	}
 
@@ -741,7 +754,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
-			"service.beta.kubernetes.io/aws-load-balancer-scheme":          "internet-facing",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":          lbScheme,
 		},
 	}
 }

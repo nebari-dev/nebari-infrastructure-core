@@ -83,6 +83,12 @@ cluster:
     #   enabled: true
     #   # chart_version: "3.2.1"  # optional override; tracks latest v3.x by default
 
+    # Scheme applied to the Gateway's NLB. Defaults to "internet-facing".
+    # Set to "internal" for private-only VPCs (no public subnets / no IGW);
+    # an internet-facing NLB has no public subnets to land in and will hang
+    # the deploy waiting for an LB endpoint.
+    # load_balancer_scheme: internet-facing  # or: internal
+
     # EFS configuration for shared storage (optional)
     # Creates an EFS file system with mount targets in each private subnet
     efs:
