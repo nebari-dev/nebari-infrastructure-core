@@ -124,9 +124,10 @@ No new template variables, no new NIC config flags, no new code paths. The chang
 Five hook-annotated objects, all `helm.sh/hook: post-install,post-upgrade`, `helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`:
 
 1. **ServiceAccount** `{{ release }}-otel-patcher` in `monitoring`.
-2. **Role** — least-privilege, scoped by `resourceNames`:
-   - `configmaps`: `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent`
-   - `daemonsets` (apps): `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent`
+2. **Role** — least-privilege:
+   - `configmaps`: `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent` (`resourceNames`-scoped)
+   - `daemonsets` (apps): `get`, `patch` on `opentelemetry-collector-opentelemetry-collector-agent` (`resourceNames`-scoped)
+   - `daemonsets` (apps): `list`, `watch` namespace-wide. `kubectl rollout status` uses an informer that requires `list`+`watch` on the collection; Kubernetes `resourceNames` does not apply to `list`/`watch` verbs, so this rule is namespace-scoped only. Still least-privilege at the namespace level.
 3. **RoleBinding** binding the SA to the Role.
 4. **ConfigMap** `{{ release }}-otel-overrides` holding `overrides.yaml`. Endpoints are templated using `{{ .Release.Name }}` so the chart survives custom release names:
    ```yaml

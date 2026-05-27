@@ -351,6 +351,13 @@ rules:
     resources: ["daemonsets"]
     resourceNames: ["{{ .Values.otelCollectorOverrides.daemonSetName }}"]
     verbs: ["get", "patch"]
+  # `kubectl rollout status` uses an informer that requires list+watch on the
+  # collection. resourceNames does not apply to list/watch verbs in RBAC, so
+  # these are scoped to the namespace only (still least-privilege at namespace
+  # level; the namespace itself should only host the targeted DaemonSet).
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
