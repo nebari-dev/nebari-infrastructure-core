@@ -247,4 +247,4 @@ If NIC later drops a receiver or processor that LGTM's pipelines reference (e.g.
 
 ## Open questions
 
-- Should the LGTM `helm uninstall` flow ship a `pre-delete` Job that resets `data.relay` to a known-good empty config (forcing ArgoCD to recreate from Helm defaults)? Currently designed as a documented manual step; could be revisited if user feedback indicates surprise.
+None — `pre-delete` revert hook is explicitly out of scope (see Non-goals); uninstall behavior is documented manual reset.
