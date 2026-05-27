@@ -139,11 +139,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	}
 
 	// Validate load_balancer_scheme if specified
-	if awsCfg.LoadBalancerScheme != "" &&
-		awsCfg.LoadBalancerScheme != LoadBalancerSchemeInternetFacing &&
-		awsCfg.LoadBalancerScheme != LoadBalancerSchemeInternal {
-		err := fmt.Errorf("invalid load_balancer_scheme %q: must be %q or %q",
-			awsCfg.LoadBalancerScheme, LoadBalancerSchemeInternetFacing, LoadBalancerSchemeInternal)
+	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
+		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
+			awsCfg.LoadBalancerScheme, validLoadBalancerSchemes)
 		span.RecordError(err)
 		return err
 	}
@@ -731,7 +729,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	sc := longhorn.StorageClassName
 	var efsSC string
-	lbScheme := LoadBalancerSchemeInternetFacing
+	lbScheme := loadBalancerSchemeInternetFacing
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {

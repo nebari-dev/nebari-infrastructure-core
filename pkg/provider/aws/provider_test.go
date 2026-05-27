@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -51,6 +53,44 @@ func TestInfraSettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.got != tt.want {
 				t.Errorf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidate_LoadBalancerScheme covers the rejection path only. Valid
+// schemes flow through Validate to the AWS credential check, which would
+// require live AWS credentials (or a long IMDS timeout) in this test
+// environment. The default and valid-value paths are exercised by
+// TestInfraSettings and TestInfraSettings_LoadBalancerScheme.
+func TestValidate_LoadBalancerScheme(t *testing.T) {
+	tests := []struct {
+		name   string
+		scheme string
+	}{
+		{name: "typo is rejected", scheme: "internet_facing"},
+		{name: "arbitrary string is rejected", scheme: "public"},
+		{name: "mixed case is rejected", scheme: "Internal"},
+	}
+
+	p := NewProvider()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
+				"region":               "us-west-2",
+				"kubernetes_version":   "1.34",
+				"load_balancer_scheme": tt.scheme,
+				"node_groups": map[string]any{
+					"general": map[string]any{"instance": "m5.large"},
+				},
+			}}}
+
+			err := p.Validate(context.Background(), "test-project", cfg)
+			if err == nil {
+				t.Fatalf("expected error for scheme %q, got nil", tt.scheme)
+			}
+			if !strings.Contains(err.Error(), "load_balancer_scheme") {
+				t.Fatalf("expected error to mention load_balancer_scheme, got: %v", err)
 			}
 		})
 	}

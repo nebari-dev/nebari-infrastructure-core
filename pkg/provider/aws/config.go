@@ -31,16 +31,21 @@ type Config struct {
 }
 
 const (
-	LoadBalancerSchemeInternetFacing = "internet-facing"
-	LoadBalancerSchemeInternal       = "internal"
+	loadBalancerSchemeInternetFacing = "internet-facing"
+	loadBalancerSchemeInternal       = "internal"
 )
+
+var validLoadBalancerSchemes = []string{
+	loadBalancerSchemeInternetFacing,
+	loadBalancerSchemeInternal,
+}
 
 // LoadBalancerSchemeOrDefault returns the configured AWS load balancer scheme,
 // defaulting to "internet-facing" when unset. Values are validated at config
 // load time, so callers can trust the result is one of the supported schemes.
 func (c *Config) LoadBalancerSchemeOrDefault() string {
 	if c.LoadBalancerScheme == "" {
-		return LoadBalancerSchemeInternetFacing
+		return loadBalancerSchemeInternetFacing
 	}
 	return c.LoadBalancerScheme
 }
