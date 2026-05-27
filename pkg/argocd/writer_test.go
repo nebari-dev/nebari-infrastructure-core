@@ -739,3 +739,32 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }
+
+func TestWriteApplication_OtelCollector_IgnoreDifferences(t *testing.T) {
+	var buf bytes.Buffer
+	ctx := context.Background()
+
+	if err := WriteApplication(ctx, &buf, "opentelemetry-collector"); err != nil {
+		t.Fatalf("WriteApplication(opentelemetry-collector) error: %v", err)
+	}
+
+	content := buf.String()
+
+	// ignoreDifferences must be set so LGTM (or any pack) can claim data.relay
+	// without ArgoCD reverting it on the next sync.
+	requiredFragments := []string{
+		"ignoreDifferences:",
+		"kind: ConfigMap",
+		"name: opentelemetry-collector-opentelemetry-collector-agent",
+		"namespace: monitoring",
+		"jsonPointers:",
+		"- /data/relay",
+		"RespectIgnoreDifferences=true",
+	}
+
+	for _, frag := range requiredFragments {
+		if !strings.Contains(content, frag) {
+			t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", frag, content)
+		}
+	}
+}
