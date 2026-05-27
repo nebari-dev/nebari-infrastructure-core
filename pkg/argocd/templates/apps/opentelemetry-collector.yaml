@@ -18,6 +18,12 @@ spec:
   # collector config; everything else (labels, annotations, existence) still
   # reconciles normally. Requires RespectIgnoreDifferences=true in syncOptions
   # below to be effective during sync (not just drift detection).
+  #
+  # The ConfigMap name is rendered by the upstream chart as
+  # <release>-<chart>-agent in daemonset mode. If you bump targetRevision
+  # below, re-verify with `helm template` that the rendered name still
+  # matches — otherwise this rule silently stops applying and packs will
+  # start getting clobbered with no test failure.
   ignoreDifferences:
     - group: ""
       kind: ConfigMap
