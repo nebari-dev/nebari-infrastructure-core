@@ -36,9 +36,16 @@ cluster:
       pod_cidr: "10.244.0.0/16"
       service_cidr: "10.0.16.0/22"
       dns_service_ip: "10.0.16.10"
+      # Network dataplane: "azure" (default) or "cilium" (Azure CNI Powered by
+      # Cilium). Set at create time to avoid a node roll later.
+      # dataplane: cilium
       # BYO networking:
       # existing_vnet_id: /subscriptions/.../virtualNetworks/foo
       # existing_node_subnet_id: /subscriptions/.../subnets/foo
+
+    # Node Auto Provisioning (Karpenter). "Manual" (default) or "Auto".
+    # "Auto" requires network.dataplane: cilium above.
+    # node_provisioning_mode: Auto
 
     node_groups:
       # Exactly one node group must have mode=System (or omit mode entirely

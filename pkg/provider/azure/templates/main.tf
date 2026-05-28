@@ -1,6 +1,6 @@
 module "aks_cluster" {
   source  = "nebari-dev/aks-cluster/azurerm"
-  version = "0.1.0"
+  version = "0.1.1"
 
   project_name                 = var.project_name
   location                     = var.location
@@ -14,6 +14,8 @@ module "aks_cluster" {
   existing_node_subnet_id      = var.existing_node_subnet_id
   network_plugin               = var.network_plugin
   network_plugin_mode          = var.network_plugin_mode
+  network_data_plane           = var.network_data_plane
+  node_provisioning_mode       = var.node_provisioning_mode
   pod_cidr                     = var.pod_cidr
   service_cidr                 = var.service_cidr
   dns_service_ip               = var.dns_service_ip

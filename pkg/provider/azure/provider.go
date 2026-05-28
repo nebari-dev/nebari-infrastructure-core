@@ -77,16 +77,41 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	return nil
 }
 
+// initTofuBackend runs `tofu init` against the right backend. For a dry run on
+// a never-deployed cluster (backendExists=false) it overrides the azurerm
+// backend with a throwaway local backend so the dry run never bootstraps cloud
+// state; otherwise it points init at the shared azurerm backend (whose
+// resources are either already present or were just created by
+// ensureStateBackend). Mirrors the AWS provider's local-vs-S3 dry-run pattern.
+func initTofuBackend(ctx context.Context, tf *tofu.TerraformExecutor, subID, projectName string, dryRun, backendExists bool) error {
+	if dryRun && !backendExists {
+		if err := tf.WriteBackendOverride(); err != nil {
+			return err
+		}
+		return tf.Init(ctx)
+	}
+	backend := newStateBackendConfig(subID, projectName)
+	return tf.Init(ctx,
+		tfexec.BackendConfig(fmt.Sprintf("resource_group_name=%s", backend.RGName)),
+		tfexec.BackendConfig(fmt.Sprintf("storage_account_name=%s", backend.SAName)),
+		tfexec.BackendConfig(fmt.Sprintf("container_name=%s", backend.Container)),
+		tfexec.BackendConfig(fmt.Sprintf("key=%s", backend.Key)),
+	)
+}
+
 // Deploy provisions the Azure AKS cluster by invoking the embedded OpenTofu
 // shim. It writes terraform.tfvars.json from the parsed Config, runs
 // `tofu init` and `tofu apply`, and streams output through the status channel.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
+// With opts.DryRun it runs `tofu plan` instead of apply and never creates the
+// state backend for a cluster that hasn't been deployed yet.
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("provider", providerName),
 		attribute.String("project_name", projectName),
+		attribute.Bool("dry_run", opts.DryRun),
 	)
 
 	cfg, err := p.parseConfig(ctx, clusterConfig)
@@ -106,14 +131,25 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring Terraform state backend resources").
-		WithResource("state-backend").
-		WithAction("bootstrap").
-		WithMetadata("cluster_name", projectName))
-	backend, err := ensureStateBackend(ctx, subID, cfg.Region, projectName)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("bootstrap state backend: %w", err)
+	// A dry run must not create cloud resources. If the state backend already
+	// exists we read from it; if not, initTofuBackend falls back to a local
+	// backend below. A real deploy always bootstraps the backend first.
+	backendExists := true
+	if opts.DryRun {
+		backendExists, err = stateBackendExists(ctx, subID)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("check state backend: %w", err)
+		}
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring Terraform state backend resources").
+			WithResource("state-backend").
+			WithAction("bootstrap").
+			WithMetadata("cluster_name", projectName))
+		if _, err := ensureStateBackend(ctx, subID, cfg.Region, projectName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("bootstrap state backend: %w", err)
+		}
 	}
 
 	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
@@ -139,14 +175,21 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		WithResource("tofu").
 		WithAction("init").
 		WithMetadata("cluster_name", projectName))
-	if err := tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("resource_group_name=%s", backend.RGName)),
-		tfexec.BackendConfig(fmt.Sprintf("storage_account_name=%s", backend.SAName)),
-		tfexec.BackendConfig(fmt.Sprintf("container_name=%s", backend.Container)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", backend.Key)),
-	); err != nil {
+	if err := initTofuBackend(ctx, tf, subID, projectName, opts.DryRun, backendExists); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu init: %w", err)
+	}
+
+	if opts.DryRun {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Planning Terraform changes (dry run)").
+			WithResource("tofu").
+			WithAction("plan").
+			WithMetadata("cluster_name", projectName))
+		if _, err := tf.Plan(ctx); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("tofu plan: %w", err)
+		}
+		return nil
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Applying Terraform plan").
@@ -169,13 +212,14 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 // the same state backend used by Deploy. After tofu completes, cleanupOrphans
 // reports any tagged resources tofu missed (e.g., AKS-managed MC_* siblings)
 // as a non-fatal warning so users can clean them up manually.
-func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Destroy")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("provider", providerName),
 		attribute.String("project_name", projectName),
+		attribute.Bool("dry_run", opts.DryRun),
 	)
 
 	cfg, err := p.parseConfig(ctx, clusterConfig)
@@ -195,19 +239,31 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	// ensureStateBackend is idempotent; on Destroy it's a no-op when the
-	// RG/SA/container already exist (the common case) and reconstructs them
-	// only if a partial-deploy left them missing — which would also mean
-	// there's nothing to destroy, but tofu init still needs the backend
-	// resources reachable to read state.
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Verifying Terraform state backend resources").
-		WithResource("state-backend").
-		WithAction("verify").
-		WithMetadata("cluster_name", projectName))
-	backend, err := ensureStateBackend(ctx, subID, cfg.Region, projectName)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("ensure state backend: %w", err)
+	// A dry-run destroy must not touch cloud state. If the backend exists we
+	// read from it to plan the teardown; if it doesn't, there's nothing to
+	// destroy and initTofuBackend falls back to a local backend so the plan
+	// still runs. A real destroy ensures the backend is reachable first.
+	backendExists := true
+	if opts.DryRun {
+		backendExists, err = stateBackendExists(ctx, subID)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("check state backend: %w", err)
+		}
+	} else {
+		// ensureStateBackend is idempotent; on Destroy it's a no-op when the
+		// RG/SA/container already exist (the common case) and reconstructs them
+		// only if a partial-deploy left them missing — which would also mean
+		// there's nothing to destroy, but tofu init still needs the backend
+		// resources reachable to read state.
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Verifying Terraform state backend resources").
+			WithResource("state-backend").
+			WithAction("verify").
+			WithMetadata("cluster_name", projectName))
+		if _, err := ensureStateBackend(ctx, subID, cfg.Region, projectName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("ensure state backend: %w", err)
+		}
 	}
 
 	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
@@ -233,14 +289,22 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		WithResource("tofu").
 		WithAction("init").
 		WithMetadata("cluster_name", projectName))
-	if err := tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("resource_group_name=%s", backend.RGName)),
-		tfexec.BackendConfig(fmt.Sprintf("storage_account_name=%s", backend.SAName)),
-		tfexec.BackendConfig(fmt.Sprintf("container_name=%s", backend.Container)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", backend.Key)),
-	); err != nil {
+	if err := initTofuBackend(ctx, tf, subID, projectName, opts.DryRun, backendExists); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu init: %w", err)
+	}
+
+	if opts.DryRun {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Planning Terraform teardown (dry run)").
+			WithResource("tofu").
+			WithAction("plan").
+			WithMetadata("cluster_name", projectName))
+		if _, err := tf.Plan(ctx, tfexec.Destroy(true)); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("tofu plan: %w", err)
+		}
+		// Dry run: skip the actual destroy and the orphan sweep below.
+		return nil
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Terraform-managed resources").

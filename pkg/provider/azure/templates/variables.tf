@@ -56,6 +56,16 @@ variable "network_plugin_mode" {
   default = "overlay"
 }
 
+variable "network_data_plane" {
+  type    = string
+  default = "azure"
+}
+
+variable "node_provisioning_mode" {
+  type    = string
+  default = "Manual"
+}
+
 variable "pod_cidr" {
   type    = string
   default = "10.244.0.0/16"

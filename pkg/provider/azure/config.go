@@ -22,15 +22,22 @@ type Config struct {
 	Network               *NetworkConfig       `yaml:"network,omitempty"`
 	NodeGroups            map[string]NodeGroup `yaml:"node_groups"`
 	Tags                  map[string]string    `yaml:"tags,omitempty"`
+	// NodeProvisioningMode enables AKS Node Auto Provisioning (Karpenter) when
+	// set to "Auto". Defaults to "Manual". "Auto" requires the cilium dataplane
+	// (network.dataplane: cilium).
+	NodeProvisioningMode string `yaml:"node_provisioning_mode,omitempty"`
 }
 
 // NetworkConfig groups all VNet/subnet/CIDR knobs.
 type NetworkConfig struct {
-	VNetCIDRBlock        string `yaml:"vnet_cidr_block,omitempty"`
-	NodeSubnetCIDRBlock  string `yaml:"node_subnet_cidr_block,omitempty"`
-	PodCIDR              string `yaml:"pod_cidr,omitempty"`
-	ServiceCIDR          string `yaml:"service_cidr,omitempty"`
-	DNSServiceIP         string `yaml:"dns_service_ip,omitempty"`
+	VNetCIDRBlock       string `yaml:"vnet_cidr_block,omitempty"`
+	NodeSubnetCIDRBlock string `yaml:"node_subnet_cidr_block,omitempty"`
+	PodCIDR             string `yaml:"pod_cidr,omitempty"`
+	ServiceCIDR         string `yaml:"service_cidr,omitempty"`
+	DNSServiceIP        string `yaml:"dns_service_ip,omitempty"`
+	// DataPlane selects the AKS network dataplane: "azure" (default) or
+	// "cilium" (Azure CNI Powered by Cilium).
+	DataPlane            string `yaml:"dataplane,omitempty"`
 	ExistingVNetID       string `yaml:"existing_vnet_id,omitempty"`
 	ExistingNodeSubnetID string `yaml:"existing_node_subnet_id,omitempty"`
 }
@@ -85,10 +92,30 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	switch c.NodeProvisioningMode {
+	case "", napModeManual, napModeAuto:
+	default:
+		return fmt.Errorf("cluster.azure.node_provisioning_mode %q is invalid (expected %q or %q)", c.NodeProvisioningMode, napModeManual, napModeAuto)
+	}
+
+	// Node Auto Provisioning requires the cilium dataplane (enforced upstream by
+	// the Terraform module too; we check here for a fast, clear error).
+	if c.NodeProvisioningMode == napModeAuto {
+		if c.Network == nil || c.Network.DataPlane != dataPlaneCilium {
+			return fmt.Errorf("cluster.azure.node_provisioning_mode %q requires network.dataplane: %q", napModeAuto, dataPlaneCilium)
+		}
+	}
+
 	return nil
 }
 
 func (n *NetworkConfig) validate() error {
+	switch n.DataPlane {
+	case "", dataPlaneAzure, dataPlaneCilium:
+	default:
+		return fmt.Errorf("cluster.azure.network.dataplane %q is invalid (expected %q or %q)", n.DataPlane, dataPlaneAzure, dataPlaneCilium)
+	}
+
 	// BYO networking: both ID fields must be set together.
 	if (n.ExistingVNetID != "") != (n.ExistingNodeSubnetID != "") {
 		if n.ExistingVNetID == "" {

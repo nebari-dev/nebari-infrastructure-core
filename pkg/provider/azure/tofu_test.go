@@ -84,6 +84,37 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 	}
 }
 
+func TestToTFVarsDataPlaneAndNAP(t *testing.T) {
+	t.Run("propagates cilium dataplane and NAP", func(t *testing.T) {
+		cfg := Config{
+			Region:               "eastus",
+			NodeGroups:           map[string]NodeGroup{"s": {Mode: modeSystem}},
+			NodeProvisioningMode: napModeAuto,
+			Network:              &NetworkConfig{DataPlane: dataPlaneCilium},
+		}
+		vars := cfg.toTFVars("p")
+		if vars.NetworkDataPlane != dataPlaneCilium {
+			t.Errorf("NetworkDataPlane = %q, want %q", vars.NetworkDataPlane, dataPlaneCilium)
+		}
+		if vars.NodeProvisioningMode != napModeAuto {
+			t.Errorf("NodeProvisioningMode = %q, want %q", vars.NodeProvisioningMode, napModeAuto)
+		}
+	})
+	t.Run("omits dataplane and NAP when unset so module defaults win", func(t *testing.T) {
+		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
+		b, err := json.Marshal(cfg.toTFVars("p"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		for _, key := range []string{"network_data_plane", "node_provisioning_mode"} {
+			if contains(s, key) {
+				t.Errorf("expected %q to be omitted from JSON, got: %s", key, s)
+			}
+		}
+	})
+}
+
 func TestToTFVarsOmitsEmptyPointers(t *testing.T) {
 	cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
 	vars := cfg.toTFVars("p")

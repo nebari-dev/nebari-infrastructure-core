@@ -107,6 +107,55 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid cilium dataplane",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Network:    &NetworkConfig{DataPlane: dataPlaneCilium},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid dataplane",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Network:    &NetworkConfig{DataPlane: "calico"},
+			},
+			wantErr:   true,
+			wantInErr: "dataplane",
+		},
+		{
+			name: "invalid node_provisioning_mode",
+			cfg: Config{
+				Region:               "eastus",
+				NodeGroups:           map[string]NodeGroup{"system": validNodeGroup},
+				NodeProvisioningMode: "auto",
+			},
+			wantErr:   true,
+			wantInErr: "node_provisioning_mode",
+		},
+		{
+			name: "NAP Auto without cilium",
+			cfg: Config{
+				Region:               "eastus",
+				NodeGroups:           map[string]NodeGroup{"system": validNodeGroup},
+				NodeProvisioningMode: napModeAuto,
+			},
+			wantErr:   true,
+			wantInErr: "cilium",
+		},
+		{
+			name: "NAP Auto with cilium",
+			cfg: Config{
+				Region:               "eastus",
+				NodeGroups:           map[string]NodeGroup{"system": validNodeGroup},
+				NodeProvisioningMode: napModeAuto,
+				Network:              &NetworkConfig{DataPlane: dataPlaneCilium},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tc := range cases {

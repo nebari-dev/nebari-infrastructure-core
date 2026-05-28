@@ -105,6 +105,40 @@ func ensureStateBackend(ctx context.Context, subscriptionID, location, projectNa
 	return cfg, nil
 }
 
+// stateBackendExists reports whether the Terraform state storage account for
+// this subscription already exists. It's used by dry-run to decide between the
+// real azurerm backend (existing cluster) and a throwaway local backend
+// (never-deployed cluster), so a dry run never bootstraps cloud state.
+func stateBackendExists(ctx context.Context, subscriptionID string) (bool, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "azure.StateBackendExists")
+	defer span.End()
+
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		span.RecordError(err)
+		return false, fmt.Errorf("azure credentials: %w", err)
+	}
+
+	client, err := armstorage.NewAccountsClient(subscriptionID, cred, nil)
+	if err != nil {
+		span.RecordError(err)
+		return false, fmt.Errorf("create storage accounts client: %w", err)
+	}
+
+	saName := stateStorageAccountName(subscriptionID)
+	_, err = client.GetProperties(ctx, stateResourceGroupName, saName, nil)
+	if err == nil {
+		return true, nil
+	}
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) && respErr.StatusCode == 404 {
+		return false, nil
+	}
+	span.RecordError(err)
+	return false, fmt.Errorf("get storage account %q: %w", saName, err)
+}
+
 func ensureStateResourceGroup(ctx context.Context, subscriptionID, location, rgName string, cred azcore.TokenCredential) error {
 	client, err := armresources.NewResourceGroupsClient(subscriptionID, cred, nil)
 	if err != nil {
