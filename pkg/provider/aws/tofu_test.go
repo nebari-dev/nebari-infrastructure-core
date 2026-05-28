@@ -248,3 +248,54 @@ func TestResolveNodeGroupAMIs(t *testing.T) {
 		}
 	})
 }
+
+func TestToTFVarsEnableIRSA(t *testing.T) {
+	baseConfig := func() Config {
+		return Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.33",
+			NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
+		}
+	}
+
+	t.Run("unset omits the field so the upstream default applies", func(t *testing.T) {
+		cfg := baseConfig()
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if vars.EnableIRSA != nil {
+			t.Errorf("expected EnableIRSA to be nil when unset, got %v", *vars.EnableIRSA)
+		}
+	})
+
+	t.Run("explicit false propagates through", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableIRSA = boolPtr(false)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if vars.EnableIRSA == nil {
+			t.Fatal("expected EnableIRSA to be set, got nil")
+		}
+		if *vars.EnableIRSA != false {
+			t.Errorf("expected EnableIRSA=false, got %v", *vars.EnableIRSA)
+		}
+	})
+
+	t.Run("explicit true propagates through", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.EnableIRSA = boolPtr(true)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if vars.EnableIRSA == nil {
+			t.Fatal("expected EnableIRSA to be set, got nil")
+		}
+		if *vars.EnableIRSA != true {
+			t.Errorf("expected EnableIRSA=true, got %v", *vars.EnableIRSA)
+		}
+	})
+}

@@ -45,7 +45,8 @@ type TFVars struct {
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
 	// No omitempty: a false value must be emitted so it overrides the module's
 	// `true` default when the autoscaler is disabled.
-	EnableClusterAutoscalerPodIdentity bool `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
 }
 
 func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
@@ -110,6 +111,9 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 	}
 	if c.PermissionsBoundary != "" {
 		vars.IAMRolePermissionsBoundary = &c.PermissionsBoundary
+	}
+	if c.EnableIRSA != nil {
+		vars.EnableIRSA = c.EnableIRSA
 	}
 
 	if c.LonghornEnabled() {

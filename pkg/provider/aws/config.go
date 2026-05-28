@@ -41,6 +41,12 @@ type Config struct {
 	// field once trust-manager (the in-pod half of nebari-dev/nebari-infrastructure-core#307)
 	// lands; keeping it provider-scoped here matches the current Provider interface.
 	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+	// EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for
+	// Service Accounts. When unset, the upstream module default (true) applies.
+	// Set false when the cluster relies exclusively on EKS Pod Identity, or
+	// when the VPC cannot resolve oidc.eks.<region>.amazonaws.com (a fully
+	// private deployment with no public DNS resolution for AWS hostnames).
+	EnableIRSA *bool `yaml:"enable_irsa,omitempty"`
 }
 
 // TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of

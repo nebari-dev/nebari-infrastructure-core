@@ -31,4 +31,5 @@ module "eks_cluster" {
   efs_kms_key_arn                          = var.efs_kms_key_arn
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
+  enable_irsa                              = var.enable_irsa
 }
