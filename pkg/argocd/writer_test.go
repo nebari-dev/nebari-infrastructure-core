@@ -740,7 +740,7 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	}
 }
 
-func TestWriteApplication_OtelCollector_IgnoreDifferences(t *testing.T) {
+func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := context.Background()
 
@@ -750,21 +750,40 @@ func TestWriteApplication_OtelCollector_IgnoreDifferences(t *testing.T) {
 
 	content := buf.String()
 
-	// ignoreDifferences must be set so LGTM (or any pack) can claim data.relay
-	// without ArgoCD reverting it on the next sync.
+	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
+	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
+	// container resolves it (or falls back to `{}`) into an emptyDir that the
+	// collector reads via an extra --config flag. This sidesteps the upstream
+	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
+	// keeping the base CM and the override CM completely separate.
 	requiredFragments := []string{
-		"ignoreDifferences:",
-		"kind: ConfigMap",
-		"name: opentelemetry-collector-agent",
-		"namespace: monitoring",
-		"jsonPointers:",
-		"- /data/relay",
-		"RespectIgnoreDifferences=true",
+		"extraVolumes:",
+		"name: overrides-src",
+		"name: opentelemetry-collector-overrides",
+		"optional: true",
+		"name: overrides-resolved",
+		"emptyDir: {}",
+		"initContainers:",
+		"name: ensure-overrides",
+		"--config=/conf/overrides/relay.yaml",
 	}
 
 	for _, frag := range requiredFragments {
 		if !strings.Contains(content, frag) {
 			t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", frag, content)
+		}
+	}
+
+	// And these must NOT be present — they were the previous (broken) design.
+	forbiddenFragments := []string{
+		"ignoreDifferences:",
+		"RespectIgnoreDifferences=true",
+		"jsonPointers:",
+	}
+
+	for _, frag := range forbiddenFragments {
+		if strings.Contains(content, frag) {
+			t.Errorf("rendered opentelemetry-collector.yaml still contains forbidden fragment %q from the old ignoreDifferences design", frag)
 		}
 	}
 }
