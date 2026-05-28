@@ -47,6 +47,24 @@ spec:
           repository: otel/opentelemetry-collector-k8s
           tag: ""
         mode: daemonset
+        # ClusterRole for the prometheus receiver's kubernetes_sd_configs to
+        # discover pods cluster-wide and scrape their /metrics endpoints. The
+        # chart defaults to clusterRole.create=false, which would leave the
+        # SA unable to list pods and the prometheus receiver silently empty.
+        # Resources scraped: pods (via role: pod), nodes (cAdvisor / kubelet),
+        # endpoints/services (future scrape configs). nodes/metrics + /metrics
+        # cover kubelet and apiserver metrics if scrape configs are added.
+        clusterRole:
+          create: true
+          rules:
+            - apiGroups: [""]
+              resources: ["pods", "nodes", "services", "endpoints"]
+              verbs: ["get", "list", "watch"]
+            - apiGroups: [""]
+              resources: ["nodes/metrics", "nodes/proxy"]
+              verbs: ["get"]
+            - nonResourceURLs: ["/metrics"]
+              verbs: ["get"]
         resources:
           requests:
             cpu: 100m
