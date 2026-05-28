@@ -107,7 +107,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get provider").
 			WithMetadata("provider", cfg.Cluster.ProviderName()).
 			WithMetadata("error", err.Error()))
-		return nil, err
+		return nil, fmt.Errorf("get cluster provider %q: %w", cfg.Cluster.ProviderName(), err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
@@ -119,7 +119,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
 			WithMetadata("error", err.Error()))
-		return nil, err
+		return nil, fmt.Errorf("deploy infrastructure: %w", err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
@@ -137,14 +137,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps configuration failed").
 			WithMetadata("error", err.Error()))
-		return nil, err
+		return nil, fmt.Errorf("resolve gitops configuration: %w", err)
 	}
 	if gitConfig != nil && !opts.DryRun {
 		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
 				WithMetadata("error", err.Error()))
-			return nil, err
+			return nil, fmt.Errorf("bootstrap gitops: %w", err)
 		}
 	}
 
