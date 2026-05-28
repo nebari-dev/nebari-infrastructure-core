@@ -81,6 +81,18 @@ cluster:
       # kms_key_id: ""                  # Optional: KMS key ARN for encryption
       # provisioned_mbps: 100           # Required if throughput_mode is provisioned
 
+    # Optional: install an org CA bundle into the OS trust store of every EKS
+    # worker node before kubelet starts. Required when nodes must reach the EKS
+    # control plane, ECR, or pull container images through a TLS-inspecting
+    # egress proxy. Exactly one of `path` or `inline` may be set.
+    # trust_bundle:
+    #   path: /etc/ssl/certs/my-org-ca.pem
+    #   # OR
+    #   # inline: |
+    #   #   -----BEGIN CERTIFICATE-----
+    #   #   ...
+    #   #   -----END CERTIFICATE-----
+
     tags:
       Environment: development
       Project: nebari

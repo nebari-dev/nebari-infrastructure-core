@@ -122,3 +122,8 @@ variable "node_security_group_additional_rules" {
   type    = any
   default = {}
 }
+
+variable "extra_ca_bundle" {
+  type    = string
+  default = null
+}

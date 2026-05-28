@@ -1,5 +1,13 @@
 package aws
 
+import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+)
+
 type Config struct {
 	Region                   string               `yaml:"region"`
 	StateBucket              string               `yaml:"state_bucket,omitempty"`
@@ -20,6 +28,21 @@ type Config struct {
 	Tags                     map[string]string    `yaml:"tags,omitempty"`
 	EFS                      *EFSConfig           `yaml:"efs,omitempty"`
 	Longhorn                 *LonghornConfig      `yaml:"longhorn,omitempty"`
+	// TrustBundle, when set, installs the given PEM bundle into the OS trust
+	// store of every EKS worker node before kubelet starts. Required when nodes
+	// must reach the EKS control plane, ECR, or pull container images through a
+	// TLS-inspecting egress proxy. Will likely move to a top-level NebariConfig
+	// field once trust-manager (the in-pod half of nebari-dev/nebari-infrastructure-core#307)
+	// lands; keeping it provider-scoped here matches the current Provider interface.
+	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+}
+
+// TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
+// Path or Inline must be set. Path is a filesystem path to a PEM file on the
+// operator's machine; Inline is the PEM text itself.
+type TrustBundleConfig struct {
+	Path   string `yaml:"path,omitempty"`
+	Inline string `yaml:"inline,omitempty"`
 }
 
 type NodeGroup struct {
@@ -89,4 +112,41 @@ type LonghornConfig struct {
 	ReplicaCount   int               `yaml:"replica_count,omitempty"`
 	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
 	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
+}
+
+// ResolveBase64 returns the configured CA bundle as a base64-encoded PEM string,
+// suitable for passing straight to the terraform-aws-eks-cluster module's
+// extra_ca_bundle input. Returns an empty string when the bundle is unset.
+func (t *TrustBundleConfig) ResolveBase64() (string, error) {
+	if t == nil {
+		return "", nil
+	}
+	pathSet := t.Path != ""
+	inlineSet := strings.TrimSpace(t.Inline) != ""
+	if pathSet && inlineSet {
+		return "", errors.New("trust_bundle: only one of path or inline may be set")
+	}
+	if !pathSet && !inlineSet {
+		return "", nil
+	}
+	var pem []byte
+	if pathSet {
+		data, err := os.ReadFile(t.Path)
+		if err != nil {
+			return "", fmt.Errorf("trust_bundle: read %s: %w", t.Path, err)
+		}
+		pem = data
+	} else {
+		pem = []byte(t.Inline)
+	}
+	if !strings.Contains(string(pem), "-----BEGIN CERTIFICATE-----") {
+		return "", fmt.Errorf("trust_bundle: no PEM certificate found in %s",
+			func() string {
+				if pathSet {
+					return t.Path
+				}
+				return "inline value"
+			}())
+	}
+	return base64.StdEncoding.EncodeToString(pem), nil
 }
