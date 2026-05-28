@@ -182,67 +182,31 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			// Install foundational services via Argo CD
 			status.Progress(ctx, "Installing foundational services")
 
-			// Generate foundational secrets up front
-			keycloakAdminPassword, err := generateSecurePassword(rand.Reader)
+			secrets, err := generateFoundationalSecrets(rand.Reader)
 			if err != nil {
 				span.RecordError(err)
 				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
 					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate Keycloak admin password: %w", err)
-			}
-			keycloakDBPassword, err := generateSecurePassword(rand.Reader)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate Keycloak DB password: %w", err)
-			}
-			postgresAdminPassword, err := generateSecurePassword(rand.Reader)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate Postgres admin password: %w", err)
-			}
-			postgresUserPassword, err := generateSecurePassword(rand.Reader)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate Postgres user password: %w", err)
-			}
-			realmAdminPassword, err := generateSecurePassword(rand.Reader)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate realm admin password: %w", err)
-			}
-			redisPassword, err := generateSecurePassword(rand.Reader)
-			if err != nil {
-				span.RecordError(err)
-				status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate foundational secrets").
-					WithMetadata("error", err.Error()))
-				return nil, fmt.Errorf("generate Redis password: %w", err)
+				return nil, fmt.Errorf("generate foundational secrets: %w", err)
 			}
 
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
 					AdminUsername:         "admin",
-					AdminPassword:         keycloakAdminPassword,
-					DBPassword:            keycloakDBPassword,
-					PostgresAdminPassword: postgresAdminPassword,
-					PostgresUserPassword:  postgresUserPassword,
+					AdminPassword:         secrets.KeycloakAdmin,
+					DBPassword:            secrets.KeycloakDB,
+					PostgresAdminPassword: secrets.PostgresAdmin,
+					PostgresUserPassword:  secrets.PostgresUser,
 					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    realmAdminPassword,
+					RealmAdminPassword:    secrets.RealmAdmin,
 					Hostname:              "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
-					RedisPassword: redisPassword,
+					RedisPassword: secrets.Redis,
 				},
 				// Enable MetalLB only for providers that need it
 				MetalLB: argocd.MetalLBConfig{
@@ -563,4 +527,36 @@ func generateSecurePassword(r io.Reader) (string, error) {
 	}
 	// Encode to base64 and take first 43 characters (removes padding)
 	return base64.URLEncoding.EncodeToString(b)[:43], nil
+}
+
+// foundationalSecrets bundles the random secrets required to install the
+// foundational services (Keycloak, Postgres, Redis).
+type foundationalSecrets struct {
+	KeycloakAdmin string
+	KeycloakDB    string
+	PostgresAdmin string
+	PostgresUser  string
+	RealmAdmin    string
+	Redis         string
+}
+
+// generateFoundationalSecrets generates the secrets for the foundational
+// services in one pass, failing fast on RNG error
+func generateFoundationalSecrets(r io.Reader) (foundationalSecrets, error) {
+	var s foundationalSecrets
+	for _, dst := range []*string{
+		&s.KeycloakAdmin,
+		&s.KeycloakDB,
+		&s.PostgresAdmin,
+		&s.PostgresUser,
+		&s.RealmAdmin,
+		&s.Redis,
+	} {
+		p, err := generateSecurePassword(r)
+		if err != nil {
+			return foundationalSecrets{}, fmt.Errorf("generate foundational secret: %w", err)
+		}
+		*dst = p
+	}
+	return s, nil
 }
