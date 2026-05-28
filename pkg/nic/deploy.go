@@ -219,7 +219,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				// Log warning but don't fail deployment
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install foundational services").
 					WithMetadata("error", err.Error()))
-				status.Warning(ctx, "You can install foundational services manually with: kubectl apply -f pkg/foundational/")
 			} else {
 				status.Success(ctx, "Foundational services installed successfully")
 				result.KeycloakInstalled = true
