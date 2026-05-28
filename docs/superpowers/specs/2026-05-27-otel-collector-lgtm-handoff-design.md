@@ -2,7 +2,7 @@
 
 **Issue:** https://github.com/nebari-dev/nebari-lgtm-pack/issues/8
 **Repos touched:** `nebari-dev/nebari-infrastructure-core`, `nebari-dev/nebari-lgtm-pack`
-**Status:** Design — ready for review
+**Status:** Design (revised) — second architecture after the first failed in real-cluster testing
 
 ## Problem
 
@@ -16,58 +16,78 @@ We want: **installing the LGTM pack automatically rewires the collector, and sub
 
 - A user who installs the LGTM Helm chart (or adds the corresponding ArgoCD `Application`) gets a working observability pipeline with no extra steps — no file edits, no kubectl, no `nic` re-runs.
 - `nic deploy` is idempotent: repeated runs do not revert the LGTM wiring.
-- NIC has no per-pack code paths. The mechanism is general enough that a future software pack could hook the same field without further NIC changes.
+- NIC has no per-pack code paths. The mechanism is a generic extension point that future software packs can use without further NIC changes.
 - The default (no LGTM installed) experience is unchanged: NIC ships a collector with debug exporters.
 
 ## Non-goals
 
-- A formal "software pack claim" framework with annotations, server-side checks, or per-pack opt-in flags. The mechanism in this design is a generic ArgoCD `ignoreDifferences` rule on one field; we don't promise a stable claim API yet.
-- Reverting `data.relay` to NIC defaults on LGTM uninstall. Out of scope; documented as a manual step.
+- A formal "software pack claim" framework with annotations, server-side checks, or per-pack opt-in flags. The extension point is positional (one mount path, one ConfigMap name) — not a structured API.
+- Reverting overrides on LGTM uninstall. The override ConfigMap is deleted by Helm; collector pods continue using the cached config until they restart, then fall back to defaults.
 - Configurable collector workload kind. We assume `daemonset` mode, matching NIC's current Application values.
-- Coordinating two software packs that both want to overwrite the same field. No other pack does this today; documented as a future concern.
+- Coordinating two software packs that both want to override. No other pack does this today; documented as a future concern.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  nic deploy (initial or repeat)                                       │
-│                                                                       │
-│  pkg/argocd/templates/apps/opentelemetry-collector.yaml               │
-│  └─ ArgoCD Application (release name, chart, base values: unchanged) │
-│     ├─ NEW: spec.ignoreDifferences                                    │
-│     │   └─ ConfigMap "opentelemetry-collector-opentelemetry-          │
-│     │       collector-agent" data.relay (jsonPointer)                 │
-│     └─ NEW: syncPolicy.syncOptions += RespectIgnoreDifferences=true   │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  nic deploy (initial or repeat) — NIC adds extension-point values   │
+│                                                                      │
+│  pkg/argocd/templates/apps/opentelemetry-collector.yaml              │
+│  └─ ArgoCD Application (release name, chart, base values: unchanged)│
+│     └─ helm.values additions:                                        │
+│        ├─ extraVolumes:                                              │
+│        │  ├─ overrides-src ← configMap: opentelemetry-collector-    │
+│        │  │                    overrides (optional: true)            │
+│        │  └─ overrides-resolved ← emptyDir                           │
+│        ├─ extraVolumeMounts: overrides-resolved → /conf/overrides    │
+│        ├─ initContainers: ensure-overrides                           │
+│        │     copies /src/relay.yaml → /dst/relay.yaml,               │
+│        │     or writes `{}` if /src/relay.yaml missing               │
+│        ├─ command.extraArgs: --config=/conf/overrides/relay.yaml     │
+│        └─ clusterRole.create: true (preserves prometheus receiver    │
+│           pod-discovery — separate concern from the LGTM handoff)    │
+└─────────────────────────────────────────────────────────────────────┘
                               │ (written to GitOps repo, synced by ArgoCD)
                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  In cluster (no LGTM yet)                                             │
-│   ArgoCD → Helm renders → ConfigMap (default debug exporter)         │
-│                        └→ DaemonSet (collector pods)                  │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  In cluster, NIC only (no LGTM yet)                                 │
+│   ArgoCD → Helm renders → opentelemetry-collector-agent CM (debug)  │
+│                        └→ opentelemetry-collector-overrides CM      │
+│                              does NOT exist; volume mount is empty  │
+│                        └→ DaemonSet:                                 │
+│                             • init container writes `{}` to emptyDir│
+│                             • collector merges base + `{}`           │
+│                             • result: NIC defaults (debug exporter) │
+└─────────────────────────────────────────────────────────────────────┘
                               │ (user installs LGTM pack)
                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  LGTM pack post-install / post-upgrade Helm hook                      │
-│   templates/otel-collector-config-patch.yaml                          │
-│   ├─ ServiceAccount + Role + RoleBinding (patch CM, restart DS)       │
-│   ├─ ConfigMap (templated overrides.yaml, endpoints use .Release.Name)│
-│   └─ Job:                                                             │
-│      1. Wait for NIC's ConfigMap (up to 5m)                           │
-│      2. yq deep-merge overrides into data.relay                       │
-│      3. kubectl patch CM (data.relay + managed-by annotation)         │
-│      4. kubectl rollout restart daemonset/<collector>                 │
-│      5. kubectl rollout status daemonset/<collector>                  │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  LGTM pack chart renders                                             │
+│   templates/otel-collector-config-patch.yaml                         │
+│   ├─ ConfigMap opentelemetry-collector-overrides                     │
+│   │     data.relay.yaml = LGTM exporter + pipeline overrides         │
+│   │     (endpoints templated with .Release.Name)                     │
+│   └─ post-install/post-upgrade hook:                                 │
+│      ServiceAccount + Role + RoleBinding (rollout DaemonSet)         │
+│      Job: wait for DaemonSet, then `kubectl rollout restart`         │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ (DaemonSet rolls)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  New collector pods:                                                 │
+│   • Init container sees /src/relay.yaml (mounted from LGTM CM)      │
+│   • Copies it to emptyDir at /conf/overrides/relay.yaml             │
+│   • Collector starts with two --config files; deep-merges them      │
+│   • Final pipelines route to Loki/Tempo/Mimir                       │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 Key invariants:
 
-- NIC remains GitOps-write-only — no live cluster reads, no per-pack knowledge.
-- NIC's `ignoreDifferences` rule is generic ("don't reconcile the data.relay field of this specific ConfigMap"), not LGTM-aware.
-- Repeated `nic deploy` is idempotent: the rule is permanent, and `RespectIgnoreDifferences=true` prevents ArgoCD's `Helm sync` from re-applying the Helm-rendered default into the ignored field.
-- The DaemonSet's `checksum/config` annotation is derived from Helm values, not from ConfigMap content; the LGTM Job must therefore trigger the rollout explicitly.
+- NIC and the LGTM pack write to **separate** Kubernetes resources. NIC's chart manages `opentelemetry-collector-agent` (base config); LGTM manages `opentelemetry-collector-overrides` (override config). There is no shared field for ArgoCD to clobber.
+- The init container guarantees `/conf/overrides/relay.yaml` always exists, even when no software pack has provided one — the collector's `--config` arg never references a missing file.
+- The override ConfigMap is regular Helm resource (not a hook). It's owned by the lgtm-pack release and tracked by ArgoCD as part of the lgtm-pack Application. ArgoCD only ever reconciles it to match its own desired state.
+- The post-install hook Job exists purely to roll the DaemonSet — the DaemonSet's `checksum/config` annotation is derived from chart values, not from this external ConfigMap, so without an explicit rollout, override-CM changes wouldn't propagate to running pods.
 
 ## Detailed design
 
@@ -75,177 +95,173 @@ Key invariants:
 
 Single file edit: `pkg/argocd/templates/apps/opentelemetry-collector.yaml`.
 
-Add two blocks under `spec:`:
+Additions to `helm.values` (alongside the existing `config:` block):
 
 ```yaml
-spec:
-  project: foundational
-
-  ignoreDifferences:
-    - group: ""
-      kind: ConfigMap
-      name: opentelemetry-collector-agent
-      namespace: monitoring
-      jsonPointers:
-        - /data/relay
-
-  source:
-    # unchanged: chart, repoURL, targetRevision, helm.values
-
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: monitoring
-
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-      allowEmpty: false
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
-      - RespectIgnoreDifferences=true   # NEW
-    retry:
-      # unchanged
+extraVolumes:
+  - name: overrides-src
+    configMap:
+      name: opentelemetry-collector-overrides
+      optional: true
+  - name: overrides-resolved
+    emptyDir: {}
+extraVolumeMounts:
+  - name: overrides-resolved
+    mountPath: /conf/overrides
+    readOnly: true
+initContainers:
+  - name: ensure-overrides
+    image: busybox:1.37
+    command:
+      - sh
+      - -c
+      - |
+        if [ -f /src/relay.yaml ]; then
+          cp /src/relay.yaml /dst/relay.yaml
+        else
+          echo '{}' > /dst/relay.yaml
+        fi
+    volumeMounts:
+      - name: overrides-src
+        mountPath: /src
+        readOnly: true
+      - name: overrides-resolved
+        mountPath: /dst
+command:
+  extraArgs:
+    - "--config=/conf/overrides/relay.yaml"
 ```
 
-Rationale:
+Removed (from the earlier failed design):
 
-- `ignoreDifferences` scoped to `data.relay` (not the whole ConfigMap) means labels, annotations, and the ConfigMap's existence still reconcile normally. If the ConfigMap is deleted, ArgoCD recreates it from Helm.
-- `RespectIgnoreDifferences=true` extends the rule from drift detection to drift remediation: without it, ArgoCD detects the difference but still applies the Helm-rendered default during sync. With it, ArgoCD leaves the field alone during sync.
-- The ConfigMap name is pinned to the value the chart renders with NIC's release name (`opentelemetry-collector`) and the chart's daemonset-mode template. Chart version bumps that change the name will break the rule and revert LGTM's wiring; this is covered by an integration test.
+- The `spec.ignoreDifferences` block.
+- `RespectIgnoreDifferences=true` from `syncPolicy.syncOptions`.
 
-No new template variables, no new NIC config flags, no new code paths. The change is fully static.
+Independent fix kept in the same change (separate concern but caught in the same investigation):
+
+- `clusterRole.create: true` with rules for pod/node/service/endpoint list+watch. Without this, the prometheus receiver's `kubernetes_sd_configs` (role: pod) fails with `pods is forbidden` and no metrics flow.
+
+No new template variables, no new NIC config flags, no code changes — this is a static YAML edit.
 
 ### LGTM pack changes
 
-#### New file: `templates/otel-collector-config-patch.yaml`
+#### `templates/otel-collector-config-patch.yaml`
 
-Five hook-annotated objects, all `helm.sh/hook: post-install,post-upgrade`, `helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`:
+Two regular resources (not hooks):
 
-1. **ServiceAccount** `{{ release }}-otel-patcher` in `monitoring`.
-2. **Role** — least-privilege:
-   - `configmaps`: `get`, `patch` on `opentelemetry-collector-agent` (`resourceNames`-scoped)
-   - `daemonsets` (apps): `get`, `patch` on `opentelemetry-collector-agent` (`resourceNames`-scoped)
-   - `daemonsets` (apps): `list`, `watch` namespace-wide. `kubectl rollout status` uses an informer that requires `list`+`watch` on the collection; Kubernetes `resourceNames` does not apply to `list`/`watch` verbs, so this rule is namespace-scoped only. Still least-privilege at the namespace level.
-3. **RoleBinding** binding the SA to the Role.
-4. **ConfigMap** `{{ release }}-otel-overrides` holding `overrides.yaml`. Endpoints are templated using `{{ .Release.Name }}` so the chart survives custom release names:
+1. **ConfigMap** `opentelemetry-collector-overrides` in `monitoring`:
    ```yaml
    data:
-     overrides.yaml: |
+     relay.yaml: |
        exporters:
          otlphttp/loki:
            endpoint: http://{{ .Release.Name }}-loki:3100/otlp
-           tls:
-             insecure: true
+           tls: { insecure: true }
          otlp/tempo:
            endpoint: http://{{ .Release.Name }}-tempo:4317
-           tls:
-             insecure: true
+           tls: { insecure: true }
          otlphttp/mimir:
            endpoint: http://{{ .Release.Name }}-mimir-gateway/otlp
-           tls:
-             insecure: true
+           tls: { insecure: true }
        service:
          pipelines:
            logs:    { receivers: [otlp],             processors: [memory_limiter, batch], exporters: [otlphttp/loki] }
            traces:  { receivers: [otlp],             processors: [memory_limiter, batch], exporters: [otlp/tempo] }
            metrics: { receivers: [otlp, prometheus], processors: [memory_limiter, batch], exporters: [otlphttp/mimir] }
    ```
-5. **Job** `{{ release }}-otel-patch`:
-   - `serviceAccountName`: the SA above.
-   - `backoffLimit: 5`, `ttlSecondsAfterFinished: 600`.
-   - Image: `alpine/k8s:1.30.4` (bundles `kubectl`, `yq`, `jq`). Pinned in `values.yaml`.
-   - Volume-mount the overrides ConfigMap at `/overrides`.
-   - Script (Helm-templated; `NS`/`CM`/`DS` resolve from `.Values.otelCollectorOverrides.*` at render time):
-     ```sh
-     set -eu
-     NS={{ .Values.otelCollectorOverrides.namespace | quote }}
-     CM={{ .Values.otelCollectorOverrides.configMapName | quote }}
-     DS={{ .Values.otelCollectorOverrides.daemonSetName | quote }}
+   Name is hardcoded to match the volume reference NIC's chart values use. Key `relay.yaml` matches what NIC's init container expects.
 
-     # Wait up to 5m for NIC's collector ConfigMap to exist
-     for i in $(seq 1 60); do
-       kubectl -n "$NS" get cm "$CM" >/dev/null 2>&1 && break
-       sleep 5
-     done
+2. **ServiceAccount + Role + RoleBinding** for the rollout Job. Role has three rules:
+   - `daemonsets`: `get`, `patch` (resourceNames-scoped) — `patch` is what `kubectl rollout restart` does (sets `spec.template.metadata.annotations.kubectl.kubernetes.io/restartedAt`).
+   - `daemonsets`: `list`, `watch` (namespace-wide) — `kubectl rollout status` uses an informer; Kubernetes RBAC doesn't honor `resourceNames` on these verbs.
 
-     CURRENT=$(kubectl -n "$NS" get cm "$CM" -o jsonpath='{.data.relay}')
-     MERGED=$(printf '%s\n' "$CURRENT" | yq -P '. *= load("/overrides/overrides.yaml")' -)
-     PATCH=$(jq -n --arg relay "$MERGED" \
-       '{metadata:{annotations:{"nic.nebari.dev/managed-by":"lgtm-pack"}},data:{relay:$relay}}')
+3. **Job** `<release>-otel-rollout`, `post-install,post-upgrade` hook with `before-hook-creation,hook-succeeded` delete policy. Script:
 
-     kubectl -n "$NS" patch cm "$CM" --type merge --patch "$PATCH"
-     kubectl -n "$NS" rollout restart daemonset/"$DS"
-     kubectl -n "$NS" rollout status daemonset/"$DS" --timeout=3m
-     ```
+   ```sh
+   set -euo pipefail
+   # Wait up to 5m for NIC's DaemonSet to exist (handles install-order races).
+   for i in $(seq 1 60); do
+     kubectl -n "$NS" get daemonset "$DS" >/dev/null 2>&1 && break
+     sleep 5
+   done
+   kubectl -n "$NS" get daemonset "$DS" >/dev/null
+   kubectl -n "$NS" rollout restart daemonset/"$DS"
+   kubectl -n "$NS" rollout status daemonset/"$DS" --timeout=3m
+   ```
 
-#### `values.yaml` additions
+#### `values.yaml`
 
 ```yaml
 otelCollectorOverrides:
   enabled: true
   namespace: monitoring
-  configMapName: opentelemetry-collector-agent
   daemonSetName: opentelemetry-collector-agent
   image: alpine/k8s:1.30.4
+  imagePullPolicy: IfNotPresent
 ```
 
-The override content is **not** in `values.yaml` — it lives in the templated ConfigMap, since endpoints need `{{ .Release.Name }}` substitution at render time. If we later want user-tunable additional overrides, we can expose `otelCollectorOverrides.extraConfig` and `extend` the file in the template. Not in this iteration.
+The override config content lives in the template (needs `{{ .Release.Name }}` substitution at render time). Not exposed for user customization in this iteration.
 
 #### `examples/opentelemetry-collector-overrides.yaml`
 
-Reframed from "thing you copy into your GitOps repo manually" to "reference of what the chart now auto-applies." Header comment updated; content unchanged.
-
-### Merge semantics (`yq '. *= load(...)'`)
-
-- Maps deep-merge.
-- Lists and scalars are replaced (not concatenated).
-
-Consequences:
-
-- New exporter keys (`otlphttp/loki`, etc.) are *added* under `exporters`.
-- The three pipelines (`logs`, `traces`, `metrics`) under `service.pipelines` are *replaced* entirely — which is what we want, since the new pipelines list specific exporters.
-- NIC's receivers, processors, and extensions are *preserved* untouched.
-
-If NIC later drops a receiver or processor that LGTM's pipelines reference (e.g. `prometheus`), the merged config is broken and the collector pod fails to start. The Job's `rollout status` step times out and the Job exits non-zero — visible failure, not silent drift.
+Kept as a standalone reference of what the chart auto-applies. Header reframed accordingly.
 
 ## Testing strategy
 
 ### NIC side
 
-- **Unit test** (`pkg/argocd/writer_test.go`): assert the rendered `opentelemetry-collector.yaml` contains `ignoreDifferences` for `ConfigMap/opentelemetry-collector-agent` with `jsonPointers: [/data/relay]`, and that `syncOptions` includes `RespectIgnoreDifferences=true`. Pure YAML-parse assertion, no cluster.
-- **Integration test** (`make test-integration-local`): after `nic deploy` and ArgoCD sync, manually `kubectl patch` the OTel collector ConfigMap's `data.relay` field. Force-trigger an ArgoCD sync. Assert the patched value persists (i.e., `RespectIgnoreDifferences` works).
+- **Unit test** `TestWriteApplication_OtelCollector_OverridesExtensionPoint`: assert the rendered Application contains `extraVolumes` with the `opentelemetry-collector-overrides` configMap (`optional: true`), the `ensure-overrides` init container, the `--config=/conf/overrides/relay.yaml` extra arg, AND that the old broken-design fragments (`ignoreDifferences:`, `RespectIgnoreDifferences=true`, `jsonPointers:`) are gone.
 
 ### LGTM pack side
 
-- **Helm render test**: `helm template . | yq` snapshot with both default release name and a custom one (`--release-name foo`); assert override endpoints contain `lgtm-pack-{loki,tempo,mimir}` and `foo-{loki,tempo,mimir}` respectively.
-- **kind integration**: install NIC's OTel Application + LGTM chart, assert merged `data.relay` contains all three new exporter blocks, assert the collector DaemonSet rolls out and reports `Available`. Ride on the existing `Tiltfile` / `ctlptl-config.yaml`.
+- **Helm lint + template snapshot test** in CI: stub a DaemonSet (the rollout Job needs something to roll), install the chart, assert that:
+  - The override ConfigMap is rendered.
+  - Endpoints contain `lgtm-pack-{loki,tempo,mimir}` (or `foo-*` with custom release name).
+  - Each pipeline's `exporters` is exactly `[<single LGTM exporter>]` (not `[debug, <LGTM exporter>]`).
+  - The DaemonSet's generation was bumped (proves the rollout Job ran).
 
 ## Edge cases
 
 | Case | Behavior |
 |---|---|
-| LGTM installed before NIC's collector reconciles | Job wait-loop (60×5s = 5min) blocks for ConfigMap. Timeout → Job fails → `backoffLimit: 5` retries → surfaced to user. |
-| LGTM `helm upgrade` with new values | `post-upgrade` hook fires → Job re-patches → DaemonSet rolls. |
-| LGTM `helm uninstall` | ConfigMap `data.relay` keeps LGTM endpoints (now pointing at nonexistent Services). Documented reset: `kubectl -n monitoring delete cm opentelemetry-collector-agent`; ArgoCD recreates from Helm defaults. |
-| NIC chart version bump changes ConfigMap name | `ignoreDifferences` no longer matches → ArgoCD reverts LGTM overrides on next sync → caught by NIC integration test. |
-| Two software packs claim the same field | Whichever ran post-install/post-upgrade last wins. Document; out of scope. |
-| `yq` merge yields invalid OTel config | Collector pod CrashLoopBackOff → `rollout status` times out (3m) → Job non-zero → visible. |
+| LGTM installed before NIC's DaemonSet reconciles | Rollout Job's wait-loop (60×5s = 5min) waits for the DaemonSet. Times out → Job fails → `backoffLimit: 5` retries → bubble up. |
+| LGTM `helm upgrade` with new values | `post-upgrade` hook fires, Job re-rolls DaemonSet, init container picks up updated override CM. |
+| LGTM uninstalled (`helm uninstall`) | Override CM deleted. Running collector pods keep cached config until next restart. On next restart, init container falls back to empty `{}`, collector reverts to NIC defaults (debug exporter). Documented in README. |
+| NIC chart upgrade renames the DaemonSet | Rollout Job fails to find the DaemonSet → wait-loop times out → caught by NIC integration tests on the chart upgrade. |
+| Two software packs both want to override | Both would render a ConfigMap with the same name → Helm release ownership conflict on the second install. Out of scope; document as future work. |
+| User provides a malformed override | Collector pod fails to start → `rollout status` times out → Job exits non-zero → visible failure. |
 
 ## Documentation
 
-- **`nebari-lgtm-pack/README.md`**: new "OTel collector wiring" section — explains auto-patch, the `nic.nebari.dev/managed-by=lgtm-pack` annotation, and the uninstall reset command.
-- **NIC docs (`docs/`)**: short note in observability docs — NIC ships a default collector with debug exporter; software packs can claim the `data.relay` field via `ignoreDifferences`. No promise of a stable claim API yet.
-- **`nebari-lgtm-pack/examples/opentelemetry-collector-overrides.yaml`**: keep file, reframe header comment as "reference / standalone tweaking example."
+- **`nebari-lgtm-pack/README.md`** — "OpenTelemetry collector wiring" section explaining the architecture, the override CM, and the uninstall behavior.
+- **NIC docs** — short note in observability docs explaining that the OTel collector exposes a `opentelemetry-collector-overrides` ConfigMap extension point that software packs can populate. (Future work — not in this PR.)
+- **`nebari-lgtm-pack/examples/opentelemetry-collector-overrides.yaml`** — kept as standalone reference.
 
-## Rejected alternatives
+## Rejected approaches
 
-- **Approach B — LGTM patches NIC's parent ArgoCD Application's `helm.values`.** Forces NIC into live cluster reads during deploy. Two layers of `ignoreDifferences`. Rejected as over-complex.
-- **Approach C — LGTM ships a separate collector instance.** Cleanest ownership boundary but invasive UX: requires Service aliasing or downstream config to route to the LGTM collector. Rejected.
-- **NIC config flag (`software_packs.lgtm: true`)**: simpler mechanics but couples NIC to specific packs. Rejected in favor of the "fully automatic via Helm install" UX target.
-- **Full-replace `data.relay` instead of merge**: smaller Job, no `yq`. Rejected because LGTM would have to ship a complete OTel config (including NIC's receivers/processors), tightly coupling LGTM versions to NIC's collector internals.
+### Approach 1 (original) — `ignoreDifferences` + `RespectIgnoreDifferences=true`
+
+The original design had the LGTM pack in-place patch NIC's chart-rendered ConfigMap, with ArgoCD configured to ignore changes to the `data.relay` field. It made it past unit tests, code review, smoke testing on a stub cluster, and the first PR write-up.
+
+It failed in real-cluster testing. ArgoCD's `RespectIgnoreDifferences=true` only suppresses the diff calculation (UI shows Synced) — the apply step on every sync still writes the full rendered resource via a `kubectl apply` (client-side) Update operation, clobbering LGTM's patch. This is upstream ArgoCD bug [argo-cd#7478](https://github.com/argoproj/argo-cd/issues/7478) — open since 2021 with ~150 reactions and no fix.
+
+Tested variants, all failed identically:
+- `jsonPointers: [/data/relay]`
+- `jqPathExpressions: [.data.relay]`
+- Per-resource `argocd.argoproj.io/sync-options: ServerSideApply=true`
+- App-level `argocd.argoproj.io/server-side-diff: "true"`
+- `managedFieldsManagers: [lgtm-pack]` combined with `kubectl apply --server-side --field-manager=lgtm-pack`
+
+`managedFields` on the live ConfigMap confirmed the failure mode: after a sync, `argocd-controller` had two entries — an SSA `Apply` (correctly excluding `data.relay` per ignoreDifferences) AND a separate CSA `Update` (with `kubectl.kubernetes.io/last-applied-configuration` annotation) that included `data.relay` and overwrote whatever was there.
+
+### Approach 2 — separate collector instance
+
+Have the LGTM pack ship its own `opentelemetry-collector-lgtm` Helm release (different release name → different fullname → different DaemonSet and ConfigMap). Cleanest ownership but requires the LGTM pack to either suspend NIC's collector or alias its Service name; downstream workloads would need to know which collector to send OTLP to. Rejected as too invasive on UX.
+
+### Approach 3 — NIC config flag baking in LGTM endpoints
+
+User adds `software_packs.lgtm: true` in the `nic` config. NIC's chart values then bake in the LGTM exporter/pipeline overrides at render time. Simplest mechanics but couples NIC to specific software packs. Rejected against the "fully automatic via Helm install" UX target.
 
 ## Open questions
 
-None — `pre-delete` revert hook is explicitly out of scope (see Non-goals); uninstall behavior is documented manual reset.
+None — design fully refactored; PRs updated to match.
