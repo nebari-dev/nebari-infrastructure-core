@@ -177,9 +177,9 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 **Location:** `pkg/provider/azure/`
 
-**Status:** Complete implementation that drives the Track A Terraform module `nebari-dev/terraform-azurerm-aks-cluster` via OpenTofu. Implements all `Provider` methods: `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, and `InfraSettings`.
+**Status:** Complete implementation that drives the `nebari-dev/terraform-azurerm-aks-cluster` Terraform module via OpenTofu. Implements all `Provider` methods: `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, and `InfraSettings`.
 
-**Module sourcing:** Currently pinned to the module via a git ref; flips to the Terraform Registry once Track A tags `v0.1.0`.
+**Module sourcing:** Consumes the published `nebari-dev/aks-cluster/azurerm` module from the OpenTofu Registry, pinned by version in `templates/main.tf`.
 
 **State backend:** Uses the `azurerm` backend with a bootstrapped storage account/container for Terraform state (see `state_backend.go`).
 
@@ -193,12 +193,11 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 | `config.go` | Azure-specific config types: `Config`, `NodeGroup`, `Taint` |
 | `state.go` | Tag-based discovery and orphan cleanup helpers |
 | `state_backend.go` | Bootstraps the `azurerm` Terraform backend (resource group, storage account, container) |
-| `tofu.go` | OpenTofu invocation: init/plan/apply/destroy against the Track A module |
+| `tofu.go` | OpenTofu invocation: init/plan/apply/destroy against the external module |
 | `kubeconfig.go` | Retrieves cluster admin kubeconfig via `armcontainerservice` |
 | `cleanup.go` | Post-destroy resource sweep (tag-based) |
 | `interfaces.go` | Azure SDK client interfaces for mocking |
-| `version.go` | Module version pin |
-| `templates/` | Rendered Terraform root module that wraps the Track A module |
+| `templates/` | Rendered Terraform root module that wraps the external module |
 | `examples/azure-config.yaml` | Working config (at repo root `examples/`) |
 
 ### Local Provider (pkg/provider/local/) - **Stub**

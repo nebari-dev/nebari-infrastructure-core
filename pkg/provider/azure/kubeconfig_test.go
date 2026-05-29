@@ -10,7 +10,6 @@ import (
 
 type fakeManagedClusters struct {
 	credentials string
-	getResult   *armcontainerservice.ManagedCluster
 }
 
 func (f *fakeManagedClusters) ListClusterAdminCredentials(_ context.Context, _, _ string, _ *armcontainerservice.ManagedClustersClientListClusterAdminCredentialsOptions) (armcontainerservice.ManagedClustersClientListClusterAdminCredentialsResponse, error) {
@@ -21,13 +20,6 @@ func (f *fakeManagedClusters) ListClusterAdminCredentials(_ context.Context, _, 
 			},
 		},
 	}, nil
-}
-
-func (f *fakeManagedClusters) Get(_ context.Context, _, _ string, _ *armcontainerservice.ManagedClustersClientGetOptions) (armcontainerservice.ManagedClustersClientGetResponse, error) {
-	if f.getResult == nil {
-		return armcontainerservice.ManagedClustersClientGetResponse{}, nil
-	}
-	return armcontainerservice.ManagedClustersClientGetResponse{ManagedCluster: *f.getResult}, nil
 }
 
 func TestFetchAdminKubeconfig(t *testing.T) {

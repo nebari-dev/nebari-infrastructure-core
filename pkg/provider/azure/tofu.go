@@ -2,7 +2,7 @@ package azure
 
 import "embed"
 
-// tofuTemplates contains the OpenTofu shim that calls the Track A module.
+// tofuTemplates contains the OpenTofu shim that calls the external AKS module.
 // The embedded files are extracted to the working directory at deploy time
 // alongside a generated terraform.tfvars.json.
 //
@@ -87,6 +87,10 @@ const (
 	tagManagedBy   = "nic.nebari.dev_managed-by"
 )
 
+// managedByValue is the value stamped on the tagManagedBy tag to mark
+// resources as managed by NIC, enabling tag-based discovery and cleanup.
+const managedByValue = "nic"
+
 // toTFVars converts a parsed Config into the JSON-friendly TFVars accepted by
 // the embedded Terraform shim. Performs three transforms:
 //  1. Default each node group's Mode to "User" if empty.
@@ -163,7 +167,7 @@ func mergeTags(user map[string]string, projectName string) map[string]string {
 		out[k] = v
 	}
 	out[tagClusterName] = projectName
-	out[tagManagedBy] = "nic"
+	out[tagManagedBy] = managedByValue
 	return out
 }
 

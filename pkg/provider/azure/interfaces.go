@@ -17,21 +17,6 @@ type managedClustersAPI interface {
 		resourceGroupName, resourceName string,
 		options *armcontainerservice.ManagedClustersClientListClusterAdminCredentialsOptions,
 	) (armcontainerservice.ManagedClustersClientListClusterAdminCredentialsResponse, error)
-
-	Get(
-		ctx context.Context,
-		resourceGroupName, resourceName string,
-		options *armcontainerservice.ManagedClustersClientGetOptions,
-	) (armcontainerservice.ManagedClustersClientGetResponse, error)
-}
-
-// managedClusterVersionsAPI exposes the AKS-supported-versions lookup.
-type managedClusterVersionsAPI interface {
-	ListKubernetesVersions(
-		ctx context.Context,
-		location string,
-		options *armcontainerservice.ManagedClustersClientListKubernetesVersionsOptions,
-	) (armcontainerservice.ManagedClustersClientListKubernetesVersionsResponse, error)
 }
 
 // resourcesAPI is the subset of armresources.Client used by state.go / cleanup.go.

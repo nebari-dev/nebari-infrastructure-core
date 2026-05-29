@@ -9,7 +9,7 @@ A Go CLI for declarative cloud infrastructure management using native cloud SDKs
 - **No state files** — queries cloud APIs on every run for actual state
 - **Tag-based discovery** — all resources tagged `nic.nebari.dev/cluster-name` and `nic.nebari.dev/managed-by=nic`
 - **Reconciliation loop** — discover → diff → create/update/delete
-- **Native SDKs / Terraform** — aws-sdk-go-v2 for AWS; Azure uses OpenTofu against the Track A module `nebari-dev/terraform-azurerm-aks-cluster` plus the Azure SDK (`armcontainerservice`) for kubeconfig retrieval. GCP pending.
+- **Native SDKs + OpenTofu** — both providers combine cloud SDKs with OpenTofu/Terraform: AWS uses aws-sdk-go-v2 alongside OpenTofu; Azure wraps the `nebari-dev/terraform-azurerm-aks-cluster` module via OpenTofu plus the Azure SDK (`armcontainerservice`) for kubeconfig retrieval. GCP pending.
 - **Explicit registration** — no blank imports or `init()` magic; providers registered in `main.go`
 
 ---
@@ -226,7 +226,7 @@ Focus tests on:
 5. Example config in `examples/`
 6. Tests
 
-See `pkg/provider/aws/` for a native-SDK reference implementation, and `pkg/provider/azure/` for a Terraform-module-driven reference (OpenTofu wrapping an external module, with Azure SDK used only for kubeconfig retrieval and tag-based cleanup).
+See `pkg/provider/aws/` and `pkg/provider/azure/` for reference implementations. Both combine cloud SDKs with OpenTofu; Azure additionally wraps the external `nebari-dev/terraform-azurerm-aks-cluster` module, using the Azure SDK only for kubeconfig retrieval and tag-based cleanup.
 
 ---
 

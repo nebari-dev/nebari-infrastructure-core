@@ -156,7 +156,7 @@ func ensureStateResourceGroup(ctx context.Context, subscriptionID, location, rgN
 	_, err = client.CreateOrUpdate(ctx, rgName, armresources.ResourceGroup{
 		Location: to.Ptr(location),
 		Tags: map[string]*string{
-			tagManagedBy: to.Ptr("nic"),
+			tagManagedBy: to.Ptr(managedByValue),
 		},
 	}, nil)
 	if err != nil {
@@ -194,7 +194,7 @@ func ensureStateStorageAccount(ctx context.Context, subscriptionID, location, rg
 			EnableHTTPSTrafficOnly: to.Ptr(true),
 		},
 		Tags: map[string]*string{
-			tagManagedBy: to.Ptr("nic"),
+			tagManagedBy: to.Ptr(managedByValue),
 		},
 	}, nil)
 	if err != nil {
