@@ -27,6 +27,27 @@ type Config struct {
 	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
+	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
+}
+
+const (
+	loadBalancerSchemeInternetFacing = "internet-facing"
+	loadBalancerSchemeInternal       = "internal"
+)
+
+var validLoadBalancerSchemes = []string{
+	loadBalancerSchemeInternetFacing,
+	loadBalancerSchemeInternal,
+}
+
+// LoadBalancerSchemeOrDefault returns the configured AWS load balancer scheme,
+// defaulting to "internet-facing" when unset. Values are validated at config
+// load time, so callers can trust the result is one of the supported schemes.
+func (c *Config) LoadBalancerSchemeOrDefault() string {
+	if c.LoadBalancerScheme == "" {
+		return loadBalancerSchemeInternetFacing
+	}
+	return c.LoadBalancerScheme
 }
 
 type AWSLoadBalancerControllerConfig struct {

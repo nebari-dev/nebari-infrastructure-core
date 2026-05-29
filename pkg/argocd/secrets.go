@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -23,12 +23,12 @@ const (
 )
 
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
-func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cfg *config.NebariConfig, namespace string) error {
+func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, gitConfig *git.Config, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ConfigureGitRepoAccess")
 	defer span.End()
 
-	if cfg.GitRepository == nil {
+	if gitConfig == nil {
 		return nil
 	}
 
@@ -37,13 +37,13 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 		WithAction("configuring-git"))
 
 	// Get the ArgoCD auth config (falls back to main auth if not specified)
-	authCfg := cfg.GitRepository.GetArgoCDAuth()
+	authCfg := gitConfig.GetArgoCDAuth()
 
 	// Create repository secret data
 	secretData := map[string]string{
 		"name": "gitops-repo",
 		"type": gitRepoType,
-		"url":  cfg.GitRepository.URL,
+		"url":  gitConfig.URL,
 	}
 
 	// Try SSH key first, then token
@@ -79,7 +79,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Git repository access configured").
 			WithResource("argocd").
 			WithAction("git-configured").
-			WithMetadata("repo_url", cfg.GitRepository.URL))
+			WithMetadata("repo_url", gitConfig.URL))
 	} else {
 		// Secret exists, update it
 		_, err = client.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
@@ -89,7 +89,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, cf
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Git repository access updated").
 			WithResource("argocd").
 			WithAction("git-updated").
-			WithMetadata("repo_url", cfg.GitRepository.URL))
+			WithMetadata("repo_url", gitConfig.URL))
 	}
 
 	return nil
