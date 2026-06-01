@@ -1,35 +1,146 @@
 package azure
 
-// Config represents Azure-specific configuration
+import (
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+)
+
+// Config is the user-facing Azure cluster configuration as parsed from the
+// `cluster.azure:` block of NIC YAML.
 type Config struct {
-	Region                  string               `yaml:"region"`
-	KubernetesVersion       string               `yaml:"kubernetes_version,omitempty"`
-	StorageAccountPostfix   string               `yaml:"storage_account_postfix"`
-	AuthorizedIPRanges      []string             `yaml:"authorized_ip_ranges,omitempty"`
-	ResourceGroupName       string               `yaml:"resource_group_name,omitempty"`
-	NodeResourceGroupName   string               `yaml:"node_resource_group_name,omitempty"`
-	NodeGroups              map[string]NodeGroup `yaml:"node_groups,omitempty"`
-	VnetSubnetID            string               `yaml:"vnet_subnet_id,omitempty"`
-	PrivateClusterEnabled   bool                 `yaml:"private_cluster_enabled,omitempty"`
-	Tags                    map[string]string    `yaml:"tags,omitempty"`
-	NetworkProfile          map[string]string    `yaml:"network_profile,omitempty"`
-	MaxPods                 int                  `yaml:"max_pods,omitempty"`
-	WorkloadIdentityEnabled bool                 `yaml:"workload_identity_enabled,omitempty"`
-	AzurePolicyEnabled      bool                 `yaml:"azure_policy_enabled,omitempty"`
-	AdditionalFields        map[string]any       `yaml:",inline"`
+	Region            string `yaml:"region"`
+	ResourceGroupName string `yaml:"resource_group_name,omitempty"`
+	// CreateResourceGroup is tri-state: nil = infer (true unless ResourceGroupName
+	// is set), &true = always create, &false = never create (must supply ResourceGroupName).
+	CreateResourceGroup   *bool                `yaml:"create_resource_group,omitempty"`
+	KubernetesVersion     string               `yaml:"kubernetes_version,omitempty"`
+	SKUTier               string               `yaml:"sku_tier,omitempty"`
+	PrivateClusterEnabled bool                 `yaml:"private_cluster_enabled,omitempty"`
+	AuthorizedIPRanges    []string             `yaml:"authorized_ip_ranges,omitempty"`
+	Network               *NetworkConfig       `yaml:"network,omitempty"`
+	NodeGroups            map[string]NodeGroup `yaml:"node_groups"`
+	Tags                  map[string]string    `yaml:"tags,omitempty"`
+	// NodeProvisioningMode enables AKS Node Auto Provisioning (Karpenter) when
+	// set to "Auto". Defaults to "Manual". "Auto" requires the cilium dataplane
+	// (network.dataplane: cilium).
+	NodeProvisioningMode string `yaml:"node_provisioning_mode,omitempty"`
 }
 
-// NodeGroup represents Azure-specific node group configuration
+// NetworkConfig groups all VNet/subnet/CIDR knobs.
+type NetworkConfig struct {
+	VNetCIDRBlock       string `yaml:"vnet_cidr_block,omitempty"`
+	NodeSubnetCIDRBlock string `yaml:"node_subnet_cidr_block,omitempty"`
+	PodCIDR             string `yaml:"pod_cidr,omitempty"`
+	ServiceCIDR         string `yaml:"service_cidr,omitempty"`
+	DNSServiceIP        string `yaml:"dns_service_ip,omitempty"`
+	// DataPlane selects the AKS network dataplane: "azure" (default) or
+	// "cilium" (Azure CNI Powered by Cilium).
+	DataPlane            string `yaml:"dataplane,omitempty"`
+	ExistingVNetID       string `yaml:"existing_vnet_id,omitempty"`
+	ExistingNodeSubnetID string `yaml:"existing_node_subnet_id,omitempty"`
+}
+
+// NodeGroup describes one AKS node pool.
 type NodeGroup struct {
-	Instance string  `yaml:"instance"`
-	MinNodes int     `yaml:"min_nodes,omitempty"`
-	MaxNodes int     `yaml:"max_nodes,omitempty"`
-	Taints   []Taint `yaml:"taints,omitempty"`
+	Instance     string            `yaml:"instance"`
+	MinNodes     int               `yaml:"min_nodes"`
+	MaxNodes     int               `yaml:"max_nodes"`
+	Mode         string            `yaml:"mode,omitempty"` // "System" | "User"; defaults to "User"
+	OSDiskSizeGB int               `yaml:"os_disk_size_gb,omitempty"`
+	Labels       map[string]string `yaml:"labels,omitempty"`
+	// Taints in "key=value:Effect" form, e.g. "dedicated=gpu:NoSchedule".
+	Taints []string `yaml:"taints,omitempty"`
+	Zones  []string `yaml:"zones,omitempty"`
 }
 
-// Taint represents a Kubernetes taint
-type Taint struct {
-	Key    string `yaml:"key"`
-	Value  string `yaml:"value"`
-	Effect string `yaml:"effect"` // NoSchedule, PreferNoSchedule, NoExecute
+var kubernetesVersionRE = regexp.MustCompile(`^\d+\.\d+(\.\d+)?$`)
+
+// Validate checks that the Config is internally consistent and that all
+// references between fields are coherent. It does NOT make any cloud calls.
+func (c *Config) Validate() error {
+	if strings.TrimSpace(c.Region) == "" {
+		return fmt.Errorf("cluster.azure.region is required")
+	}
+
+	if len(c.NodeGroups) == 0 {
+		return fmt.Errorf("cluster.azure.node_groups must contain at least one entry")
+	}
+
+	systemCount := 0
+	for _, ng := range c.NodeGroups {
+		if ng.Mode == modeSystem {
+			systemCount++
+		}
+	}
+	if systemCount > 1 {
+		return fmt.Errorf("at most one node group may have mode=\"System\" (got %d)", systemCount)
+	}
+
+	if c.CreateResourceGroup != nil && !*c.CreateResourceGroup && strings.TrimSpace(c.ResourceGroupName) == "" {
+		return fmt.Errorf("cluster.azure.resource_group_name is required when create_resource_group=false")
+	}
+
+	if c.KubernetesVersion != "" && !kubernetesVersionRE.MatchString(c.KubernetesVersion) {
+		return fmt.Errorf("cluster.azure.kubernetes_version %q is not a valid semver-ish version (expected e.g. \"1.34\" or \"1.34.0\")", c.KubernetesVersion)
+	}
+
+	if c.Network != nil {
+		if err := c.Network.validate(); err != nil {
+			return err
+		}
+	}
+
+	switch c.NodeProvisioningMode {
+	case "", napModeManual, napModeAuto:
+	default:
+		return fmt.Errorf("cluster.azure.node_provisioning_mode %q is invalid (expected %q or %q)", c.NodeProvisioningMode, napModeManual, napModeAuto)
+	}
+
+	// Node Auto Provisioning requires the cilium dataplane (enforced upstream by
+	// the Terraform module too; we check here for a fast, clear error).
+	if c.NodeProvisioningMode == napModeAuto {
+		if c.Network == nil || c.Network.DataPlane != dataPlaneCilium {
+			return fmt.Errorf("cluster.azure.node_provisioning_mode %q requires network.dataplane: %q", napModeAuto, dataPlaneCilium)
+		}
+	}
+
+	return nil
+}
+
+func (n *NetworkConfig) validate() error {
+	switch n.DataPlane {
+	case "", dataPlaneAzure, dataPlaneCilium:
+	default:
+		return fmt.Errorf("cluster.azure.network.dataplane %q is invalid (expected %q or %q)", n.DataPlane, dataPlaneAzure, dataPlaneCilium)
+	}
+
+	// BYO networking: both ID fields must be set together.
+	if (n.ExistingVNetID != "") != (n.ExistingNodeSubnetID != "") {
+		if n.ExistingVNetID == "" {
+			return fmt.Errorf("cluster.azure.network.existing_vnet_id is required when existing_node_subnet_id is set")
+		}
+		return fmt.Errorf("cluster.azure.network.existing_node_subnet_id is required when existing_vnet_id is set")
+	}
+
+	for label, cidr := range map[string]string{
+		"vnet_cidr_block":        n.VNetCIDRBlock,
+		"node_subnet_cidr_block": n.NodeSubnetCIDRBlock,
+		"pod_cidr":               n.PodCIDR,
+		"service_cidr":           n.ServiceCIDR,
+	} {
+		if cidr == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("cluster.azure.network.%s: %w", label, err)
+		}
+	}
+
+	if n.DNSServiceIP != "" && net.ParseIP(n.DNSServiceIP) == nil {
+		return fmt.Errorf("cluster.azure.network.dns_service_ip: %q is not a valid IP address", n.DNSServiceIP)
+	}
+
+	return nil
 }

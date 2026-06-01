@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down
 
 # Variables
 BINARY_NAME=nic
@@ -73,46 +73,11 @@ test-integration: ## Run integration tests (uses testcontainers, requires Docker
 	go test -v -tags=integration ./pkg/provider/aws -timeout 30m
 	@echo "Integration tests passed successfully"
 
-test-integration-local: localstack-up ## Run integration tests against local docker-compose LocalStack
-	@echo "Running integration tests against LocalStack..."
-	@echo "Waiting for LocalStack to be ready..."
-	@sleep 5
-	AWS_ENDPOINT_URL=http://localhost:4566 go test -v -tags=integration ./pkg/provider/aws -timeout 30m
-	@echo "Integration tests passed successfully"
-
 test-all: ## Run all tests (unit + integration)
 	@echo "Running all tests..."
 	$(MAKE) test-unit
 	$(MAKE) test-integration
 	@echo "All tests passed successfully"
-
-localstack-up: ## Start LocalStack using docker-compose
-	@echo "Starting LocalStack..."
-	@which docker-compose > /dev/null || which docker > /dev/null || (echo "Error: docker-compose or docker is not installed" && exit 1)
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml up -d; \
-	else \
-		docker compose -f docker-compose.test.yml up -d; \
-	fi
-	@echo "Waiting for LocalStack to be healthy..."
-	@timeout 30 sh -c 'until curl -sf http://localhost:4566/_localstack/health > /dev/null 2>&1; do sleep 1; done' || (echo "LocalStack failed to start" && exit 1)
-	@echo "LocalStack is ready!"
-
-localstack-down: ## Stop LocalStack
-	@echo "Stopping LocalStack..."
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml down; \
-	else \
-		docker compose -f docker-compose.test.yml down; \
-	fi
-	@echo "LocalStack stopped"
-
-localstack-logs: ## Show LocalStack logs
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml logs -f localstack; \
-	else \
-		docker compose -f docker-compose.test.yml logs -f localstack; \
-	fi
 
 LOCAL_CONFIG?=./examples/local-config.yaml
 REGEN_APPS?=
