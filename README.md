@@ -306,8 +306,53 @@ make localkind-up    # Create Kind cluster and deploy
 make localkind-down  # Tear down
 ```
 
-A GitHub repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the
-`GIT_SSH_PRIVATE_KEY` environment variable.
+When using a remote repo, a repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the `GIT_SSH_PRIVATE_KEY` environment variable. 
+
+Ommitting the `git_repository` or explicitely setting a local git path will result in a local git directory being used for gitops. 
+
+### Local Cluster Testing with an Existing Cluster (k3s/k3d/minikube)
+
+The `local` provider works against any cluster already present in your kubeconfig — it does not create the cluster. To use a tool other than Kind:
+
+1. **Create the cluster** with your tool of choice.
+2. **Point NIC at it** by setting `kube_context` in your `local-config.yaml` to the context name of that cluster (NIC reads the kubeconfig from `$KUBECONFIG`, falling back to `~/.kube/config`). `kube_context` is a context *name*, not a file path — list available names with `kubectl config get-contexts -o name`.
+3. **Make the local GitOps directory visible to the cluster.** When `git_repository` is omitted (or set to a `file://` path), NIC uses a local GitOps directory at `/tmp/nebari-gitops-<project_name>`, where `project_name` comes from your config. ArgoCD's repo-server mounts this path via a `hostPath` volume, so it must exist *inside* the cluster node, not just on your host. Cluster nodes run in containers/VMs that don't share your host filesystem, so the directory must be bind-mounted in when the cluster is created. The `make localkind-up` target does this for you by generating a kind config with `extraMounts`; for k3d and minikube you mount it manually as shown below.
+
+#### k3d
+
+k3d nodes run as Docker containers and don't see your host's `/tmp` by default. Create the directory first, then mount it into the nodes at the same path:
+
+```bash
+mkdir -p /tmp/nebari-gitops-my-nebari-local
+
+k3d cluster create \
+  --volume /tmp/nebari-gitops-my-nebari-local:/tmp/nebari-gitops-my-nebari-local@all
+
+k3d kubeconfig get --all > kubeconfig
+export KUBECONFIG=$(pwd)/kubeconfig
+
+./nic deploy --file local-config.yaml
+```
+
+Set `kube_context: "k3d-<cluster-name>"` in your config (k3d prefixes the context with `k3d-`). For k3s clusters, also set `storage_class: local-path` and disable MetalLB (k3s ships ServiceLB) as noted in `examples/local-config.yaml`.
+
+#### minikube
+
+minikube runs the node inside a VM/container. Mount the host directory before deploying:
+
+```bash
+mkdir -p /tmp/nebari-gitops-my-nebari-local
+
+minikube start
+minikube mount /tmp/nebari-gitops-my-nebari-local:/tmp/nebari-gitops-my-nebari-local &
+
+export KUBECONFIG=$HOME/.kube/config   # minikube updates this automatically
+./nic deploy --file local-config.yaml
+```
+
+`minikube mount` runs in the foreground and must stay running for the duration of the deploy (and while ArgoCD is reconciling), so launch it in a separate terminal or background it as shown. Set `kube_context: "minikube"` in your config.
+
+> If you'd rather avoid the host-path mount entirely, set an explicit remote `git_repository` (see OPTION 3 in `examples/local-config.yaml`); ArgoCD then clones the repo over HTTPS/SSH and no local directory needs to be mounted into the node.
 
 ### Running Tests
 
