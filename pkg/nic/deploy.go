@@ -113,8 +113,16 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Resolve the top-level trust bundle once; providers apply it without
+	// seeing the full NebariConfig.
+	caBundle, err := cfg.TrustBundle.ResolveBase64()
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, provider.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, provider.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).

@@ -96,6 +96,36 @@ func TestValidate_LoadBalancerScheme(t *testing.T) {
 	}
 }
 
+// TestValidate_TrustBundle covers only rejection cases: a valid bundle lets
+// Validate continue to AWS credential checks, which a unit test can't satisfy
+// (same reason TestValidate_LoadBalancerScheme tests only rejections).
+func TestValidate_TrustBundle(t *testing.T) {
+	tests := []struct {
+		name    string
+		tb      map[string]any
+		wantMsg string
+	}{
+		{name: "junk inline is rejected", tb: map[string]any{"inline": "nope"}, wantMsg: "no PEM certificate"},
+		{name: "both path and inline is rejected", tb: map[string]any{"path": "/tmp/x", "inline": samplePEM}, wantMsg: "only one of path or inline"},
+	}
+
+	p := NewProvider()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
+				"region":             "us-west-2",
+				"kubernetes_version": "1.34",
+				"node_groups":        map[string]any{"general": map[string]any{"instance": "m5.large"}},
+				"trust_bundle":       tt.tb,
+			}}}
+			err := p.Validate(context.Background(), "test-project", cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantMsg, err)
+			}
+		})
+	}
+}
+
 func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 	const schemeKey = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 

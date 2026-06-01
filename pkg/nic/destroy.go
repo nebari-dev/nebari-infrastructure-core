@@ -121,10 +121,17 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
+	caBundle, err := cfg.TrustBundle.ResolveBase64()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+
 	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, provider.DestroyOptions{
-		DryRun:  opts.DryRun,
-		Force:   opts.Force,
-		Timeout: opts.Timeout,
+		DryRun:      opts.DryRun,
+		Force:       opts.Force,
+		Timeout:     opts.Timeout,
+		TrustBundle: caBundle,
 	}); err != nil {
 		span.RecordError(err)
 		if opts.Force {

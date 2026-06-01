@@ -11,6 +11,11 @@ import (
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
+
+	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
+	// passed so providers can apply it without seeing the full NebariConfig.
+	// Provider-scoped trust bundle config, where present, takes precedence.
+	TrustBundle string
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.
@@ -18,6 +23,10 @@ type DestroyOptions struct {
 	DryRun  bool
 	Force   bool
 	Timeout time.Duration
+
+	// TrustBundle mirrors DeployOptions.TrustBundle; destroy must compute the
+	// same tofu variables as deploy for the plan to match.
+	TrustBundle string
 }
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.

@@ -52,6 +52,14 @@ type TemplateData struct {
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
+	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
+	// when a top-level trust_bundle is configured.
+	TrustManagerEnabled bool
+
+	// TrustBundlePEM is the raw PEM of the org CA, rendered inline into the
+	// trust-manager Bundle. Empty unless TrustManagerEnabled is true.
+	TrustBundlePEM string
+
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
 	HTTPSPort int
 
@@ -256,6 +264,18 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	workDir := gitClient.WorkDir()
 	data := NewTemplateData(cfg, gitConfig, settings)
 
+	// Resolve the top-level trust bundle for trust-manager. Disk I/O lives here
+	// rather than in the pure NewTemplateData constructor.
+	trustPEM, err := cfg.TrustBundle.ResolvePEM()
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+	if trustPEM != "" {
+		data.TrustManagerEnabled = true
+		data.TrustBundlePEM = trustPEM
+	}
+
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),
 		attribute.String("domain", data.Domain),
@@ -263,7 +283,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	)
 
 	// Walk all files in the templates directory
-	err := fs.WalkDir(templates, templateDir, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(templates, templateDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -286,6 +306,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 
 		// Skip MetalLB templates for providers that don't need it
 		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Skip trust-manager templates unless a trust bundle is configured
+		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -339,6 +367,35 @@ func isMetalLBPath(relPath string) bool {
 		strings.HasPrefix(relPath, "manifests/metallb")
 }
 
+// isTrustBundlePath returns true if the relative path is a trust-manager-related
+// template (the chart Application, the Bundle Application, or the Bundle manifest).
+func isTrustBundlePath(relPath string) bool {
+	return relPath == "apps/trust-manager.yaml" ||
+		relPath == "apps/trust-bundle.yaml" ||
+		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
+}
+
+// templateFuncs provides the small set of helpers templates may call. indent and
+// nindent mirror the common Helm helpers for embedding multi-line values (e.g. a
+// PEM bundle) at a fixed YAML indentation.
+var templateFuncs = template.FuncMap{
+	"indent":  indentLines,
+	"nindent": func(spaces int, s string) string { return "\n" + indentLines(spaces, s) },
+}
+
+// indentLines prefixes every non-empty line of s with the given number of spaces.
+func indentLines(spaces int, s string) string {
+	pad := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = pad + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 // processTemplate processes a template file with the given data.
 // Only YAML files are processed as templates; other files are returned as-is.
 func processTemplate(name string, content []byte, data TemplateData) ([]byte, error) {
@@ -347,7 +404,7 @@ func processTemplate(name string, content []byte, data TemplateData) ([]byte, er
 		return content, nil
 	}
 
-	tmpl, err := template.New(name).Parse(string(content))
+	tmpl, err := template.New(name).Funcs(templateFuncs).Parse(string(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse template: %w", err)
 	}

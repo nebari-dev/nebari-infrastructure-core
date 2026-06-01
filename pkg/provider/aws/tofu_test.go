@@ -48,7 +48,7 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vars, err := tt.config.toTFVars("test-project")
+			vars, err := tt.config.toTFVars("test-project", "")
 			if err != nil {
 				t.Fatalf("toTFVars: %v", err)
 			}
@@ -91,7 +91,7 @@ func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 		NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 	}
 
-	vars, err := cfg.toTFVars("test-project")
+	vars, err := cfg.toTFVars("test-project", "")
 	if err != nil {
 		t.Fatalf("toTFVars: %v", err)
 	}

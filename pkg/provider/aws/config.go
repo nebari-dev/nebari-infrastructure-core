@@ -1,13 +1,9 @@
 package aws
 
 import (
-	"encoding/base64"
-	"errors"
-	"fmt"
-	"os"
-	"strings"
 	"time"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -33,22 +29,19 @@ type Config struct {
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
-	// TrustBundle, when set, installs the given PEM bundle into the OS trust
-	// store of every EKS worker node before kubelet starts. Required when nodes
-	// must reach the EKS control plane, ECR, or pull container images through a
-	// TLS-inspecting egress proxy. Will likely move to a top-level NebariConfig
-	// field once trust-manager (the in-pod half of nebari-dev/nebari-infrastructure-core#307)
-	// lands; keeping it provider-scoped here matches the current Provider interface.
+	// TrustBundle installs the given PEM bundle into the OS trust store of every
+	// EKS worker node before kubelet starts.
+	//
+	// Deprecated: set trust_bundle at the top level of the Nebari config instead.
+	// The top-level field also drives in-pod trust via trust-manager (see
+	// https://github.com/nebari-dev/nebari-infrastructure-core/issues/307). This
+	// provider-scoped field still works and takes precedence when both are set.
 	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
 }
 
-// TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
-// Path or Inline must be set. Path is a filesystem path to a PEM file on the
-// operator's machine; Inline is the PEM text itself.
-type TrustBundleConfig struct {
-	Path   string `yaml:"path,omitempty"`
-	Inline string `yaml:"inline,omitempty"`
-}
+// TrustBundleConfig is an alias for the canonical top-level type. Retained so the
+// deprecated cluster.aws.trust_bundle field continues to unmarshal.
+type TrustBundleConfig = config.TrustBundleConfig
 
 const (
 	loadBalancerSchemeInternetFacing = "internet-facing"
@@ -171,41 +164,4 @@ func (c *Config) EFSStorageClassName() string {
 		return defaultEFSStorageClassName
 	}
 	return c.EFS.StorageClassName
-}
-
-// ResolveBase64 returns the configured CA bundle as a base64-encoded PEM string,
-// suitable for passing straight to the terraform-aws-eks-cluster module's
-// extra_ca_bundle input. Returns an empty string when the bundle is unset.
-func (t *TrustBundleConfig) ResolveBase64() (string, error) {
-	if t == nil {
-		return "", nil
-	}
-	pathSet := t.Path != ""
-	inlineSet := strings.TrimSpace(t.Inline) != ""
-	if pathSet && inlineSet {
-		return "", errors.New("trust_bundle: only one of path or inline may be set")
-	}
-	if !pathSet && !inlineSet {
-		return "", nil
-	}
-	var pem []byte
-	if pathSet {
-		data, err := os.ReadFile(t.Path)
-		if err != nil {
-			return "", fmt.Errorf("trust_bundle: read %s: %w", t.Path, err)
-		}
-		pem = data
-	} else {
-		pem = []byte(t.Inline)
-	}
-	if !strings.Contains(string(pem), "-----BEGIN CERTIFICATE-----") {
-		return "", fmt.Errorf("trust_bundle: no PEM certificate found in %s",
-			func() string {
-				if pathSet {
-					return t.Path
-				}
-				return "inline value"
-			}())
-	}
-	return base64.StdEncoding.EncodeToString(pem), nil
 }

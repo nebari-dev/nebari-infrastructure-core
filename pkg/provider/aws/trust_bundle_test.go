@@ -3,8 +3,6 @@ package aws
 import (
 	"encoding/base64"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,100 +12,45 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 -----END CERTIFICATE-----
 `
 
-func TestTrustBundleResolveBase64(t *testing.T) {
-	tmp := t.TempDir()
-	pemPath := filepath.Join(tmp, "ca.pem")
-	if err := os.WriteFile(pemPath, []byte(samplePEM), 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+const altPEM = `-----BEGIN CERTIFICATE-----
+ZZZZZZZZZZ9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
+-----END CERTIFICATE-----
+`
 
-	tests := []struct {
-		name      string
-		bundle    *TrustBundleConfig
-		wantEmpty bool
-		wantErr   string
-	}{
-		{
-			name:      "nil bundle is empty no-op",
-			bundle:    nil,
-			wantEmpty: true,
-		},
-		{
-			name:      "empty struct is no-op",
-			bundle:    &TrustBundleConfig{},
-			wantEmpty: true,
-		},
-		{
-			name:    "both path and inline is an error",
-			bundle:  &TrustBundleConfig{Path: pemPath, Inline: samplePEM},
-			wantErr: "only one of path or inline",
-		},
-		{
-			name:   "inline PEM is base64-encoded verbatim",
-			bundle: &TrustBundleConfig{Inline: samplePEM},
-		},
-		{
-			name:   "path is read from disk",
-			bundle: &TrustBundleConfig{Path: pemPath},
-		},
-		{
-			name:    "missing path returns a clear error",
-			bundle:  &TrustBundleConfig{Path: filepath.Join(tmp, "does-not-exist.pem")},
-			wantErr: "read",
-		},
-		{
-			name:    "inline without a PEM block is rejected",
-			bundle:  &TrustBundleConfig{Inline: "not a certificate"},
-			wantErr: "no PEM certificate",
-		},
-	}
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.bundle.ResolveBase64()
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("expected empty result, got %q", got)
-				}
-				return
-			}
-			decoded, err := base64.StdEncoding.DecodeString(got)
-			if err != nil {
-				t.Fatalf("ResolveBase64 returned a non-base64 value: %v", err)
-			}
-			if !strings.Contains(string(decoded), "BEGIN CERTIFICATE") {
-				t.Errorf("decoded payload did not contain a PEM certificate; got %q", decoded)
-			}
-		})
-	}
-}
-
+// TestToTFVarsExtraCABundle covers the precedence between the deprecated
+// provider-scoped trust_bundle and the top-level bundle passed as a fallback.
 func TestToTFVarsExtraCABundle(t *testing.T) {
 	tests := []struct {
 		name        string
 		bundle      *TrustBundleConfig
+		fallback    string
 		wantInJSON  bool
 		wantDecoded string
 	}{
 		{
-			name:       "unset bundle is omitted from tfvars",
-			bundle:     nil,
+			name:       "neither set is omitted from tfvars",
 			wantInJSON: false,
 		},
 		{
-			name:        "inline bundle ends up base64 in tfvars",
+			name:        "provider-scoped inline ends up base64 in tfvars",
 			bundle:      &TrustBundleConfig{Inline: samplePEM},
 			wantInJSON:  true,
 			wantDecoded: samplePEM,
+		},
+		{
+			name:        "top-level fallback is used when provider-scoped is unset",
+			fallback:    b64(samplePEM),
+			wantInJSON:  true,
+			wantDecoded: samplePEM,
+		},
+		{
+			name:        "provider-scoped takes precedence over fallback",
+			bundle:      &TrustBundleConfig{Inline: altPEM},
+			fallback:    b64(samplePEM),
+			wantInJSON:  true,
+			wantDecoded: altPEM,
 		},
 	}
 
@@ -119,7 +62,7 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 				TrustBundle:       tt.bundle,
 			}
-			vars, err := cfg.toTFVars("test-project")
+			vars, err := cfg.toTFVars("test-project", tt.fallback)
 			if err != nil {
 				t.Fatalf("toTFVars: %v", err)
 			}

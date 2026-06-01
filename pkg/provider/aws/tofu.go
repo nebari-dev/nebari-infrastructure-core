@@ -63,7 +63,7 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
-func (c *Config) toTFVars(projectName string) (TFVars, error) {
+func (c *Config) toTFVars(projectName, fallbackCABundle string) (TFVars, error) {
 	vars := TFVars{
 		Region:                 c.Region,
 		ProjectName:            projectName,
@@ -127,9 +127,14 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		}
 	}
 
+	// Provider-scoped trust_bundle takes precedence; fall back to the top-level
+	// bundle resolved by the orchestration layer.
 	caBundle, err := c.TrustBundle.ResolveBase64()
 	if err != nil {
 		return TFVars{}, err
+	}
+	if caBundle == "" {
+		caBundle = fallbackCABundle
 	}
 	if caBundle != "" {
 		vars.ExtraCABundle = &caBundle

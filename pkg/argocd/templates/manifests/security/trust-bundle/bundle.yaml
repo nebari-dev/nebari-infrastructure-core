@@ -1,0 +1,17 @@
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: nebari-trust-bundle
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  sources:
+    - inLine: |-
+{{ indent 8 .TrustBundlePEM }}
+  target:
+    configMap:
+      key: ca-certificates.crt
+    # Empty selector projects the bundle ConfigMap into every namespace,
+    # covering foundational and software-pack namespaces alike.
+    namespaceSelector: {}
