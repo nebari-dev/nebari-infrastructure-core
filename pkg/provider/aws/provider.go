@@ -98,7 +98,7 @@ func (p *Provider) invalidateKubeconfigCache(projectName, region string) {
 // extractAWSConfig converts the any provider config to AWS Config type
 func extractAWSConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.extractAWSConfig")
+	ctx, span := tracer.Start(ctx, "aws.extractAWSConfig")
 	defer span.End()
 
 	rawCfg := clusterConfig.ProviderConfig()
@@ -120,7 +120,7 @@ func extractAWSConfig(ctx context.Context, clusterConfig *config.ClusterConfig) 
 // Validate validates the AWS configuration with pre-flight checks
 func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.Validate")
+	ctx, span := tracer.Start(ctx, "aws.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -243,7 +243,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // Deploy deploys AWS infrastructure using stateless reconciliation
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.Deploy")
+	ctx, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -437,7 +437,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 // Destroy tears down AWS infrastructure in reverse order
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.Destroy")
+	ctx, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
 
 	// Extract AWS configuration
