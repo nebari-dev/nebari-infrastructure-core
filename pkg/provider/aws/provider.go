@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -14,6 +15,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -26,19 +28,33 @@ const (
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
 
-	// storageClassLonghorn is the StorageClass name used when Longhorn is enabled.
-	storageClassLonghorn = "longhorn"
-
 	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
 	storageClassGP2 = "gp2"
+
+	// attrKeyRegion is the attribute / Helm value key for AWS region.
+	attrKeyRegion = "region"
 )
 
-// Provider implements the AWS provider
-type Provider struct{}
+// Provider implements the AWS provider. Not safe to copy once constructed
+// (embeds a mutex). Always pass *Provider.
+type Provider struct {
+	kubeconfigMu    sync.RWMutex
+	kubeconfigCache map[kubeconfigCacheKey][]byte
+}
+
+// kubeconfigCacheKey identifies a cached kubeconfig within a single process.
+// (projectName, region) is sufficient since one Provider instance can be
+// reused across clusters in different regions or with different project names.
+type kubeconfigCacheKey struct {
+	projectName string
+	region      string
+}
 
 // NewProvider creates a new AWS provider
 func NewProvider() *Provider {
-	return &Provider{}
+	return &Provider{
+		kubeconfigCache: make(map[kubeconfigCacheKey][]byte),
+	}
 }
 
 // Name returns the provider name
@@ -68,6 +84,15 @@ func containsSubstring(slice []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// invalidateKubeconfigCache removes any cached kubeconfig for the given
+// project/region. Called on Destroy so a follow-up Deploy in the same process
+// doesn't return stale data for a cluster that has been torn down and recreated.
+func (p *Provider) invalidateKubeconfigCache(projectName, region string) {
+	p.kubeconfigMu.Lock()
+	delete(p.kubeconfigCache, kubeconfigCacheKey{projectName: projectName, region: region})
+	p.kubeconfigMu.Unlock()
 }
 
 // extractAWSConfig converts the any provider config to AWS Config type
@@ -135,6 +160,14 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 			span.RecordError(err)
 			return err
 		}
+	}
+
+	// Validate load_balancer_scheme if specified
+	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
+		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
+			awsCfg.LoadBalancerScheme, validLoadBalancerSchemes)
+		span.RecordError(err)
+		return err
 	}
 
 	// Validate node groups
@@ -324,9 +357,43 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 
-		if err := installLonghorn(ctx, kubeconfigBytes, awsCfg); err != nil {
+		if err := longhorn.Install(ctx, kubeconfigBytes, awsCfg.Longhorn); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+	}
+
+	// Install AWS Load Balancer Controller if enabled.
+	// Must run before any workload that relies on Service type=LoadBalancer.
+	if awsCfg.LoadBalancerControllerEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for AWS Load Balancer Controller install: %w", err)
+		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for AWS Load Balancer Controller: %w", err)
+		}
+
+		vpcIDOutput, ok := outputs["vpc_id"]
+		if !ok {
+			err := fmt.Errorf("vpc_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var vpcID string
+		if err := json.Unmarshal(vpcIDOutput.Value, &vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal vpc_id: %w", err)
+		}
+
+		if err := installAWSLoadBalancerController(ctx, kubeconfigBytes, awsCfg, projectName, vpcID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install AWS Load Balancer Controller: %w", err)
 		}
 	}
 
@@ -387,6 +454,14 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	region := awsCfg.Region
 
+	// Drop any cached kubeconfig for this cluster at the end on every
+	// exit path (success, error, panic), so callers reusing the same
+	// Provider after a destroy don't get a stale entry The call is
+	// idempotent: a missing entry is a no-op.
+	if !opts.DryRun {
+		defer p.invalidateKubeconfigCache(projectName, region)
+	}
+
 	// Get bucket name from config or generate one
 	bucketName := awsCfg.StateBucket
 	if bucketName == "" {
@@ -405,7 +480,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", projectName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 		attribute.Bool("dry_run", opts.DryRun),
 		attribute.Bool("force", opts.Force),
 	)
@@ -470,9 +545,22 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	// Clean up Kubernetes-created load balancers before destroying infrastructure.
-	// These are not managed by Terraform and will block VPC/subnet deletion.
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up Kubernetes-created load balancers for cluster: %s", projectName)).
+	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
+	// falls through to the Stage 2 SDK sweep below.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Attempting graceful Kubernetes-side load balancer cleanup").
+		WithResource("load-balancer").WithAction("cleanup"))
+	kubeconfigBytes, kcErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+	if kcErr != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kubernetes API unreachable; skipping graceful LB cleanup: %v", kcErr)).
+			WithResource("load-balancer").WithAction("cleanup"))
+	} else {
+		if err := cleanupKubernetesResources(ctx, kubeconfigBytes, projectName, awsCfg.LoadBalancerControllerDestroyTimeout()); err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Graceful LB cleanup incomplete: %v", err)).
+				WithResource("load-balancer").WithAction("cleanup"))
+		}
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Cleaning up AWS load balancers for cluster: %s", projectName)).
 		WithResource("load-balancer").
 		WithAction("cleanup"))
 	elbClient, err := newELBClient(ctx, region)
@@ -480,19 +568,44 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		span.RecordError(err)
 		return fmt.Errorf("failed to create ELB client: %w", err)
 	}
+	elbv2Client, err := newELBv2Client(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to create ELBv2 client: %w", err)
+	}
 	ec2ClientForCleanup, err := newEC2Client(ctx, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
-	if err := cleanupKubernetesLoadBalancers(ctx, elbClient, ec2ClientForCleanup, projectName); err != nil {
+	if err := cleanupAWSLoadBalancers(ctx, elbClient, elbv2Client, ec2ClientForCleanup, projectName); err != nil {
 		if opts.Force {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
-				WithResource("load-balancer").
-				WithAction("cleanup"))
+				WithResource("load-balancer").WithAction("cleanup"))
 		} else {
 			span.RecordError(err)
 			return fmt.Errorf("failed to clean up load balancers: %w", err)
+		}
+	}
+
+	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
+	// Longhorn-backed PVs left in the cluster can block EKS node group
+	// deletion via CSI finalizers.
+	if awsCfg.LonghornEnabled() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("longhorn").WithAction("uninstalling"))
+		default:
+			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
+					WithResource("longhorn").WithAction("uninstalling"))
+			}
 		}
 	}
 
@@ -510,13 +623,16 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	return nil
 }
 
-// GetKubeconfig generates a kubeconfig file for the EKS cluster
+// GetKubeconfig generates a kubeconfig file for the EKS cluster.
+//
+// Results are cached in-memory per Provider instance, indexed by projectName and
+// region, so repeated calls within a single command invocation (e.g. ArgoCD, Longhorn,
+// and AWS LBC install) reuse the same fetched value.
 func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "aws.GetKubeconfig")
+	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
 	defer span.End()
 
-	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
 		span.RecordError(err)
@@ -525,110 +641,44 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 
 	clusterName := projectName
 	region := awsCfg.Region
-
-	// Get bucket name from config or generate one
-	bucketName := awsCfg.StateBucket
-	if bucketName == "" {
-		stsClient, err := newSTSClient(ctx, region)
-		if err != nil {
-			span.RecordError(err)
-			return nil, fmt.Errorf("failed to create STS client: %w", err)
-		}
-		bucketName, err = getStateBucketName(ctx, stsClient, region, projectName)
-		if err != nil {
-			span.RecordError(err)
-			return nil, fmt.Errorf("failed to get state bucket name: %w", err)
-		}
-	}
+	cacheKey := kubeconfigCacheKey{projectName: projectName, region: region}
 
 	span.SetAttributes(
 		attribute.String("provider", ProviderName),
 		attribute.String("cluster_name", clusterName),
-		attribute.String("region", region),
+		attribute.String(attrKeyRegion, region),
 	)
 
-	// Verify the state bucket exists before attempting to read outputs
-	s3Client, err := newS3Client(ctx, region)
+	// Concurrent callers with the same cacheKey can both miss here and both
+	// fetch from EKS. The mutex keeps the cache itself race-free, but we
+	// accept the duplicate DescribeCluster call rather than wrapping the miss
+	// path in singleflight. The cost of an extra API call is relatively low
+	// and parallel kubeconfig reads on the same cluster are rare enough to
+	// not justify the dependency.
+	p.kubeconfigMu.RLock()
+	if cached, ok := p.kubeconfigCache[cacheKey]; ok {
+		p.kubeconfigMu.RUnlock()
+		span.SetAttributes(attribute.Bool("cache_hit", true))
+		return cached, nil
+	}
+	p.kubeconfigMu.RUnlock()
+	span.SetAttributes(attribute.Bool("cache_hit", false))
+
+	eksClient, err := newEKSClient(ctx, region)
 	if err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("failed to create S3 client: %w", err)
+		return nil, fmt.Errorf("failed to create EKS client: %w", err)
 	}
-	bucketExists, err := stateBucketExists(ctx, s3Client, bucketName)
+
+	kubeconfigBytes, err := fetchEKSKubeconfig(ctx, eksClient, clusterName, region)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
-	if !bucketExists {
-		err := fmt.Errorf("state bucket does not exist: run 'deploy' first")
-		span.RecordError(err)
-		return nil, err
-	}
 
-	// Initialize terraform to read outputs from state
-	tfVars, err := awsCfg.toTFVars(projectName)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
-	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to setup terraform: %w", err)
-	}
-	defer func() {
-		err := tf.Cleanup()
-		if err != nil {
-			span.RecordError(err)
-		}
-	}()
-
-	err = tf.Init(ctx,
-		tfexec.BackendConfig(fmt.Sprintf("bucket=%s", bucketName)),
-		tfexec.BackendConfig(fmt.Sprintf("key=%s", stateKey(projectName))),
-		tfexec.BackendConfig(fmt.Sprintf("region=%s", region)),
-	)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to initialize terraform: %w", err)
-	}
-
-	// Get outputs from terraform state
-	outputs, err := tf.Output(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to get terraform outputs: %w", err)
-	}
-
-	endpoint, ok := outputs["cluster_endpoint"]
-	if !ok {
-		err := fmt.Errorf("cluster not found: run 'deploy' first to create the cluster")
-		span.RecordError(err)
-		return nil, err
-	}
-
-	caData, ok := outputs["cluster_certificate_authority_data"]
-	if !ok {
-		err := fmt.Errorf("cluster not found: run 'deploy' first to create the cluster")
-		span.RecordError(err)
-		return nil, err
-	}
-
-	// Output values are JSON-encoded strings, need to extract the actual string value
-	var endpointStr, caDataStr string
-	if err := json.Unmarshal(endpoint.Value, &endpointStr); err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to unmarshal cluster_endpoint: %w", err)
-	}
-	if err := json.Unmarshal(caData.Value, &caDataStr); err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to unmarshal cluster_certificate_authority_data: %w", err)
-	}
-
-	kubeconfigBytes, err := buildKubeconfig(clusterName, endpointStr, caDataStr, region)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
-	}
+	p.kubeconfigMu.Lock()
+	p.kubeconfigCache[cacheKey] = kubeconfigBytes
+	p.kubeconfigMu.Unlock()
 
 	return kubeconfigBytes, nil
 }
@@ -654,9 +704,16 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
 // StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
 // EFSStorageClass is set when EFS is enabled.
+//
+// LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
+// Controller (type=external) and request an IP-targeted NLB. The
+// aws-load-balancer-scheme annotation defaults to "internet-facing" so the NLB
+// is reachable from outside the VPC; operators with private-only VPCs can
+// override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	sc := storageClassLonghorn
+	sc := longhorn.StorageClassName
 	var efsSC string
+	lbScheme := loadBalancerSchemeInternetFacing
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
@@ -668,6 +725,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()
 			}
+			lbScheme = awsCfg.LoadBalancerSchemeOrDefault()
 		}
 	}
 
@@ -675,5 +733,10 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LoadBalancerAnnotations: map[string]string{
+			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
+			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":          lbScheme,
+		},
 	}
 }

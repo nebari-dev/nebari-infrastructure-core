@@ -11,6 +11,212 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestAddLocalGitopsMount(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    map[string]any
+		localPath string
+	}{
+		{
+			name:      "empty values map",
+			values:    map[string]any{},
+			localPath: "/tmp/nebari-gitops-test",
+		},
+		{
+			name: "existing repoServer section",
+			values: map[string]any{
+				"repoServer": map[string]any{
+					"replicas": 2,
+				},
+			},
+			localPath: "/Users/dev/my-gitops-repo.git",
+		},
+		{
+			name: "existing non-map repoServer gets overwritten",
+			values: map[string]any{
+				"repoServer": "not-a-map",
+			},
+			localPath: "/tmp/repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addLocalGitopsMount(context.Background(), tt.values, tt.localPath)
+
+			repoServer, ok := tt.values["repoServer"].(map[string]any)
+			if !ok {
+				t.Fatal("repoServer should be a map[string]any")
+			}
+
+			// Check volumes
+			volumes, ok := repoServer["volumes"].([]map[string]any)
+			if !ok {
+				t.Fatal("volumes should be []map[string]any")
+			}
+			if len(volumes) != 1 {
+				t.Fatalf("expected 1 volume, got %d", len(volumes))
+			}
+			if volumes[0]["name"] != "local-gitops" {
+				t.Errorf("volume name = %v, want local-gitops", volumes[0]["name"])
+			}
+			hostPath, ok := volumes[0]["hostPath"].(map[string]any)
+			if !ok {
+				t.Fatal("hostPath should be a map[string]any")
+			}
+			if hostPath["path"] != tt.localPath {
+				t.Errorf("hostPath.path = %v, want %v", hostPath["path"], tt.localPath)
+			}
+			if hostPath["type"] != "Directory" {
+				t.Errorf("hostPath.type = %v, want Directory", hostPath["type"])
+			}
+
+			// Check volumeMounts
+			volumeMounts, ok := repoServer["volumeMounts"].([]map[string]any)
+			if !ok {
+				t.Fatal("volumeMounts should be []map[string]any")
+			}
+			if len(volumeMounts) != 1 {
+				t.Fatalf("expected 1 volumeMount, got %d", len(volumeMounts))
+			}
+			if volumeMounts[0]["name"] != "local-gitops" {
+				t.Errorf("volumeMount name = %v, want local-gitops", volumeMounts[0]["name"])
+			}
+			if volumeMounts[0]["mountPath"] != tt.localPath {
+				t.Errorf("volumeMount mountPath = %v, want %v", volumeMounts[0]["mountPath"], tt.localPath)
+			}
+		})
+	}
+}
+
+func TestAddLocalGitopsMountPreservesExistingKeys(t *testing.T) {
+	values := map[string]any{
+		"repoServer": map[string]any{
+			"replicas": 2,
+			"image":    "custom-image:latest",
+		},
+	}
+
+	addLocalGitopsMount(context.Background(), values, "/tmp/test-repo")
+
+	repoServer := values["repoServer"].(map[string]any)
+	if repoServer["replicas"] != 2 {
+		t.Errorf("existing replicas key was overwritten, got %v", repoServer["replicas"])
+	}
+	if repoServer["image"] != "custom-image:latest" {
+		t.Errorf("existing image key was overwritten, got %v", repoServer["image"])
+	}
+	if _, ok := repoServer["volumes"]; !ok {
+		t.Error("volumes key was not added")
+	}
+	if _, ok := repoServer["volumeMounts"]; !ok {
+		t.Error("volumeMounts key was not added")
+	}
+}
+
+func TestAppendToSlice(t *testing.T) {
+	newItem := map[string]any{"name": "new-volume"}
+
+	tests := []struct {
+		name     string
+		existing any
+		wantLen  int
+	}{
+		{
+			name:     "nil existing",
+			existing: nil,
+			wantLen:  1,
+		},
+		{
+			name:     "empty typed slice",
+			existing: []map[string]any{},
+			wantLen:  1,
+		},
+		{
+			name: "typed slice with one item",
+			existing: []map[string]any{
+				{"name": "existing-volume"},
+			},
+			wantLen: 2,
+		},
+		{
+			name: "untyped slice (from YAML parsing)",
+			existing: []any{
+				map[string]any{"name": "existing-volume"},
+			},
+			wantLen: 2,
+		},
+		{
+			name: "untyped slice with multiple items",
+			existing: []any{
+				map[string]any{"name": "vol1"},
+				map[string]any{"name": "vol2"},
+			},
+			wantLen: 3,
+		},
+		{
+			name:     "invalid type returns just new item",
+			existing: "not-a-slice",
+			wantLen:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendToSlice(tt.existing, newItem)
+			if len(result) != tt.wantLen {
+				t.Errorf("appendToSlice() len = %d, want %d", len(result), tt.wantLen)
+			}
+			// Last item should always be our new item
+			if result[len(result)-1]["name"] != "new-volume" {
+				t.Errorf("appendToSlice() last item = %v, want new-volume", result[len(result)-1])
+			}
+		})
+	}
+}
+
+func TestAddLocalGitopsMountAppendsToExistingVolumes(t *testing.T) {
+	// Test that existing volumes are preserved (not replaced)
+	values := map[string]any{
+		"repoServer": map[string]any{
+			"volumes": []map[string]any{
+				{
+					"name":     "existing-vol",
+					"emptyDir": map[string]any{},
+				},
+			},
+			"volumeMounts": []map[string]any{
+				{
+					"name":      "existing-vol",
+					"mountPath": "/existing",
+				},
+			},
+		},
+	}
+
+	addLocalGitopsMount(context.Background(), values, "/tmp/test-repo")
+
+	repoServer := values["repoServer"].(map[string]any)
+	volumes := repoServer["volumes"].([]map[string]any)
+	volumeMounts := repoServer["volumeMounts"].([]map[string]any)
+
+	if len(volumes) != 2 {
+		t.Errorf("expected 2 volumes (existing + new), got %d", len(volumes))
+	}
+	if len(volumeMounts) != 2 {
+		t.Errorf("expected 2 volumeMounts (existing + new), got %d", len(volumeMounts))
+	}
+
+	// Check that existing volume is preserved
+	if volumes[0]["name"] != "existing-vol" {
+		t.Errorf("existing volume was not preserved, got %v", volumes[0]["name"])
+	}
+	// Check that new volume was appended
+	if volumes[1]["name"] != "local-gitops" {
+		t.Errorf("new volume name = %v, want local-gitops", volumes[1]["name"])
+	}
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

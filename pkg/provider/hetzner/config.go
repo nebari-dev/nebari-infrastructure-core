@@ -5,7 +5,12 @@ import (
 	"net"
 	"regexp"
 	"strings"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
+
+// allCIDRs is the default CIDR allowlist that opens access to the entire internet.
+const allCIDRs = "0.0.0.0/0"
 
 // Config holds Hetzner-specific provider configuration.
 // Parsed from the "hetzner_cloud" key in nebari-config.yaml.
@@ -30,6 +35,27 @@ type Config struct {
 
 	SSH     *SSHConfig     `yaml:"ssh,omitempty"`
 	Network *NetworkConfig `yaml:"network,omitempty"`
+
+	// Longhorn configures the Longhorn distributed block storage install.
+	// Hetzner's hcloud-volumes CSI is RWO-only; charts that need RWX (e.g.
+	// jupyterhub shared-storage for group dirs) require Longhorn — or another
+	// RWX provider — to avoid the in-cluster NFS-on-RWO workaround.
+	// Defaults to enabled when the block is omitted; set `enabled: false` to
+	// opt out.
+	Longhorn *longhorn.Config `yaml:"longhorn,omitempty"`
+}
+
+// LonghornEnabled returns whether Longhorn distributed block storage should
+// be deployed on this Hetzner cluster. Defaults to true when the Longhorn
+// block is omitted entirely — Longhorn is the Hetzner storage default since
+// hcloud-volumes is RWO-only. The shared longhorn.Config defaults to
+// disabled-when-nil because non-managed providers (e.g. existing) require
+// an explicit opt-in.
+func (c *Config) LonghornEnabled() bool {
+	if c.Longhorn == nil {
+		return true
+	}
+	return c.Longhorn.IsEnabled()
 }
 
 // NodeGroup defines a pool of Hetzner Cloud instances. Exactly one node group
@@ -116,7 +142,7 @@ func (c *Config) SSHAllowedNetworks() []string {
 	if c.Network != nil && len(c.Network.SSHAllowedCIDRs) > 0 {
 		return c.Network.SSHAllowedCIDRs
 	}
-	return []string{"0.0.0.0/0"}
+	return []string{allCIDRs}
 }
 
 // APIAllowedNetworks returns the configured API CIDR ranges, defaulting to 0.0.0.0/0.
@@ -124,7 +150,7 @@ func (c *Config) APIAllowedNetworks() []string {
 	if c.Network != nil && len(c.Network.APIAllowedCIDRs) > 0 {
 		return c.Network.APIAllowedCIDRs
 	}
-	return []string{"0.0.0.0/0"}
+	return []string{allCIDRs}
 }
 
 // IsExplicitK3sVersion returns true if the kubernetes_version already contains

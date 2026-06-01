@@ -6,28 +6,33 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 type Config struct {
-	Region                   string               `yaml:"region"`
-	StateBucket              string               `yaml:"state_bucket,omitempty"`
-	AvailabilityZones        []string             `yaml:"availability_zones,omitempty"`
-	VPCCIDRBlock             string               `yaml:"vpc_cidr_block,omitempty"`
-	ExistingVPCID            string               `yaml:"existing_vpc_id,omitempty"`
-	ExistingPrivateSubnetIDs []string             `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID  string               `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion        string               `yaml:"kubernetes_version"`
-	EndpointPrivateAccess    bool                 `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess     bool                 `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                string               `yaml:"eks_kms_arn,omitempty"`
-	EnabledLogTypes          []string             `yaml:"enabled_log_types,omitempty"`
-	ExistingClusterRoleArn   string               `yaml:"existing_cluster_role_arn,omitempty"`
-	ExistingNodeRoleArn      string               `yaml:"existing_node_role_arn,omitempty"`
-	PermissionsBoundary      string               `yaml:"permissions_boundary,omitempty"`
-	NodeGroups               map[string]NodeGroup `yaml:"node_groups"`
-	Tags                     map[string]string    `yaml:"tags,omitempty"`
-	EFS                      *EFSConfig           `yaml:"efs,omitempty"`
-	Longhorn                 *LonghornConfig      `yaml:"longhorn,omitempty"`
+	Region                    string                           `yaml:"region"`
+	StateBucket               string                           `yaml:"state_bucket,omitempty"`
+	AvailabilityZones         []string                         `yaml:"availability_zones,omitempty"`
+	VPCCIDRBlock              string                           `yaml:"vpc_cidr_block,omitempty"`
+	ExistingVPCID             string                           `yaml:"existing_vpc_id,omitempty"`
+	ExistingPrivateSubnetIDs  []string                         `yaml:"existing_private_subnet_ids,omitempty"`
+	ExistingSecurityGroupID   string                           `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion         string                           `yaml:"kubernetes_version"`
+	EndpointPrivateAccess     bool                             `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess      bool                             `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                 string                           `yaml:"eks_kms_arn,omitempty"`
+	EnabledLogTypes           []string                         `yaml:"enabled_log_types,omitempty"`
+	ExistingClusterRoleArn    string                           `yaml:"existing_cluster_role_arn,omitempty"`
+	ExistingNodeRoleArn       string                           `yaml:"existing_node_role_arn,omitempty"`
+	PermissionsBoundary       string                           `yaml:"permissions_boundary,omitempty"`
+	NodeGroups                map[string]NodeGroup             `yaml:"node_groups"`
+	Tags                      map[string]string                `yaml:"tags,omitempty"`
+	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
+	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
+	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
+	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
 	// TrustBundle, when set, installs the given PEM bundle into the OS trust
 	// store of every EKS worker node before kubelet starts. Required when nodes
 	// must reach the EKS control plane, ECR, or pull container images through a
@@ -43,6 +48,69 @@ type Config struct {
 type TrustBundleConfig struct {
 	Path   string `yaml:"path,omitempty"`
 	Inline string `yaml:"inline,omitempty"`
+}
+
+const (
+	loadBalancerSchemeInternetFacing = "internet-facing"
+	loadBalancerSchemeInternal       = "internal"
+)
+
+var validLoadBalancerSchemes = []string{
+	loadBalancerSchemeInternetFacing,
+	loadBalancerSchemeInternal,
+}
+
+// LoadBalancerSchemeOrDefault returns the configured AWS load balancer scheme,
+// defaulting to "internet-facing" when unset. Values are validated at config
+// load time, so callers can trust the result is one of the supported schemes.
+func (c *Config) LoadBalancerSchemeOrDefault() string {
+	if c.LoadBalancerScheme == "" {
+		return loadBalancerSchemeInternetFacing
+	}
+	return c.LoadBalancerScheme
+}
+
+type AWSLoadBalancerControllerConfig struct {
+	Enabled        *bool          `yaml:"enabled,omitempty"`
+	ChartVersion   string         `yaml:"chart_version,omitempty"`
+	DestroyTimeout *time.Duration `yaml:"destroy_timeout,omitempty"`
+}
+
+// defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
+// Bump to track the latest v3.x line; v2/chart-v1 is EOL.
+const defaultLBCChartVersion = "3.2.1"
+
+// defaultLBCDestroyTimeout is the maximum time the graceful Kubernetes-side
+// cleanup will wait for LBC's finalizer to drain load balancers before falling
+// through to the SDK sweep.
+const defaultLBCDestroyTimeout = 5 * time.Minute
+
+// LoadBalancerControllerEnabled returns whether the AWS Load Balancer Controller
+// should be installed. Defaults to true.
+func (c *Config) LoadBalancerControllerEnabled() bool {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.Enabled == nil {
+		return true
+	}
+	return *c.AWSLoadBalancerController.Enabled
+}
+
+// LoadBalancerControllerChartVersion returns the Helm chart version for the
+// AWS Load Balancer Controller. Returns defaultLBCChartVersion when unset.
+func (c *Config) LoadBalancerControllerChartVersion() string {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.ChartVersion == "" {
+		return defaultLBCChartVersion
+	}
+	return c.AWSLoadBalancerController.ChartVersion
+}
+
+// LoadBalancerControllerDestroyTimeout returns the maximum time the graceful
+// Kubernetes-side cleanup will wait for LBC's finalizer to drain load
+// balancers before falling through to the SDK sweep.
+func (c *Config) LoadBalancerControllerDestroyTimeout() time.Duration {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.DestroyTimeout == nil {
+		return defaultLBCDestroyTimeout
+	}
+	return *c.AWSLoadBalancerController.DestroyTimeout
 }
 
 type NodeGroup struct {
@@ -64,25 +132,23 @@ type Taint struct {
 }
 
 // LonghornEnabled returns whether Longhorn distributed block storage should
-// be deployed on this AWS cluster. Defaults to true when the Longhorn config
-// is nil or Enabled is not set.
+// be deployed on this AWS cluster. Defaults to true when the Longhorn block
+// is omitted entirely — Longhorn is the AWS storage default. The shared
+// longhorn.Config defaults to disabled-when-nil because non-AWS providers
+// require an explicit opt-in.
 func (c *Config) LonghornEnabled() bool {
 	if c.Longhorn == nil {
 		return true
 	}
-	if c.Longhorn.Enabled == nil {
-		return true
-	}
-	return *c.Longhorn.Enabled
+	return c.Longhorn.IsEnabled()
 }
 
 // LonghornReplicaCount returns the number of Longhorn volume replicas.
-// Defaults to 2 when not set.
+// Safe to call when c.Longhorn is nil — Replicas() is a nil-receiver method
+// and returns the package default (this matches the LonghornEnabled() == true
+// path when no longhorn block is configured on AWS).
 func (c *Config) LonghornReplicaCount() int {
-	if c.Longhorn == nil || c.Longhorn.ReplicaCount == 0 {
-		return 2
-	}
-	return c.Longhorn.ReplicaCount
+	return c.Longhorn.Replicas()
 }
 
 type EFSConfig struct {
@@ -105,13 +171,6 @@ func (c *Config) EFSStorageClassName() string {
 		return defaultEFSStorageClassName
 	}
 	return c.EFS.StorageClassName
-}
-
-type LonghornConfig struct {
-	Enabled        *bool             `yaml:"enabled,omitempty"`
-	ReplicaCount   int               `yaml:"replica_count,omitempty"`
-	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
-	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
 }
 
 // ResolveBase64 returns the configured CA bundle as a base64-encoded PEM string,

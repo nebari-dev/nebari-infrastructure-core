@@ -12,6 +12,7 @@ An ADR is a document that captures an important architectural decision made alon
 |----|-------|--------|------|
 | [ADR-0001](0001-git-provider-for-gitops-bootstrap.md) | Git Provider for GitOps Bootstrap | Proposed | 2025-01-21 |
 | [ADR-0002](0002-longhorn-distributed-block-storage-for-aws.md) | Longhorn Distributed Block Storage for AWS | Proposed | 2026-02-13 |
+| [ADR-0004](0004-out-of-tree-provider-plugins.md) | Out-of-Tree Provider Plugin Architecture | Proposed | 2026-04-15 |
 
 ## ADR Statuses
 

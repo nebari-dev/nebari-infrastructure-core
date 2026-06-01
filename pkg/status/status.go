@@ -9,7 +9,7 @@ import (
 
 const (
 	// DefaultChannelSize is the default buffer size for the status channel
-	DefaultChannelSize = 100
+	DefaultChannelSize = 1000
 
 	// DefaultFlushTimeout is the default timeout for flushing remaining messages on shutdown
 	DefaultFlushTimeout = 5 * time.Second
@@ -180,8 +180,10 @@ func Errorf(ctx context.Context, format string, args ...any) {
 // It is called for each update received on the channel
 type Handler func(Update)
 
-// CleanupFunc is called to close the status channel and wait for the handler to finish
-// It should be deferred immediately after calling StartHandler
+// CleanupFunc is called to close the status channel and wait for the handler to finish.
+// It should be deferred immediately after calling StartHandler. It is idempotent, so
+// callers may also invoke it eagerly (e.g., to drain pending updates before printing)
+// while leaving the deferred call in place as a safety net.
 type CleanupFunc func()
 
 // StartHandler creates a status channel, attaches it to the context, and starts a goroutine
@@ -221,22 +223,28 @@ func StartHandlerWithOptions(ctx context.Context, handler Handler, channelSize i
 		}
 	}()
 
+	// sync.Once makes cleanup idempotent so callers can invoke it eagerly
+	// (e.g., to drain pending updates before printing) and still defer it as
+	// a safety net without risking a double-close panic.
+	var once sync.Once
 	cleanup := func() {
-		close(ch)
+		once.Do(func() {
+			close(ch)
 
-		// Wait for handler goroutine with timeout to prevent hanging
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
+			// Wait for handler goroutine with timeout to prevent hanging
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
 
-		select {
-		case <-done:
-			// All status messages processed successfully
-		case <-time.After(flushTimeout):
-			// Timeout - some messages may be lost, but we don't block shutdown
-		}
+			select {
+			case <-done:
+				// All status messages processed successfully
+			case <-time.After(flushTimeout):
+				// Timeout - some messages may be lost, but we don't block shutdown
+			}
+		})
 	}
 
 	return ctx, cleanup

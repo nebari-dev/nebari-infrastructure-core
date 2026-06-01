@@ -25,7 +25,12 @@ import (
 //go:embed templates
 var templates embed.FS
 
-const templateDir = "templates"
+const (
+	templateDir = "templates"
+	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
+	// not configured a real ACME provider.
+	certificateIssuerSelfSigned = "selfsigned-issuer"
+)
 
 // TemplateData holds the dynamic values for template processing
 type TemplateData struct {
@@ -66,8 +71,10 @@ type TemplateData struct {
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
 }
 
-// NewTemplateData creates TemplateData from NebariConfig and provider InfraSettings.
-func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) TemplateData {
+// NewTemplateData creates TemplateData from NebariConfig, the effective git
+// configuration, and provider InfraSettings. gitConfig may be nil when no
+// GitOps repository is configured; in that case Git* fields are left empty.
+func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -93,10 +100,10 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 	}
 
 	// Set git repository info
-	if cfg.GitRepository != nil {
-		data.GitRepoURL = cfg.GitRepository.URL
-		data.GitBranch = cfg.GitRepository.GetBranch()
-		data.GitPath = cfg.GitRepository.Path
+	if gitConfig != nil {
+		data.GitRepoURL = gitConfig.URL
+		data.GitBranch = gitConfig.GetBranch()
+		data.GitPath = gitConfig.Path
 	}
 
 	// Set certificate configuration
@@ -111,10 +118,10 @@ func NewTemplateData(cfg *config.NebariConfig, settings provider.InfraSettings) 
 				}
 			}
 		} else {
-			data.CertificateIssuer = "selfsigned-issuer"
+			data.CertificateIssuer = certificateIssuerSelfSigned
 		}
 	} else {
-		data.CertificateIssuer = "selfsigned-issuer"
+		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
 
 	// Default domain if not set
@@ -241,13 +248,13 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, settings provider.InfraSettings) error {
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	workDir := gitClient.WorkDir()
-	data := NewTemplateData(cfg, settings)
+	data := NewTemplateData(cfg, gitConfig, settings)
 
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),

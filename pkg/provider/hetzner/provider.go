@@ -12,6 +12,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 const providerName = "hetzner"
@@ -148,7 +149,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Resolving k3s version").
 		WithResource("provider").WithAction("deploy"))
 
-	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, "")
+	releases, err := getHetznerK3sReleases(ctx, binaryPath)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to get k3s releases: %w", err)
+	}
+
+	k3sVersion, err := resolveK3sVersion(ctx, hCfg.KubernetesVersion, releases)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve k3s version: %w", err)
@@ -204,6 +211,21 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner k3s cluster created successfully").
 		WithResource("provider").WithAction("deploy"))
+
+	// Install Longhorn unless explicitly disabled. Hetzner's hcloud-volumes
+	// CSI is RWO-only; Longhorn provides the RWX StorageClass that downstream
+	// charts (e.g. jupyterhub shared-storage for group dirs) need.
+	if hCfg.LonghornEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
+		}
+		if err := longhorn.Install(ctx, kubeconfigBytes, hCfg.Longhorn); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+	}
 
 	// Label volumes for persistence if configured
 	if hCfg.PersistData {
@@ -268,6 +290,28 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
+	}
+
+	// Uninstall Longhorn before tearing down the cluster (ADR-0002 §"Destroy
+	// Flow"). Best-effort: if it fails, --force lets teardown continue and
+	// stranded PVs are cleaned up by hcloud-volume garbage collection below.
+	hCfg, hCfgErr := p.parseConfig(ctx, clusterConfig)
+	if hCfgErr == nil && hCfg.LonghornEnabled() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("longhorn").WithAction("uninstalling"))
+		default:
+			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
+					WithResource("longhorn").WithAction("uninstalling"))
+			}
+		}
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Hetzner k3s cluster").
@@ -335,20 +379,27 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *con
 
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
 	settings := provider.InfraSettings{
-		StorageClass: "hcloud-volumes",
+		StorageClass: longhorn.StorageClassName,
 		NeedsMetalLB: false,
 	}
 
-	// Derive LB annotations from location.
+	// Derive LB annotations from location, and fall back to "hcloud-volumes"
+	// when Longhorn is explicitly disabled. Longhorn is the Hetzner default
+	// because hcloud-volumes is RWO-only (see Config.LonghornEnabled).
 	// Parse errors are intentionally ignored here: InfraSettings is called after
 	// Validate() has already confirmed the config is parseable. If it somehow
 	// fails (e.g., nil config in tests), we return valid defaults without annotations.
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
 		var hCfg Config
-		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &hCfg); err == nil && hCfg.Location != "" {
-			settings.LoadBalancerAnnotations = map[string]string{
-				"load-balancer.hetzner.cloud/location": hCfg.Location,
+		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &hCfg); err == nil {
+			if hCfg.Location != "" {
+				settings.LoadBalancerAnnotations = map[string]string{
+					"load-balancer.hetzner.cloud/location": hCfg.Location,
+				}
+			}
+			if !hCfg.LonghornEnabled() {
+				settings.StorageClass = "hcloud-volumes"
 			}
 		}
 	}

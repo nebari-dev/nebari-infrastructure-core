@@ -8,33 +8,57 @@ certificate:
     email: admin@example.com
 
 # GitOps repository configuration (required for foundational services)
-# ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
 git_repository:
   url: "git@github.com:my-org/my-gitops-repo.git"
   branch: main
   path: "clusters/my-nebari-azure"
   auth:
     ssh_key_env: GIT_SSH_PRIVATE_KEY
-    # OR use token for HTTPS:
-    # token_env: GIT_TOKEN
 
 cluster:
   azure:
     region: eastus
+
+    # Optional: omit to let NIC create "<project_name>-rg"
+    # resource_group_name: my-rg
+
     kubernetes_version: "1.34"
-    storage_account_postfix: "nebari"
-    resource_group_name: "nebari-resources"
+    sku_tier: Free
     private_cluster_enabled: false
 
+    # Restrict API server access to specific CIDRs. [] means open.
+    # authorized_ip_ranges:
+    #   - 203.0.113.0/24
+
+    network:
+      vnet_cidr_block: "10.0.0.0/16"
+      node_subnet_cidr_block: "10.0.0.0/22"
+      pod_cidr: "10.244.0.0/16"
+      service_cidr: "10.0.16.0/22"
+      dns_service_ip: "10.0.16.10"
+      # Network dataplane: "azure" (default) or "cilium" (Azure CNI Powered by
+      # Cilium). Set at create time to avoid a node roll later.
+      # dataplane: cilium
+      # BYO networking:
+      # existing_vnet_id: /subscriptions/.../virtualNetworks/foo
+      # existing_node_subnet_id: /subscriptions/.../subnets/foo
+
+    # Node Auto Provisioning (Karpenter). "Manual" (default) or "Auto".
+    # "Auto" requires network.dataplane: cilium above.
+    # node_provisioning_mode: Auto
+
     node_groups:
-      general:
-        instance: Standard_D8_v3
+      # Exactly one node group must have mode=System (or omit mode entirely
+      # and the first entry will be defaulted to System).
+      system:
+        instance: Standard_D4_v3
         min_nodes: 1
-        max_nodes: 1
+        max_nodes: 3
+        mode: System
 
       user:
-        instance: Standard_D4_v3
-        min_nodes: 0
+        instance: Standard_D8_v3
+        min_nodes: 1
         max_nodes: 5
 
       worker:
@@ -45,3 +69,12 @@ cluster:
     tags:
       Environment: development
       Project: nebari
+
+# Required environment variables:
+#   AZURE_SUBSCRIPTION_ID  (will be exported as ARM_SUBSCRIPTION_ID for tofu)
+#
+# Auth picked up by azidentity.DefaultAzureCredential, in order:
+#   1. Env vars (AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_CLIENT_SECRET)
+#   2. Workload identity (in-cluster)
+#   3. Managed identity
+#   4. Azure CLI (az login)

@@ -1,17 +1,15 @@
-# .github/workflows/add-to-project.yml
 name: Add to project
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled, unlabeled]
   pull_request:
-    types: [opened]
+    types: [opened, labeled, unlabeled]
 
 jobs:
-  add-to-project:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/add-to-project@v1.0.2
-        with:
-          project-url: https://github.com/orgs/nebari-dev/projects/12
-          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+  sync:
+    uses: nebari-dev/.github/.github/workflows/sync-project-priority.yaml@main
+    with:
+      project-id: PVT_kwDOBd3CI84BKoKt
+    secrets:
+      token: ${{ secrets.ADD_TO_PROJECT_PAT }}

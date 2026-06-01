@@ -2,9 +2,6 @@ package hetzner
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -31,7 +28,7 @@ func TestProvider_InfraSettings(t *testing.T) {
 		wantMLB bool
 	}{
 		{
-			name: "default settings with location",
+			name: "default settings with location use longhorn",
 			cfg: &config.ClusterConfig{
 				Providers: map[string]any{
 					"hetzner": map[string]any{
@@ -39,17 +36,32 @@ func TestProvider_InfraSettings(t *testing.T) {
 					},
 				},
 			},
-			wantSC:  "hcloud-volumes",
+			wantSC:  "longhorn",
 			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
 			wantMLB: false,
 		},
 		{
-			name: "nil provider config uses defaults",
+			name: "empty provider config defaults to longhorn",
 			cfg: &config.ClusterConfig{
 				Providers: map[string]any{"hetzner": map[string]any{}},
 			},
+			wantSC:  "longhorn",
+			wantKBP: "",
+			wantMLB: false,
+		},
+		{
+			name: "longhorn explicitly disabled falls back to hcloud-volumes",
+			cfg: &config.ClusterConfig{
+				Providers: map[string]any{
+					"hetzner": map[string]any{
+						"location": "ash",
+						"longhorn": map[string]any{"enabled": false},
+					},
+				},
+			},
 			wantSC:  "hcloud-volumes",
+			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
 			wantMLB: false,
 		},
@@ -164,19 +176,8 @@ func TestProvider_Deploy_DryRun(t *testing.T) {
 	p := NewProvider()
 	t.Setenv("HETZNER_TOKEN", "test-token")
 
-	// Set up a fake k3s releases API
-	releases := []ghRelease{
-		{TagName: "v1.32.12+k3s1", Prerelease: false},
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(releases)
-	}))
-	defer server.Close()
-
-	// We need to test the dry-run path. Since Deploy calls resolveK3sVersion
-	// with the real GitHub API URL, we test the components individually.
-	// The Deploy integration requires network access, so we verify the dry-run
-	// logic through the Validate + DryRun flag path.
+	// We test the Validate + DryRun flag path. The actual Deploy flow
+	// requires hetzner-k3s binary and network access.
 	cfg := validHetznerClusterConfig()
 
 	// Validate should pass

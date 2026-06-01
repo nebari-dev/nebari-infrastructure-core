@@ -30,6 +30,13 @@ spec:
                   key: password
             - name: KEYCLOAK_URL
               value: {{ .KeycloakServiceURL }}
+            - name: ARGOCD_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: argocd-oidc-client-secret
+                  key: client-secret
+            - name: DOMAIN
+              value: {{ .Domain }}
           command:
             - /bin/bash
             - -c
@@ -105,6 +112,41 @@ spec:
 
                 echo "Ensuring groups is a realm default client scope..."
                 $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
+              fi
+
+              echo "Creating ArgoCD OIDC client..."
+              $KCADM create clients -r nebari \
+                -s clientId=argocd \
+                -s enabled=true \
+                -s protocol=openid-connect \
+                -s publicClient=false \
+                -s "secret=$ARGOCD_CLIENT_SECRET" \
+                -s "redirectUris=[\"https://argocd.$DOMAIN/auth/callback\"]" \
+                -s directAccessGrantsEnabled=false \
+                -s standardFlowEnabled=true || echo "Client may already exist"
+
+              # Add groups scope to argocd client as a default scope
+              ARGOCD_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
+                grep -B1 '"clientId" *: *"argocd"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+
+              if [ -n "$ARGOCD_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
+                echo "Adding groups scope to argocd client..."
+                $KCADM update clients/$ARGOCD_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
+              fi
+
+              echo "Creating ArgoCD access groups..."
+              $KCADM create groups -r nebari -s name=argocd-admins || echo "Group may already exist"
+              $KCADM create groups -r nebari -s name=argocd-viewers || echo "Group may already exist"
+
+              echo "Adding admin user to argocd-admins group..."
+              ADMIN_USER_ID=$($KCADM get users -r nebari -q username=admin --fields id | \
+                sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+              ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \
+                grep -B1 '"name" *: *"argocd-admins"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+
+              if [ -n "$ADMIN_USER_ID" ] && [ -n "$ADMINS_GROUP_ID" ]; then
+                $KCADM update users/$ADMIN_USER_ID/groups/$ADMINS_GROUP_ID -r nebari \
+                  -s realm=nebari -s userId=$ADMIN_USER_ID -s groupId=$ADMINS_GROUP_ID -n || true
               fi
 
               echo "Realm setup complete!"
