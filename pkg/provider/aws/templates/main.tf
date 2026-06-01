@@ -1,9 +1,6 @@
 module "eks_cluster" {
-  # Pointing at the feature branch carrying extra_ca_bundle support
-  # (https://github.com/nebari-dev/terraform-aws-eks-cluster/pull/32) until that
-  # PR is merged and tagged. Revert to the registry source + a tagged version
-  # before merging this PR. Tracking: nebari-dev/nebari-infrastructure-core#334.
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git//?ref=feat/extra-ca-bundle"
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.5.0"
 
   project_name                             = var.project_name
   tags                                     = var.tags
