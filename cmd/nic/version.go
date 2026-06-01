@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -24,9 +24,10 @@ var versionCmd = &cobra.Command{
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
+
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "cmd.version")
+	ctx, span := tracer.Start(ctx, "cmd.version")
 	defer span.End()
 
 	slog.Info("Version command executed", "version", version, "commit", commit)
@@ -36,10 +37,13 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
 
-	// Show registered providers
-	providers := getValidNames(ctx, reg)
-	fmt.Printf("Registered cloud providers: %v\n", providers.ClusterProviders)
-	fmt.Printf("Registered DNS providers: %v\n", providers.DNSProviders)
+	client, err := nic.NewClient(ctx)
+	if err != nil {
+		return err
+	}
+	providers := client.ProviderNames(ctx)
+	fmt.Printf("Registered cloud providers: %v\n", providers.Cluster)
+	fmt.Printf("Registered DNS providers: %v\n", providers.DNS)
 
 	return nil
 }
