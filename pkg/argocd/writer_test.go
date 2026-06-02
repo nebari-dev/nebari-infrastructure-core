@@ -756,34 +756,33 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	// collector reads via an extra --config flag. This sidesteps the upstream
 	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
 	// keeping the base CM and the override CM completely separate.
-	requiredFragments := []string{
-		"extraVolumes:",
-		"name: overrides-src",
-		"name: opentelemetry-collector-overrides",
-		"optional: true",
-		"name: overrides-resolved",
-		"emptyDir: {}",
-		"initContainers:",
-		"name: ensure-overrides",
-		"--config=/conf/overrides/relay.yaml",
+	tests := []struct {
+		name        string
+		fragment    string
+		wantPresent bool
+	}{
+		// Required fragments — composite where possible to pin context
+		{"extraVolumes section", "extraVolumes:", true},
+		{"overrides-src volume with configmap name", "name: overrides-src\n            configMap:\n              name: opentelemetry-collector-overrides\n              optional: true", true},
+		{"overrides-resolved emptyDir", "name: overrides-resolved\n            emptyDir: {}", true},
+		{"initContainers section", "initContainers:", true},
+		{"ensure-overrides init container", "name: ensure-overrides", true},
+		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
+		// Forbidden fragments — old ignoreDifferences design
+		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", "jsonPointers:", false},
 	}
 
-	for _, frag := range requiredFragments {
-		if !strings.Contains(content, frag) {
-			t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", frag, content)
-		}
-	}
-
-	// And these must NOT be present — they were the previous (broken) design.
-	forbiddenFragments := []string{
-		"ignoreDifferences:",
-		"RespectIgnoreDifferences=true",
-		"jsonPointers:",
-	}
-
-	for _, frag := range forbiddenFragments {
-		if strings.Contains(content, frag) {
-			t.Errorf("rendered opentelemetry-collector.yaml still contains forbidden fragment %q from the old ignoreDifferences design", frag)
-		}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			found := strings.Contains(content, tc.fragment)
+			if tc.wantPresent && !found {
+				t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", tc.fragment, content)
+			}
+			if !tc.wantPresent && found {
+				t.Errorf("rendered opentelemetry-collector.yaml contains forbidden fragment %q from the old ignoreDifferences design", tc.fragment)
+			}
+		})
 	}
 }

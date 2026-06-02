@@ -31,6 +31,11 @@ spec:
         # Resources scraped: pods (via role: pod), nodes (cAdvisor / kubelet),
         # endpoints/services (future scrape configs). nodes/metrics + /metrics
         # cover kubelet and apiserver metrics if scrape configs are added.
+        #
+        # Note: nodes/proxy grants access to the full kubelet proxy, not just
+        # /metrics paths. RBAC cannot restrict by URL path; the proxy itself
+        # decides what to expose. This is inherent to the apiserver-proxy
+        # approach for scraping kubelet metrics.
         clusterRole:
           create: true
           rules:
@@ -40,8 +45,6 @@ spec:
             - apiGroups: [""]
               resources: ["nodes/metrics", "nodes/proxy"]
               verbs: ["get"]
-            - nonResourceURLs: ["/metrics"]
-              verbs: ["get"]
         resources:
           requests:
             cpu: 100m
@@ -49,6 +52,11 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+        extraEnvs:
+          - name: K8S_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
         config:
           receivers:
             otlp:
@@ -84,15 +92,18 @@ spec:
                   # Views / Pods + Namespaces dashboards (container_cpu_*,
                   # container_memory_*). Routed via the apiserver proxy so
                   # it works regardless of kubelet network reachability.
+                  # Each daemonset pod scrapes only its own node via K8S_NODE_NAME.
                   - job_name: 'kubernetes-cadvisor'
                     scheme: https
                     tls_config:
                       ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                      insecure_skip_verify: true
                     bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
                     kubernetes_sd_configs:
                       - role: node
                     relabel_configs:
+                      - source_labels: [__meta_kubernetes_node_name]
+                        regex: $${env:K8S_NODE_NAME}
+                        action: keep
                       - action: labelmap
                         regex: __meta_kubernetes_node_label_(.+)
                       - target_label: __address__
@@ -104,15 +115,18 @@ spec:
 
                   # Kubelet's own /metrics — node-level pod lifecycle,
                   # volume, runtime metrics. Same apiserver-proxy approach.
+                  # Each daemonset pod scrapes only its own node via K8S_NODE_NAME.
                   - job_name: 'kubernetes-kubelet'
                     scheme: https
                     tls_config:
                       ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-                      insecure_skip_verify: true
                     bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
                     kubernetes_sd_configs:
                       - role: node
                     relabel_configs:
+                      - source_labels: [__meta_kubernetes_node_name]
+                        regex: $${env:K8S_NODE_NAME}
+                        action: keep
                       - action: labelmap
                         regex: __meta_kubernetes_node_label_(.+)
                       - target_label: __address__
@@ -166,16 +180,17 @@ spec:
             servicePort: 8888
             protocol: TCP
 
-        # Software-pack extension point. A Nebari software pack (e.g.
-        # nebari-lgtm-pack) creates a ConfigMap named
-        # `opentelemetry-collector-overrides` containing `relay.yaml` — a
-        # partial OTel config that's deep-merged with the base config above
-        # at collector startup. The init container copies the override file
-        # into an emptyDir, falling back to an empty mapping `{}` if no
-        # software pack has provided one. We do NOT try to share the chart's
-        # main ConfigMap because ArgoCD's `ignoreDifferences` does not survive
-        # sync (upstream issue argoproj/argo-cd#7478) — separate ConfigMaps
-        # mean NIC and software packs never write to the same resource.
+        # Software-pack extension point — see ADR-0005. A Nebari software
+        # pack (e.g. nebari-lgtm-pack) creates a ConfigMap named
+        # `opentelemetry-collector-overrides` in the `monitoring` namespace
+        # containing a `relay.yaml` key — a partial OTel config that's
+        # deep-merged with the base config above at collector startup. The
+        # init container copies the override file into an emptyDir, falling
+        # back to an empty mapping `{}` if no software pack has provided one.
+        # We do NOT try to share the chart's main ConfigMap because ArgoCD's
+        # `ignoreDifferences` does not survive sync (upstream issue
+        # argoproj/argo-cd#7478) — separate ConfigMaps mean NIC and software
+        # packs never write to the same resource.
         extraVolumes:
           - name: overrides-src
             configMap:
@@ -189,14 +204,16 @@ spec:
             readOnly: true
         initContainers:
           - name: ensure-overrides
-            image: busybox:1.37
+            image: busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
             command:
               - sh
               - -c
               - |
                 if [ -f /src/relay.yaml ]; then
+                  echo "ensure-overrides: found /src/relay.yaml from software pack ConfigMap, using override config"
                   cp /src/relay.yaml /dst/relay.yaml
                 else
+                  echo "ensure-overrides: no /src/relay.yaml found (ConfigMap absent or missing key), using empty fallback {}"
                   echo '{}' > /dst/relay.yaml
                 fi
             volumeMounts:
