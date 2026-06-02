@@ -256,7 +256,9 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) error {
+// trustBundlePEM is the top-level CA bundle already resolved by the orchestration
+// layer (empty when no bundle is configured); it is not re-read from disk here.
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
@@ -264,16 +266,9 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	workDir := gitClient.WorkDir()
 	data := NewTemplateData(cfg, gitConfig, settings)
 
-	// Resolve the top-level trust bundle for trust-manager. Disk I/O lives here
-	// rather than in the pure NewTemplateData constructor.
-	trustPEM, err := cfg.TrustBundle.ResolvePEM()
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("resolve trust_bundle: %w", err)
-	}
-	if trustPEM != "" {
+	if trustBundlePEM != "" {
 		data.TrustManagerEnabled = true
-		data.TrustBundlePEM = trustPEM
+		data.TrustBundlePEM = trustBundlePEM
 	}
 
 	span.SetAttributes(
@@ -283,7 +278,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	)
 
 	// Walk all files in the templates directory
-	err = fs.WalkDir(templates, templateDir, func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(templates, templateDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -375,9 +370,10 @@ func isTrustBundlePath(relPath string) bool {
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
 }
 
-// templateFuncs provides the small set of helpers templates may call. indent and
-// nindent mirror the common Helm helpers for embedding multi-line values (e.g. a
-// PEM bundle) at a fixed YAML indentation.
+// templateFuncs is the single extension point for helpers available to every
+// template; it is consumed only by processTemplate, not a broader public surface.
+// indent and nindent mirror the common Helm helpers for embedding multi-line
+// values (e.g. a PEM bundle) at a fixed YAML indentation.
 var templateFuncs = template.FuncMap{
 	"indent":  indentLines,
 	"nindent": func(spaces int, s string) string { return "\n" + indentLines(spaces, s) },

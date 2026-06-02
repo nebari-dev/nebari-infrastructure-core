@@ -13,6 +13,11 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 -----END CERTIFICATE-----
 `
 
+const samplePEMWithKey = samplePEM + `-----BEGIN PRIVATE KEY-----
+MIICfQIBADANBgkqhkiG9w0BAQEFAASCAmcwggJjAgEAAoGBAQ0123456789==
+-----END PRIVATE KEY-----
+`
+
 func TestTrustBundleResolveBase64(t *testing.T) {
 	tmp := t.TempDir()
 	pemPath := filepath.Join(tmp, "ca.pem")
@@ -32,8 +37,10 @@ func TestTrustBundleResolveBase64(t *testing.T) {
 		{name: "both path and inline is an error", bundle: &TrustBundleConfig{Path: pemPath, Inline: samplePEM}, wantErr: "only one of path or inline"},
 		{name: "inline PEM is base64-encoded verbatim", bundle: &TrustBundleConfig{Inline: samplePEM}},
 		{name: "path is read from disk", bundle: &TrustBundleConfig{Path: pemPath}},
+		{name: "whitespace-padded path is trimmed and read", bundle: &TrustBundleConfig{Path: "  " + pemPath + "  "}},
 		{name: "missing path returns a clear error", bundle: &TrustBundleConfig{Path: filepath.Join(tmp, "does-not-exist.pem")}, wantErr: "read"},
 		{name: "inline without a PEM block is rejected", bundle: &TrustBundleConfig{Inline: "not a certificate"}, wantErr: "no PEM certificate"},
+		{name: "inline cert bundled with a private key is rejected", bundle: &TrustBundleConfig{Inline: samplePEMWithKey}, wantErr: "private key"},
 	}
 
 	for _, tt := range tests {
@@ -97,6 +104,11 @@ func TestTrustBundleValidate(t *testing.T) {
 		{name: "valid inline", bundle: &TrustBundleConfig{Inline: samplePEM}},
 		{name: "both set is invalid", bundle: &TrustBundleConfig{Path: "/tmp/x", Inline: samplePEM}, wantErr: true},
 		{name: "junk inline is invalid", bundle: &TrustBundleConfig{Inline: "nope"}, wantErr: true},
+		{name: "inline with a private key is invalid", bundle: &TrustBundleConfig{Inline: samplePEMWithKey}, wantErr: true},
+		// Structural-only: a missing path is valid at Validate time. The file read
+		// (and any resulting error) is deferred to resolve time so `nic validate`
+		// stays environment-independent.
+		{name: "missing path is structurally valid", bundle: &TrustBundleConfig{Path: "/does/not/exist.pem"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

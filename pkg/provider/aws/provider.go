@@ -310,7 +310,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle, false)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve terraform variables: %w", err)
@@ -510,7 +510,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle, true)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to resolve terraform variables: %w", err)

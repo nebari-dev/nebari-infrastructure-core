@@ -24,6 +24,9 @@ type TrustBundleConfig struct {
 // ResolvePEM returns the configured CA bundle as raw PEM text. Returns an empty
 // string when the bundle is unset.
 func (t *TrustBundleConfig) ResolvePEM() (string, error) {
+	if t == nil {
+		return "", nil
+	}
 	pem, err := t.resolve()
 	if err != nil {
 		return "", err
@@ -35,6 +38,9 @@ func (t *TrustBundleConfig) ResolvePEM() (string, error) {
 // suitable for passing straight to the terraform-aws-eks-cluster module's
 // extra_ca_bundle input. Returns an empty string when the bundle is unset.
 func (t *TrustBundleConfig) ResolveBase64() (string, error) {
+	if t == nil {
+		return "", nil
+	}
 	pem, err := t.resolve()
 	if err != nil {
 		return "", err
@@ -45,11 +51,25 @@ func (t *TrustBundleConfig) ResolveBase64() (string, error) {
 	return base64.StdEncoding.EncodeToString(pem), nil
 }
 
-// Validate checks that the bundle is well-formed without returning its contents.
-// Safe to call at validate time so misconfigurations surface before deploy.
+// Validate performs structural checks only and never touches disk, so it is safe
+// in environments where a path:-based PEM isn't present (CI, config linting). It
+// enforces mutual exclusion of path/inline and, for inline values (which are
+// available without I/O), the PEM-marker checks. The file read and the same
+// PEM-marker checks for path:-based bundles happen later at resolve time
+// (ResolvePEM/ResolveBase64), called during deploy and destroy.
 func (t *TrustBundleConfig) Validate() error {
-	_, err := t.resolve()
-	return err
+	if t == nil {
+		return nil
+	}
+	pathSet := strings.TrimSpace(t.Path) != ""
+	inlineSet := strings.TrimSpace(t.Inline) != ""
+	if pathSet && inlineSet {
+		return errors.New("trust_bundle: only one of path or inline may be set")
+	}
+	if inlineSet {
+		return checkPEM([]byte(t.Inline), "inline value")
+	}
+	return nil
 }
 
 // resolve reads and validates the bundle, returning the raw PEM bytes. Returns
@@ -58,12 +78,15 @@ func (t *TrustBundleConfig) resolve() ([]byte, error) {
 	if t == nil {
 		return nil, nil
 	}
-	pathSet := strings.TrimSpace(t.Path) != ""
+	// Trim once and reuse: a whitespace-padded path must be treated identically
+	// for the set-check and the read, or a value like "  /real/path  " is
+	// detected as set but then fed verbatim to os.ReadFile and fails.
+	path := strings.TrimSpace(t.Path)
 	inlineSet := strings.TrimSpace(t.Inline) != ""
-	if pathSet && inlineSet {
+	if path != "" && inlineSet {
 		return nil, errors.New("trust_bundle: only one of path or inline may be set")
 	}
-	if !pathSet && !inlineSet {
+	if path == "" && !inlineSet {
 		return nil, nil
 	}
 
@@ -71,11 +94,11 @@ func (t *TrustBundleConfig) resolve() ([]byte, error) {
 		pem     []byte
 		subject string
 	)
-	if pathSet {
-		subject = t.Path
-		data, err := os.ReadFile(t.Path)
+	if path != "" {
+		subject = path
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("trust_bundle: read %s: %w", t.Path, err)
+			return nil, fmt.Errorf("trust_bundle: read %s: %w", path, err)
 		}
 		pem = data
 	} else {
@@ -83,8 +106,24 @@ func (t *TrustBundleConfig) resolve() ([]byte, error) {
 		pem = []byte(t.Inline)
 	}
 
-	if !strings.Contains(string(pem), "-----BEGIN CERTIFICATE-----") {
-		return nil, fmt.Errorf("trust_bundle: no PEM certificate found in %s", subject)
+	if err := checkPEM(pem, subject); err != nil {
+		return nil, err
 	}
 	return pem, nil
+}
+
+// checkPEM verifies the bytes contain a PEM certificate and reject any private
+// key block. The private-key guard is defense-in-depth: a resolved bundle is
+// written to OpenTofu state and projected into every namespace via the GitOps
+// repo, so a stray cert+key file must never be distributed cluster-wide or
+// committed to git.
+func checkPEM(pem []byte, subject string) error {
+	s := string(pem)
+	if !strings.Contains(s, "-----BEGIN CERTIFICATE-----") {
+		return fmt.Errorf("trust_bundle: no PEM certificate found in %s", subject)
+	}
+	if strings.Contains(s, "PRIVATE KEY") {
+		return fmt.Errorf("trust_bundle: %s contains a private key block; only certificates may be distributed", subject)
+	}
+	return nil
 }

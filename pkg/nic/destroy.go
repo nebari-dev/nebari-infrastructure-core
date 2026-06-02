@@ -2,7 +2,9 @@ package nic
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -121,7 +123,17 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
+	// Re-resolve the bundle so the destroy plan matches what was deployed. The
+	// applied value already lives in TF state, so a source PEM that was deleted
+	// or moved after deploy must not block teardown: downgrade a missing file to
+	// an empty bundle and warn rather than fail.
 	caBundle, err := cfg.TrustBundle.ResolveBase64()
+	if errors.Is(err, fs.ErrNotExist) {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			"trust_bundle PEM file is no longer present; continuing destroy with the value already in Terraform state").
+			WithResource("trust_bundle"))
+		caBundle, err = "", nil
+	}
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("resolve trust_bundle: %w", err)

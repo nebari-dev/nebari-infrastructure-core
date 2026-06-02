@@ -1,6 +1,10 @@
 package aws
 
-import "embed"
+import (
+	"embed"
+	"errors"
+	"io/fs"
+)
 
 // Embed all files in the templates directory, including dotfiles (i.e. .terraform.lock.hcl)
 //
@@ -63,7 +67,12 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
-func (c *Config) toTFVars(projectName, fallbackCABundle string) (TFVars, error) {
+// toTFVars builds the OpenTofu variables for the cluster. fallbackCABundle is
+// the top-level bundle resolved by the orchestration layer, used when the
+// deprecated provider-scoped trust_bundle is unset. tolerateMissingBundle is set
+// on destroy: a provider-scoped path:-based PEM that was removed after deploy is
+// downgraded to an empty bundle rather than blocking teardown.
+func (c *Config) toTFVars(projectName, fallbackCABundle string, tolerateMissingBundle bool) (TFVars, error) {
 	vars := TFVars{
 		Region:                 c.Region,
 		ProjectName:            projectName,
@@ -130,6 +139,9 @@ func (c *Config) toTFVars(projectName, fallbackCABundle string) (TFVars, error) 
 	// Provider-scoped trust_bundle takes precedence; fall back to the top-level
 	// bundle resolved by the orchestration layer.
 	caBundle, err := c.TrustBundle.ResolveBase64()
+	if tolerateMissingBundle && errors.Is(err, fs.ErrNotExist) {
+		caBundle, err = "", nil
+	}
 	if err != nil {
 		return TFVars{}, err
 	}

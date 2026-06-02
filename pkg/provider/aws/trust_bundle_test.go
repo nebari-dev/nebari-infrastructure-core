@@ -26,6 +26,8 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 		name        string
 		bundle      *TrustBundleConfig
 		fallback    string
+		tolerate    bool
+		wantErr     bool
 		wantInJSON  bool
 		wantDecoded string
 	}{
@@ -52,6 +54,17 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 			wantInJSON:  true,
 			wantDecoded: altPEM,
 		},
+		{
+			name:    "provider-scoped missing path errors on deploy",
+			bundle:  &TrustBundleConfig{Path: "/does/not/exist.pem"},
+			wantErr: true,
+		},
+		{
+			name:       "provider-scoped missing path tolerated on destroy",
+			bundle:     &TrustBundleConfig{Path: "/does/not/exist.pem"},
+			tolerate:   true,
+			wantInJSON: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -62,7 +75,13 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 				TrustBundle:       tt.bundle,
 			}
-			vars, err := cfg.toTFVars("test-project", tt.fallback)
+			vars, err := cfg.toTFVars("test-project", tt.fallback, tt.tolerate)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("toTFVars: %v", err)
 			}

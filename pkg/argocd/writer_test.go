@@ -622,7 +622,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 
 	mock := &mockGitClient{workDir: tmpDir}
-	err := WriteAllToGit(ctx, mock, cfg, nil, settings)
+	err := WriteAllToGit(ctx, mock, cfg, nil, settings, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
