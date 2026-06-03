@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -211,6 +212,41 @@ func createNamespace(ctx context.Context, client kubernetes.Interface, namespace
 		WithAction("created").
 		WithMetadata("namespace", namespace))
 
+	return nil
+}
+
+// createOrUpdateConfigMap creates the ConfigMap, or updates its data when it
+// already exists with different contents. Unlike createSecret (create-only, for
+// generated one-time credentials), an org CA bundle is operator-supplied and
+// rotates, so this upserts to make a changed trust_bundle actually propagate.
+func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, cm *corev1.ConfigMap) error {
+	namespace := cm.Namespace
+	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, cm.Name, metav1.GetOptions{})
+	if err != nil {
+		// Doesn't exist (or unreadable) — create it.
+		if _, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("failed to create configmap %s: %w", cm.Name, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created ConfigMap %s", cm.Name)).
+			WithResource("configmap").
+			WithAction("created").
+			WithMetadata("configmap_name", cm.Name))
+		return nil
+	}
+
+	if reflect.DeepEqual(existing.Data, cm.Data) {
+		// Already up to date — nothing to do.
+		return nil
+	}
+
+	existing.Data = cm.Data
+	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w", cm.Name, err)
+	}
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Updated ConfigMap %s", cm.Name)).
+		WithResource("configmap").
+		WithAction("updated").
+		WithMetadata("configmap_name", cm.Name))
 	return nil
 }
 
