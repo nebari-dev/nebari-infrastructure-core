@@ -40,7 +40,7 @@ const (
 // pinned to match the cluster's Kubernetes minor version, as AWS requires.
 func clusterAutoscalerHelmValues(cfg *Config, clusterName string) map[string]any {
 	values := map[string]any{
-		"cloudProvider": "aws",
+		"cloudProvider": ProviderName,
 		"awsRegion":     cfg.Region,
 		"autoDiscovery": map[string]any{
 			"clusterName": clusterName,
