@@ -1,6 +1,10 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.5.0"
+  # Intentionally pinned to the feat/cluster-autoscaler branch rather than the
+  # released registry version: the branch carries changes we depend on that are
+  # not yet in a tagged release of nebari-dev/eks-cluster/aws.
+  #   source  = "nebari-dev/eks-cluster/aws"
+  #   version = "0.5.0"
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feat/cluster-autoscaler"
 
   project_name                             = var.project_name
   tags                                     = var.tags
@@ -21,6 +25,7 @@ module "eks_cluster" {
   existing_node_iam_role_arn               = var.existing_node_iam_role_arn
   iam_role_permissions_boundary            = var.iam_role_permissions_boundary
   enable_cluster_creator_admin_permissions = true
+  enable_cluster_autoscaler_pod_identity   = var.enable_cluster_autoscaler_pod_identity
   node_groups                              = var.node_groups
   efs_enabled                              = var.efs_enabled
   efs_performance_mode                     = var.efs_performance_mode

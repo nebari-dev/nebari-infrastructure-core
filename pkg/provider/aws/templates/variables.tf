@@ -127,3 +127,8 @@ variable "extra_ca_bundle" {
   type    = string
   default = null
 }
+
+variable "enable_cluster_autoscaler_pod_identity" {
+  type    = bool
+  default = true
+}

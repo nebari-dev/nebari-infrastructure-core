@@ -43,6 +43,9 @@ type TFVars struct {
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
 	NodeSGAdditionalRules         map[string]any       `json:"node_security_group_additional_rules,omitempty"`
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
+	// No omitempty: a false value must be emitted so it overrides the module's
+	// `true` default when the autoscaler is disabled.
+	EnableClusterAutoscalerPodIdentity bool `json:"enable_cluster_autoscaler_pod_identity"`
 }
 
 func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
@@ -77,6 +80,9 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		ClusterEnabledLogTypes: c.EnabledLogTypes,
 		CreateIAMRoles:         c.ExistingClusterRoleArn == "" && c.ExistingNodeRoleArn == "",
 		NodeGroups:             resolveNodeGroupAMIs(c.NodeGroups),
+		// Only provision the autoscaler's IAM role / pod identity association
+		// when the autoscaler itself will be installed (see provider deploy).
+		EnableClusterAutoscalerPodIdentity: c.ClusterAutoscalerEnabled(),
 	}
 
 	// Set pointer fields only when values are provided, so omitempty excludes them from JSON.

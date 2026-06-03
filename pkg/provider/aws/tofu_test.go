@@ -84,6 +84,37 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 	}
 }
 
+func TestToTFVarsClusterAutoscalerPodIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "defaults to enabled when unset",
+			config:   Config{Region: "us-west-2", NodeGroups: map[string]NodeGroup{"general": {Instance: "m5.xlarge"}}},
+			expected: true,
+		},
+		{
+			name:     "disabled when autoscaler explicitly disabled",
+			config:   Config{Region: "us-west-2", NodeGroups: map[string]NodeGroup{"general": {Instance: "m5.xlarge"}}, ClusterAutoscaler: &ClusterAutoscalerConfig{Enabled: boolPtr(false)}},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vars, err := tt.config.toTFVars("test-project")
+			if err != nil {
+				t.Fatalf("toTFVars() returned error: %v", err)
+			}
+			if vars.EnableClusterAutoscalerPodIdentity != tt.expected {
+				t.Errorf("EnableClusterAutoscalerPodIdentity = %v, want %v", vars.EnableClusterAutoscalerPodIdentity, tt.expected)
+			}
+		})
+	}
+}
+
 func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 	cfg := Config{
 		Region:            "us-west-2",
