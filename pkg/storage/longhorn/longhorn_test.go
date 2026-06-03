@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func ptrBool(b bool) *bool { return &b }
+func boolPtr(b bool) *bool { return &b }
 
 func TestBuildHelmValues(t *testing.T) {
 	tests := []struct {
@@ -68,14 +68,14 @@ func TestBuildHelmValues(t *testing.T) {
 		},
 		{
 			name:   "cluster autoscaler enabled renders setting true",
-			config: &Config{ClusterAutoscalerEnabled: ptrBool(true)},
+			config: &Config{ClusterAutoscalerEnabled: boolPtr(true)},
 			checkValues: map[string]any{
 				"defaultSettings.kubernetesClusterAutoscalerEnabled": true,
 			},
 		},
 		{
 			name:   "cluster autoscaler disabled renders setting false",
-			config: &Config{ClusterAutoscalerEnabled: ptrBool(false)},
+			config: &Config{ClusterAutoscalerEnabled: boolPtr(false)},
 			checkValues: map[string]any{
 				"defaultSettings.kubernetesClusterAutoscalerEnabled": false,
 			},
