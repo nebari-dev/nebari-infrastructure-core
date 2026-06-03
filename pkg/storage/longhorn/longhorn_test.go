@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+func ptrBool(b bool) *bool { return &b }
+
 func TestBuildHelmValues(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -63,6 +65,20 @@ func TestBuildHelmValues(t *testing.T) {
 				"persistence.defaultClassReplicaCount": 2,
 			},
 			wantAbsent: []string{"longhornManager", "longhornDriver"},
+		},
+		{
+			name:   "cluster autoscaler enabled renders setting true",
+			config: &Config{ClusterAutoscalerEnabled: ptrBool(true)},
+			checkValues: map[string]any{
+				"defaultSettings.kubernetesClusterAutoscalerEnabled": true,
+			},
+		},
+		{
+			name:   "cluster autoscaler disabled renders setting false",
+			config: &Config{ClusterAutoscalerEnabled: ptrBool(false)},
+			checkValues: map[string]any{
+				"defaultSettings.kubernetesClusterAutoscalerEnabled": false,
+			},
 		},
 	}
 

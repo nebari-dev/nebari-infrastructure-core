@@ -204,6 +204,12 @@ func buildHelmValues(cfg *Config) map[string]any {
 		"replicaAutoBalance":          "best-effort",
 	}
 
+	// Only render the autoscaler setting when a provider explicitly sets it.
+	// Leaving it unset keeps Longhorn's default.
+	if cfg != nil && cfg.ClusterAutoscalerEnabled != nil {
+		settings["kubernetesClusterAutoscalerEnabled"] = *cfg.ClusterAutoscalerEnabled
+	}
+
 	values := map[string]any{
 		"persistence":     persistence,
 		"defaultSettings": settings,

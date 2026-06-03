@@ -39,6 +39,16 @@ type Config struct {
 	ReplicaCount   int               `yaml:"replica_count,omitempty"`
 	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
 	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
+
+	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the
+	// Kubernetes Cluster Autoscaler. It is not user-facing so providers set it
+	// from their own autoscaler config (e.g. the AWS provider derives it from
+	// ClusterAutoscalerEnabled). When non-nil, it renders the Longhorn
+	// `kubernetesClusterAutoscalerEnabled` setting, which makes Longhorn mark
+	// instance-manager pods safe-to-evict on nodes holding no replicas/engines
+	// so the autoscaler can scale those nodes in. nil leaves the setting unset
+	// (Longhorn's default of false), so non-autoscaled providers are unaffected.
+	ClusterAutoscalerEnabled *bool `yaml:"-"`
 }
 
 // IsEnabled returns whether Longhorn should be installed. A nil Config (i.e.
