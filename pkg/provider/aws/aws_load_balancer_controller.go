@@ -42,6 +42,9 @@ func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string)
 			"create": true,
 			"name":   lbcServiceAccount,
 		},
+		// Reuse the existing webhook TLS secret across upgrades instead of
+		// regenerating it.
+		"keepTLSSecret": true,
 	}
 }
 
