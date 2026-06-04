@@ -3,6 +3,8 @@ package longhorn
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -21,6 +23,14 @@ const installTimeout = 10 * time.Minute
 // nodeStorageLabel is the node label Longhorn uses to identify nodes that
 // should host its storage components when DedicatedNodes is enabled.
 const nodeStorageLabel = "node.longhorn.io/storage"
+
+// nodeStorageTaintToleration is the Longhorn taint-toleration setting value
+// matching the recommended dedicated-node taint
+// (node.longhorn.io/storage=true:NoSchedule). Unlike the manager/driver
+// tolerations, this setting is what lets Longhorn's system-managed components
+// (instance-manager, engine-image, CSI plugin) schedule onto tainted nodes.
+// https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
+const nodeStorageTaintToleration = nodeStorageLabel + "=true:NoSchedule"
 
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
@@ -231,6 +241,18 @@ func buildHelmValues(cfg *Config) map[string]any {
 			},
 		}
 
+		// longhornManager/longhornDriver tolerations only cover the
+		// user-deployed components. The system-managed components
+		// (instance-manager, engine-image, CSI plugin) that actually serve
+		// replicas tolerate the node taint only via the taint-toleration
+		// setting, and are confined to the storage nodes via
+		// system-managed-components-node-selector. Without both, tainting the
+		// dedicated node group prevents Longhorn from scheduling its storage
+		// engines there.
+		// https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
+		settings["taintToleration"] = nodeStorageTaintToleration
+		settings["systemManagedComponentsNodeSelector"] = formatNodeSelector(nodeSelector)
+
 		values["longhornManager"] = map[string]any{
 			"nodeSelector": nodeSelector,
 			"tolerations":  tolerations,
@@ -242,4 +264,21 @@ func buildHelmValues(cfg *Config) map[string]any {
 	}
 
 	return values
+}
+
+// formatNodeSelector renders a label map as Longhorn's
+// systemManagedComponentsNodeSelector setting string ("key:value" pairs joined
+// by ";"). Keys are sorted so the generated Helm values are deterministic.
+func formatNodeSelector(sel map[string]string) string {
+	keys := make([]string, 0, len(sel))
+	for k := range sel {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+":"+sel[k])
+	}
+	return strings.Join(parts, ";")
 }

@@ -2,6 +2,7 @@ package longhorn
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -48,14 +50,28 @@ func TestBuildHelmValues(t *testing.T) {
 				NodeSelector:   map[string]string{"node.longhorn.io/storage": "true"},
 			},
 			checkValues: map[string]any{
-				"defaultSettings.createDefaultDiskLabeledNodes": true,
+				"defaultSettings.createDefaultDiskLabeledNodes":       true,
+				"defaultSettings.taintToleration":                     "node.longhorn.io/storage=true:NoSchedule",
+				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
 			},
 		},
 		{
 			name:   "dedicated nodes without custom nodeSelector uses default",
 			config: &Config{DedicatedNodes: true},
 			checkValues: map[string]any{
-				"defaultSettings.createDefaultDiskLabeledNodes": true,
+				"defaultSettings.createDefaultDiskLabeledNodes":       true,
+				"defaultSettings.taintToleration":                     "node.longhorn.io/storage=true:NoSchedule",
+				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
+			},
+		},
+		{
+			name: "dedicated nodes with custom multi-key nodeSelector derives sorted selector setting",
+			config: &Config{
+				DedicatedNodes: true,
+				NodeSelector:   map[string]string{"workload": "storage", "tier": "longhorn"},
+			},
+			checkValues: map[string]any{
+				"defaultSettings.systemManagedComponentsNodeSelector": "tier:longhorn;workload:storage",
 			},
 		},
 		{
@@ -150,6 +166,83 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 	}
 	if _, ok := driver["tolerations"].([]map[string]string); !ok {
 		t.Fatal("longhornDriver.tolerations not found or not a []map[string]string")
+	}
+}
+
+func TestBuildHelmValuesNonDedicatedOmitsSystemSettings(t *testing.T) {
+	values := buildHelmValues(&Config{DedicatedNodes: false})
+
+	settings, ok := values["defaultSettings"].(map[string]any)
+	if !ok {
+		t.Fatal("defaultSettings not found or not a map")
+	}
+	// The system-managed-component settings confine instance-managers to
+	// labeled/tainted nodes. On a colocated cluster those nodes don't exist,
+	// so the settings must not be emitted.
+	if _, ok := settings["taintToleration"]; ok {
+		t.Error("defaultSettings.taintToleration should not be set when DedicatedNodes is false")
+	}
+	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
+		t.Error("defaultSettings.systemManagedComponentsNodeSelector should not be set when DedicatedNodes is false")
+	}
+}
+
+func TestFormatNodeSelector(t *testing.T) {
+	tests := []struct {
+		name     string
+		selector map[string]string
+		want     string
+	}{
+		{
+			name:     "single label",
+			selector: map[string]string{"node.longhorn.io/storage": "true"},
+			want:     "node.longhorn.io/storage:true",
+		},
+		{
+			name:     "multiple labels sorted by key",
+			selector: map[string]string{"workload": "storage", "tier": "longhorn"},
+			want:     "tier:longhorn;workload:storage",
+		},
+		{
+			name:     "empty selector",
+			selector: map[string]string{},
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatNodeSelector(tt.selector); got != tt.want {
+				t.Errorf("formatNodeSelector(%v) = %q, want %q", tt.selector, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestISCSIDaemonSetToleratesAllTaints(t *testing.T) {
+	var ds appsv1.DaemonSet
+	if err := yaml.NewYAMLOrJSONDecoder(
+		strings.NewReader(iscsiDaemonSetYAML), 4096,
+	).Decode(&ds); err != nil {
+		t.Fatalf("failed to parse embedded iSCSI DaemonSet YAML: %v", err)
+	}
+
+	tolerations := ds.Spec.Template.Spec.Tolerations
+	if len(tolerations) == 0 {
+		t.Fatal("iSCSI DaemonSet has no tolerations; it will skip tainted dedicated storage nodes")
+	}
+
+	// A node-level prerequisite should tolerate every taint via an unqualified
+	// Exists toleration (no key), so it installs on all nodes regardless of taint.
+	found := false
+	for _, tol := range tolerations {
+		if tol.Key == "" && tol.Operator == corev1.TolerationOpExists {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("iSCSI DaemonSet tolerations = %+v, want an Exists toleration with empty key", tolerations)
 	}
 }
 

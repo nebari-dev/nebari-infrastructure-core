@@ -43,6 +43,11 @@ spec:
     spec:
       hostNetwork: true
       hostPID: true
+      # Tolerate every taint so the iSCSI prerequisite installs on all nodes,
+      # including dedicated Longhorn storage nodes tainted to repel general
+      # workloads. This is a node-level prerequisite, not a workload.
+      tolerations:
+      - operator: Exists
       initContainers:
       - name: iscsi-installation
         command:
