@@ -1,11 +1,7 @@
 module "eks_cluster" {
-  # Intentionally pinned to the feat/cluster-autoscaler branch rather than the
-  # released registry version: the branch carries changes we depend on that are
-  # not yet in a tagged release of nebari-dev/eks-cluster/aws.
-  #   source  = "nebari-dev/eks-cluster/aws"
-  #   version = "0.5.0"
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feat/cluster-autoscaler"
-
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.6.0"
+  
   project_name                             = var.project_name
   tags                                     = var.tags
   availability_zones                       = var.availability_zones
