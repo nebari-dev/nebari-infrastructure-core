@@ -49,9 +49,29 @@ const (
 // is the minimal opt-in. ReplicaCount defaults to 2 — appropriate for small
 // clusters; production deploys should raise it.
 type Config struct {
-	Enabled        *bool `yaml:"enabled,omitempty"`
-	ReplicaCount   int   `yaml:"replica_count,omitempty"`
-	DedicatedNodes bool  `yaml:"dedicated_nodes,omitempty"`
+	Enabled      *bool `yaml:"enabled,omitempty"`
+	ReplicaCount int   `yaml:"replica_count,omitempty"`
+
+	// DedicatedNodes confines Longhorn replica data to a dedicated, tainted
+	// storage node group (disks are created only there; see NodeSelector and
+	// CreateDefaultDiskLabel).
+	//
+	// WARNING — toggling this is a MANUAL migration, not a hands-off switch.
+	// The setting only governs FUTURE default-disk creation; it never moves or
+	// re-syncs replicas that already exist, and neither NIC nor Longhorn migrates
+	// them for you:
+	//   - false -> true: existing replicas stay on the colocated (general/user)
+	//     node disks — Longhorn does not delete those disks on a setting change.
+	//     Those nodes then cannot scale down (they still hold replicas) and the
+	//     data is NOT auto-moved to the storage nodes. To finish the migration,
+	//     manually evict the old disks/nodes in Longhorn (allowScheduling:false
+	//     or evictionRequested) so replicas rebuild onto the storage nodes first.
+	//   - true -> false while also removing the storage node group: terraform
+	//     tears down the nodes holding the only replicas before they are rebuilt
+	//     elsewhere -> DATA LOSS (this is the #354 node-removal hazard). Migrate
+	//     replicas off the storage nodes (evict, wait for rebuild) BEFORE removing
+	//     the group.
+	DedicatedNodes bool `yaml:"dedicated_nodes,omitempty"`
 	// NodeSelector is the label set that identifies the dedicated storage nodes
 	// when DedicatedNodes is true (defaults to {node.longhorn.io/storage: "true"},
 	// i.e. NodeStorageLabel). It no longer pins Longhorn's system components by
