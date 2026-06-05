@@ -212,7 +212,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 				return err
 			}
 
-			validEffects := []string{"NoSchedule", "NoExecute", "PreferNoSchedule"}
+			// EKS managed node group taint effects use the API enum spelling
+			// (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), which is what the
+			// terraform-aws-eks-cluster module expects and what config taints
+			// carry. EKS maps these to the Kubernetes taint effects.
+			validEffects := []string{"NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
 			if !contains(validEffects, taint.Effect) {
 				err := fmt.Errorf("node group %s: taint %d has invalid effect %s (must be one of: %v)", nodeGroupName, i, taint.Effect, validEffects)
 				span.RecordError(err)

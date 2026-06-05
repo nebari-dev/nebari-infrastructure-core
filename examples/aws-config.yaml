@@ -93,10 +93,10 @@ cluster:
 
     # Longhorn distributed block storage (enabled by default on AWS).
     # Production-recommended: dedicate tainted storage nodes (see the "storage"
-    # node group above) and keep at least one replica per AZ. Note:
-    # dedicated_nodes with tainted storage nodes needs the Longhorn
-    # taint-toleration fix (nebari-dev/nebari-infrastructure-core#356); present
-    # in any build that includes it.
+    # node group above) and keep at least one replica per AZ. The dedicated
+    # nodes must carry the node.longhorn.io/storage=true:NoSchedule taint shown
+    # there; NIC wires the matching tolerations for every Longhorn component
+    # (manager, driver, and the system-managed instance-manager/engine/CSI pods).
     longhorn:
       dedicated_nodes: true # pins Longhorn to nodes labeled/tainted node.longhorn.io/storage
       replica_count: 2 # one replica per storage node / AZ; raise to 3 for 3 AZs

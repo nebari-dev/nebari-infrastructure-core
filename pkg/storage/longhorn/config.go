@@ -35,10 +35,20 @@ const (
 // is the minimal opt-in. ReplicaCount defaults to 2 — appropriate for small
 // clusters; production deploys should raise it.
 type Config struct {
-	Enabled        *bool             `yaml:"enabled,omitempty"`
-	ReplicaCount   int               `yaml:"replica_count,omitempty"`
-	DedicatedNodes bool              `yaml:"dedicated_nodes,omitempty"`
-	NodeSelector   map[string]string `yaml:"node_selector,omitempty"`
+	Enabled        *bool `yaml:"enabled,omitempty"`
+	ReplicaCount   int   `yaml:"replica_count,omitempty"`
+	DedicatedNodes bool  `yaml:"dedicated_nodes,omitempty"`
+	// NodeSelector overrides the node label Longhorn uses to place its
+	// components when DedicatedNodes is true (defaults to
+	// node.longhorn.io/storage=true). It controls only the nodeSelector side.
+	//
+	// Constraint: the taint toleration is NOT derived from this field. Longhorn
+	// always tolerates the fixed taint node.longhorn.io/storage=true:NoSchedule
+	// (see nodeStorageTaintToleration in install.go). So if you customize this
+	// selector, the dedicated nodes must still carry that exact taint, or the
+	// system-managed components (instance-manager, engine-image, CSI plugin)
+	// will sit Pending. Parameterizing the taint is tracked separately.
+	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
 
 	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the
 	// Kubernetes Cluster Autoscaler. It is not user-facing so providers set it

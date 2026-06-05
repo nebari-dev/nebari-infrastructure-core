@@ -172,32 +172,47 @@ When Longhorn is disabled (`longhorn.enabled: false`), falls back to `gp2`.
 
 Default (no longhorn section needed):
 ```yaml
-amazon_web_services:
-  region: us-west-2
-  kubernetes_version: "1.34"
-  node_groups:
-    user:
-      instance: m7i.xlarge
-      min_nodes: 0
-      max_nodes: 5
+cluster:
+  aws:
+    region: us-west-2
+    kubernetes_version: "1.34"
+    node_groups:
+      user:
+        instance: m7i.xlarge
+        min_nodes: 0
+        max_nodes: 5
 ```
 
-Explicit configuration:
+Explicit configuration with dedicated, tainted storage nodes:
 ```yaml
-amazon_web_services:
-  region: us-west-2
-  longhorn:
-    replica_count: 3
-    dedicated_nodes: true
-    node_selector:
-      node.longhorn.io/storage: "true"
+cluster:
+  aws:
+    region: us-west-2
+    node_groups:
+      storage:
+        instance: m7g.large
+        min_nodes: 2
+        max_nodes: 2
+        disk_size: 500
+        labels:
+          node.longhorn.io/storage: "true"
+        taints:
+          - key: node.longhorn.io/storage
+            value: "true"
+            effect: NO_SCHEDULE
+    longhorn:
+      replica_count: 3
+      dedicated_nodes: true
+      node_selector:
+        node.longhorn.io/storage: "true"
 ```
 
 Opt out:
 ```yaml
-amazon_web_services:
-  longhorn:
-    enabled: false
+cluster:
+  aws:
+    longhorn:
+      enabled: false
 ```
 
 ### Helm Values
@@ -218,6 +233,11 @@ Dedicated nodes deployment adds:
 ```yaml
 defaultSettings:
   createDefaultDiskLabeledNodes: true
+  # System-managed components (instance-manager, engine-image, CSI plugin) are
+  # not covered by the per-component tolerations below; they honor node taints
+  # and pinning only through these two settings.
+  taintToleration: node.longhorn.io/storage=true:NoSchedule
+  systemManagedComponentsNodeSelector: node.longhorn.io/storage:true
 
 longhornManager:
   nodeSelector:
