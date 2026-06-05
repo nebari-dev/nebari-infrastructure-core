@@ -22,9 +22,13 @@ const iscsiDaemonSetTimeout = 3 * time.Minute
 
 // iscsiDaemonSetYAML is the Longhorn iSCSI prerequisite DaemonSet.
 // Source: https://github.com/longhorn/longhorn/blob/v1.9.2/deploy/prerequisite/longhorn-iscsi-installation.yaml
-// (removed upstream in v1.10.0; see longhorn/longhorn@600801b5 — the
-// embedded DaemonSet content still works against newer engine versions.)
-// Embedded to avoid runtime HTTP fetches and support air-gapped installs.
+// Upstream removed this manifest in v1.10.0 (longhorn/longhorn@600801b5) and the
+// pinned v1.11.2 chart no longer ships an iSCSI prerequisite under
+// deploy/prerequisite. iSCSI setup is a host-OS operation (install open-iscsi,
+// enable iscsid, load the iscsi_tcp module) that is independent of the Longhorn
+// version, so the embedded DaemonSet remains valid for v1.11.2. Embedded to
+// avoid runtime HTTP fetches and support air-gapped installs. The added
+// tolerations let it install on tainted dedicated storage nodes.
 const iscsiDaemonSetYAML = `apiVersion: apps/v1
 kind: DaemonSet
 metadata:

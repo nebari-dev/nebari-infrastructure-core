@@ -229,7 +229,11 @@ func buildHelmValues(cfg *Config) map[string]any {
 		settings["createDefaultDiskLabeledNodes"] = true
 
 		nodeSelector := map[string]string{nodeStorageLabel: "true"}
-		if cfg.NodeSelector != nil {
+		// Override only when a non-empty selector is supplied. An explicitly
+		// empty map (node_selector: {}) would otherwise clear the
+		// system-managed-components node selector, silently unpinning the
+		// instance-managers from the storage nodes.
+		if len(cfg.NodeSelector) > 0 {
 			nodeSelector = cfg.NodeSelector
 		}
 
@@ -270,6 +274,10 @@ func buildHelmValues(cfg *Config) map[string]any {
 // systemManagedComponentsNodeSelector setting string ("key:value" pairs joined
 // by ";"). Keys are sorted so the generated Helm values are deterministic.
 func formatNodeSelector(sel map[string]string) string {
+	if len(sel) == 0 {
+		return ""
+	}
+
 	keys := make([]string, 0, len(sel))
 	for k := range sel {
 		keys = append(keys, k)

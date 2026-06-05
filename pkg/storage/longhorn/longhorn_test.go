@@ -75,6 +75,16 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
+			name: "dedicated nodes with empty nodeSelector falls back to default label",
+			config: &Config{
+				DedicatedNodes: true,
+				NodeSelector:   map[string]string{},
+			},
+			checkValues: map[string]any{
+				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
+			},
+		},
+		{
 			name:   "non-dedicated nodes omits nodeSelector and tolerations",
 			config: &Config{DedicatedNodes: false, ReplicaCount: 2},
 			checkValues: map[string]any{
