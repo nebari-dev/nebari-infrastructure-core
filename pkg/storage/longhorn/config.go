@@ -71,6 +71,12 @@ type Config struct {
 	//     elsewhere -> DATA LOSS (this is the #354 node-removal hazard). Migrate
 	//     replicas off the storage nodes (evict, wait for rebuild) BEFORE removing
 	//     the group.
+	//
+	// Before switching modes, take a fresh OFF-CLUSTER backup (the
+	// nebari-longhorn-backup-pack provides scheduled S3 backups; trigger an
+	// on-demand one right before the switch). In-cluster snapshots do not survive
+	// the destructive true->false case since they live on the disks being removed;
+	// only the S3 backup does, and you can restore onto the new topology.
 	DedicatedNodes bool `yaml:"dedicated_nodes,omitempty"`
 	// NodeSelector is the label set that identifies the dedicated storage nodes
 	// when DedicatedNodes is true (defaults to {node.longhorn.io/storage: "true"},
