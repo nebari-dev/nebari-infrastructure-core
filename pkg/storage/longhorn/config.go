@@ -73,3 +73,19 @@ func (c *Config) Replicas() int {
 	}
 	return c.ReplicaCount
 }
+
+// WithClusterAutoscalerEnabled returns a copy of the config with
+// ClusterAutoscalerEnabled set to enabled, without mutating the receiver.
+// A nil receiver yields a fresh Config (the "use defaults" case), so a provider
+// can chain this onto an optional, user-owned *Config without aliasing or
+// mutating it. A shallow copy is sufficient: only the new pointer field is set,
+// and the shared map/pointer fields are read-only downstream.
+func (c *Config) WithClusterAutoscalerEnabled(enabled bool) *Config {
+	out := &Config{}
+	if c != nil {
+		cp := *c
+		out = &cp
+	}
+	out.ClusterAutoscalerEnabled = &enabled
+	return out
+}

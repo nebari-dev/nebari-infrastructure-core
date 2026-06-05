@@ -359,13 +359,10 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 
 		// Tell Longhorn whether the Cluster Autoscaler is present so it can mark
 		// instance-manager pods safe-to-evict on empty nodes - otherwise those
-		// pods pin otherwise-idle nodes and block scale-down.
-		longhornCfg := awsCfg.Longhorn
-		if longhornCfg == nil {
-			longhornCfg = &longhorn.Config{}
-		}
-		caEnabled := awsCfg.ClusterAutoscalerEnabled()
-		longhornCfg.ClusterAutoscalerEnabled = &caEnabled
+		// pods pin otherwise-idle nodes and block scale-down. WithCluster-
+		// AutoscalerEnabled returns a copy, so the caller-owned awsCfg.Longhorn
+		// is never mutated.
+		longhornCfg := awsCfg.Longhorn.WithClusterAutoscalerEnabled(awsCfg.ClusterAutoscalerEnabled())
 
 		if err := longhorn.Install(ctx, kubeconfigBytes, longhornCfg); err != nil {
 			span.RecordError(err)

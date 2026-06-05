@@ -195,6 +195,41 @@ func TestConfigReplicas(t *testing.T) {
 	}
 }
 
+func TestConfigWithClusterAutoscalerEnabled(t *testing.T) {
+	t.Run("nil receiver yields a fresh config with the flag set", func(t *testing.T) {
+		got := (*Config)(nil).WithClusterAutoscalerEnabled(true)
+		if got == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if got.ClusterAutoscalerEnabled == nil || *got.ClusterAutoscalerEnabled != true {
+			t.Errorf("ClusterAutoscalerEnabled = %v, want true", got.ClusterAutoscalerEnabled)
+		}
+	})
+
+	t.Run("returns a copy and does not mutate the receiver", func(t *testing.T) {
+		base := &Config{
+			ReplicaCount: 3,
+			NodeSelector: map[string]string{"node.longhorn.io/storage": "true"},
+		}
+		got := base.WithClusterAutoscalerEnabled(false)
+
+		// Receiver must be untouched.
+		if base.ClusterAutoscalerEnabled != nil {
+			t.Errorf("receiver was mutated: ClusterAutoscalerEnabled = %v, want nil", base.ClusterAutoscalerEnabled)
+		}
+		// Copy must carry the receiver's other fields plus the new flag.
+		if got == base {
+			t.Error("expected a distinct copy, got the same pointer")
+		}
+		if got.ReplicaCount != 3 {
+			t.Errorf("copy ReplicaCount = %d, want 3", got.ReplicaCount)
+		}
+		if got.ClusterAutoscalerEnabled == nil || *got.ClusterAutoscalerEnabled != false {
+			t.Errorf("copy ClusterAutoscalerEnabled = %v, want false", got.ClusterAutoscalerEnabled)
+		}
+	})
+}
+
 func TestEnsureNamespace(t *testing.T) {
 	tests := []struct {
 		name      string
