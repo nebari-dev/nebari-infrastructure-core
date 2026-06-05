@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -221,15 +222,20 @@ func createNamespace(ctx context.Context, client kubernetes.Interface, namespace
 	return nil
 }
 
-// createOrUpdateConfigMap creates the ConfigMap, or updates its data when it
-// already exists with different contents. Unlike createSecret (create-only, for
-// generated one-time credentials), an org CA bundle is operator-supplied and
-// rotates, so this upserts to make a changed trust_bundle actually propagate.
+// createOrUpdateConfigMap creates the ConfigMap, or reconciles its data and
+// labels when it already exists with different contents. Unlike createSecret
+// (create-only by design, for generated one-time credentials), an org CA bundle
+// is operator-supplied and rotates, so this upserts to make a changed
+// trust_bundle actually propagate.
 func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, cm *corev1.ConfigMap) error {
 	namespace := cm.Namespace
 	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, cm.Name, metav1.GetOptions{})
 	if err != nil {
-		// Doesn't exist (or unreadable) — create it.
+		if !apierrors.IsNotFound(err) {
+			// A transient/permission error must not be mistaken for "absent" —
+			// otherwise we'd blindly Create and mask the real failure.
+			return fmt.Errorf("failed to get configmap %s: %w", cm.Name, err)
+		}
 		if _, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("failed to create configmap %s: %w", cm.Name, err)
 		}
@@ -240,12 +246,17 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 		return nil
 	}
 
-	if reflect.DeepEqual(existing.Data, cm.Data) {
-		// Already up to date — nothing to do.
+	// Reconcile both data and our managed labels; no-op when already in sync.
+	if reflect.DeepEqual(existing.Data, cm.Data) && labelsContain(existing.Labels, cm.Labels) {
 		return nil
 	}
-
 	existing.Data = cm.Data
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	for k, v := range cm.Labels {
+		existing.Labels[k] = v
+	}
 	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("failed to update configmap %s: %w", cm.Name, err)
 	}
@@ -256,7 +267,38 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 	return nil
 }
 
-// createSecret creates a Kubernetes secret if it doesn't already exist
+// labelsContain reports whether have already includes every key/value in want.
+func labelsContain(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// createOrgCAConfigMap upserts the install-time argocd-org-ca ConfigMap holding
+// the operator's org CA, labeled as a foundational resource. It is the org-CA
+// analogue of createKeycloakSecrets — keeping the resource construction beside
+// the other foundational create helpers rather than inline in Install.
+func createOrgCAConfigMap(ctx context.Context, client kubernetes.Interface, namespace, orgCABundlePEM string) error {
+	return createOrUpdateConfigMap(ctx, client, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      orgCAConfigMapName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
+				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+			},
+		},
+		Data: map[string]string{orgCAConfigMapKey: orgCABundlePEM},
+	})
+}
+
+// createSecret creates a Kubernetes secret if it doesn't already exist.
+// Create-only by design: these are generated one-time credentials that must
+// never be overwritten on re-deploy. For operator-supplied data that can rotate
+// (e.g. a CA bundle), use createOrUpdateConfigMap / createOrgCAConfigMap instead.
 func createSecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret) error {
 	namespace := secret.Namespace
 	_, err := client.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
