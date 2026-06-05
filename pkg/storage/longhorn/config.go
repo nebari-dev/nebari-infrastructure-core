@@ -60,6 +60,11 @@ type Config struct {
 	// can add CreateDefaultDiskLabel to it; Longhorn then provisions disks only
 	// there, which is what confines replicas to storage nodes.
 	//
+	// Matching is an exact key/value comparison: a storage node group labeled
+	// node.longhorn.io/storage="yes" (any value other than the configured one)
+	// will not match, so it gets no disk label and its volumes fault. Use the
+	// exact values set here.
+	//
 	// Constraint: the taint toleration is NOT derived from this field. Longhorn's
 	// system components always tolerate the fixed taint
 	// node.longhorn.io/storage=true:NoSchedule (see nodeStorageTaintToleration in

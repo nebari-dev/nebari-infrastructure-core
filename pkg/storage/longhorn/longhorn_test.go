@@ -114,6 +114,22 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 
 	values := buildHelmValues(cfg)
 
+	// Full dedicated-nodes contract on defaultSettings: disk auto-creation +
+	// taint-toleration present, and the removed pinning setting absent.
+	settings, ok := values["defaultSettings"].(map[string]any)
+	if !ok {
+		t.Fatal("defaultSettings not found or not a map")
+	}
+	if settings["createDefaultDiskLabeledNodes"] != true {
+		t.Errorf("defaultSettings.createDefaultDiskLabeledNodes = %v, want true", settings["createDefaultDiskLabeledNodes"])
+	}
+	if settings["taintToleration"] != "node.longhorn.io/storage=true:NoSchedule" {
+		t.Errorf("defaultSettings.taintToleration = %v, want the storage taint", settings["taintToleration"])
+	}
+	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
+		t.Error("defaultSettings.systemManagedComponentsNodeSelector must not be set (pinning removed, #366)")
+	}
+
 	// longhorn-manager and the driver must run on EVERY node so workloads can
 	// mount volumes anywhere (#366). They must therefore carry NO nodeSelector
 	// and a tolerate-all toleration.

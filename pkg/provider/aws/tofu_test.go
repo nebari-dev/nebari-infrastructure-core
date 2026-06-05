@@ -361,4 +361,44 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 			t.Error("group not matching the custom selector must not get the disk label")
 		}
 	})
+
+	t.Run("labels multiple storage groups, idempotent, literal wire value", func(t *testing.T) {
+		cfg := Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: true},
+			NodeGroups: map[string]NodeGroup{
+				"storage-a": {Instance: "m7g.large", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+				// already carries the disk label — injection must be idempotent
+				"storage-b": {Instance: "m7g.large", Labels: map[string]string{
+					longhorn.NodeStorageLabel:              "true",
+					"node.longhorn.io/create-default-disk": "true",
+				}},
+			},
+		}
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		// literal wire value, both groups
+		for _, g := range []string{"storage-a", "storage-b"} {
+			if vars.NodeGroups[g].Labels["node.longhorn.io/create-default-disk"] != "true" {
+				t.Errorf("%s missing create-default-disk=true, got %v", g, vars.NodeGroups[g].Labels)
+			}
+		}
+	})
+
+	t.Run("does not mutate the caller's node-group labels", func(t *testing.T) {
+		cfg := newCfg(true, nil)
+		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Fatal("precondition: input already has the disk label")
+		}
+		if _, err := cfg.toTFVars("test"); err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		// the original config's label map must be untouched (no aliasing)
+		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Error("toTFVars mutated the caller's NodeGroup.Labels map")
+		}
+	})
 }

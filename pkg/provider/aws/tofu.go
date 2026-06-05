@@ -72,28 +72,22 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
-// longhornStorageSelector returns the label set that identifies the dedicated
-// Longhorn storage node group: the configured NodeSelector, or the default
-// {node.longhorn.io/storage: "true"}.
-func longhornStorageSelector(cfg *longhorn.Config) map[string]string {
-	if cfg != nil && len(cfg.NodeSelector) > 0 {
-		return cfg.NodeSelector
-	}
-	return map[string]string{longhorn.NodeStorageLabel: "true"}
-}
-
-// applyLonghornDiskLabel adds longhorn.CreateDefaultDiskLabel=true to every node
-// group whose labels already match the Longhorn storage selector, so Longhorn
-// auto-provisions a disk on those nodes (#369). Node groups that aren't storage
-// nodes are left untouched.
+// applyLonghornDiskLabel ensures every node group that matches the Longhorn
+// storage selector carries the labels Longhorn needs on a storage node (the
+// selector labels plus the create-default-disk label) so Longhorn
+// auto-provisions a disk there (#369). The label policy is owned by the
+// longhorn package (StorageSelector/StorageNodeLabels); this only applies it to
+// whichever AWS node group is the storage pool. Non-storage groups are left
+// untouched.
 func applyLonghornDiskLabel(nodeGroups map[string]NodeGroup, cfg *longhorn.Config) map[string]NodeGroup {
-	sel := longhornStorageSelector(cfg)
+	sel := longhorn.StorageSelector(cfg)
+	storageLabels := longhorn.StorageNodeLabels(cfg)
 	result := make(map[string]NodeGroup, len(nodeGroups))
 	for name, group := range nodeGroups {
 		if nodeGroupMatchesSelector(group.Labels, sel) {
-			labels := make(map[string]string, len(group.Labels)+1)
+			labels := make(map[string]string, len(group.Labels)+len(storageLabels))
 			maps.Copy(labels, group.Labels)
-			labels[longhorn.CreateDefaultDiskLabel] = "true"
+			maps.Copy(labels, storageLabels)
 			group.Labels = labels
 		}
 		result[name] = group

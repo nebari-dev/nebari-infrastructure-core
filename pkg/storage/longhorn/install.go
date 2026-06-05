@@ -130,6 +130,11 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage installed").
 		WithResource("longhorn").
 		WithAction("installed").
@@ -171,6 +176,11 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfig
 	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	}
+
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage upgraded").
@@ -236,11 +246,17 @@ func buildHelmValues(cfg *Config) map[string]any {
 		// the dedicated storage nodes that host replicas.
 		settings["taintToleration"] = nodeStorageTaintToleration
 
-		// longhorn-manager (DaemonSet) and the driver deployer must run on EVERY
-		// node so a volume can be served to a workload anywhere — they are
-		// node-level infrastructure, not workloads, so they tolerate all taints
-		// (same rationale as the embedded iSCSI prerequisite DaemonSet). They are
-		// deliberately NOT given a nodeSelector (#366).
+		// longhorn-manager (DaemonSet) and the driver deployer are node-level
+		// infrastructure, not workloads, so they tolerate all taints (same
+		// rationale as the embedded iSCSI prerequisite DaemonSet) and carry no
+		// nodeSelector (#366). NOTE: the per-node *mount* component,
+		// longhorn-csi-plugin, is system-managed — its tolerations come from the
+		// taintToleration setting above (storage taint only), NOT from these
+		// manager/driver tolerations. So mounts work on untainted workload nodes
+		// and on the storage nodes, but a *tainted* workload pool (e.g. a GPU pool
+		// with nvidia.com/gpu:NoSchedule) would need its taint added to
+		// taintToleration for csi-plugin to land there. Tracked as a follow-up
+		// (relates to #363/#368).
 		tolerateAll := []map[string]any{{"operator": "Exists"}}
 		values["longhornManager"] = map[string]any{"tolerations": tolerateAll}
 		values["longhornDriver"] = map[string]any{"tolerations": tolerateAll}
