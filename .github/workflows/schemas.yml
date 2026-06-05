@@ -1,0 +1,71 @@
+name: Schemas
+
+# Drift check for the generated schemas/ artifacts (committed in-tree,
+# consumed by nebari-docs). Runs schemagen and fails if the working tree
+# diverges from what was committed. Authors keep schemas/ in sync by
+# running `make schemas` locally before pushing.
+#
+# Paths-filtered to avoid running on PRs that can't affect schema output
+# (e.g. docs-only PRs, CI tweaks).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/config/**'
+      - 'pkg/provider/**'
+      - 'pkg/dnsprovider/**'
+      - 'pkg/nic/registry.go'
+      - 'pkg/nic/config_types.go'
+      - 'pkg/storage/longhorn/**'
+      - 'pkg/git/**'
+      - 'pkg/configschema/**'
+      - 'cmd/schemagen/**'
+      - 'schemas/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/schemas.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pkg/config/**'
+      - 'pkg/provider/**'
+      - 'pkg/dnsprovider/**'
+      - 'pkg/nic/registry.go'
+      - 'pkg/nic/config_types.go'
+      - 'pkg/storage/longhorn/**'
+      - 'pkg/git/**'
+      - 'pkg/configschema/**'
+      - 'cmd/schemagen/**'
+      - 'schemas/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/schemas.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    name: schemas/ drift check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate schemas
+        run: make schemas
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --exit-code schemas/; then
+            echo "::error::schemas/ is out of sync with the code. Run 'make schemas' locally and commit the result."
+            exit 1
+          fi

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/config.NebariConfig",
+  "$defs": {
+    "config.ACMEConfig": {
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email is the email address for Let's Encrypt registration"
+        },
+        "server": {
+          "type": "string",
+          "description": "Server is the ACME server URL (defaults to Let's Encrypt production)\nUse \"https://acme-staging-v02.api.letsencrypt.org/directory\" for testing"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "email"
+      ],
+      "description": "ACMEConfig holds ACME (Let's Encrypt) configuration"
+    },
+    "config.CertificateConfig": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type is the certificate type: \"selfsigned\" or \"letsencrypt\""
+        },
+        "acme": {
+          "$ref": "#/$defs/config.ACMEConfig",
+          "description": "ACME configuration for Let's Encrypt"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "CertificateConfig holds TLS certificate configuration"
+    },
+    "config.ClusterConfig": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ClusterConfig holds typed cloud provider configuration."
+    },
+    "config.DNSConfig": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DNSConfig holds typed DNS provider configuration."
+    },
+    "config.NebariConfig": {
+      "properties": {
+        "project_name": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/config.ClusterConfig",
+          "description": "Cluster Provider configuration.\nOnly one provider can be configured at a time."
+        },
+        "dns": {
+          "$ref": "#/$defs/config.DNSConfig",
+          "description": "DNS provider configuration (optional).\nOnly one provider can be configured at a time."
+        },
+        "git_repository": {
+          "$ref": "#/$defs/git.Config",
+          "description": "GitRepository configures the GitOps repository for ArgoCD bootstrap (optional)"
+        },
+        "certificate": {
+          "$ref": "#/$defs/config.CertificateConfig",
+          "description": "Certificate configuration (optional)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "project_name"
+      ],
+      "description": "NebariConfig represents the parsed nebari-config.yaml structure"
+    },
+    "git.AuthConfig": {
+      "properties": {
+        "ssh_key_env": {
+          "type": "string",
+          "description": "SSHKeyEnv is the name of the environment variable containing the SSH private key\nThe key should be in PEM format (e.g., contents of ~/.ssh/id_ed25519)"
+        },
+        "token_env": {
+          "type": "string",
+          "description": "TokenEnv is the name of the environment variable containing the personal access token\nUsed for HTTPS authentication"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ssh_key_env",
+        "token_env"
+      ],
+      "description": "AuthConfig specifies authentication credentials for git operations."
+    },
+    "git.Config": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL is the repository URL (SSH or HTTPS format)\nExamples: \"git@github.com:org/repo.git\" or \"https://github.com/org/repo.git\""
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch is the git branch to use (default: \"main\")"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is an optional subdirectory within the repository\nIf specified, all operations are scoped to this path"
+        },
+        "auth": {
+          "$ref": "#/$defs/git.AuthConfig",
+          "description": "Auth specifies credentials for NIC to push to the repository (requires write access)"
+        },
+        "argocd_auth": {
+          "$ref": "#/$defs/git.AuthConfig",
+          "description": "ArgoCDAuth specifies optional separate credentials for ArgoCD (read-only access)\nIf not specified, falls back to Auth"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "branch",
+        "path",
+        "auth"
+      ],
+      "description": "Config represents git repository configuration for GitOps bootstrap."
+    }
+  },
+  "title": "Nebari config"
+}

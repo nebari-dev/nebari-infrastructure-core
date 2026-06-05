@@ -1,32 +1,38 @@
-// schemagen emits JSON Schema + commented YAML reference documents for
-// nebari-config.yaml and each registered provider's Config struct. It is
-// an internal build/CI tool, not a user-facing subcommand of nic.
+// schemagen emits JSON Schema documents for nebari-config.yaml and each
+// registered provider's Config struct. It is an internal build/CI tool,
+// not a user-facing subcommand of nic.
 //
-// Currently a skeleton: it enumerates the registered providers via
-// pkg/nic.RegisteredConfigTypes and reports what it would generate, but
-// the underlying configschema.Generate is not yet implemented. The
-// actual generation + file writing lands in a follow-up commit on the
-// same branch.
+// Output layout (default `-out ./schemas`):
 //
-// Intended invocation (once complete):
+//	schemas/
+//	  manifest.json
+//	  nebari-config.json
+//	  providers/
+//	    <name>.json    (one per registered cluster + DNS provider)
 //
-//	go run ./cmd/schemagen -out ./schemas
+// The provider list is sourced from the nic registry (pkg/nic/registry.go)
+// via (*nic.Client).RegisteredConfigTypes; there is no parallel hard-coded
+// list. Adding a new provider to the registry automatically extends the
+// schemagen output on the next CI run.
 //
-// Flags:
-//
-//	-out         output directory (default "./schemas")
-//	-providers   comma-separated subset to regenerate (default: all registered)
+// Invocation: `make schemas` or `go run ./cmd/schemagen -out ./schemas`.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/configschema"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
@@ -34,47 +40,166 @@ func main() {
 	var (
 		outDir    string
 		providers string
+		pkgRoot   string
+		version   string
 	)
 	flag.StringVar(&outDir, "out", "./schemas", "output directory for generated schema files")
-	flag.StringVar(&providers, "providers", "", "comma-separated subset of providers to regenerate (default: all registered)")
+	flag.StringVar(&providers, "providers", "", "comma-separated subset to regenerate (default: all registered)")
+	flag.StringVar(&pkgRoot, "pkg-root", "./pkg", "root directory whose Go packages are scanned for field godoc")
+	flag.StringVar(&version, "version", "", "version string stamped into manifest.json (default: empty)")
 	flag.Parse()
 
 	ctx := context.Background()
+	if err := run(ctx, outDir, providers, pkgRoot, version); err != nil {
+		slog.Error("schemagen failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, outDir, providersFlag, pkgRoot, version string) error {
+	if err := os.MkdirAll(filepath.Join(outDir, "providers"), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", outDir, err)
+	}
+
+	pkgPaths, err := collectPackagePaths(pkgRoot)
+	if err != nil {
+		return fmt.Errorf("collect package paths under %s: %w", pkgRoot, err)
+	}
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
-		slog.Error("build nic client", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("build nic client: %w", err)
 	}
-
 	types := client.RegisteredConfigTypes(ctx)
 
-	cluster := sortedKeys(types.Cluster)
-	dns := sortedKeys(types.DNS)
+	filter := parseFilter(providersFlag)
+	emitTopLevel := len(filter) == 0
 
-	filter := parseFilter(providers)
-	if len(filter) > 0 {
-		cluster = filterNames(cluster, filter)
-		dns = filterNames(dns, filter)
+	clusterNames := sortedKeys(types.Cluster)
+	dnsNames := sortedKeys(types.DNS)
+
+	if emitTopLevel {
+		if err := writeSchema(ctx, outDir, "nebari-config.json",
+			reflect.TypeFor[config.NebariConfig](),
+			"Nebari config", pkgPaths); err != nil {
+			return err
+		}
 	}
 
-	fmt.Printf("schemagen — output directory: %s\n", outDir)
-	fmt.Printf("cluster providers (%d):\n", len(cluster))
-	for _, name := range cluster {
-		fmt.Printf("  %-10s → %s\n", name, types.Cluster[name].String())
+	for _, name := range clusterNames {
+		if !accepts(filter, name) {
+			continue
+		}
+		if err := writeSchema(ctx, outDir, filepath.Join("providers", name+".json"),
+			types.Cluster[name],
+			fmt.Sprintf("%s cluster provider configuration", name), pkgPaths); err != nil {
+			return err
+		}
 	}
-	fmt.Printf("dns providers (%d):\n", len(dns))
-	for _, name := range dns {
-		fmt.Printf("  %-10s → %s\n", name, types.DNS[name].String())
+
+	for _, name := range dnsNames {
+		if !accepts(filter, name) {
+			continue
+		}
+		if err := writeSchema(ctx, outDir, filepath.Join("providers", name+".json"),
+			types.DNS[name],
+			fmt.Sprintf("%s DNS provider configuration", name), pkgPaths); err != nil {
+			return err
+		}
 	}
-	fmt.Println()
-	fmt.Println("schemagen is a skeleton. configschema.Generate is not yet")
-	fmt.Println("implemented; no schema files were written. See the follow-up")
-	fmt.Println("commit on the feat/config-schema-gen branch.")
+
+	if emitTopLevel {
+		if err := writeManifest(outDir, version, clusterNames, dnsNames); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("schemagen wrote schemas under %s\n", outDir)
+	fmt.Printf("  cluster providers: %v\n", clusterNames)
+	fmt.Printf("  dns providers:     %v\n", dnsNames)
+	return nil
 }
 
-// sortedKeys returns the keys of m in deterministic order. The schema
-// output must be reproducible for the CI drift gate to work.
+func writeSchema(ctx context.Context, outDir, relPath string, t reflect.Type, title string, pkgPaths []string) error {
+	data, err := configschema.Generate(ctx, t, configschema.FormatJSON, configschema.Options{
+		Title:        title,
+		PackagePaths: pkgPaths,
+	})
+	if err != nil {
+		return fmt.Errorf("generate %s: %w", relPath, err)
+	}
+	full := filepath.Join(outDir, relPath)
+	if err := os.WriteFile(full, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", full, err)
+	}
+	return nil
+}
+
+// manifest is the shape of schemas/manifest.json. The docs site fetches
+// this first to discover what schemas exist, then fetches each referenced
+// file. Adding a new provider extends Providers/DNS automatically.
+type manifest struct {
+	Version   string   `json:"version,omitempty"`
+	Providers []string `json:"providers"`
+	DNS       []string `json:"dns"`
+	TopLevel  string   `json:"top_level"`
+}
+
+func writeManifest(outDir, version string, cluster, dns []string) error {
+	m := manifest{
+		Version:   version,
+		Providers: cluster,
+		DNS:       dns,
+		TopLevel:  "nebari-config.json",
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(outDir, "manifest.json"), data, 0o644)
+}
+
+// collectPackagePaths walks root and returns every subdirectory that
+// contains at least one non-test .go file. These paths are passed to
+// configschema.Generate as Options.PackagePaths so invopop/jsonschema
+// can pick up godoc comments wherever the type tree leads.
+func collectPackagePaths(root string) ([]string, error) {
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata" {
+			return fs.SkipDir
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			n := e.Name()
+			if strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go") {
+				paths = append(paths, path)
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -98,12 +223,10 @@ func parseFilter(raw string) map[string]struct{} {
 	return out
 }
 
-func filterNames(all []string, want map[string]struct{}) []string {
-	out := make([]string, 0, len(all))
-	for _, name := range all {
-		if _, ok := want[name]; ok {
-			out = append(out, name)
-		}
+func accepts(filter map[string]struct{}, name string) bool {
+	if filter == nil {
+		return true
 	}
-	return out
+	_, ok := filter[name]
+	return ok
 }
