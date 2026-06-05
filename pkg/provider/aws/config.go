@@ -180,6 +180,19 @@ type Taint struct {
 	Effect string `yaml:"effect" json:"effect"` // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
 }
 
+// hasGPUNodeGroups reports whether any node group is tagged gpu: true. This is
+// the AWS idiom for "this cluster has GPU hardware" — the infra layer already
+// selects the AL2023_x86_64_NVIDIA AMI for these node groups, and the GPU
+// operator install (see gpu_operator.go) keys off it.
+func (c *Config) hasGPUNodeGroups() bool {
+	for _, ng := range c.NodeGroups {
+		if ng.GPU {
+			return true
+		}
+	}
+	return false
+}
+
 // LonghornEnabled returns whether Longhorn distributed block storage should
 // be deployed on this AWS cluster. Defaults to true when the Longhorn block
 // is omitted entirely — Longhorn is the AWS storage default. The shared
