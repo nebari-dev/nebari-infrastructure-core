@@ -1,6 +1,9 @@
 package dnsprovider
 
-import "context"
+import (
+	"context"
+	"reflect"
+)
 
 // DNSProvider defines the interface that all DNS providers must implement.
 // Providers are stateless - domain and DNS config are passed to each call.
@@ -18,4 +21,11 @@ type DNSProvider interface {
 	// This is called before infrastructure destruction to clean up stale records.
 	// Idempotent - succeeds even if records are already gone.
 	DestroyRecords(ctx context.Context, domain string, dnsConfig map[string]any) error
+
+	// ConfigType returns the reflect.Type of this DNS provider's configuration
+	// struct. Used by schema-generation tooling to enumerate provider
+	// configurations via the registry, without taking by-name imports on
+	// concrete provider packages. Implementations are one-liners:
+	//   func (*Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
+	ConfigType() reflect.Type
 }

@@ -3,6 +3,7 @@ package existing
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,6 +30,11 @@ func NewProvider() *Provider {
 // Name returns the provider name.
 func (p *Provider) Name() string {
 	return ProviderName
+}
+
+// ConfigType returns the reflect.Type of this provider's configuration struct.
+func (p *Provider) ConfigType() reflect.Type {
+	return reflect.TypeFor[Config]()
 }
 
 // extractConfig converts the generic provider config to the existing-cluster Config type.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -26,6 +27,9 @@ func NewProvider() *Provider {
 }
 
 func (p *Provider) Name() string { return providerName }
+
+// ConfigType returns the reflect.Type of this provider's configuration struct.
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
 
 // parseConfig extracts and validates the Hetzner config from ClusterConfig.
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
