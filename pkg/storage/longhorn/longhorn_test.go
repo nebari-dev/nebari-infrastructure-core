@@ -142,9 +142,14 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("longhornManager not found or not a map")
 	}
-	ns, ok := manager["nodeSelector"].(map[string]string)
+	// nodeSelector must be map[string]any, not map[string]string: Helm's value
+	// coalescing only treats map[string]any as a table (chartutil.istable), so
+	// a map[string]string nested here trips "cannot overwrite table with non
+	// table" against the chart's nodeSelector: {} default and the selector is
+	// dropped, leaving longhornManager/longhornDriver unpinned. See #365.
+	ns, ok := manager["nodeSelector"].(map[string]any)
 	if !ok {
-		t.Fatal("longhornManager.nodeSelector not found or not a map[string]string")
+		t.Fatal("longhornManager.nodeSelector not found or not a map[string]any")
 	}
 	if ns["node.longhorn.io/storage"] != "true" {
 		t.Errorf("longhornManager.nodeSelector[node.longhorn.io/storage] = %q, want %q", ns["node.longhorn.io/storage"], "true")
@@ -171,8 +176,8 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("longhornDriver not found or not a map")
 	}
-	if _, ok := driver["nodeSelector"].(map[string]string); !ok {
-		t.Fatal("longhornDriver.nodeSelector not found or not a map[string]string")
+	if _, ok := driver["nodeSelector"].(map[string]any); !ok {
+		t.Fatal("longhornDriver.nodeSelector not found or not a map[string]any")
 	}
 	if _, ok := driver["tolerations"].([]map[string]string); !ok {
 		t.Fatal("longhornDriver.tolerations not found or not a []map[string]string")

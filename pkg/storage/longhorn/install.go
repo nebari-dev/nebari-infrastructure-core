@@ -257,12 +257,23 @@ func buildHelmValues(cfg *Config) map[string]any {
 		settings["taintToleration"] = nodeStorageTaintToleration
 		settings["systemManagedComponentsNodeSelector"] = formatNodeSelector(nodeSelector)
 
+		// Helm's value coalescing only treats map[string]any as a "table"
+		// (chartutil.istable). A map[string]string nested in the values is seen
+		// as a non-table, so coalescing it against the chart's nodeSelector: {}
+		// default emits "cannot overwrite table with non table" and skips the
+		// merge. Convert to map[string]any so longhornManager/longhornDriver
+		// actually receive the selector.
+		nodeSelectorValue := make(map[string]any, len(nodeSelector))
+		for k, v := range nodeSelector {
+			nodeSelectorValue[k] = v
+		}
+
 		values["longhornManager"] = map[string]any{
-			"nodeSelector": nodeSelector,
+			"nodeSelector": nodeSelectorValue,
 			"tolerations":  tolerations,
 		}
 		values["longhornDriver"] = map[string]any{
-			"nodeSelector": nodeSelector,
+			"nodeSelector": nodeSelectorValue,
 			"tolerations":  tolerations,
 		}
 	}
