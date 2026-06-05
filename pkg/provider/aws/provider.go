@@ -72,6 +72,24 @@ func contains(slice []string, str string) bool {
 	return false
 }
 
+// validateTaints checks that every node group taint has a key and a valid EKS
+// effect. EKS managed node group taint effects use the API enum spelling
+// (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), which is what the
+// terraform-aws-eks-cluster module expects and what config taints carry; EKS
+// maps these to the Kubernetes taint effects.
+func validateTaints(nodeGroupName string, taints []Taint) error {
+	validEffects := []string{"NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
+	for i, taint := range taints {
+		if taint.Key == "" {
+			return fmt.Errorf("node group %s: taint %d is missing key", nodeGroupName, i)
+		}
+		if !contains(validEffects, taint.Effect) {
+			return fmt.Errorf("node group %s: taint %d has invalid effect %s (must be one of: %v)", nodeGroupName, i, taint.Effect, validEffects)
+		}
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -205,23 +223,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 
 		// Validate taints
-		for i, taint := range nodeGroup.Taints {
-			if taint.Key == "" {
-				err := fmt.Errorf("node group %s: taint %d is missing key", nodeGroupName, i)
-				span.RecordError(err)
-				return err
-			}
-
-			// EKS managed node group taint effects use the API enum spelling
-			// (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), which is what the
-			// terraform-aws-eks-cluster module expects and what config taints
-			// carry. EKS maps these to the Kubernetes taint effects.
-			validEffects := []string{"NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
-			if !contains(validEffects, taint.Effect) {
-				err := fmt.Errorf("node group %s: taint %d has invalid effect %s (must be one of: %v)", nodeGroupName, i, taint.Effect, validEffects)
-				span.RecordError(err)
-				return err
-			}
+		if err := validateTaints(nodeGroupName, nodeGroup.Taints); err != nil {
+			span.RecordError(err)
+			return err
 		}
 	}
 

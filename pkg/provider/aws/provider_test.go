@@ -96,44 +96,40 @@ func TestValidate_LoadBalancerScheme(t *testing.T) {
 	}
 }
 
-// TestValidate_TaintEffect verifies node group taint effects are validated
-// against the EKS API enum (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), not the
-// Kubernetes-style spelling. A valid effect flows past the taint check to the
-// AWS credential check (so its error, if any, must not mention the effect);
-// an invalid effect is rejected at the taint check.
-func TestValidate_TaintEffect(t *testing.T) {
+// TestValidateTaints verifies node group taint effects are validated against
+// the EKS API enum (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), not the
+// Kubernetes-style spelling, and that a missing key is rejected. It exercises
+// the helper directly so the valid cases don't fall through Validate to the
+// AWS credential check (which would block on an IMDS timeout).
+func TestValidateTaints(t *testing.T) {
 	tests := []struct {
-		name          string
-		effect        string
-		wantEffectErr bool
+		name      string
+		taints    []Taint
+		errSubstr string // "" means no error expected
 	}{
-		{name: "EKS NO_SCHEDULE is accepted", effect: "NO_SCHEDULE", wantEffectErr: false},
-		{name: "EKS NO_EXECUTE is accepted", effect: "NO_EXECUTE", wantEffectErr: false},
-		{name: "EKS PREFER_NO_SCHEDULE is accepted", effect: "PREFER_NO_SCHEDULE", wantEffectErr: false},
-		{name: "k8s-style NoSchedule is rejected", effect: "NoSchedule", wantEffectErr: true},
-		{name: "arbitrary string is rejected", effect: "Garbage", wantEffectErr: true},
+		{name: "EKS NO_SCHEDULE is accepted", taints: []Taint{{Key: "k", Value: "v", Effect: "NO_SCHEDULE"}}},
+		{name: "EKS NO_EXECUTE is accepted", taints: []Taint{{Key: "k", Effect: "NO_EXECUTE"}}},
+		{name: "EKS PREFER_NO_SCHEDULE is accepted", taints: []Taint{{Key: "k", Effect: "PREFER_NO_SCHEDULE"}}},
+		{name: "no taints is fine", taints: nil},
+		{name: "k8s-style NoSchedule is rejected", taints: []Taint{{Key: "k", Effect: "NoSchedule"}}, errSubstr: "invalid effect"},
+		{name: "arbitrary effect is rejected", taints: []Taint{{Key: "k", Effect: "Garbage"}}, errSubstr: "invalid effect"},
+		{name: "missing key is rejected", taints: []Taint{{Effect: "NO_SCHEDULE"}}, errSubstr: "missing key"},
 	}
 
-	p := NewProvider()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
-				"region":             "us-west-2",
-				"kubernetes_version": "1.34",
-				"node_groups": map[string]any{
-					"storage": map[string]any{
-						"instance": "m7g.large",
-						"taints": []any{
-							map[string]any{"key": "node.longhorn.io/storage", "value": "true", "effect": tt.effect},
-						},
-					},
-				},
-			}}}
-
-			err := p.Validate(context.Background(), "test-project", cfg)
-			mentionsEffect := err != nil && strings.Contains(err.Error(), "invalid effect")
-			if mentionsEffect != tt.wantEffectErr {
-				t.Fatalf("effect %q: invalid-effect error = %v (err=%v), want %v", tt.effect, mentionsEffect, err, tt.wantEffectErr)
+			err := validateTaints("storage", tt.taints)
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
 			}
 		})
 	}

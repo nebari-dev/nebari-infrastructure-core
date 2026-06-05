@@ -47,7 +47,8 @@ type Config struct {
 	// (see nodeStorageTaintToleration in install.go). So if you customize this
 	// selector, the dedicated nodes must still carry that exact taint, or the
 	// system-managed components (instance-manager, engine-image, CSI plugin)
-	// will sit Pending. Parameterizing the taint is tracked separately.
+	// will sit Pending. Parameterizing the taint is tracked in
+	// nebari-dev/nebari-infrastructure-core#363.
 	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
 
 	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the
