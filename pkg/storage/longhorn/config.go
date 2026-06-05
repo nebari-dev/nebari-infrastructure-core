@@ -15,6 +15,20 @@ const (
 	// ReleaseName is the Helm release name used for Longhorn.
 	ReleaseName = "longhorn"
 
+	// NodeStorageLabel marks a node as a dedicated Longhorn storage node. It is
+	// the default Config.NodeSelector and the label providers put on their
+	// storage node group.
+	NodeStorageLabel = "node.longhorn.io/storage"
+
+	// CreateDefaultDiskLabel is the label Longhorn requires on a node before it
+	// auto-provisions a default disk at /var/lib/longhorn (paired with the
+	// createDefaultDiskLabeledNodes setting this package enables for dedicated
+	// nodes). CONTRACT: when DedicatedNodes is true, every storage node group
+	// MUST carry this label, or Longhorn creates no disks and all volumes fault
+	// with ReplicaSchedulingFailure (#369). The AWS provider injects it
+	// automatically; other providers must add it to their storage pool.
+	CreateDefaultDiskLabel = "node.longhorn.io/create-default-disk"
+
 	// ChartVersion pins the upstream Longhorn Helm chart version. Bump
 	// together with iscsiDaemonSetYAML when upgrading.
 	// v1.11.2 (released 2026-05-05) includes the (*Controller).Snapshot
@@ -38,16 +52,20 @@ type Config struct {
 	Enabled        *bool `yaml:"enabled,omitempty"`
 	ReplicaCount   int   `yaml:"replica_count,omitempty"`
 	DedicatedNodes bool  `yaml:"dedicated_nodes,omitempty"`
-	// NodeSelector overrides the node label Longhorn uses to place its
-	// components when DedicatedNodes is true (defaults to
-	// node.longhorn.io/storage=true). It controls only the nodeSelector side.
+	// NodeSelector is the label set that identifies the dedicated storage nodes
+	// when DedicatedNodes is true (defaults to {node.longhorn.io/storage: "true"},
+	// i.e. NodeStorageLabel). It no longer pins Longhorn's system components by
+	// node selector — pinning broke PVC mounts on workload nodes (#366). Instead
+	// it tells the provider which node group is the storage pool, so the provider
+	// can add CreateDefaultDiskLabel to it; Longhorn then provisions disks only
+	// there, which is what confines replicas to storage nodes.
 	//
-	// Constraint: the taint toleration is NOT derived from this field. Longhorn
-	// always tolerates the fixed taint node.longhorn.io/storage=true:NoSchedule
-	// (see nodeStorageTaintToleration in install.go). So if you customize this
-	// selector, the dedicated nodes must still carry that exact taint, or the
-	// system-managed components (instance-manager, engine-image, CSI plugin)
-	// will sit Pending. Parameterizing the taint is tracked in
+	// Constraint: the taint toleration is NOT derived from this field. Longhorn's
+	// system components always tolerate the fixed taint
+	// node.longhorn.io/storage=true:NoSchedule (see nodeStorageTaintToleration in
+	// install.go). If you customize this selector, the storage nodes must still
+	// carry that exact taint, or the replica-role components can't run there.
+	// Parameterizing the taint is tracked in
 	// nebari-dev/nebari-infrastructure-core#363.
 	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
 

@@ -20,10 +20,11 @@ func boolPtr(b bool) *bool { return &b }
 
 func TestBuildHelmValues(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *Config
-		checkValues map[string]any
-		wantAbsent  []string // top-level keys that must NOT be set
+		name             string
+		config           *Config
+		checkValues      map[string]any
+		wantAbsent       []string // top-level keys that must NOT be set
+		wantAbsentNested []string // dotted nested paths that must NOT be set
 	}{
 		{
 			name:   "default config produces base values",
@@ -44,45 +45,15 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
-			name: "dedicated nodes adds nodeSelector and tolerations",
-			config: &Config{
-				DedicatedNodes: true,
-				NodeSelector:   map[string]string{"node.longhorn.io/storage": "true"},
-			},
-			checkValues: map[string]any{
-				"defaultSettings.createDefaultDiskLabeledNodes":       true,
-				"defaultSettings.taintToleration":                     "node.longhorn.io/storage=true:NoSchedule",
-				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
-			},
-		},
-		{
-			name:   "dedicated nodes without custom nodeSelector uses default",
+			name:   "dedicated nodes set disk + taint-toleration settings, not a node selector",
 			config: &Config{DedicatedNodes: true},
 			checkValues: map[string]any{
-				"defaultSettings.createDefaultDiskLabeledNodes":       true,
-				"defaultSettings.taintToleration":                     "node.longhorn.io/storage=true:NoSchedule",
-				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
+				"defaultSettings.createDefaultDiskLabeledNodes": true,
+				"defaultSettings.taintToleration":               "node.longhorn.io/storage=true:NoSchedule",
 			},
-		},
-		{
-			name: "dedicated nodes with custom multi-key nodeSelector derives sorted selector setting",
-			config: &Config{
-				DedicatedNodes: true,
-				NodeSelector:   map[string]string{"workload": "storage", "tier": "longhorn"},
-			},
-			checkValues: map[string]any{
-				"defaultSettings.systemManagedComponentsNodeSelector": "tier:longhorn;workload:storage",
-			},
-		},
-		{
-			name: "dedicated nodes with empty nodeSelector falls back to default label",
-			config: &Config{
-				DedicatedNodes: true,
-				NodeSelector:   map[string]string{},
-			},
-			checkValues: map[string]any{
-				"defaultSettings.systemManagedComponentsNodeSelector": "node.longhorn.io/storage:true",
-			},
+			// system components must NOT be pinned by node selector (#366);
+			// confinement comes from disks only existing on storage nodes.
+			wantAbsentNested: []string{"defaultSettings.systemManagedComponentsNodeSelector"},
 		},
 		{
 			name:   "non-dedicated nodes omits nodeSelector and tolerations",
@@ -126,6 +97,11 @@ func TestBuildHelmValues(t *testing.T) {
 					t.Errorf("key %q should not be set", key)
 				}
 			}
+			for _, key := range tt.wantAbsentNested {
+				if got := getNestedValue(values, key); got != nil {
+					t.Errorf("nested key %q should not be set, got %v", key, got)
+				}
+			}
 		})
 	}
 }
@@ -138,49 +114,30 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 
 	values := buildHelmValues(cfg)
 
-	manager, ok := values["longhornManager"].(map[string]any)
-	if !ok {
-		t.Fatal("longhornManager not found or not a map")
-	}
-	// nodeSelector must be map[string]any, not map[string]string: Helm's value
-	// coalescing only treats map[string]any as a table (chartutil.istable), so
-	// a map[string]string nested here trips "cannot overwrite table with non
-	// table" against the chart's nodeSelector: {} default and the selector is
-	// dropped, leaving longhornManager/longhornDriver unpinned. See #365.
-	ns, ok := manager["nodeSelector"].(map[string]any)
-	if !ok {
-		t.Fatal("longhornManager.nodeSelector not found or not a map[string]any")
-	}
-	if ns["node.longhorn.io/storage"] != "true" {
-		t.Errorf("longhornManager.nodeSelector[node.longhorn.io/storage] = %q, want %q", ns["node.longhorn.io/storage"], "true")
-	}
-
-	tolerations, ok := manager["tolerations"].([]map[string]string)
-	if !ok {
-		t.Fatal("longhornManager.tolerations not found or not a []map[string]string")
-	}
-	if len(tolerations) != 1 {
-		t.Fatalf("longhornManager.tolerations length = %d, want 1", len(tolerations))
-	}
-	if tolerations[0]["key"] != "node.longhorn.io/storage" {
-		t.Errorf("toleration key = %q, want %q", tolerations[0]["key"], "node.longhorn.io/storage")
-	}
-	if tolerations[0]["operator"] != "Exists" {
-		t.Errorf("toleration operator = %q, want %q", tolerations[0]["operator"], "Exists")
-	}
-	if tolerations[0]["effect"] != "NoSchedule" {
-		t.Errorf("toleration effect = %q, want %q", tolerations[0]["effect"], "NoSchedule")
-	}
-
-	driver, ok := values["longhornDriver"].(map[string]any)
-	if !ok {
-		t.Fatal("longhornDriver not found or not a map")
-	}
-	if _, ok := driver["nodeSelector"].(map[string]any); !ok {
-		t.Fatal("longhornDriver.nodeSelector not found or not a map[string]any")
-	}
-	if _, ok := driver["tolerations"].([]map[string]string); !ok {
-		t.Fatal("longhornDriver.tolerations not found or not a []map[string]string")
+	// longhorn-manager and the driver must run on EVERY node so workloads can
+	// mount volumes anywhere (#366). They must therefore carry NO nodeSelector
+	// and a tolerate-all toleration.
+	for _, comp := range []string{"longhornManager", "longhornDriver"} {
+		c, ok := values[comp].(map[string]any)
+		if !ok {
+			t.Fatalf("%s not found or not a map", comp)
+		}
+		if _, ok := c["nodeSelector"]; ok {
+			t.Errorf("%s must not set a nodeSelector (pinning breaks workload-node mounts, #366)", comp)
+		}
+		tolerations, ok := c["tolerations"].([]map[string]any)
+		if !ok {
+			t.Fatalf("%s.tolerations not found or not a []map[string]any", comp)
+		}
+		if len(tolerations) != 1 {
+			t.Fatalf("%s.tolerations length = %d, want 1", comp, len(tolerations))
+		}
+		if tolerations[0]["operator"] != "Exists" {
+			t.Errorf("%s toleration operator = %v, want Exists", comp, tolerations[0]["operator"])
+		}
+		if _, ok := tolerations[0]["key"]; ok {
+			t.Errorf("%s toleration must have no key (tolerate-all), got %v", comp, tolerations[0]["key"])
+		}
 	}
 }
 
@@ -199,38 +156,6 @@ func TestBuildHelmValuesNonDedicatedOmitsSystemSettings(t *testing.T) {
 	}
 	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
 		t.Error("defaultSettings.systemManagedComponentsNodeSelector should not be set when DedicatedNodes is false")
-	}
-}
-
-func TestFormatNodeSelector(t *testing.T) {
-	tests := []struct {
-		name     string
-		selector map[string]string
-		want     string
-	}{
-		{
-			name:     "single label",
-			selector: map[string]string{"node.longhorn.io/storage": "true"},
-			want:     "node.longhorn.io/storage:true",
-		},
-		{
-			name:     "multiple labels sorted by key",
-			selector: map[string]string{"workload": "storage", "tier": "longhorn"},
-			want:     "tier:longhorn;workload:storage",
-		},
-		{
-			name:     "empty selector",
-			selector: map[string]string{},
-			want:     "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := formatNodeSelector(tt.selector); got != tt.want {
-				t.Errorf("formatNodeSelector(%v) = %q, want %q", tt.selector, got, tt.want)
-			}
-		})
 	}
 }
 

@@ -299,3 +299,66 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 		}
 	})
 }
+
+func TestToTFVarsLonghornDiskLabel(t *testing.T) {
+	const diskLabel = longhorn.CreateDefaultDiskLabel
+
+	newCfg := func(dedicated bool, selector map[string]string) Config {
+		return Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: dedicated, NodeSelector: selector},
+			NodeGroups: map[string]NodeGroup{
+				"storage": {Instance: "m7g.large", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+				"user":    {Instance: "m7i.xlarge"},
+			},
+		}
+	}
+
+	t.Run("dedicated nodes injects disk label onto storage group only", func(t *testing.T) {
+		cfg := newCfg(true, nil)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if got := vars.NodeGroups["storage"].Labels[diskLabel]; got != "true" {
+			t.Errorf("storage group %s = %q, want %q", diskLabel, got, "true")
+		}
+		if _, ok := vars.NodeGroups["user"].Labels[diskLabel]; ok {
+			t.Errorf("user group must not get %s", diskLabel)
+		}
+	})
+
+	t.Run("disk label not injected when dedicated_nodes is false", func(t *testing.T) {
+		cfg := newCfg(false, nil)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if _, ok := vars.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Errorf("no group should get %s when dedicated_nodes is false", diskLabel)
+		}
+	})
+
+	t.Run("custom NodeSelector identifies the storage group", func(t *testing.T) {
+		cfg := Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: true, NodeSelector: map[string]string{"pool": "lh"}},
+			NodeGroups: map[string]NodeGroup{
+				"storage": {Instance: "m7g.large", Labels: map[string]string{"pool": "lh"}},
+				"user":    {Instance: "m7i.xlarge", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+			},
+		}
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if got := vars.NodeGroups["storage"].Labels[diskLabel]; got != "true" {
+			t.Errorf("custom-selector storage group %s = %q, want %q", diskLabel, got, "true")
+		}
+		if _, ok := vars.NodeGroups["user"].Labels[diskLabel]; ok {
+			t.Error("group not matching the custom selector must not get the disk label")
+		}
+	})
+}

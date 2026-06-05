@@ -1,6 +1,11 @@
 package aws
 
-import "embed"
+import (
+	"embed"
+	"maps"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
+)
 
 // Embed all files in the templates directory, including dotfiles (i.e. .terraform.lock.hcl)
 //
@@ -67,7 +72,60 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
+// longhornStorageSelector returns the label set that identifies the dedicated
+// Longhorn storage node group: the configured NodeSelector, or the default
+// {node.longhorn.io/storage: "true"}.
+func longhornStorageSelector(cfg *longhorn.Config) map[string]string {
+	if cfg != nil && len(cfg.NodeSelector) > 0 {
+		return cfg.NodeSelector
+	}
+	return map[string]string{longhorn.NodeStorageLabel: "true"}
+}
+
+// applyLonghornDiskLabel adds longhorn.CreateDefaultDiskLabel=true to every node
+// group whose labels already match the Longhorn storage selector, so Longhorn
+// auto-provisions a disk on those nodes (#369). Node groups that aren't storage
+// nodes are left untouched.
+func applyLonghornDiskLabel(nodeGroups map[string]NodeGroup, cfg *longhorn.Config) map[string]NodeGroup {
+	sel := longhornStorageSelector(cfg)
+	result := make(map[string]NodeGroup, len(nodeGroups))
+	for name, group := range nodeGroups {
+		if nodeGroupMatchesSelector(group.Labels, sel) {
+			labels := make(map[string]string, len(group.Labels)+1)
+			maps.Copy(labels, group.Labels)
+			labels[longhorn.CreateDefaultDiskLabel] = "true"
+			group.Labels = labels
+		}
+		result[name] = group
+	}
+	return result
+}
+
+// nodeGroupMatchesSelector reports whether labels is a superset of sel (i.e. the
+// node group carries every storage selector label). An empty selector never
+// matches, so no group is treated as storage by accident.
+func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
+	if len(sel) == 0 {
+		return false
+	}
+	for k, v := range sel {
+		if labels[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Config) toTFVars(projectName string) (TFVars, error) {
+	nodeGroups := resolveNodeGroupAMIs(c.NodeGroups)
+	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
+	// the create-default-disk label or Longhorn provisions no disks and every
+	// volume faults (#369). Inject it here so it is applied by kubelet at node
+	// registration (autoscaler-safe) rather than via a post-install reconcile.
+	if c.LonghornEnabled() && c.Longhorn != nil && c.Longhorn.DedicatedNodes {
+		nodeGroups = applyLonghornDiskLabel(nodeGroups, c.Longhorn)
+	}
+
 	vars := TFVars{
 		Region:                 c.Region,
 		ProjectName:            projectName,
@@ -80,7 +138,7 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		EndpointPublicAccess:   c.EndpointPublicAccess,
 		ClusterEnabledLogTypes: c.EnabledLogTypes,
 		CreateIAMRoles:         c.ExistingClusterRoleArn == "" && c.ExistingNodeRoleArn == "",
-		NodeGroups:             resolveNodeGroupAMIs(c.NodeGroups),
+		NodeGroups:             nodeGroups,
 		// Only provision the autoscaler's IAM role / pod identity association
 		// when the autoscaler itself will be installed (see provider deploy).
 		EnableClusterAutoscalerPodIdentity: c.ClusterAutoscalerEnabled(),
