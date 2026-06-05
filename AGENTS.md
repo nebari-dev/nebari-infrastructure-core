@@ -21,7 +21,7 @@ More categories (certificate issuers, git hosting, software installers) are plan
 
 | Provider | Backing tool | Status |
 | --- | --- | --- |
-| `aws` | OpenTofu, with `.tf` templates embedded under `pkg/provider/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
+| `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/provider/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
 | `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
 | `local` | Validates an existing kubeconfig context for a Kind cluster. **The Kind cluster itself is brought up by `make localkind-up`**, not by `nic deploy` (the provider's `Deploy` is currently a stub) | Working for the Makefile-driven flow |
