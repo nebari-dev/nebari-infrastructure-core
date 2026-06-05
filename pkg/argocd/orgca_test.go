@@ -152,15 +152,60 @@ func TestCreateOrUpdateConfigMap(t *testing.T) {
 		}
 	})
 
-	t.Run("no-op when data unchanged", func(t *testing.T) {
+	t.Run("no-op when data unchanged issues no update", func(t *testing.T) {
 		existing := newCM("CA-A")
 		client := fake.NewSimpleClientset(existing) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 		if err := createOrUpdateConfigMap(context.Background(), client, newCM("CA-A")); err != nil {
 			t.Fatalf("createOrUpdateConfigMap: %v", err)
 		}
-		got, _ := client.CoreV1().ConfigMaps(ns).Get(context.Background(), "argocd-org-ca", metav1.GetOptions{})
-		if got.Data["ca.crt"] != "CA-A" {
-			t.Errorf("data = %q, want CA-A", got.Data["ca.crt"])
+		// Prove the DeepEqual early-return fired: a write would defeat the no-op.
+		for _, a := range client.Actions() {
+			if a.GetVerb() == "update" || a.GetVerb() == "create" {
+				t.Errorf("unexpected %s action on no-op", a.GetVerb())
+			}
+		}
+	})
+}
+
+func TestConfigureRepoServerCATrust(t *testing.T) {
+	const ns = "argocd"
+
+	t.Run("no-op when bundle empty", func(t *testing.T) {
+		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		values := map[string]any{}
+		if err := configureRepoServerCATrust(context.Background(), client, ns, "", values); err != nil {
+			t.Fatalf("configureRepoServerCATrust: %v", err)
+		}
+		if _, ok := values["repoServer"]; ok {
+			t.Error("repoServer values should be untouched when no bundle is configured")
+		}
+		if _, err := client.CoreV1().ConfigMaps(ns).Get(context.Background(), "argocd-org-ca", metav1.GetOptions{}); err == nil {
+			t.Error("argocd-org-ca ConfigMap should not be created when no bundle is configured")
+		}
+	})
+
+	t.Run("creates labeled ConfigMap and wires values", func(t *testing.T) {
+		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		values := map[string]any{}
+		if err := configureRepoServerCATrust(context.Background(), client, ns, "ORG-CA-PEM", values); err != nil {
+			t.Fatalf("configureRepoServerCATrust: %v", err)
+		}
+
+		cm, err := client.CoreV1().ConfigMaps(ns).Get(context.Background(), "argocd-org-ca", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("expected argocd-org-ca to exist: %v", err)
+		}
+		if cm.Data["ca.crt"] != "ORG-CA-PEM" {
+			t.Errorf("ca.crt = %q, want ORG-CA-PEM", cm.Data["ca.crt"])
+		}
+		if cm.Labels["app.kubernetes.io/part-of"] != "nebari-foundational" ||
+			cm.Labels["app.kubernetes.io/managed-by"] != "nebari-infrastructure-core" {
+			t.Errorf("foundational labels missing/wrong: %v", cm.Labels)
+		}
+
+		repoServer, ok := values["repoServer"].(map[string]any)
+		if !ok || entryByName(t, repoServer["volumes"], "org-ca") == nil {
+			t.Error("repoServer values were not wired with the org-ca mount")
 		}
 	})
 }

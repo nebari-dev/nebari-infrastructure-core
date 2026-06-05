@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -133,37 +134,17 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		return fmt.Errorf("failed to create namespace: %w", err)
 	}
 
-	// If an org CA bundle is configured, create the install-time ConfigMap and
-	// wire the repo-server to trust it (combined system+org bundle via env vars).
-	// This must happen before InstallHelm so the values carry the mount and the
-	// ConfigMap exists when the repo-server pod starts.
-	if orgCABundlePEM != "" {
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      orgCAConfigMapName,
-				Namespace: argoCDCfg.Namespace,
-				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
-				},
-			},
-			Data: map[string]string{orgCAConfigMapKey: orgCABundlePEM},
-		}
-		if err := createOrUpdateConfigMap(ctx, k8sClient, cm); err != nil {
-			span.RecordError(err)
-			status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to create org CA ConfigMap").
-				WithResource("argocd").
-				WithAction("ca-config-failed").
-				WithMetadata("error", err.Error()))
-			return fmt.Errorf("create org CA configmap: %w", err)
-		}
-		addOrgCAMount(ctx, argoCDCfg.Values)
-		// Log a fingerprint, never the PEM body, so rotation is observable.
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configured repo-server to trust org CA bundle").
+	// Wire the repo-server to trust the org CA (no-op when none is configured).
+	// Must run before InstallHelm so the Helm values carry the mount and the
+	// backing ConfigMap exists when the repo-server pod starts.
+	span.SetAttributes(attribute.Bool("org_ca_configured", orgCABundlePEM != ""))
+	if err := configureRepoServerCATrust(ctx, k8sClient, argoCDCfg.Namespace, orgCABundlePEM, argoCDCfg.Values); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to configure repo-server CA trust").
 			WithResource("argocd").
-			WithAction("ca-configured").
-			WithMetadata("ca_fingerprint", sha256Fingerprint(orgCABundlePEM)).
-			WithMetadata("ca_bytes", fmt.Sprintf("%d", len(orgCABundlePEM))))
+			WithAction("ca-config-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("configure repo-server CA trust: %w", err)
 	}
 
 	// Install Argo CD using Helm
@@ -428,6 +409,29 @@ func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath s
 	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], newMount)
 }
 
+// configureRepoServerCATrust upserts the install-time argocd-org-ca ConfigMap
+// and injects the combined-bundle mount into the repo-server Helm values so it
+// trusts the org CA. It is a no-op when orgCABundlePEM is empty. Must be called
+// before InstallHelm so the values carry the mount and the ConfigMap exists when
+// the repo-server pod starts. This is the single seam for org-CA wiring — keep
+// the logic here rather than accreting inline blocks in Install.
+func configureRepoServerCATrust(ctx context.Context, client kubernetes.Interface, namespace, orgCABundlePEM string, values map[string]any) error {
+	if orgCABundlePEM == "" {
+		return nil
+	}
+	if err := createOrgCAConfigMap(ctx, client, namespace, orgCABundlePEM); err != nil {
+		return err
+	}
+	addOrgCAMount(ctx, values)
+	// Log a fingerprint, never the PEM body, so rotation is observable.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configured repo-server to trust org CA bundle").
+		WithResource("argocd").
+		WithAction("ca-configured").
+		WithMetadata("ca_fingerprint", sha256Fingerprint(orgCABundlePEM)).
+		WithMetadata("ca_bytes", strconv.Itoa(len(orgCABundlePEM))))
+	return nil
+}
+
 // addOrgCAMount wires the ArgoCD repo-server to trust an org CA so it can clone
 // git repos and pull Helm/OCI charts through a TLS-inspecting egress proxy.
 //
@@ -491,6 +495,7 @@ func addOrgCAMount(ctx context.Context, values map[string]any) {
 			"allowPrivilegeEscalation": false,
 			"readOnlyRootFilesystem":   true,
 			"capabilities":             map[string]any{"drop": []any{"ALL"}},
+			"seccompProfile":           map[string]any{"type": "RuntimeDefault"},
 		},
 	})
 
