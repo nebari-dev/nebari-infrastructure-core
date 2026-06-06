@@ -322,3 +322,7 @@ Known limitations (tracked separately): csi-plugin tolerations come from the
 need their taint added there before mounts work on them (relates to #363/#368);
 and the disk-label injection is AWS-only — Hetzner/existing must label their
 storage pool themselves (the installer now warns when no node carries the label).
+
+Switching an existing cluster between `dedicated_nodes` modes is a manual
+replica migration (Longhorn does not move existing replicas on a flag change).
+See [Migrating Longhorn dedicated_nodes modes](../operations/longhorn-dedicated-nodes-migration.md).
