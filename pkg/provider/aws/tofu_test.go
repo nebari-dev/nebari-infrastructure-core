@@ -153,7 +153,7 @@ func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 	}
 }
 
-func TestResolveNodeGroupAMIs(t *testing.T) {
+func TestResolveNodeGroupDefaultsAMIs(t *testing.T) {
 	nvidiaAMI := "AL2023_x86_64_NVIDIA"
 	standardAMI := "AL2023_x86_64_STANDARD"
 	customAMI := "AL2023_ARM_64_NVIDIA"
@@ -214,7 +214,7 @@ func TestResolveNodeGroupAMIs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := resolveNodeGroupAMIs(tt.input)
+			result := resolveNodeGroupDefaults(tt.input)
 
 			for name, expectedAMI := range tt.expected {
 				g, ok := result[name]
@@ -239,12 +239,119 @@ func TestResolveNodeGroupAMIs(t *testing.T) {
 			"gpu":    {Instance: "g4dn.xlarge", GPU: true},
 			"worker": {Instance: "m7i.xlarge"},
 		}
-		resolveNodeGroupAMIs(original)
+		resolveNodeGroupDefaults(original)
 		if original["gpu"].AMIType != nil {
-			t.Error("resolveNodeGroupAMIs mutated the gpu node group in the input map")
+			t.Error("resolveNodeGroupDefaults mutated the gpu node group in the input map")
 		}
 		if original["worker"].AMIType != nil {
-			t.Error("resolveNodeGroupAMIs mutated the worker node group in the input map")
+			t.Error("resolveNodeGroupDefaults mutated the worker node group in the input map")
+		}
+	})
+}
+
+func TestResolveNodeGroupGPUTaints(t *testing.T) {
+	const gpuTaintKey = "nvidia.com/gpu"
+
+	// countTaintsWithKey returns how many taints in the group use the given key.
+	countTaintsWithKey := func(g NodeGroup, key string) int {
+		n := 0
+		for _, taint := range g.Taints {
+			if taint.Key == key {
+				n++
+			}
+		}
+		return n
+	}
+
+	tests := []struct {
+		name       string
+		input      map[string]NodeGroup
+		group      string
+		wantGPU    *Taint // expected nvidia.com/gpu taint, or nil if none expected
+		wantTaints int    // total taint count expected on the group
+	}{
+		{
+			name: "gpu node group without taints gets the standard gpu taint",
+			input: map[string]NodeGroup{
+				"gpu": {Instance: "g4dn.xlarge", GPU: true},
+			},
+			group:      "gpu",
+			wantGPU:    &Taint{Key: gpuTaintKey, Value: "true", Effect: "NO_SCHEDULE"},
+			wantTaints: 1,
+		},
+		{
+			name: "gpu node group with an existing gpu taint is left untouched",
+			input: map[string]NodeGroup{
+				"gpu": {Instance: "g4dn.xlarge", GPU: true, Taints: []Taint{
+					{Key: gpuTaintKey, Value: "present", Effect: "NO_EXECUTE"},
+				}},
+			},
+			group:      "gpu",
+			wantGPU:    &Taint{Key: gpuTaintKey, Value: "present", Effect: "NO_EXECUTE"},
+			wantTaints: 1,
+		},
+		{
+			name: "gpu node group with an unrelated taint keeps it and gains the gpu taint",
+			input: map[string]NodeGroup{
+				"gpu": {Instance: "g4dn.xlarge", GPU: true, Taints: []Taint{
+					{Key: "dedicated", Value: "ml", Effect: "NO_SCHEDULE"},
+				}},
+			},
+			group:      "gpu",
+			wantGPU:    &Taint{Key: gpuTaintKey, Value: "true", Effect: "NO_SCHEDULE"},
+			wantTaints: 2,
+		},
+		{
+			name: "non-gpu node group gets no taint",
+			input: map[string]NodeGroup{
+				"worker": {Instance: "m7i.xlarge"},
+			},
+			group:      "worker",
+			wantGPU:    nil,
+			wantTaints: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveNodeGroupDefaults(tt.input)
+			g := result[tt.group]
+
+			if got := len(g.Taints); got != tt.wantTaints {
+				t.Errorf("taint count = %d, want %d (taints: %+v)", got, tt.wantTaints, g.Taints)
+			}
+
+			if got := countTaintsWithKey(g, gpuTaintKey); got > 1 {
+				t.Errorf("found %d %q taints, want at most 1", got, gpuTaintKey)
+			}
+
+			var gpuTaint *Taint
+			for i := range g.Taints {
+				if g.Taints[i].Key == gpuTaintKey {
+					gpuTaint = &g.Taints[i]
+					break
+				}
+			}
+			switch {
+			case tt.wantGPU == nil && gpuTaint != nil:
+				t.Errorf("expected no %q taint, got %+v", gpuTaintKey, *gpuTaint)
+			case tt.wantGPU != nil && gpuTaint == nil:
+				t.Errorf("expected %q taint %+v, got none", gpuTaintKey, *tt.wantGPU)
+			case tt.wantGPU != nil && *gpuTaint != *tt.wantGPU:
+				t.Errorf("gpu taint = %+v, want %+v", *gpuTaint, *tt.wantGPU)
+			}
+		})
+	}
+
+	t.Run("does not mutate input taints", func(t *testing.T) {
+		original := map[string]NodeGroup{
+			"gpu": {Instance: "g4dn.xlarge", GPU: true, Taints: []Taint{
+				{Key: "dedicated", Value: "ml", Effect: "NO_SCHEDULE"},
+			}},
+		}
+		resolveNodeGroupDefaults(original)
+		if got := len(original["gpu"].Taints); got != 1 {
+			t.Errorf("input gpu node group taints mutated: len = %d, want 1", got)
 		}
 	})
 }

@@ -181,17 +181,19 @@ amazon_web_services:
       max_nodes: 10
       taints: []
 
-    # GPU node group example
+    # GPU node group example.
+    # With gpu: true, NIC selects the AL2023_x86_64_NVIDIA AMI and automatically
+    # applies the taint nvidia.com/gpu=true:NO_SCHEDULE so only pods that
+    # tolerate it land on GPU nodes. The NVIDIA GPU Operator does not taint
+    # nodes itself; it only tolerates this taint on its own operands. To use a
+    # different value or effect, set an explicit nvidia.com/gpu taint below and
+    # NIC leaves it untouched.
     gpu:
       instance: g5.2xlarge
       min_nodes: 0
       max_nodes: 5
       gpu: true
       spot: false
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
 
     # Spot instance node group example
     spot-workers:

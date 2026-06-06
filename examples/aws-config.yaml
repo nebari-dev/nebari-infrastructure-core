@@ -75,7 +75,10 @@ cluster:
       #   instance: g5.xlarge
       #   min_nodes: 0
       #   max_nodes: 3
-      #   gpu: true # Uses AL2023_x86_64_NVIDIA AMI
+      #   gpu: true # Uses AL2023_x86_64_NVIDIA AMI and auto-applies the
+      #             # nvidia.com/gpu=true:NO_SCHEDULE taint (set your own
+      #             # nvidia.com/gpu taint to override). GPU workloads must
+      #             # tolerate it; the NVIDIA GPU Operator tolerates it already.
       #
       # # Example: ARM64 Graviton node group
       # graviton:
