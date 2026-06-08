@@ -92,12 +92,10 @@ type Config struct {
 	// exact values set here.
 	//
 	// Constraint: the taint toleration is NOT derived from this field. Longhorn's
-	// system components always tolerate the fixed taint
-	// node.longhorn.io/storage=true:NoSchedule (see nodeStorageTaintToleration in
-	// install.go). If you customize this selector, the storage nodes must still
-	// carry that exact taint, or the replica-role components can't run there.
-	// Parameterizing the taint is tracked in
-	// nebari-dev/nebari-infrastructure-core#363.
+	// system components tolerate every taint (see tolerateAllTaints in install.go),
+	// so the storage nodes' taint - and any taint on a workload pool where a PVC
+	// must mount - is covered regardless of what you set here. This selector only
+	// controls which nodes are labeled as the storage (replica) pool.
 	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
 
 	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the

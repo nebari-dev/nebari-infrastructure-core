@@ -18,14 +18,19 @@ import (
 
 const installTimeout = 10 * time.Minute
 
-// nodeStorageTaintToleration is the Longhorn taint-toleration setting value
-// matching the recommended dedicated-node taint
-// (node.longhorn.io/storage=true:NoSchedule). This setting is what lets
-// Longhorn's system-managed components (instance-manager, engine-image,
-// CSI plugin) tolerate the storage-node taint so the replica-serving
-// components can run on the dedicated storage nodes.
+// tolerateAllTaints is the Longhorn taint-toleration setting value that tells
+// Longhorn's system-managed components (longhorn-csi-plugin, the replica/engine
+// instance-managers, engine-image, share-manager) to tolerate EVERY taint.
+// Longhorn parses the bare ":" as a toleration with an empty key and
+// Operator=Exists, which matches all taints regardless of key, value, or effect.
+// The csi-plugin is the per-node mount driver, so it must run on every node a
+// workload pod might land on - including tainted pools (the storage taint, a GPU
+// pool's nvidia.com/gpu:NoSchedule, any config-driven taint) - or PVC mounts
+// fail there (#366). Replica DATA is still confined to storage nodes because
+// only they carry CreateDefaultDiskLabel and thus get a Longhorn disk (#369).
+// https://github.com/longhorn/longhorn-manager/blob/v1.11.2/types/setting.go
 // https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
-const nodeStorageTaintToleration = NodeStorageLabel + "=true:NoSchedule"
+const tolerateAllTaints = ":"
 
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
@@ -241,22 +246,19 @@ func buildHelmValues(cfg *Config) map[string]any {
 		// nodes and broke PVC mounts there (#366).
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		// System-managed components (replica-role instance-managers, engine-image,
-		// share-manager) must tolerate the storage-node taint so they can run on
-		// the dedicated storage nodes that host replicas.
-		settings["taintToleration"] = nodeStorageTaintToleration
+		// System-managed components - crucially the per-node longhorn-csi-plugin,
+		// plus the replica/engine instance-managers, engine-image and share-manager
+		// - tolerate EVERY taint via the tolerate-all taintToleration. The csi-plugin
+		// must run wherever a workload pod can be scheduled, including tainted pools
+		// (storage taint, a GPU pool's nvidia.com/gpu:NoSchedule, any config-driven
+		// taint), or PVC mounts fail there (#366). Replica DATA stays on storage
+		// nodes regardless, because only they get a Longhorn disk (#369).
+		settings["taintToleration"] = tolerateAllTaints
 
 		// longhorn-manager (DaemonSet) and the driver deployer are node-level
-		// infrastructure, not workloads, so they tolerate all taints (same
+		// infrastructure, not workloads, so they also tolerate all taints (same
 		// rationale as the embedded iSCSI prerequisite DaemonSet) and carry no
-		// nodeSelector (#366). NOTE: the per-node *mount* component,
-		// longhorn-csi-plugin, is system-managed — its tolerations come from the
-		// taintToleration setting above (storage taint only), NOT from these
-		// manager/driver tolerations. So mounts work on untainted workload nodes
-		// and on the storage nodes, but a *tainted* workload pool (e.g. a GPU pool
-		// with nvidia.com/gpu:NoSchedule) would need its taint added to
-		// taintToleration for csi-plugin to land there. Tracked as a follow-up
-		// (relates to #363/#368).
+		// nodeSelector (#366).
 		tolerateAll := []map[string]any{{"operator": "Exists"}}
 		values["longhornManager"] = map[string]any{"tolerations": tolerateAll}
 		values["longhornDriver"] = map[string]any{"tolerations": tolerateAll}
