@@ -45,11 +45,11 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
-			name:   "dedicated nodes set disk + taint-toleration settings, not a node selector",
+			name:   "dedicated nodes set disk + tolerate-all taint setting, not a node selector",
 			config: &Config{DedicatedNodes: true},
 			checkValues: map[string]any{
 				"defaultSettings.createDefaultDiskLabeledNodes": true,
-				"defaultSettings.taintToleration":               "node.longhorn.io/storage=true:NoSchedule",
+				"defaultSettings.taintToleration":               ":",
 			},
 			// system components must NOT be pinned by node selector (#366);
 			// confinement comes from disks only existing on storage nodes.
@@ -123,8 +123,8 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 	if settings["createDefaultDiskLabeledNodes"] != true {
 		t.Errorf("defaultSettings.createDefaultDiskLabeledNodes = %v, want true", settings["createDefaultDiskLabeledNodes"])
 	}
-	if settings["taintToleration"] != "node.longhorn.io/storage=true:NoSchedule" {
-		t.Errorf("defaultSettings.taintToleration = %v, want the storage taint", settings["taintToleration"])
+	if settings["taintToleration"] != ":" {
+		t.Errorf("defaultSettings.taintToleration = %v, want \":\" (tolerate all taints)", settings["taintToleration"])
 	}
 	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
 		t.Error("defaultSettings.systemManagedComponentsNodeSelector must not be set (pinning removed, #366)")
