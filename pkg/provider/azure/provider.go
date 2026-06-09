@@ -369,10 +369,12 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	return out
 }
 
-// InfraSettings returns Azure-specific Kubernetes infra settings.
+// InfraSettings returns Azure-specific Kubernetes infrastructure settings.
+// LonghornEnabled is false: Longhorn is not yet wired for Azure.
 func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
 	return provider.InfraSettings{
-		StorageClass: "managed-csi",
-		NeedsMetalLB: false,
+		StorageClass:    "managed-csi",
+		NeedsMetalLB:    false,
+		LonghornEnabled: false,
 	}
 }
