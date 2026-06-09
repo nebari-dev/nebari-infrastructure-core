@@ -58,6 +58,31 @@ cluster:
         min_nodes: 1 # minimum of 1 node required
         max_nodes: 5
 
+      # Dedicated Longhorn storage nodes (production-recommended).
+      # Small instances with large gp3 disks, tainted so only Longhorn's
+      # storage components schedule here. Pair with the `longhorn` block below
+      # (dedicated_nodes: true). For one node per AZ, set min_nodes == max_nodes
+      # to the number of availability_zones above (2 here). disk_size sets the
+      # gp3 root volume size; when omitted EKS defaults it to 20 GiB, so set it
+      # explicitly for storage nodes. Capacity comes from the disk, not the
+      # instance size.
+      storage:
+        instance: m7g.large # 2 vCPU / 8 GiB Graviton; use m7i.large for x86
+        ami_type: AL2023_ARM_64_STANDARD # omit this line for x86 instances
+        min_nodes: 2
+        max_nodes: 2
+        disk_size: 500 # GiB gp3 root volume backing /var/lib/longhorn
+        labels:
+          node.longhorn.io/storage: "true"
+          # Triggers Longhorn default-disk creation on these nodes. NIC injects
+          # this automatically for dedicated-nodes storage groups; shown here so
+          # the contract is explicit.
+          node.longhorn.io/create-default-disk: "true"
+        taints:
+          - key: node.longhorn.io/storage
+            value: "true"
+            effect: NO_SCHEDULE
+
       # worker:
       #   instance: m7i.xlarge
       #   min_nodes: 0
@@ -83,6 +108,20 @@ cluster:
       #   min_nodes: 0
       #   max_nodes: 2
       #   ami_type: AL2023_x86_64_NEURON
+
+    # Longhorn distributed block storage (enabled by default on AWS).
+    # Production-recommended: dedicate tainted storage nodes (see the "storage"
+    # node group above) and keep at least one replica per AZ. The dedicated nodes
+    # must carry the node.longhorn.io/storage=true:NoSchedule taint shown there;
+    # NIC tolerates it for every Longhorn component. Replicas (the data) live only
+    # on storage nodes because only they get a Longhorn disk; the csi-plugin and
+    # manager still run on every node so workloads anywhere can mount volumes.
+    longhorn:
+      dedicated_nodes: true # confines replica DATA to the labeled/tainted storage nodes
+      replica_count: 2 # one replica per storage node / AZ; raise to 3 for 3 AZs
+      # node_selector:      # optional; defaults to {node.longhorn.io/storage: "true"}
+      #   node.longhorn.io/storage: "true"
+      # enabled: true       # default true on AWS; set false to opt out (falls back to gp2/EBS)
 
     # AWS Load Balancer Controller (LBC) configuration (optional).
     # Enabled by default. The controller authenticates via an EKS Pod Identity

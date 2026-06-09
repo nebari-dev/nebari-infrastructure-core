@@ -21,6 +21,7 @@ func TestAWSLoadBalancerControllerHelmValues(t *testing.T) {
 				"vpcId":                 "vpc-abc123",
 				"serviceAccount.create": true,
 				"serviceAccount.name":   "aws-load-balancer-controller",
+				"keepTLSSecret":         true,
 			},
 		},
 		{

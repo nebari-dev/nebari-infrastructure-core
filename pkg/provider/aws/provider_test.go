@@ -96,6 +96,45 @@ func TestValidate_LoadBalancerScheme(t *testing.T) {
 	}
 }
 
+// TestValidateTaints verifies node group taint effects are validated against
+// the EKS API enum (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), not the
+// Kubernetes-style spelling, and that a missing key is rejected. It exercises
+// the helper directly so the valid cases don't fall through Validate to the
+// AWS credential check (which would block on an IMDS timeout).
+func TestValidateTaints(t *testing.T) {
+	tests := []struct {
+		name      string
+		taints    []Taint
+		errSubstr string // "" means no error expected
+	}{
+		{name: "EKS NO_SCHEDULE is accepted", taints: []Taint{{Key: "k", Value: "v", Effect: "NO_SCHEDULE"}}},
+		{name: "EKS NO_EXECUTE is accepted", taints: []Taint{{Key: "k", Effect: "NO_EXECUTE"}}},
+		{name: "EKS PREFER_NO_SCHEDULE is accepted", taints: []Taint{{Key: "k", Effect: "PREFER_NO_SCHEDULE"}}},
+		{name: "no taints is fine", taints: nil},
+		{name: "k8s-style NoSchedule is rejected", taints: []Taint{{Key: "k", Effect: "NoSchedule"}}, errSubstr: "invalid effect"},
+		{name: "arbitrary effect is rejected", taints: []Taint{{Key: "k", Effect: "Garbage"}}, errSubstr: "invalid effect"},
+		{name: "missing key is rejected", taints: []Taint{{Effect: "NO_SCHEDULE"}}, errSubstr: "missing key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateTaints("storage", tt.taints)
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
 func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 	const schemeKey = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 
