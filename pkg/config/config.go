@@ -165,6 +165,12 @@ type CertificateConfig struct {
 	ACME *ACMEConfig `yaml:"acme,omitempty"`
 }
 
+// ACME challenge types.
+const (
+	ACMEChallengeHTTP01 = "http01"
+	ACMEChallengeDNS01  = "dns01"
+)
+
 // ACMEConfig holds ACME (Let's Encrypt) configuration
 type ACMEConfig struct {
 	// Email is the email address for Let's Encrypt registration
@@ -173,6 +179,38 @@ type ACMEConfig struct {
 	// Server is the ACME server URL (defaults to Let's Encrypt production)
 	// Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing
 	Server string `yaml:"server,omitempty"`
+
+	// Challenge is the ACME challenge type: "http01" (default) or "dns01".
+	// dns01 validates domain ownership via DNS TXT records instead of inbound
+	// HTTP, so it works for clusters the ACME server cannot reach (private
+	// networks, VPNs). It requires a dns provider block for solver credentials.
+	Challenge string `yaml:"challenge,omitempty"`
+}
+
+// NeedsDNS01Solver reports whether the configuration requires a cert-manager
+// dns01 solver (letsencrypt certificates with the dns01 challenge).
+func (c *CertificateConfig) NeedsDNS01Solver() bool {
+	return c != nil && c.Type == "letsencrypt" && c.ACME != nil && c.ACME.Challenge == ACMEChallengeDNS01
+}
+
+// Validate checks the certificate configuration. The dns config is consulted
+// because the dns01 challenge sources its solver credentials from the dns
+// provider.
+func (c *CertificateConfig) Validate(dns *DNSConfig) error {
+	if c.ACME == nil {
+		return nil
+	}
+	switch c.ACME.Challenge {
+	case "", ACMEChallengeHTTP01:
+		return nil
+	case ACMEChallengeDNS01:
+		if dns.ProviderName() != "cloudflare" {
+			return fmt.Errorf("acme challenge %q requires a dns block with the %q provider (the only provider with dns01 solver support)", ACMEChallengeDNS01, "cloudflare")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid acme challenge %q, must be %q or %q", c.ACME.Challenge, ACMEChallengeHTTP01, ACMEChallengeDNS01)
+	}
 }
 
 // safeProjectName matches alphanumeric strings with hyphens and underscores.
@@ -200,6 +238,12 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	if c.DNS != nil {
 		if err := c.DNS.Validate(opts.DNSProviders); err != nil {
 			return fmt.Errorf("invalid dns: %w", err)
+		}
+	}
+
+	if c.Certificate != nil {
+		if err := c.Certificate.Validate(c.DNS); err != nil {
+			return fmt.Errorf("invalid certificate: %w", err)
 		}
 	}
 

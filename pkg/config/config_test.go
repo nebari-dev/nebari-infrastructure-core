@@ -838,3 +838,89 @@ func TestUnmarshalProviderConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestCertificateConfigValidate(t *testing.T) {
+	cloudflareDNS := &DNSConfig{
+		Providers: map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+	}
+
+	tests := []struct {
+		name        string
+		cert        CertificateConfig
+		dns         *DNSConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "selfsigned without acme is valid",
+			cert: CertificateConfig{Type: "selfsigned"},
+		},
+		{
+			name: "letsencrypt with default challenge is valid",
+			cert: CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com"}},
+		},
+		{
+			name: "explicit http01 is valid without dns",
+			cert: CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com", Challenge: ACMEChallengeHTTP01}},
+		},
+		{
+			name: "dns01 with cloudflare dns is valid",
+			cert: CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com", Challenge: ACMEChallengeDNS01}},
+			dns:  cloudflareDNS,
+		},
+		{
+			name:        "dns01 without dns block is rejected",
+			cert:        CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com", Challenge: ACMEChallengeDNS01}},
+			wantErr:     true,
+			errContains: "requires a dns block",
+		},
+		{
+			name:        "unknown challenge is rejected",
+			cert:        CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com", Challenge: "tls-alpn-01"}},
+			wantErr:     true,
+			errContains: "invalid acme challenge",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cert.Validate(tt.dns)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestCertificateConfigNeedsDNS01Solver(t *testing.T) {
+	dns01ACME := &ACMEConfig{Email: "a@example.com", Challenge: ACMEChallengeDNS01}
+
+	tests := []struct {
+		name string
+		cert *CertificateConfig
+		want bool
+	}{
+		{"nil receiver", nil, false},
+		{"selfsigned", &CertificateConfig{Type: "selfsigned"}, false},
+		{"letsencrypt default challenge", &CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@example.com"}}, false},
+		{"letsencrypt dns01", &CertificateConfig{Type: "letsencrypt", ACME: dns01ACME}, true},
+		{"selfsigned with dns01 acme is ignored", &CertificateConfig{Type: "selfsigned", ACME: dns01ACME}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cert.NeedsDNS01Solver(); got != tt.want {
+				t.Errorf("NeedsDNS01Solver() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
