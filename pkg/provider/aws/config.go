@@ -32,6 +32,7 @@ type Config struct {
 	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
+	ClusterAutoscaler         *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
 	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
 	// TrustBundle, when set, installs the given PEM bundle into the OS trust
 	// store of every EKS worker node before kubelet starts. Required when nodes
@@ -40,6 +41,12 @@ type Config struct {
 	// field once trust-manager (the in-pod half of nebari-dev/nebari-infrastructure-core#307)
 	// lands; keeping it provider-scoped here matches the current Provider interface.
 	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+	// EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for
+	// Service Accounts. When unset, the upstream module default (true) applies.
+	// Set false when the cluster relies exclusively on EKS Pod Identity, or
+	// when the VPC cannot resolve oidc.eks.<region>.amazonaws.com (a fully
+	// private deployment with no public DNS resolution for AWS hostnames).
+	EnableIRSA *bool `yaml:"enable_irsa,omitempty"`
 }
 
 // TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
@@ -111,6 +118,54 @@ func (c *Config) LoadBalancerControllerDestroyTimeout() time.Duration {
 		return defaultLBCDestroyTimeout
 	}
 	return *c.AWSLoadBalancerController.DestroyTimeout
+}
+
+type ClusterAutoscalerConfig struct {
+	Enabled      *bool  `yaml:"enabled,omitempty"`
+	ChartVersion string `yaml:"chart_version,omitempty"`
+	ImageTag     string `yaml:"image_tag,omitempty"`
+}
+
+// defaultClusterAutoscalerChartVersion pins the cluster-autoscaler Helm chart.
+// Chart 9.57.0 ships appVersion 1.35.0. The autoscaler image version is not
+// pinned by the chart here - it is derived from the cluster's Kubernetes
+// version at install time (see ClusterAutoscalerImageTag), because AWS requires
+// the autoscaler's version to match the cluster's Kubernetes minor version.
+const defaultClusterAutoscalerChartVersion = "9.57.0"
+
+// ClusterAutoscalerEnabled returns whether the Kubernetes Cluster Autoscaler
+// should be installed. Defaults to true.
+func (c *Config) ClusterAutoscalerEnabled() bool {
+	if c.ClusterAutoscaler == nil || c.ClusterAutoscaler.Enabled == nil {
+		return true
+	}
+	return *c.ClusterAutoscaler.Enabled
+}
+
+// ClusterAutoscalerChartVersion returns the Helm chart version for the Cluster
+// Autoscaler. Returns defaultClusterAutoscalerChartVersion when unset.
+func (c *Config) ClusterAutoscalerChartVersion() string {
+	if c.ClusterAutoscaler == nil || c.ClusterAutoscaler.ChartVersion == "" {
+		return defaultClusterAutoscalerChartVersion
+	}
+	return c.ClusterAutoscaler.ChartVersion
+}
+
+// ClusterAutoscalerImageTag returns the cluster-autoscaler container image tag.
+// AWS requires the autoscaler version to match the cluster's Kubernetes minor
+// version (cross-version is unsupported). When not explicitly set, the tag is
+// derived from KubernetesVersion as `v<version>.0` (the autoscaler publishes a
+// `.0` patch release for every supported minor). Returns "" when neither an
+// explicit tag nor a Kubernetes version is available, letting the chart's
+// bundled appVersion stand.
+func (c *Config) ClusterAutoscalerImageTag() string {
+	if c.ClusterAutoscaler != nil && c.ClusterAutoscaler.ImageTag != "" {
+		return c.ClusterAutoscaler.ImageTag
+	}
+	if c.KubernetesVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("v%s.0", c.KubernetesVersion)
 }
 
 type NodeGroup struct {

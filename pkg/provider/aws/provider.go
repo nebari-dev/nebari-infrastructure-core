@@ -72,6 +72,24 @@ func contains(slice []string, str string) bool {
 	return false
 }
 
+// validateTaints checks that every node group taint has a key and a valid EKS
+// effect. EKS managed node group taint effects use the API enum spelling
+// (NO_SCHEDULE/NO_EXECUTE/PREFER_NO_SCHEDULE), which is what the
+// terraform-aws-eks-cluster module expects and what config taints carry; EKS
+// maps these to the Kubernetes taint effects.
+func validateTaints(nodeGroupName string, taints []Taint) error {
+	validEffects := []string{"NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
+	for i, taint := range taints {
+		if taint.Key == "" {
+			return fmt.Errorf("node group %s: taint %d is missing key", nodeGroupName, i)
+		}
+		if !contains(validEffects, taint.Effect) {
+			return fmt.Errorf("node group %s: taint %d has invalid effect %s (must be one of: %v)", nodeGroupName, i, taint.Effect, validEffects)
+		}
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -205,19 +223,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 
 		// Validate taints
-		for i, taint := range nodeGroup.Taints {
-			if taint.Key == "" {
-				err := fmt.Errorf("node group %s: taint %d is missing key", nodeGroupName, i)
-				span.RecordError(err)
-				return err
-			}
-
-			validEffects := []string{"NoSchedule", "NoExecute", "PreferNoSchedule"}
-			if !contains(validEffects, taint.Effect) {
-				err := fmt.Errorf("node group %s: taint %d has invalid effect %s (must be one of: %v)", nodeGroupName, i, taint.Effect, validEffects)
-				span.RecordError(err)
-				return err
-			}
+		if err := validateTaints(nodeGroupName, nodeGroup.Taints); err != nil {
+			span.RecordError(err)
+			return err
 		}
 	}
 
@@ -357,7 +365,14 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for Longhorn install: %w", err)
 		}
 
-		if err := longhorn.Install(ctx, kubeconfigBytes, awsCfg.Longhorn); err != nil {
+		// Tell Longhorn whether the Cluster Autoscaler is present so it can mark
+		// instance-manager pods safe-to-evict on empty nodes - otherwise those
+		// pods pin otherwise-idle nodes and block scale-down. WithCluster-
+		// AutoscalerEnabled returns a copy, so the caller-owned awsCfg.Longhorn
+		// is never mutated.
+		longhornCfg := awsCfg.Longhorn.WithClusterAutoscalerEnabled(awsCfg.ClusterAutoscalerEnabled())
+
+		if err := longhorn.Install(ctx, kubeconfigBytes, longhornCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
 		}
@@ -394,6 +409,22 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		if err := installAWSLoadBalancerController(ctx, kubeconfigBytes, awsCfg, projectName, vpcID); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install AWS Load Balancer Controller: %w", err)
+		}
+	}
+
+	// Install Cluster Autoscaler if enabled. IAM is provided by the EKS Pod
+	// Identity association created by the terraform-aws-eks-cluster module
+	// (enable_cluster_autoscaler_pod_identity, default true).
+	if awsCfg.ClusterAutoscalerEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for Cluster Autoscaler install: %w", err)
+		}
+
+		if err := installClusterAutoscaler(ctx, kubeconfigBytes, awsCfg, projectName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install Cluster Autoscaler: %w", err)
 		}
 	}
 

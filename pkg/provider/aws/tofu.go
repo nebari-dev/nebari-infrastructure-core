@@ -1,6 +1,11 @@
 package aws
 
-import "embed"
+import (
+	"embed"
+	"maps"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
+)
 
 // Embed all files in the templates directory, including dotfiles (i.e. .terraform.lock.hcl)
 //
@@ -43,6 +48,10 @@ type TFVars struct {
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
 	NodeSGAdditionalRules         map[string]any       `json:"node_security_group_additional_rules,omitempty"`
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
+	// No omitempty: a false value must be emitted so it overrides the module's
+	// `true` default when the autoscaler is disabled.
+	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
 }
 
 func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
@@ -63,7 +72,54 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 	return result
 }
 
+// applyLonghornDiskLabel ensures every node group that matches the Longhorn
+// storage selector carries the labels Longhorn needs on a storage node (the
+// selector labels plus the create-default-disk label) so Longhorn
+// auto-provisions a disk there (#369). The label policy is owned by the
+// longhorn package (StorageSelector/StorageNodeLabels); this only applies it to
+// whichever AWS node group is the storage pool. Non-storage groups are left
+// untouched.
+func applyLonghornDiskLabel(nodeGroups map[string]NodeGroup, cfg *longhorn.Config) map[string]NodeGroup {
+	sel := longhorn.StorageSelector(cfg)
+	storageLabels := longhorn.StorageNodeLabels(cfg)
+	result := make(map[string]NodeGroup, len(nodeGroups))
+	for name, group := range nodeGroups {
+		if nodeGroupMatchesSelector(group.Labels, sel) {
+			labels := make(map[string]string, len(group.Labels)+len(storageLabels))
+			maps.Copy(labels, group.Labels)
+			maps.Copy(labels, storageLabels)
+			group.Labels = labels
+		}
+		result[name] = group
+	}
+	return result
+}
+
+// nodeGroupMatchesSelector reports whether labels is a superset of sel (i.e. the
+// node group carries every storage selector label). An empty selector never
+// matches, so no group is treated as storage by accident.
+func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
+	if len(sel) == 0 {
+		return false
+	}
+	for k, v := range sel {
+		if labels[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Config) toTFVars(projectName string) (TFVars, error) {
+	nodeGroups := resolveNodeGroupAMIs(c.NodeGroups)
+	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
+	// the create-default-disk label or Longhorn provisions no disks and every
+	// volume faults (#369). Inject it here so it is applied by kubelet at node
+	// registration (autoscaler-safe) rather than via a post-install reconcile.
+	if c.LonghornEnabled() && c.Longhorn != nil && c.Longhorn.DedicatedNodes {
+		nodeGroups = applyLonghornDiskLabel(nodeGroups, c.Longhorn)
+	}
+
 	vars := TFVars{
 		Region:                 c.Region,
 		ProjectName:            projectName,
@@ -76,7 +132,10 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		EndpointPublicAccess:   c.EndpointPublicAccess,
 		ClusterEnabledLogTypes: c.EnabledLogTypes,
 		CreateIAMRoles:         c.ExistingClusterRoleArn == "" && c.ExistingNodeRoleArn == "",
-		NodeGroups:             resolveNodeGroupAMIs(c.NodeGroups),
+		NodeGroups:             nodeGroups,
+		// Only provision the autoscaler's IAM role / pod identity association
+		// when the autoscaler itself will be installed (see provider deploy).
+		EnableClusterAutoscalerPodIdentity: c.ClusterAutoscalerEnabled(),
 	}
 
 	// Set pointer fields only when values are provided, so omitempty excludes them from JSON.
@@ -104,6 +163,9 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 	}
 	if c.PermissionsBoundary != "" {
 		vars.IAMRolePermissionsBoundary = &c.PermissionsBoundary
+	}
+	if c.EnableIRSA != nil {
+		vars.EnableIRSA = c.EnableIRSA
 	}
 
 	if c.LonghornEnabled() {

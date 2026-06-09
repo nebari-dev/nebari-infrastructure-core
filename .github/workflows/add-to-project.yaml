@@ -3,7 +3,12 @@ name: Add to project
 on:
   issues:
     types: [opened, labeled, unlabeled]
-  pull_request:
+  # Use pull_request_target (not pull_request) so the ADD_TO_PROJECT_PAT secret
+  # is available on PRs opened from forks. Under pull_request, GitHub withholds
+  # secrets from cross-repo (fork) PRs, leaving the token empty and failing the
+  # job. This is safe here because the reusable workflow checks out no PR code —
+  # it only reads trusted event metadata and calls the GitHub API.
+  pull_request_target:
     types: [opened, labeled, unlabeled]
 
 jobs:

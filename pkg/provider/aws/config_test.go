@@ -187,6 +187,110 @@ func TestLoadBalancerControllerDestroyTimeout(t *testing.T) {
 	}
 }
 
+func TestClusterAutoscalerEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "nil ClusterAutoscaler defaults to enabled",
+			config:   Config{ClusterAutoscaler: nil},
+			expected: true,
+		},
+		{
+			name:     "empty ClusterAutoscaler defaults to enabled",
+			config:   Config{ClusterAutoscaler: &ClusterAutoscalerConfig{}},
+			expected: true,
+		},
+		{
+			name:     "explicitly enabled",
+			config:   Config{ClusterAutoscaler: &ClusterAutoscalerConfig{Enabled: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "explicitly disabled",
+			config:   Config{ClusterAutoscaler: &ClusterAutoscalerConfig{Enabled: boolPtr(false)}},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.ClusterAutoscalerEnabled()
+			if got != tt.expected {
+				t.Errorf("ClusterAutoscalerEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClusterAutoscalerChartVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{
+			name:     "nil ClusterAutoscaler returns default",
+			config:   Config{ClusterAutoscaler: nil},
+			expected: defaultClusterAutoscalerChartVersion,
+		},
+		{
+			name:     "empty ChartVersion returns default",
+			config:   Config{ClusterAutoscaler: &ClusterAutoscalerConfig{}},
+			expected: defaultClusterAutoscalerChartVersion,
+		},
+		{
+			name:     "custom ChartVersion is used",
+			config:   Config{ClusterAutoscaler: &ClusterAutoscalerConfig{ChartVersion: "9.50.0"}},
+			expected: "9.50.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.ClusterAutoscalerChartVersion()
+			if got != tt.expected {
+				t.Errorf("ClusterAutoscalerChartVersion() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestClusterAutoscalerImageTag(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{
+			name:     "derives tag from kubernetes version",
+			config:   Config{KubernetesVersion: "1.35"},
+			expected: "v1.35.0",
+		},
+		{
+			name:     "explicit image tag overrides derivation",
+			config:   Config{KubernetesVersion: "1.35", ClusterAutoscaler: &ClusterAutoscalerConfig{ImageTag: "v1.34.2"}},
+			expected: "v1.34.2",
+		},
+		{
+			name:     "no kubernetes version and no override yields empty",
+			config:   Config{},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.ClusterAutoscalerImageTag()
+			if got != tt.expected {
+				t.Errorf("ClusterAutoscalerImageTag() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestProviderInfraSettingsStorageClass(t *testing.T) {
 	tests := []struct {
 		name     string
