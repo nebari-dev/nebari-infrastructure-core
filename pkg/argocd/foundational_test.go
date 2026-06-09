@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -374,6 +375,38 @@ func TestNewK8sClient(t *testing.T) {
 		_, err := newK8sClient([]byte{})
 		if err == nil {
 			t.Error("newK8sClient() should fail with empty kubeconfig")
+		}
+	})
+}
+
+func TestCreateDNS01SolverSecret(t *testing.T) {
+	t.Run("creates namespace and secret from env token", func(t *testing.T) {
+		t.Setenv("CLOUDFLARE_API_TOKEN", "test-token")
+		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		if err := createDNS01SolverSecret(context.Background(), client); err != nil {
+			t.Fatalf("createDNS01SolverSecret() error: %v", err)
+		}
+
+		secret, err := client.CoreV1().Secrets(CertManagerNamespace).Get(context.Background(), DNS01TokenSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("expected secret to exist: %v", err)
+		}
+		if got := secret.StringData[DNS01TokenSecretKey]; got != "test-token" {
+			t.Errorf("secret %s = %q, want %q", DNS01TokenSecretKey, got, "test-token")
+		}
+	})
+
+	t.Run("fails without env token", func(t *testing.T) {
+		t.Setenv("CLOUDFLARE_API_TOKEN", "")
+		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		err := createDNS01SolverSecret(context.Background(), client)
+		if err == nil {
+			t.Fatal("expected error when CLOUDFLARE_API_TOKEN is unset")
+		}
+		if !strings.Contains(err.Error(), "CLOUDFLARE_API_TOKEN") {
+			t.Errorf("error %q should mention CLOUDFLARE_API_TOKEN", err.Error())
 		}
 	})
 }

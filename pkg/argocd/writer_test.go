@@ -739,3 +739,94 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
 }
+
+func TestNewTemplateData_ACMEChallenge(t *testing.T) {
+	tests := []struct {
+		name          string
+		cert          *config.CertificateConfig
+		wantChallenge string
+	}{
+		{
+			name:          "selfsigned has no challenge",
+			cert:          &config.CertificateConfig{Type: "selfsigned"},
+			wantChallenge: "",
+		},
+		{
+			name:          "letsencrypt defaults to http01",
+			cert:          &config.CertificateConfig{Type: "letsencrypt", ACME: &config.ACMEConfig{Email: "a@example.com"}},
+			wantChallenge: config.ACMEChallengeHTTP01,
+		},
+		{
+			name:          "letsencrypt without acme block defaults to http01",
+			cert:          &config.CertificateConfig{Type: "letsencrypt"},
+			wantChallenge: config.ACMEChallengeHTTP01,
+		},
+		{
+			name:          "letsencrypt with dns01",
+			cert:          &config.CertificateConfig{Type: "letsencrypt", ACME: &config.ACMEConfig{Email: "a@example.com", Challenge: config.ACMEChallengeDNS01}},
+			wantChallenge: config.ACMEChallengeDNS01,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.NebariConfig{Domain: "test.example.com", Certificate: tt.cert}
+			data := NewTemplateData(cfg, nil, provider.InfraSettings{})
+			if data.ACMEChallenge != tt.wantChallenge {
+				t.Errorf("ACMEChallenge = %q, want %q", data.ACMEChallenge, tt.wantChallenge)
+			}
+		})
+	}
+}
+
+func TestLetsEncryptClusterIssuerTemplate_Solvers(t *testing.T) {
+	render := func(t *testing.T, challenge string) string {
+		t.Helper()
+		data := TemplateData{
+			ACMEEmail:     "a@example.com",
+			ACMEServer:    "https://acme-v02.api.letsencrypt.org/directory",
+			ACMEChallenge: challenge,
+		}
+		content, err := templates.ReadFile("templates/manifests/security/issuers/letsencrypt-clusterissuer.yaml")
+		if err != nil {
+			t.Fatalf("failed to read issuer template: %v", err)
+		}
+		processed, err := processTemplate("manifests/security/issuers/letsencrypt-clusterissuer.yaml", content, data)
+		if err != nil {
+			t.Fatalf("processTemplate() error: %v", err)
+		}
+		return string(processed)
+	}
+
+	t.Run("http01 default", func(t *testing.T) {
+		output := render(t, config.ACMEChallengeHTTP01)
+		if !strings.Contains(output, "http01:") {
+			t.Errorf("expected http01 solver, got:\n%s", output)
+		}
+		if !strings.Contains(output, "gatewayHTTPRoute:") {
+			t.Errorf("expected gatewayHTTPRoute solver config, got:\n%s", output)
+		}
+		if strings.Contains(output, "dns01:") {
+			t.Errorf("should NOT contain dns01 solver, got:\n%s", output)
+		}
+	})
+
+	t.Run("dns01 cloudflare", func(t *testing.T) {
+		output := render(t, config.ACMEChallengeDNS01)
+		if !strings.Contains(output, "dns01:") {
+			t.Errorf("expected dns01 solver, got:\n%s", output)
+		}
+		if !strings.Contains(output, "cloudflare:") {
+			t.Errorf("expected cloudflare dns01 config, got:\n%s", output)
+		}
+		if !strings.Contains(output, "name: "+DNS01TokenSecretName) {
+			t.Errorf("expected apiTokenSecretRef name %q, got:\n%s", DNS01TokenSecretName, output)
+		}
+		if !strings.Contains(output, "key: "+DNS01TokenSecretKey) {
+			t.Errorf("expected apiTokenSecretRef key %q, got:\n%s", DNS01TokenSecretKey, output)
+		}
+		if strings.Contains(output, "http01:") {
+			t.Errorf("should NOT contain http01 solver, got:\n%s", output)
+		}
+	})
+}

@@ -12,9 +12,17 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-account-key
     solvers:
+{{- if eq .ACMEChallenge "dns01" }}
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+{{- else }}
       - http01:
           gatewayHTTPRoute:
             parentRefs:
               - name: nebari-gateway
                 namespace: envoy-gateway-system
                 kind: Gateway
+{{- end }}

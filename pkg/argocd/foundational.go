@@ -3,6 +3,7 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,6 +33,14 @@ const (
 
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// CertManagerNamespace is the namespace where cert-manager is deployed.
+	CertManagerNamespace = "cert-manager"
+
+	// DNS01TokenSecretName/Key identify the Cloudflare API token secret referenced
+	// by the letsencrypt ClusterIssuer's dns01 solver (apiTokenSecretRef).
+	DNS01TokenSecretName = "cloudflare-api-token" //nolint:gosec // This is a secret name reference, not a credential
+	DNS01TokenSecretKey  = "api-token"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -153,6 +162,21 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		}
 	}
 
+	// Create the dns01 solver credential secret when the dns01 ACME challenge
+	// is configured, before the root App-of-Apps syncs the letsencrypt
+	// ClusterIssuer that references it.
+	if cfg.Certificate.NeedsDNS01Solver() {
+		k8sClient, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Kubernetes client: %w", err)
+		}
+		if err := createDNS01SolverSecret(ctx, k8sClient); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create dns01 solver secret: %w", err)
+		}
+	}
+
 	// 3. Apply root App-of-Apps if git configuration is available
 	if gitConfig != nil {
 		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, gitConfig); err != nil {
@@ -230,6 +254,33 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 			WithMetadata("secret_name", secret.Name))
 	}
 	return nil
+}
+
+// createDNS01SolverSecret creates the Cloudflare API token secret referenced by
+// the letsencrypt ClusterIssuer's dns01 solver. The token is read from the
+// CLOUDFLARE_API_TOKEN environment variable (the same credential the DNS record
+// provisioner uses) and is created directly on the cluster, never written to
+// the GitOps repository.
+func createDNS01SolverSecret(ctx context.Context, client kubernetes.Interface) error {
+	token := os.Getenv("CLOUDFLARE_API_TOKEN")
+	if token == "" {
+		return fmt.Errorf("CLOUDFLARE_API_TOKEN environment variable is required for the dns01 ACME challenge")
+	}
+
+	if err := createNamespace(ctx, client, CertManagerNamespace); err != nil {
+		return err
+	}
+
+	return createSecret(ctx, client, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      DNS01TokenSecretName,
+			Namespace: CertManagerNamespace,
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			DNS01TokenSecretKey: token,
+		},
+	})
 }
 
 // createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL

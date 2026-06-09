@@ -48,6 +48,7 @@ type TemplateData struct {
 	CertificateIssuer string // "selfsigned-issuer" or "letsencrypt-issuer"
 	ACMEEmail         string
 	ACMEServer        string
+	ACMEChallenge     string // "http01" or "dns01" — selects the letsencrypt ClusterIssuer solver
 
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
@@ -110,11 +111,15 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings p
 	if cfg.Certificate != nil {
 		if cfg.Certificate.Type == "letsencrypt" {
 			data.CertificateIssuer = "letsencrypt-issuer"
+			data.ACMEChallenge = config.ACMEChallengeHTTP01
 			if cfg.Certificate.ACME != nil {
 				data.ACMEEmail = cfg.Certificate.ACME.Email
 				data.ACMEServer = cfg.Certificate.ACME.Server
 				if data.ACMEServer == "" {
 					data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
+				}
+				if cfg.Certificate.ACME.Challenge != "" {
+					data.ACMEChallenge = cfg.Certificate.ACME.Challenge
 				}
 			}
 		} else {
