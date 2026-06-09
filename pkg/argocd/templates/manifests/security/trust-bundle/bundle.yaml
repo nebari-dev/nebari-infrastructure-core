@@ -1,0 +1,21 @@
+# trust.cert-manager.io/v1alpha1 is an alpha API and may change across
+# trust-manager minor versions. It is safe while the chart is pinned (see the
+# pinned version in apps/trust-manager.yaml); revisit this manifest whenever that
+# pin is bumped.
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: nebari-trust-bundle
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  sources:
+    - inLine: |-
+{{ indent 8 .TrustBundlePEM }}
+  target:
+    configMap:
+      key: ca-certificates.crt
+    # Empty selector projects the bundle ConfigMap into every namespace,
+    # covering foundational and software-pack namespaces alike.
+    namespaceSelector: {}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
 )
@@ -324,6 +326,100 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	}
 }
 
+// TestKeycloakTemplate_TrustBundle verifies the org CA bundle is wired into
+// Keycloak only when trust-manager is enabled: the projected ConfigMap is
+// mounted and KC_TRUSTSTORE_PATHS points at it so outbound TLS trusts the org CA.
+func TestKeycloakTemplate_TrustBundle(t *testing.T) {
+	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak template: %v", err)
+	}
+
+	baseData := func() TemplateData {
+		return TemplateData{
+			Domain:                  "test.example.com",
+			KeycloakNamespace:       "keycloak",
+			KeycloakAdminSecretName: "keycloak-admin",
+			GitRepoURL:              "https://github.com/example/repo",
+			GitBranch:               "main",
+		}
+	}
+
+	// helmValues renders the template, confirms the Application manifest is valid
+	// YAML, and returns the inner keycloakx Helm values (also parsed as YAML).
+	helmValues := func(t *testing.T, data TemplateData) (string, map[string]any) {
+		t.Helper()
+		processed, err := processTemplate("apps/keycloak.yaml", content, data)
+		if err != nil {
+			t.Fatalf("processTemplate() error: %v", err)
+		}
+		out := string(processed)
+
+		var app map[string]any
+		if err := yaml.Unmarshal(processed, &app); err != nil {
+			t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, out)
+		}
+		spec, _ := app["spec"].(map[string]any)
+		sources, _ := spec["sources"].([]any)
+		if len(sources) == 0 {
+			t.Fatalf("expected at least one source in:\n%s", out)
+		}
+		src0, _ := sources[0].(map[string]any)
+		helm, _ := src0["helm"].(map[string]any)
+		valuesStr, _ := helm["values"].(string)
+
+		var values map[string]any
+		if err := yaml.Unmarshal([]byte(valuesStr), &values); err != nil {
+			t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, valuesStr)
+		}
+		return out, values
+	}
+
+	t.Run("mounts bundle and sets truststore path when enabled", func(t *testing.T) {
+		data := baseData()
+		data.TrustManagerEnabled = true
+		data.TrustBundlePEM = testCAPEM
+
+		out, values := helmValues(t, data)
+
+		for _, want := range []string{
+			"KC_TRUSTSTORE_PATHS",
+			"/etc/nebari/truststore",
+			"name: nebari-trust-bundle",
+			"ca-certificates.crt",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("expected rendered template to contain %q, got:\n%s", want, out)
+			}
+		}
+
+		if _, ok := values["extraVolumes"].(string); !ok {
+			t.Errorf("expected extraVolumes string in Helm values, got: %#v", values["extraVolumes"])
+		}
+		if _, ok := values["extraVolumeMounts"].(string); !ok {
+			t.Errorf("expected extraVolumeMounts string in Helm values, got: %#v", values["extraVolumeMounts"])
+		}
+	})
+
+	t.Run("omits bundle wiring when disabled", func(t *testing.T) {
+		out, values := helmValues(t, baseData())
+
+		for _, unwanted := range []string{
+			"KC_TRUSTSTORE_PATHS",
+			"nebari-trust-bundle",
+			"extraVolumes:",
+			"extraVolumeMounts:",
+		} {
+			if strings.Contains(out, unwanted) {
+				t.Errorf("did not expect %q when trust-manager disabled, got:\n%s", unwanted, out)
+			}
+		}
+		if _, ok := values["extraVolumes"]; ok {
+			t.Errorf("did not expect extraVolumes key when disabled, got: %#v", values["extraVolumes"])
+		}
+	})
+}
+
 func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -622,7 +718,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 
 	mock := &mockGitClient{workDir: tmpDir}
-	err := WriteAllToGit(ctx, mock, cfg, nil, settings)
+	err := WriteAllToGit(ctx, mock, cfg, nil, settings, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}

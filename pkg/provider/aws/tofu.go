@@ -110,7 +110,10 @@ func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
 	return true
 }
 
-func (c *Config) toTFVars(projectName string) (TFVars, error) {
+// toTFVars builds the OpenTofu variables for the cluster. caBundle is the
+// top-level trust_bundle resolved by the orchestration layer (base64-encoded
+// PEM), empty when no bundle is configured.
+func (c *Config) toTFVars(projectName, caBundle string) TFVars {
 	nodeGroups := resolveNodeGroupAMIs(c.NodeGroups)
 	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
 	// the create-default-disk label or Longhorn provisions no disks and every
@@ -189,10 +192,6 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		}
 	}
 
-	caBundle, err := c.TrustBundle.ResolveBase64()
-	if err != nil {
-		return TFVars{}, err
-	}
 	if caBundle != "" {
 		vars.ExtraCABundle = &caBundle
 	}
@@ -210,5 +209,5 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		}
 	}
 
-	return vars, nil
+	return vars
 }
