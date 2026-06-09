@@ -18,6 +18,12 @@ var rootCmd = &cobra.Command{
 	Short: "Nebari Infrastructure Core - Cloud infrastructure management for Nebari",
 	Long: `Nebari Infrastructure Core (NIC) is a standalone CLI tool that manages
 cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.`,
+	// Runtime failures are reported once, by main() via slog. Silence cobra's
+	// own error print and usage block so a runtime error is neither duplicated
+	// nor mistaken for misuse of the command. Cobra still prints usage for
+	// genuine argument/flag errors, which it detects before RunE runs.
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelInfo,
