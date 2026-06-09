@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -31,6 +32,9 @@ func NewProvider() *Provider {
 
 // Name returns the provider name used in cluster.azure: dispatch.
 func (p *Provider) Name() string { return providerName }
+
+// ConfigType returns the reflect.Type of this provider's configuration struct.
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
 
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	raw := clusterConfig.ProviderConfig()

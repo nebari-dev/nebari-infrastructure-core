@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down schemas
 
 # Variables
 BINARY_NAME=nic
@@ -165,6 +165,11 @@ deps: ## Download Go dependencies
 	go mod download
 	go mod verify
 	@echo "Dependencies downloaded successfully"
+
+schemas: ## Regenerate JSON Schema + commented YAML reference under schemas/
+	@echo "Regenerating schemas/..."
+	go run ./cmd/schemagen -out ./schemas
+	@echo "Schemas regenerated. Run 'git diff schemas/' to review."
 
 deps-update: ## Update Go dependencies
 	@echo "Updating dependencies..."

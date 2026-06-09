@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -60,6 +61,13 @@ func NewProvider() *Provider {
 // Name returns the provider name
 func (p *Provider) Name() string {
 	return ProviderName
+}
+
+// ConfigType returns the reflect.Type of this provider's configuration struct.
+// Used by schema-generation tooling to enumerate provider configurations via
+// the registry without taking by-name imports on concrete provider packages.
+func (p *Provider) ConfigType() reflect.Type {
+	return reflect.TypeFor[Config]()
 }
 
 // contains checks if a string slice contains a string

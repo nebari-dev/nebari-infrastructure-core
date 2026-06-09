@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/gcp.Config",
+  "$defs": {
+    "gcp.Config": {
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "kubernetes_version": {
+          "type": "string"
+        },
+        "availability_zones": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "release_channel": {
+          "type": "string"
+        },
+        "node_groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/gcp.NodeGroup"
+          },
+          "type": "object"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "networking_mode": {
+          "type": "string"
+        },
+        "network": {
+          "type": "string"
+        },
+        "subnetwork": {
+          "type": "string"
+        },
+        "ip_allocation_policy": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "master_authorized_networks_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "private_cluster_config": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "project",
+        "region",
+        "kubernetes_version"
+      ],
+      "description": "Config represents GCP-specific configuration"
+    },
+    "gcp.GuestAccelerator": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "GuestAccelerator represents a GCP GPU configuration"
+    },
+    "gcp.NodeGroup": {
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "min_nodes": {
+          "type": "integer"
+        },
+        "max_nodes": {
+          "type": "integer"
+        },
+        "taints": {
+          "items": {
+            "$ref": "#/$defs/gcp.Taint"
+          },
+          "type": "array"
+        },
+        "preemptible": {
+          "type": "boolean"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "guest_accelerators": {
+          "items": {
+            "$ref": "#/$defs/gcp.GuestAccelerator"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ],
+      "description": "NodeGroup represents GCP-specific node group configuration"
+    },
+    "gcp.Taint": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "effect": {
+          "type": "string",
+          "description": "NoSchedule, PreferNoSchedule, NoExecute"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "key",
+        "value",
+        "effect"
+      ],
+      "description": "Taint represents a Kubernetes taint"
+    }
+  },
+  "title": "gcp cluster provider configuration"
+}

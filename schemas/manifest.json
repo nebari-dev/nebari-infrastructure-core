@@ -1,0 +1,14 @@
+{
+  "providers": [
+    "aws",
+    "azure",
+    "existing",
+    "gcp",
+    "hetzner",
+    "local"
+  ],
+  "dns": [
+    "cloudflare"
+  ],
+  "top_level": "nebari-config.json"
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -24,6 +25,11 @@ func NewProvider() *Provider {
 // Name returns the provider name
 func (p *Provider) Name() string {
 	return "gcp"
+}
+
+// ConfigType returns the reflect.Type of this provider's configuration struct.
+func (p *Provider) ConfigType() reflect.Type {
+	return reflect.TypeFor[Config]()
 }
 
 // Validate validates the GCP configuration (stub implementation)

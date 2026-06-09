@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/cloudflare.Config",
+  "$defs": {
+    "cloudflare.Config": {
+      "properties": {
+        "zone_name": {
+          "type": "string",
+          "description": "Domain zone (e.g., example.com)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "zone_name"
+      ],
+      "description": "Config represents Cloudflare-specific DNS configuration Secrets like API tokens are read from environment variables, not config"
+    }
+  },
+  "title": "cloudflare DNS provider configuration"
+}

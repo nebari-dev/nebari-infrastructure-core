@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/local.Config",
+  "$defs": {
+    "local.Config": {
+      "properties": {
+        "kube_context": {
+          "type": "string"
+        },
+        "node_selectors": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "storage_class": {
+          "type": "string"
+        },
+        "https_port": {
+          "type": "integer"
+        },
+        "metallb": {
+          "$ref": "#/$defs/local.MetalLBConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Config represents local provider configuration"
+    },
+    "local.MetalLBConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enabled controls whether MetalLB is deployed. Default: true.\nUse a pointer to distinguish \"not set\" (default true) from \"explicitly false\"."
+        },
+        "address_pool": {
+          "type": "string",
+          "description": "AddressPool is the IP range for MetalLB's IPAddressPool.\nDefault: \"192.168.1.100-192.168.1.110\""
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "MetalLBConfig holds MetalLB-specific settings for the local provider."
+    }
+  },
+  "title": "local cluster provider configuration"
+}

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -113,4 +114,11 @@ type Provider interface {
 	// CLI commands and the ArgoCD writer use these to configure templates
 	// without importing provider packages or switching on provider names.
 	InfraSettings(clusterConfig *config.ClusterConfig) InfraSettings
+
+	// ConfigType returns the reflect.Type of this provider's configuration
+	// struct. Used by schema-generation tooling to enumerate provider
+	// configurations via the registry, without taking by-name imports on
+	// concrete provider packages. Implementations are one-liners:
+	//   func (*Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
+	ConfigType() reflect.Type
 }

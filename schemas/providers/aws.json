@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/aws.Config",
+  "$defs": {
+    "aws.AWSLoadBalancerControllerConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "chart_version": {
+          "type": "string"
+        },
+        "destroy_timeout": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "aws.Config": {
+      "properties": {
+        "region": {
+          "type": "string"
+        },
+        "state_bucket": {
+          "type": "string"
+        },
+        "availability_zones": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vpc_cidr_block": {
+          "type": "string"
+        },
+        "existing_vpc_id": {
+          "type": "string"
+        },
+        "existing_private_subnet_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "existing_security_group_id": {
+          "type": "string"
+        },
+        "kubernetes_version": {
+          "type": "string"
+        },
+        "endpoint_private_access": {
+          "type": "boolean"
+        },
+        "endpoint_public_access": {
+          "type": "boolean"
+        },
+        "eks_kms_arn": {
+          "type": "string"
+        },
+        "enabled_log_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "existing_cluster_role_arn": {
+          "type": "string"
+        },
+        "existing_node_role_arn": {
+          "type": "string"
+        },
+        "permissions_boundary": {
+          "type": "string"
+        },
+        "node_groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/aws.NodeGroup"
+          },
+          "type": "object"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "efs": {
+          "$ref": "#/$defs/aws.EFSConfig"
+        },
+        "longhorn": {
+          "$ref": "#/$defs/longhorn.Config"
+        },
+        "aws_load_balancer_controller": {
+          "$ref": "#/$defs/aws.AWSLoadBalancerControllerConfig"
+        },
+        "load_balancer_scheme": {
+          "type": "string"
+        },
+        "trust_bundle": {
+          "$ref": "#/$defs/aws.TrustBundleConfig",
+          "description": "TrustBundle, when set, installs the given PEM bundle into the OS trust\nstore of every EKS worker node before kubelet starts. Required when nodes\nmust reach the EKS control plane, ECR, or pull container images through a\nTLS-inspecting egress proxy. Will likely move to a top-level NebariConfig\nfield once trust-manager (the in-pod half of nebari-dev/nebari-infrastructure-core#307)\nlands; keeping it provider-scoped here matches the current Provider interface."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "region",
+        "kubernetes_version",
+        "node_groups"
+      ]
+    },
+    "aws.EFSConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "performance_mode": {
+          "type": "string",
+          "description": "default: generalPurpose"
+        },
+        "throughput_mode": {
+          "type": "string",
+          "description": "default: bursting"
+        },
+        "provisioned_throughput_mibps": {
+          "type": "integer"
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "default: true"
+        },
+        "kms_key_arn": {
+          "type": "string"
+        },
+        "storage_class_name": {
+          "type": "string",
+          "description": "default: efs-sc"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "aws.NodeGroup": {
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "min_nodes": {
+          "type": "integer"
+        },
+        "max_nodes": {
+          "type": "integer"
+        },
+        "gpu": {
+          "type": "boolean"
+        },
+        "ami_type": {
+          "type": "string"
+        },
+        "spot": {
+          "type": "boolean"
+        },
+        "disk_size": {
+          "type": "integer"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "taints": {
+          "items": {
+            "$ref": "#/$defs/aws.Taint"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ]
+    },
+    "aws.Taint": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "effect": {
+          "type": "string",
+          "description": "NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "key",
+        "value",
+        "effect"
+      ]
+    },
+    "aws.TrustBundleConfig": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "inline": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "TrustBundleConfig specifies the source of an extra CA bundle."
+    },
+    "longhorn.Config": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replica_count": {
+          "type": "integer"
+        },
+        "dedicated_nodes": {
+          "type": "boolean"
+        },
+        "node_selector": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Config carries the user-tunable Longhorn settings shared across providers."
+    }
+  },
+  "title": "aws cluster provider configuration"
+}
