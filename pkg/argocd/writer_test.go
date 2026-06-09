@@ -814,9 +814,14 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
 			}
 		}
+
+		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
+		if _, err := os.Stat(appPath); err != nil {
+			t.Errorf("apps/securitypolicies.yaml should be written when LonghornEnabled=true: %v", err)
+		}
 	})
 
-	t.Run("renders empty when LonghornEnabled is false", func(t *testing.T) {
+	t.Run("skips SecurityPolicy templates when LonghornEnabled is false", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := provider.InfraSettings{
@@ -829,13 +834,13 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		}
 
 		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
-		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
-		if err != nil {
-			t.Fatalf("failed to read longhorn-securitypolicy file: %v", err)
+		if _, err := os.Stat(policyPath); !os.IsNotExist(err) {
+			t.Errorf("longhorn-securitypolicy.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
 		}
-		out := strings.TrimSpace(string(content))
-		if out != "" {
-			t.Errorf("longhorn-securitypolicy.yaml should render empty when LonghornEnabled=false, got:\n%s", out)
+
+		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
+		if _, err := os.Stat(appPath); !os.IsNotExist(err) {
+			t.Errorf("apps/securitypolicies.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
 		}
 	})
 }

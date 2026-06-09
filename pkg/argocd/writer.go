@@ -300,6 +300,18 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip Longhorn-only templates when Longhorn is disabled. The
+		// securitypolicies Application targets manifests/networking/policies,
+		// whose only content is the Longhorn SecurityPolicy; writing the app
+		// without its manifest would create an Application with zero resources
+		// (rejected by allowEmpty: false).
+		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -345,6 +357,14 @@ func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+// isLonghornOnlyPath returns true if the relative path is a template that only
+// produces Longhorn resources and must be skipped entirely when Longhorn is
+// disabled.
+func isLonghornOnlyPath(relPath string) bool {
+	return relPath == "apps/securitypolicies.yaml" ||
+		strings.HasPrefix(relPath, "manifests/networking/policies")
 }
 
 // processTemplate processes a template file with the given data.

@@ -1,4 +1,3 @@
-{{- if .LonghornEnabled }}
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
@@ -50,4 +49,3 @@ spec:
                 valueType: StringArray
                 values:
                   - /longhorn-admins
-{{- end }}
