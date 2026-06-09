@@ -102,7 +102,7 @@ spec:
                       - role: node
                     relabel_configs:
                       - source_labels: [__meta_kubernetes_node_name]
-                        regex: $${env:K8S_NODE_NAME}
+                        regex: ${env:K8S_NODE_NAME}
                         action: keep
                       - action: labelmap
                         regex: __meta_kubernetes_node_label_(.+)
@@ -125,7 +125,7 @@ spec:
                       - role: node
                     relabel_configs:
                       - source_labels: [__meta_kubernetes_node_name]
-                        regex: $${env:K8S_NODE_NAME}
+                        regex: ${env:K8S_NODE_NAME}
                         action: keep
                       - action: labelmap
                         regex: __meta_kubernetes_node_label_(.+)

@@ -50,6 +50,7 @@ Chosen option: "Option 2 - Separate ConfigMap merged at collector startup", beca
 - Pack authors must create a ConfigMap with the exact name/namespace/key
 - Silent fallback to `{}` if ConfigMap is misconfigured (mitigated by init container logging)
 - Additional complexity compared to a single ConfigMap
+- Only one software pack can own the override ConfigMap; supporting multiple collector-customizing packs is an explicit non-goal (see [Single-Owner Constraint](#single-owner-constraint))
 
 ## Contract Surface
 
@@ -87,7 +88,7 @@ The collector is started with two `--config` flags:
 1. The base configuration (from the Helm chart's ConfigMap)
 2. `/conf/overrides/relay.yaml` (from this extension point)
 
-The OTel Collector's confmap system deep-merges these configurations. Later configs override earlier ones for scalar values; arrays and maps are merged recursively.
+The OTel Collector's confmap system merges these configurations as follows: **maps are deep-merged** (keys defined only in the base config are preserved; later sources override matching keys), but **lists/arrays are not merged — the last `--config` source wins and replaces the list wholesale**. (Appending lists is opt-in via the experimental `confmap.enableMergeAppendOption` feature gate, which NIC does not enable.) Practical consequence for pack authors: specify only the map keys you want to change, but any list you touch — e.g. a pipeline's `exporters` — must be re-stated in full. Setting a map key to `null` deletes that component from the base, so use `{}` for an empty map. See the [confmap merge docs](https://github.com/open-telemetry/opentelemetry-collector/blob/main/confmap/README.md).
 
 ### Failure Modes
 
@@ -108,6 +109,51 @@ Expected output when override is applied:
 ```
 ensure-overrides: found /src/relay.yaml from software pack ConfigMap, using override config
 ```
+
+### Single-Owner Constraint
+
+**Supporting more than one collector-customizing software pack is an explicit
+non-goal of this design.** The override point is a **singleton**: it is keyed to
+one fixed ConfigMap (`opentelemetry-collector-overrides`) and the collector
+merges exactly two configs (base + this override). Exactly **one** pack may own
+the override.
+
+This is an unusual case in practice — a cluster has a single observability
+backend — so the contract optimizes for that rather than for composition. For
+the record, here is what happens if two packs both try to customize the
+collector:
+
+- **Resource collision.** Each pack is its own ArgoCD Application, so both
+  render a ConfigMap with the same name/namespace. ArgoCD raises a
+  `SharedResourceWarning` and, with `selfHeal: true`, the two Applications
+  thrash — each sync reverts the other's `relay.yaml`. (Via plain Helm, the
+  second `helm install` fails: the ConfigMap already exists and is owned by
+  another release.)
+- **Silent pipeline clobbering (if forced to coexist).** `confmap` deep-merges
+  maps but **replaces lists** — the last `--config` source wins (see
+  [Merge Behavior](#merge-behavior)). Exporter *definitions* from both packs
+  union fine under `exporters:`, but a pipeline's `exporters:` **list** (e.g.
+  `service.pipelines.metrics.exporters`) keeps only the last writer, so one
+  pack's backend is defined but never wired into the pipeline and receives no
+  telemetry — with no error. The `ensure-overrides` init container cannot
+  detect this; it is only visible at the ArgoCD layer.
+
+**Guidance:**
+
+- Reserve the override for the **single telemetry-backend pack** (e.g.
+  `nebari-lgtm-pack`) that defines *where* telemetry is exported.
+- **Producer** packs that merely generate telemetry must use the collector's
+  ingest paths instead: send OTLP to the collector's `4317`/`4318` endpoints,
+  or annotate pods with `prometheus.io/scrape`. They must never write the
+  override ConfigMap.
+
+Supporting multiple collector-customizing packs is therefore **out of scope**.
+If it ever becomes a real requirement, the contract would have to change — each
+pack creating a uniquely-named override ConfigMap, the collector loading all of
+them via additional `--config` flags (a controller regenerating the daemonset's
+volume mounts and args dynamically), and the `confmap.enableMergeAppendOption`
+feature gate enabled so component lists append-and-dedupe instead of last-wins.
+That work is deferred until a concrete multi-backend need exists.
 
 ## Options Detail
 
