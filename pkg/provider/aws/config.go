@@ -3,7 +3,6 @@ package aws
 import (
 	"time"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -29,19 +28,7 @@ type Config struct {
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
-	// TrustBundle installs the given PEM bundle into the OS trust store of every
-	// EKS worker node before kubelet starts.
-	//
-	// Deprecated: set trust_bundle at the top level of the Nebari config instead.
-	// The top-level field also drives in-pod trust via trust-manager (see
-	// https://github.com/nebari-dev/nebari-infrastructure-core/issues/307). This
-	// provider-scoped field still works and takes precedence when both are set.
-	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
 }
-
-// TrustBundleConfig is an alias for the canonical top-level type. Retained so the
-// deprecated cluster.aws.trust_bundle field continues to unmarshal.
-type TrustBundleConfig = config.TrustBundleConfig
 
 const (
 	loadBalancerSchemeInternetFacing = "internet-facing"

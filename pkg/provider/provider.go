@@ -14,7 +14,6 @@ type DeployOptions struct {
 
 	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
 	// passed so providers can apply it without seeing the full NebariConfig.
-	// Provider-scoped trust bundle config, where present, takes precedence.
 	TrustBundle string
 }
 

@@ -170,19 +170,6 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
-	// Validate the deprecated provider-scoped trust_bundle here so misconfigs
-	// surface at validate time rather than mid-deploy.
-	if awsCfg.TrustBundle != nil {
-		if err := awsCfg.TrustBundle.Validate(); err != nil {
-			span.RecordError(err)
-			return err
-		}
-		status.Send(ctx, status.NewUpdate(status.LevelWarning,
-			"cluster.aws.trust_bundle is deprecated; set trust_bundle at the top level of the Nebari config instead").
-			WithResource("trust_bundle").
-			WithAction("deprecated"))
-	}
-
 	// Validate node groups
 	if len(awsCfg.NodeGroups) == 0 {
 		err := fmt.Errorf("at least one node group is required")
@@ -310,11 +297,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle, false)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -510,11 +493,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, opts.TrustBundle, true)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)

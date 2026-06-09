@@ -12,58 +12,26 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 -----END CERTIFICATE-----
 `
 
-const altPEM = `-----BEGIN CERTIFICATE-----
-ZZZZZZZZZZ9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
------END CERTIFICATE-----
-`
-
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
-// TestToTFVarsExtraCABundle covers the precedence between the deprecated
-// provider-scoped trust_bundle and the top-level bundle passed as a fallback.
+// TestToTFVarsExtraCABundle covers how the top-level trust bundle resolved by
+// the orchestration layer is threaded into the extra_ca_bundle tfvar.
 func TestToTFVarsExtraCABundle(t *testing.T) {
 	tests := []struct {
 		name        string
-		bundle      *TrustBundleConfig
-		fallback    string
-		tolerate    bool
-		wantErr     bool
+		caBundle    string
 		wantInJSON  bool
 		wantDecoded string
 	}{
 		{
-			name:       "neither set is omitted from tfvars",
+			name:       "unset is omitted from tfvars",
 			wantInJSON: false,
 		},
 		{
-			name:        "provider-scoped inline ends up base64 in tfvars",
-			bundle:      &TrustBundleConfig{Inline: samplePEM},
+			name:        "resolved top-level bundle is passed through",
+			caBundle:    b64(samplePEM),
 			wantInJSON:  true,
 			wantDecoded: samplePEM,
-		},
-		{
-			name:        "top-level fallback is used when provider-scoped is unset",
-			fallback:    b64(samplePEM),
-			wantInJSON:  true,
-			wantDecoded: samplePEM,
-		},
-		{
-			name:        "provider-scoped takes precedence over fallback",
-			bundle:      &TrustBundleConfig{Inline: altPEM},
-			fallback:    b64(samplePEM),
-			wantInJSON:  true,
-			wantDecoded: altPEM,
-		},
-		{
-			name:    "provider-scoped missing path errors on deploy",
-			bundle:  &TrustBundleConfig{Path: "/does/not/exist.pem"},
-			wantErr: true,
-		},
-		{
-			name:       "provider-scoped missing path tolerated on destroy",
-			bundle:     &TrustBundleConfig{Path: "/does/not/exist.pem"},
-			tolerate:   true,
-			wantInJSON: false,
 		},
 	}
 
@@ -73,18 +41,8 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				Region:            "us-west-2",
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
-				TrustBundle:       tt.bundle,
 			}
-			vars, err := cfg.toTFVars("test-project", tt.fallback, tt.tolerate)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("toTFVars: %v", err)
-			}
+			vars := cfg.toTFVars("test-project", tt.caBundle)
 
 			raw, err := json.Marshal(vars)
 			if err != nil {
