@@ -312,6 +312,8 @@ func SomeFunction(ctx context.Context, ...) error {
 - Use `slog.Info()` / `slog.Error()` in `cmd/nic/` commands.
 - Do **not** log in `pkg/` library code; emit spans and status updates instead.
 
+**Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
+
 **The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler` and remains the only layer that emits logs. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
 
 ## Key Development Patterns
