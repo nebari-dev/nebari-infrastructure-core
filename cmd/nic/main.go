@@ -18,17 +18,20 @@ var rootCmd = &cobra.Command{
 	Short: "Nebari Infrastructure Core - Cloud infrastructure management for Nebari",
 	Long: `Nebari Infrastructure Core (NIC) is a standalone CLI tool that manages
 cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.`,
-	// Runtime failures are reported once, by main() via slog. Silence cobra's
-	// own error print and usage block so a runtime error is neither duplicated
-	// nor mistaken for misuse of the command. Cobra still prints usage for
-	// genuine argument/flag errors, which it detects before RunE runs.
-	SilenceErrors: true,
-	SilenceUsage:  true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelInfo,
 		}))
 		slog.SetDefault(logger)
+
+		// PersistentPreRun runs only after cobra has parsed flags and validated
+		// args. Any failure from here on is a runtime error and not a misuse,
+		// so silence cobra's own error/usage output and let main() report it
+		// once via slog. Usage-class errors (bad flag, unknown command, wrong
+		// number of args) surface before this hook runs, so cobra still prints
+		// the error and usage block for those.
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
 	},
 }
 
@@ -69,12 +72,19 @@ func main() {
 		}
 	}()
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	cmd, err := rootCmd.ExecuteContextC(ctx)
+	if err != nil {
 		if ctx.Err() == context.Canceled {
 			slog.Info("Shutdown complete")
 			os.Exit(130)
 		}
-		slog.Error("Command execution failed", "error", err)
+		// SilenceUsage is set in PersistentPreRun, so it is true only once RunE
+		// is reached. We log just those runtime failures and leave usage-class
+		// errors (bad flag, unknown command, bad args) to cobra, which already
+		// printed them.
+		if cmd != nil && cmd.SilenceUsage {
+			slog.Error("Command execution failed", "error", err)
+		}
 		os.Exit(1)
 	}
 }
