@@ -428,6 +428,24 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Reconcile the NVIDIA GPU Operator before the GitOps/ArgoCD stage, so
+	// nvidia.com/gpu is advertised by the time GPU workloads sync. Installs when
+	// the cluster has (or is configured to have) GPU nodes, removes it otherwise;
+	// the live-node check inside is advisory and never fails the deploy (see
+	// reconcileGPUOperator). Decision recorded in ADR-0006 (#361).
+	{
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for GPU Operator reconcile: %w", err)
+		}
+
+		if err := reconcileGPUOperator(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to reconcile GPU Operator: %w", err)
+		}
+	}
+
 	// Create EFS StorageClass if EFS is enabled
 	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
@@ -636,6 +654,27 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 				}
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
 					WithResource("longhorn").WithAction("uninstalling"))
+			}
+		}
+	}
+
+	// Uninstall the GPU Operator before tofu destroy. It has no cloud resources
+	// of its own so it can't block teardown, but removing it first keeps the
+	// teardown clean and symmetric with deploy. Best-effort, like Longhorn.
+	{
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping GPU Operator uninstall — kubeconfig unavailable: %v", kErr)).
+				WithResource("gpu-operator").WithAction("uninstalling"))
+		default:
+			if err := uninstallGPUOperator(ctx, kubeconfigBytes); err != nil {
+				if !opts.Force {
+					span.RecordError(err)
+					return fmt.Errorf("failed to uninstall GPU Operator: %w", err)
+				}
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("GPU Operator uninstall failed, continuing with --force: %v", err)).
+					WithResource("gpu-operator").WithAction("uninstalling"))
 			}
 		}
 	}

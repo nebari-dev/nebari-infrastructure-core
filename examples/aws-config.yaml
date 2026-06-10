@@ -128,6 +128,11 @@ cluster:
     # the deploy waiting for an LB endpoint.
     # load_balancer_scheme: internet-facing  # or: internal
 
+    # When a node group sets gpu: true, nic installs the NVIDIA GPU Operator on
+    # the cluster (device plugin only; the AL2023_x86_64_NVIDIA AMI already
+    # ships the driver and container toolkit) so nvidia.com/gpu becomes
+    # schedulable. No extra config is required. See ADR-0006 for the rationale.
+
     # EFS configuration for shared storage (optional)
     # Creates an EFS file system with mount targets in each private subnet
     efs:
