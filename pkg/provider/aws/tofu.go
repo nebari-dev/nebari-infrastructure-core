@@ -19,6 +19,11 @@ const (
 	longhornWebhookConversionKey = "longhorn_webhook_conversion"
 )
 
+// gpuTaintKey is the taint key applied to GPU node groups. It matches the key
+// the NVIDIA GPU Operator's operands tolerate out of the box, so operator
+// components keep scheduling while ordinary pods are kept off GPU nodes.
+const gpuTaintKey = "nvidia.com/gpu"
+
 type TFVars struct {
 	Region                        string               `json:"region"`
 	ProjectName                   string               `json:"project_name,omitempty"`
@@ -54,7 +59,10 @@ type TFVars struct {
 	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
 }
 
-func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
+// resolveNodeGroupDefaults derives per-node-group defaults from the parsed
+// config: the EKS AMI type (NVIDIA for GPU groups, standard otherwise) and the
+// GPU taint. It returns a new map and never mutates the caller's node groups.
+func resolveNodeGroupDefaults(nodeGroups map[string]NodeGroup) map[string]NodeGroup {
 	result := make(map[string]NodeGroup, len(nodeGroups))
 	for name, group := range nodeGroups {
 		if group.AMIType == nil {
@@ -67,9 +75,32 @@ func resolveNodeGroupAMIs(nodeGroups map[string]NodeGroup) map[string]NodeGroup 
 			}
 			group.AMIType = &ami
 		}
-		result[name] = group
+		result[name] = applyGPUTaint(group)
 	}
 	return result
+}
+
+// applyGPUTaint ensures a GPU node group carries the nvidia.com/gpu taint so
+// that only pods tolerating it schedule onto GPU hardware. The NVIDIA GPU
+// Operator does not taint nodes itself; it only tolerates this taint on its own
+// operands, so applying it is the caller's responsibility. A node group that
+// already has an nvidia.com/gpu taint (any value or effect) is left untouched.
+// The returned group never shares its Taints backing array with the input, so
+// the caller's config is not mutated.
+func applyGPUTaint(group NodeGroup) NodeGroup {
+	if !group.GPU {
+		return group
+	}
+	for _, t := range group.Taints {
+		if t.Key == gpuTaintKey {
+			return group
+		}
+	}
+	taints := make([]Taint, len(group.Taints), len(group.Taints)+1)
+	copy(taints, group.Taints)
+	taints = append(taints, Taint{Key: gpuTaintKey, Value: "true", Effect: "NO_SCHEDULE"})
+	group.Taints = taints
+	return group
 }
 
 // applyLonghornDiskLabel ensures every node group that matches the Longhorn
@@ -111,7 +142,7 @@ func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
 }
 
 func (c *Config) toTFVars(projectName string) (TFVars, error) {
-	nodeGroups := resolveNodeGroupAMIs(c.NodeGroups)
+	nodeGroups := resolveNodeGroupDefaults(c.NodeGroups)
 	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
 	// the create-default-disk label or Longhorn provisions no disks and every
 	// volume faults (#369). Inject it here so it is applied by kubelet at node
