@@ -3,8 +3,6 @@ package longhorn
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -20,17 +18,19 @@ import (
 
 const installTimeout = 10 * time.Minute
 
-// nodeStorageLabel is the node label Longhorn uses to identify nodes that
-// should host its storage components when DedicatedNodes is enabled.
-const nodeStorageLabel = "node.longhorn.io/storage"
-
-// nodeStorageTaintToleration is the Longhorn taint-toleration setting value
-// matching the recommended dedicated-node taint
-// (node.longhorn.io/storage=true:NoSchedule). Unlike the manager/driver
-// tolerations, this setting is what lets Longhorn's system-managed components
-// (instance-manager, engine-image, CSI plugin) schedule onto tainted nodes.
+// tolerateAllTaints is the Longhorn taint-toleration setting value that tells
+// Longhorn's system-managed components (longhorn-csi-plugin, the replica/engine
+// instance-managers, engine-image, share-manager) to tolerate EVERY taint.
+// Longhorn parses the bare ":" as a toleration with an empty key and
+// Operator=Exists, which matches all taints regardless of key, value, or effect.
+// The csi-plugin is the per-node mount driver, so it must run on every node a
+// workload pod might land on - including tainted pools (the storage taint, a GPU
+// pool's nvidia.com/gpu:NoSchedule, any config-driven taint) - or PVC mounts
+// fail there (#366). Replica DATA is still confined to storage nodes because
+// only they carry CreateDefaultDiskLabel and thus get a Longhorn disk (#369).
+// https://github.com/longhorn/longhorn-manager/blob/v1.11.2/types/setting.go
 // https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
-const nodeStorageTaintToleration = nodeStorageLabel + "=true:NoSchedule"
+const tolerateAllTaints = ":"
 
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
@@ -135,6 +135,11 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage installed").
 		WithResource("longhorn").
 		WithAction("installed").
@@ -176,6 +181,11 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfig
 	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	}
+
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage upgraded").
@@ -226,67 +236,33 @@ func buildHelmValues(cfg *Config) map[string]any {
 	}
 
 	if cfg != nil && cfg.DedicatedNodes {
+		// Storage nodes auto-provision a Longhorn disk: createDefaultDiskLabeledNodes
+		// makes Longhorn create a default disk only on nodes carrying the
+		// CreateDefaultDiskLabel (the AWS provider adds it to storage node groups;
+		// other providers must label their storage pool — see config.go). Because
+		// only storage nodes get a disk, replicas can only ever land on storage
+		// nodes. We therefore do NOT pin the system components by node selector:
+		// doing so kept longhorn-csi-plugin and longhorn-manager off workload
+		// nodes and broke PVC mounts there (#366).
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		nodeSelector := map[string]string{nodeStorageLabel: "true"}
-		// Override only when a non-empty selector is supplied. An explicitly
-		// empty map (node_selector: {}) would otherwise clear the
-		// system-managed-components node selector, silently unpinning the
-		// instance-managers from the storage nodes.
-		if len(cfg.NodeSelector) > 0 {
-			nodeSelector = cfg.NodeSelector
-		}
+		// System-managed components - crucially the per-node longhorn-csi-plugin,
+		// plus the replica/engine instance-managers, engine-image and share-manager
+		// - tolerate EVERY taint via the tolerate-all taintToleration. The csi-plugin
+		// must run wherever a workload pod can be scheduled, including tainted pools
+		// (storage taint, a GPU pool's nvidia.com/gpu:NoSchedule, any config-driven
+		// taint), or PVC mounts fail there (#366). Replica DATA stays on storage
+		// nodes regardless, because only they get a Longhorn disk (#369).
+		settings["taintToleration"] = tolerateAllTaints
 
-		tolerations := []map[string]string{
-			{
-				"key":      nodeStorageLabel,
-				"operator": "Exists",
-				"effect":   "NoSchedule",
-			},
-		}
-
-		// longhornManager/longhornDriver tolerations only cover the
-		// user-deployed components. The system-managed components
-		// (instance-manager, engine-image, CSI plugin) that actually serve
-		// replicas tolerate the node taint only via the taint-toleration
-		// setting, and are confined to the storage nodes via
-		// system-managed-components-node-selector. Without both, tainting the
-		// dedicated node group prevents Longhorn from scheduling its storage
-		// engines there.
-		// https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
-		settings["taintToleration"] = nodeStorageTaintToleration
-		settings["systemManagedComponentsNodeSelector"] = formatNodeSelector(nodeSelector)
-
-		values["longhornManager"] = map[string]any{
-			"nodeSelector": nodeSelector,
-			"tolerations":  tolerations,
-		}
-		values["longhornDriver"] = map[string]any{
-			"nodeSelector": nodeSelector,
-			"tolerations":  tolerations,
-		}
+		// longhorn-manager (DaemonSet) and the driver deployer are node-level
+		// infrastructure, not workloads, so they also tolerate all taints (same
+		// rationale as the embedded iSCSI prerequisite DaemonSet) and carry no
+		// nodeSelector (#366).
+		tolerateAll := []map[string]any{{"operator": "Exists"}}
+		values["longhornManager"] = map[string]any{"tolerations": tolerateAll}
+		values["longhornDriver"] = map[string]any{"tolerations": tolerateAll}
 	}
 
 	return values
-}
-
-// formatNodeSelector renders a label map as Longhorn's
-// systemManagedComponentsNodeSelector setting string ("key:value" pairs joined
-// by ";"). Keys are sorted so the generated Helm values are deterministic.
-func formatNodeSelector(sel map[string]string) string {
-	if len(sel) == 0 {
-		return ""
-	}
-
-	keys := make([]string, 0, len(sel))
-	for k := range sel {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+":"+sel[k])
-	}
-	return strings.Join(parts, ";")
 }

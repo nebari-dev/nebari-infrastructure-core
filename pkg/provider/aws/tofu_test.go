@@ -406,3 +406,106 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 		}
 	})
 }
+
+func TestToTFVarsLonghornDiskLabel(t *testing.T) {
+	const diskLabel = longhorn.CreateDefaultDiskLabel
+
+	newCfg := func(dedicated bool, selector map[string]string) Config {
+		return Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: dedicated, NodeSelector: selector},
+			NodeGroups: map[string]NodeGroup{
+				"storage": {Instance: "m7g.large", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+				"user":    {Instance: "m7i.xlarge"},
+			},
+		}
+	}
+
+	t.Run("dedicated nodes injects disk label onto storage group only", func(t *testing.T) {
+		cfg := newCfg(true, nil)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if got := vars.NodeGroups["storage"].Labels[diskLabel]; got != "true" {
+			t.Errorf("storage group %s = %q, want %q", diskLabel, got, "true")
+		}
+		if _, ok := vars.NodeGroups["user"].Labels[diskLabel]; ok {
+			t.Errorf("user group must not get %s", diskLabel)
+		}
+	})
+
+	t.Run("disk label not injected when dedicated_nodes is false", func(t *testing.T) {
+		cfg := newCfg(false, nil)
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if _, ok := vars.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Errorf("no group should get %s when dedicated_nodes is false", diskLabel)
+		}
+	})
+
+	t.Run("custom NodeSelector identifies the storage group", func(t *testing.T) {
+		cfg := Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: true, NodeSelector: map[string]string{"pool": "lh"}},
+			NodeGroups: map[string]NodeGroup{
+				"storage": {Instance: "m7g.large", Labels: map[string]string{"pool": "lh"}},
+				"user":    {Instance: "m7i.xlarge", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+			},
+		}
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		if got := vars.NodeGroups["storage"].Labels[diskLabel]; got != "true" {
+			t.Errorf("custom-selector storage group %s = %q, want %q", diskLabel, got, "true")
+		}
+		if _, ok := vars.NodeGroups["user"].Labels[diskLabel]; ok {
+			t.Error("group not matching the custom selector must not get the disk label")
+		}
+	})
+
+	t.Run("labels multiple storage groups, idempotent, literal wire value", func(t *testing.T) {
+		cfg := Config{
+			Region:            "us-west-2",
+			KubernetesVersion: "1.34",
+			Longhorn:          &longhorn.Config{DedicatedNodes: true},
+			NodeGroups: map[string]NodeGroup{
+				"storage-a": {Instance: "m7g.large", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
+				// already carries the disk label — injection must be idempotent
+				"storage-b": {Instance: "m7g.large", Labels: map[string]string{
+					longhorn.NodeStorageLabel:              "true",
+					"node.longhorn.io/create-default-disk": "true",
+				}},
+			},
+		}
+		vars, err := cfg.toTFVars("test")
+		if err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		// literal wire value, both groups
+		for _, g := range []string{"storage-a", "storage-b"} {
+			if vars.NodeGroups[g].Labels["node.longhorn.io/create-default-disk"] != "true" {
+				t.Errorf("%s missing create-default-disk=true, got %v", g, vars.NodeGroups[g].Labels)
+			}
+		}
+	})
+
+	t.Run("does not mutate the caller's node-group labels", func(t *testing.T) {
+		cfg := newCfg(true, nil)
+		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Fatal("precondition: input already has the disk label")
+		}
+		if _, err := cfg.toTFVars("test"); err != nil {
+			t.Fatalf("toTFVars: %v", err)
+		}
+		// the original config's label map must be untouched (no aliasing)
+		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
+			t.Error("toTFVars mutated the caller's NodeGroup.Labels map")
+		}
+	})
+}
