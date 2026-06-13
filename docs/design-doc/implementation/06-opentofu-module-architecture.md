@@ -1,686 +1,118 @@
 # OpenTofu Module Architecture
 
-## 6.1 Overview
+## 6.1 Scope
 
-NIC uses **OpenTofu/Terraform modules** for infrastructure provisioning. The Go CLI orchestrates OpenTofu execution via the terraform-exec library, while actual infrastructure provisioning is handled by HCL-based modules that leverage the Terraform provider ecosystem.
+This document describes how OpenTofu is used inside NIC. **OpenTofu is not used by every provider.** Only the AWS cluster provider uses tofu today; Hetzner shells out to the `hetzner-k3s` binary, the local provider relies on Kind (driven from the Makefile), and the `existing` provider does not provision any infrastructure at all.
 
-## 6.2 Module Structure
+For the contract between CLI and provider implementations - which is what actually defines NIC's architecture - see the `Provider` interface in `pkg/provider/provider.go` and [System Overview](../architecture/02-system-overview.md).
 
-### Repository Layout
+## 6.2 Repository Layout (Real)
+
+There is **no root-level `terraform/` directory**. AWS-specific templates live inside the AWS provider package:
 
 ```
-nebari-infrastructure-core/
-├── cmd/nic/               # Go CLI (orchestration layer)
-├── pkg/
-│   ├── tofu/             # terraform-exec wrapper with OpenTelemetry
-│   ├── config/           # Parse config.yaml
-│   ├── kubernetes/       # K8s health checks
-│   └── telemetry/        # OpenTelemetry setup
-├── terraform/            # OpenTofu/Terraform modules
-│   ├── main.tf           # Root module
-│   ├── variables.tf      # Input variables from config.yaml
-│   ├── outputs.tf        # Outputs (kubeconfig, URLs, etc.)
-│   ├── backend.tf.tmpl   # State backend configuration template
-│   ├── providers.tf      # Provider configurations
-│   └── modules/
-│       ├── aws/          # AWS-specific modules
-│       │   ├── vpc/
-│       │   ├── eks/
-│       │   └── efs/
-│       ├── gcp/          # GCP-specific modules
-│       │   ├── vpc/
-│       │   ├── gke/
-│       │   └── filestore/
-│       ├── azure/        # Azure-specific modules
-│       │   ├── vnet/
-│       │   ├── aks/
-│       │   └── azure-files/
-│       ├── local/        # Local K3s module
-│       │   └── k3s/
-│       ├── kubernetes/   # K8s bootstrap (namespaces, RBAC, etc.)
-│       ├── argocd/       # ArgoCD Helm deployment
-│       └── foundational-apps/  # ArgoCD Applications
-└── go.mod
+pkg/provider/aws/
+├── config.go                          # aws.Config struct (yaml/json tags)
+├── provider.go                        # Implements provider.Provider
+├── state.go                           # S3 state-bucket lifecycle (ensure / destroy)
+├── tofu.go                            # Builds tfvars and invokes pkg/tofu.Setup
+├── k8s.go                             # Shared kube-client construction
+├── kubeconfig.go                      # GetKubeconfig implementation
+├── efs.go                             # EFS storage-class wiring
+├── longhorn.go                        # Longhorn storage installation
+├── aws_load_balancer_controller.go    # AWS Load Balancer Controller install
+├── cleanup.go / cleanup_k8s.go        # Pre-destroy resource cleanup
+├── version.go                         # Provider-version probe
+└── templates/                         # Embedded via go:embed
+    ├── main.tf                        # Calls upstream nebari-dev/eks-cluster module
+    ├── variables.tf                   # tfvars input schema
+    ├── outputs.tf                     # Cluster name, endpoint, OIDC issuer, etc.
+    ├── provider.tf                    # AWS provider config
+    └── backend.tf                     # S3 backend with use_lockfile = true
 ```
 
-### How It Works
+Other cluster providers do not use OpenTofu and therefore have no `templates/` directory:
 
-1. **User runs**: `nic deploy -f config.yaml`
-2. **Go CLI (`cmd/nic`)**:
-   - Parses `config.yaml` into Go structs
-   - Converts config to Terraform variables JSON
-   - Invokes terraform-exec to run `tofu init`, `tofu plan`, `tofu apply`
-3. **OpenTofu**:
-   - Reads variables JSON
-   - Executes `terraform/main.tf` root module
-   - Provisions cloud infrastructure via provider plugins
-   - Updates state file in configured backend
-4. **Go CLI resumes**:
-   - Waits for Kubernetes cluster readiness
-   - Waits for ArgoCD and foundational software
-   - Reports deployment success
+```
+pkg/provider/hetzner/      # Wraps the hetzner-k3s binary
+pkg/provider/local/        # Kind stub (Makefile creates the cluster)
+pkg/provider/existing/     # Adopts an existing kubeconfig
+pkg/provider/gcp/          # Stub: emits a "(stub)" status message and returns nil
+pkg/provider/azure/        # Stub: emits a "(stub)" status message and returns nil
+```
 
-## 6.3 Root Module Design
+## 6.3 AWS Root Module
 
-The root module (`terraform/main.tf`) contains conditional logic to provision the correct cloud resources based on the `provider` variable:
+The AWS root module is intentionally thin. It is a single Terraform file that calls the upstream community module `nebari-dev/eks-cluster/aws`:
 
 ```hcl
-terraform {
-  required_version = ">= 1.6"
+# pkg/provider/aws/templates/main.tf
+module "eks_cluster" {
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.4.0"
 
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-  }
-}
-
-# Provider selection based on var.provider
-locals {
-  is_aws   = var.provider == "aws"
-  is_gcp   = var.provider == "gcp"
-  is_azure = var.provider == "azure"
-  is_local = var.provider == "local"
-}
-
-# AWS Infrastructure (only created if provider=aws)
-module "aws_vpc" {
-  count  = local.is_aws ? 1 : 0
-  source = "./modules/aws/vpc"
-
-  name               = var.cluster_name
-  cidr               = var.aws_vpc_cidr
-  availability_zones = var.aws_availability_zones
-  tags               = var.tags
-}
-
-module "aws_eks" {
-  count  = local.is_aws ? 1 : 0
-  source = "./modules/aws/eks"
-
-  cluster_name       = var.cluster_name
-  kubernetes_version = var.kubernetes_version
-  vpc_id             = module.aws_vpc[0].vpc_id
-  subnet_ids         = module.aws_vpc[0].private_subnet_ids
-  node_pools         = var.node_pools
-  tags               = var.tags
-}
-
-# GCP Infrastructure (only created if provider=gcp)
-module "gcp_vpc" {
-  count  = local.is_gcp ? 1 : 0
-  source = "./modules/gcp/vpc"
-
-  name    = var.cluster_name
-  region  = var.region
-  project = var.gcp_project_id
-}
-
-module "gcp_gke" {
-  count  = local.is_gcp ? 1 : 0
-  source = "./modules/gcp/gke"
-
-  cluster_name       = var.cluster_name
-  kubernetes_version = var.kubernetes_version
-  region             = var.region
-  project            = var.gcp_project_id
-  network            = module.gcp_vpc[0].network_name
-  subnetwork         = module.gcp_vpc[0].subnetwork_name
-  node_pools         = var.node_pools
-}
-
-# Azure, Local, Kubernetes bootstrap, ArgoCD modules...
-# (Similar pattern for other providers)
-```
-
-## 6.4 AWS EKS Module Example
-
-Shows how infrastructure is defined in HCL:
-
-**terraform/modules/aws/eks/main.tf:**
-
-```hcl
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-# EKS Cluster IAM Role
-resource "aws_iam_role" "cluster" {
-  name = "${var.cluster_name}-cluster-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "eks.amazonaws.com"
-      }
-    }]
-  })
-
-  tags = var.tags
-}
-
-resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSClusterPolicy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.cluster.name
-}
-
-# EKS Cluster
-resource "aws_eks_cluster" "main" {
-  name     = var.cluster_name
-  version  = var.kubernetes_version
-  role_arn = aws_iam_role.cluster.arn
-
-  vpc_config {
-    subnet_ids              = var.subnet_ids
-    endpoint_private_access = true
-    endpoint_public_access  = true
-  }
-
-  enabled_cluster_log_types = [
-    "api",
-    "audit",
-    "authenticator",
-    "controllerManager",
-    "scheduler"
-  ]
-
-  tags = var.tags
-
-  depends_on = [
-    aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy
-  ]
-}
-
-# Node Groups
-resource "aws_eks_node_group" "node_pools" {
-  for_each = { for np in var.node_pools : np.name => np }
-
-  cluster_name    = aws_eks_cluster.main.name
-  node_group_name = each.value.name
-  node_role_arn   = aws_iam_role.node_group.arn
-  subnet_ids      = var.subnet_ids
-
-  instance_types = [each.value.instance_type]
-
-  scaling_config {
-    desired_size = each.value.min_size
-    min_size     = each.value.min_size
-    max_size     = each.value.max_size
-  }
-
-  labels = each.value.labels
-
-  dynamic "taint" {
-    for_each = each.value.taints
-    content {
-      key    = taint.value.key
-      value  = taint.value.value
-      effect = taint.value.effect
-    }
-  }
-
-  tags = merge(var.tags, {
-    "NodePool" = each.value.name
-  })
+  project_name                  = var.project_name
+  tags                          = var.tags
+  availability_zones            = var.availability_zones
+  create_vpc                    = var.create_vpc
+  vpc_cidr_block                = var.vpc_cidr_block
+  kubernetes_version            = var.kubernetes_version
+  endpoint_private_access       = var.endpoint_private_access
+  endpoint_public_access        = var.endpoint_public_access
+  node_groups                   = var.node_groups
+  efs_enabled                   = var.efs_enabled
+  efs_performance_mode          = var.efs_performance_mode
+  efs_throughput_mode           = var.efs_throughput_mode
+  efs_encrypted                 = var.efs_encrypted
+  # ... see real templates/main.tf for the full set
 }
 ```
 
-**terraform/modules/aws/eks/outputs.tf:**
-
-```hcl
-output "cluster_id" {
-  description = "EKS cluster ID"
-  value       = aws_eks_cluster.main.id
-}
-
-output "cluster_endpoint" {
-  description = "EKS cluster endpoint"
-  value       = aws_eks_cluster.main.endpoint
-}
-
-output "cluster_ca_certificate" {
-  description = "EKS cluster CA certificate"
-  value       = base64decode(aws_eks_cluster.main.certificate_authority[0].data)
-  sensitive   = true
-}
-
-output "cluster_oidc_issuer_url" {
-  description = "OIDC issuer URL for IRSA"
-  value       = aws_eks_cluster.main.identity[0].oidc[0].issuer
-}
-```
-
-## 6.5 Community Module Integration
-
-**Major Advantage**: NIC can leverage battle-tested community modules instead of writing everything from scratch.
-
-### Example: Using terraform-aws-modules/eks
-
-```hcl
-# terraform/modules/aws/eks/main.tf (using community module)
-module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.0"
-
-  cluster_name    = var.cluster_name
-  cluster_version = var.kubernetes_version
-
-  vpc_id     = var.vpc_id
-  subnet_ids = var.subnet_ids
-
-  # EKS Managed Node Groups
-  eks_managed_node_groups = {
-    for np in var.node_pools :
-    np.name => {
-      min_size       = np.min_size
-      max_size       = np.max_size
-      desired_size   = np.min_size
-      instance_types = [np.instance_type]
-      labels         = np.labels
-      taints         = np.taints
-    }
-  }
-
-  # Enable IRSA
-  enable_irsa = true
-
-  # Cluster addons
-  cluster_addons = {
-    coredns = {
-      most_recent = true
-    }
-    kube-proxy = {
-      most_recent = true
-    }
-    vpc-cni = {
-      most_recent = true
-    }
-    aws-ebs-csi-driver = {
-      most_recent = true
-    }
-  }
-
-  tags = var.tags
-}
-```
-
-### Benefits of Community Modules
-
-- **Less code**: Reuse proven modules instead of writing 100s of lines of HCL
-- **Best practices**: Community modules encode AWS/GCP/Azure best practices
-- **Faster development**: Don't reinvent the wheel for common patterns
-- **Battle-tested**: Modules used by thousands of companies, bugs are found quickly
-- **Maintained**: Active community maintenance and updates
-
-### Trade-offs of Community Modules
-
-- **Less control**: Module abstractions may hide details you want to configure
-- **Dependency**: Reliant on module maintainer to fix bugs and add features
-- **Version tracking**: Must monitor and update module versions
-- **Learning curve**: Need to understand module's abstraction layer
-
-## 6.6 Kubernetes Bootstrap Module
-
-Handles post-cluster setup that's identical across providers:
-
-**terraform/modules/kubernetes/main.tf:**
-
-```hcl
-terraform {
-  required_providers {
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-  }
-}
-
-# Namespaces for foundational software
-resource "kubernetes_namespace_v1" "namespaces" {
-  for_each = toset(var.namespaces)
-
-  metadata {
-    name = each.value
-    labels = {
-      "managed-by" = "nic"
-      "nic.nebari.dev/namespace" = "true"
-    }
-  }
-}
-
-# Storage Classes (example for AWS)
-resource "kubernetes_storage_class_v1" "gp3" {
-  count = var.storage_class_gp3_enabled ? 1 : 0
-
-  metadata {
-    name = "gp3"
-    annotations = {
-      "storageclass.kubernetes.io/is-default-class" = "true"
-    }
-  }
-
-  storage_provisioner = "ebs.csi.aws.com"
-  reclaim_policy      = "Delete"
-  volume_binding_mode = "WaitForFirstConsumer"
-
-  parameters = {
-    type      = "gp3"
-    encrypted = "true"
-  }
-}
-
-# Priority Classes
-resource "kubernetes_priority_class_v1" "high_priority" {
-  metadata {
-    name = "high-priority"
-  }
-
-  value          = 1000
-  global_default = false
-  description    = "High priority for critical workloads"
-}
-
-# Network Policies (deny all by default, allow within namespace)
-resource "kubernetes_network_policy_v1" "deny_all" {
-  for_each = toset(var.namespaces)
-
-  metadata {
-    name      = "deny-all"
-    namespace = each.value
-  }
-
-  spec {
-    pod_selector {}
-    policy_types = ["Ingress", "Egress"]
-  }
-
-  depends_on = [kubernetes_namespace_v1.namespaces]
-}
-
-resource "kubernetes_network_policy_v1" "allow_same_namespace" {
-  for_each = toset(var.namespaces)
-
-  metadata {
-    name      = "allow-same-namespace"
-    namespace = each.value
-  }
-
-  spec {
-    pod_selector {}
-    policy_types = ["Ingress", "Egress"]
-
-    ingress {
-      from {
-        pod_selector {}
-      }
-    }
-
-    egress {
-      to {
-        pod_selector {}
-      }
-    }
-  }
-
-  depends_on = [kubernetes_namespace_v1.namespaces]
-}
-```
-
-## 6.7 ArgoCD Deployment Module
-
-ArgoCD is deployed via Helm, then used to deploy all other foundational software:
-
-**terraform/modules/argocd/main.tf:**
-
-```hcl
-terraform {
-  required_providers {
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-  }
-}
-
-resource "kubernetes_namespace_v1" "argocd" {
-  metadata {
-    name = "argocd"
-    labels = {
-      "managed-by" = "nic"
-    }
-  }
-}
-
-resource "helm_release" "argocd" {
-  name       = "argocd"
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argo-cd"
-  version    = var.argocd_version
-  namespace  = kubernetes_namespace_v1.argocd.metadata[0].name
-
-  values = [
-    yamlencode({
-      server = {
-        ingress = {
-          enabled = true
-          hosts   = ["argocd.${var.domain}"]
-        }
-      }
-      configs = {
-        cm = {
-          "admin.enabled" = "false"
-          "oidc.config"   = var.oidc_config
-        }
-      }
-    })
-  ]
-
-  depends_on = [kubernetes_namespace_v1.argocd]
-}
-
-# ArgoCD Applications for foundational software
-resource "kubernetes_manifest" "argocd_app_cert_manager" {
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "cert-manager"
-      namespace = "argocd"
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = var.foundational_software_repo
-        targetRevision = var.foundational_software_version
-        path           = "cert-manager"
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = "cert-manager"
-      }
-      syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
-      }
-    }
-  }
-
-  depends_on = [helm_release.argocd]
-}
-
-# Additional ArgoCD Applications for LGTM stack, Keycloak, Envoy Gateway, etc.
-# (Similar pattern for each foundational software component)
-```
-
-## 6.8 Variables and Configuration
-
-**terraform/variables.tf:**
-
-```hcl
-variable "provider" {
-  description = "Cloud provider: aws, gcp, azure, or local"
-  type        = string
-
-  validation {
-    condition     = contains(["aws", "gcp", "azure", "local"], var.provider)
-    error_message = "Provider must be one of: aws, gcp, azure, local"
-  }
-}
-
-variable "cluster_name" {
-  description = "Name of the Kubernetes cluster"
-  type        = string
-}
-
-variable "region" {
-  description = "Cloud provider region"
-  type        = string
-}
-
-variable "kubernetes_version" {
-  description = "Kubernetes version"
-  type        = string
-  default     = "1.29"
-}
-
-variable "node_pools" {
-  description = "Node pool configurations"
-  type = list(object({
-    name          = string
-    instance_type = string
-    min_size      = number
-    max_size      = number
-    labels        = optional(map(string), {})
-    taints = optional(list(object({
-      key    = string
-      value  = string
-      effect = string
-    })), [])
-  }))
-}
-
-variable "domain" {
-  description = "Base domain for the cluster"
-  type        = string
-}
-
-variable "tags" {
-  description = "Tags to apply to all resources"
-  type        = map(string)
-  default     = {}
-}
-
-# AWS-specific variables
-variable "aws_vpc_cidr" {
-  description = "CIDR block for AWS VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-
-variable "aws_availability_zones" {
-  description = "Availability zones for AWS"
-  type        = list(string)
-  default     = []
-}
-
-# GCP-specific variables
-variable "gcp_project_id" {
-  description = "GCP project ID"
-  type        = string
-  default     = ""
-}
-
-# Azure-specific variables
-variable "azure_resource_group" {
-  description = "Azure resource group name"
-  type        = string
-  default     = ""
-}
-```
-
-## 6.9 Outputs
-
-**terraform/outputs.tf:**
-
-```hcl
-output "kubeconfig" {
-  description = "Kubeconfig for cluster access"
-  value = coalesce(
-    try(module.aws_eks[0].kubeconfig, null),
-    try(module.gcp_gke[0].kubeconfig, null),
-    try(module.azure_aks[0].kubeconfig, null),
-    try(module.local_k3s[0].kubeconfig, null)
-  )
-  sensitive = true
-}
-
-output "cluster_endpoint" {
-  description = "Kubernetes API server endpoint"
-  value = coalesce(
-    try(module.aws_eks[0].cluster_endpoint, null),
-    try(module.gcp_gke[0].cluster_endpoint, null),
-    try(module.azure_aks[0].cluster_endpoint, null),
-    try(module.local_k3s[0].cluster_endpoint, null)
-  )
-}
-
-output "argocd_url" {
-  description = "ArgoCD dashboard URL"
-  value       = "https://argocd.${var.domain}"
-}
-
-output "grafana_url" {
-  description = "Grafana dashboard URL"
-  value       = "https://grafana.${var.domain}"
-}
-
-output "keycloak_url" {
-  description = "Keycloak admin console URL"
-  value       = "https://keycloak.${var.domain}"
-}
-```
-
----
-
-## Summary
-
-The OpenTofu module architecture provides:
-
-- **Modular design**: Separate modules for each cloud provider and component
-- **Community leverage**: Ability to use battle-tested Terraform modules
-- **Standard tooling**: Compatible with terraform-docs, tfsec, Atlantis, etc.
-- **Familiar patterns**: HCL syntax known to most infrastructure engineers
-- **Declarative infrastructure**: Terraform's plan/apply workflow for safe changes
-
-See [Terraform-Exec Integration](08-terraform-exec-integration.md) for how the Go CLI orchestrates these modules.
+The variables file (`templates/variables.tf`) declares the input schema (project name, availability zones, VPC, EKS version, node groups, EFS settings, etc.) and the outputs file (`templates/outputs.tf`) exposes the cluster name, API endpoint, certificate authority data, OIDC issuer URL, OIDC provider ARN, VPC ID, private subnet IDs, and EFS file system ID.
+
+The backend is configured for S3 with native lockfile-based locking (`use_lockfile = true`). Bucket name and key are supplied via `-backend-config` at `tofu init` time. See [State Management](../architecture/05-state-management.md) for bucket naming and lifecycle.
+
+## 6.4 Embedding and Extraction
+
+Templates are embedded into the NIC binary via Go's `embed.FS` declared inside `pkg/provider/aws/`. At deploy time, the AWS provider:
+
+1. Constructs a `map[string]any` of tfvars from the parsed AWS config (region, project name, node groups, EFS settings, etc.).
+2. Calls `pkg/tofu.Setup(ctx, templatesFS, tfvars)`, which extracts the embedded files into a fresh temp directory, downloads the OpenTofu binary if not cached, writes `terraform.tfvars.json`, and returns a `TerraformExecutor`.
+3. Calls `Init`, `Plan` (or `Apply`/`Destroy`) and lets `pkg/tofu` stream JSON output through the status channel.
+
+There is no in-tree EKS HCL, no in-tree node group resources, and no in-tree IAM HCL beyond what the upstream module provides. The intent is to leverage a battle-tested community module instead of maintaining a parallel implementation.
+
+## 6.5 Non-AWS Providers (Brief)
+
+For completeness, the other providers do not have any `.tf` files:
+
+| Provider | What it actually does |
+|----------|----------------------|
+| Hetzner | Generates a `hetzner-k3s` config file, invokes the binary, parses its output |
+| Local | The provider itself is a thin adapter; the cluster is created by `make localkind-up` (Kind), and NIC's job is the bootstrap that follows |
+| Existing | Reads `kubeconfig` and `context` from config; performs no provisioning |
+| GCP, Azure | Registered, but every method currently returns "not yet implemented" |
+
+If and when GCP/Azure are implemented, each provider package will decide independently whether to use OpenTofu (e.g., with the upstream `terraform-google-modules/kubernetes-engine` module for GKE) or another mechanism. The `Provider` interface is the boundary, not Terraform.
+
+## 6.6 Adding a New Terraform-Backed Provider
+
+The pattern, if you choose tofu for a new provider:
+
+1. Create `pkg/provider/<name>/` with `config.go`, `provider.go`, and `tofu.go`.
+2. Add a `templates/` directory inside the package with `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`, and (optionally) `backend.tf`. Embed it via `go:embed`.
+3. Implement the `provider.Provider` interface. `Deploy` should build a tfvars map, call `pkg/tofu.Setup`, and invoke `Init`/`Plan`/`Apply` (or `Plan` only when `DeployOptions.DryRun` is true).
+4. Implement `InfraSettings(cfg)` to return provider-shaped capabilities (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, etc.). Do not add `switch` statements on provider name elsewhere in the codebase.
+5. Register the provider in `cmd/nic/main.go` via `reg.ClusterProviders.Register(ctx, "<name>", New())`.
+6. Add an example config under `examples/` and validate against `pkg/config`.
+
+## 6.7 Anti-Patterns to Avoid
+
+These came up during the previous design-doc audit and are not how NIC actually works:
+
+- **Root `terraform/` directory with modules per provider.** Each provider owns its templates, embedded in the package.
+- **A single root tofu module with `local.is_aws / is_gcp / is_azure` conditionals.** There is no single module; each provider has its own.
+- **OpenTofu installing ArgoCD via `helm_release`.** NIC installs ArgoCD via the embedded Helm Go SDK (`pkg/helm`).
+- **OpenTofu applying ArgoCD `Application` manifests via the Terraform kubernetes provider.** ArgoCD manifests are rendered into a Git repository by `pkg/argocd` and synced by ArgoCD.
+
+See [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md) for the planned direction (out-of-tree gRPC plugins per provider kind), which makes the per-provider tool choice even more explicit.

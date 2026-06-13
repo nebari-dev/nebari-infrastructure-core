@@ -1,345 +1,122 @@
-# State Management with Terraform State
+# State Management
 
 ## 5.1 Overview
 
-NIC uses **Terraform state files** to track infrastructure. The state file records what resources Terraform has created and their current configuration, enabling drift detection and safe updates.
+State management in NIC is **provider-specific**. There is no single state mechanism that spans all cluster providers.
 
-## 5.2 Terraform State Backends
+| Provider | State Mechanism |
+|----------|-----------------|
+| AWS | OpenTofu state in S3, with native lockfile-based locking |
+| Hetzner | `hetzner-k3s` writes a cluster state file managed by that tool |
+| Local (Kind) | Kind manages its own cluster lifecycle; no NIC-owned state |
+| Existing | No state; NIC adopts a cluster by `kubeconfig`/`context` |
 
-NIC generates backend configuration based on the cloud provider and user preferences.
+This document focuses on the **AWS provider**, which is the only provider that uses OpenTofu today.
 
-### AWS (S3 + DynamoDB for Locking)
+## 5.2 AWS State Backend
+
+The AWS provider uses the standard Terraform S3 backend with native lockfile-based locking (introduced in OpenTofu/Terraform 1.10):
 
 ```hcl
+# pkg/provider/aws/templates/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "nebari-prod-terraform-state"
-    key            = "nic/terraform.tfstate"
-    region         = "us-west-2"
-    encrypt        = true
-    dynamodb_table = "nebari-prod-terraform-locks"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 ```
 
-**Setup Requirements**:
-1. Create S3 bucket for state storage
-2. Enable versioning on S3 bucket
-3. Create DynamoDB table for locking (primary key: `LockID` string)
-4. Configure appropriate IAM permissions
+Bucket and key are not hard-coded; they are populated via `-backend-config` flags at `tofu init` time from values computed in `pkg/provider/aws/state.go`.
 
-### GCP (Cloud Storage)
+### Bucket Naming
 
-```hcl
-terraform {
-  backend "gcs" {
-    bucket = "nebari-prod-terraform-state"
-    prefix = "nic"
-  }
-}
+The bucket name is deterministic and not user-configurable today:
+
+```
+nic-tfstate-<project_name>-<region>-<8-hex-chars-of-sha256(account_id)>
 ```
 
-**Setup Requirements**:
-1. Create Cloud Storage bucket
-2. Enable object versioning
-3. Configure appropriate IAM permissions
-4. Locking handled automatically by GCS
+For example, `nic-tfstate-my-nebari-us-west-2-1a2b3c4d`. The account ID is hashed rather than embedded directly. The total length is checked against the 63-character S3 bucket name limit; project names that would overflow it return an error.
 
-### Azure (Blob Storage)
+The state object key is `<project_name>/terraform.tfstate`.
 
-```hcl
-terraform {
-  backend "azurerm" {
-    storage_account_name = "nebaristate"
-    container_name       = "tfstate"
-    key                  = "nic/terraform.tfstate"
-  }
-}
+### Bucket Lifecycle
+
+NIC creates the bucket automatically on first deploy (`ensureStateBucket` in `pkg/provider/aws/state.go`) with:
+
+- Versioning enabled
+- Public access fully blocked (`PutPublicAccessBlock`)
+- SSE enabled at the backend level (`encrypt = true` in `backend.tf`)
+
+On `nic destroy`, the bucket and all object versions are deleted (`destroyStateBucket`). The bucket lifecycle is owned by NIC; there is no separate "setup" step the user runs first.
+
+### Locking
+
+`use_lockfile = true` makes OpenTofu acquire the state lock by writing a `.tflock` object to S3 next to the state file. This replaces the older pattern of using a DynamoDB table for locks. NIC does **not** create or manage a DynamoDB table; if you see references to one anywhere, that is a documentation bug.
+
+Lock conflicts surface as an error from `tofu apply` like:
+
 ```
-
-**Setup Requirements**:
-1. Create Azure Storage Account
-2. Create blob container
-3. Configure appropriate RBAC permissions
-4. Locking handled via blob lease mechanism
-
-### Local (Development Only)
-
-```hcl
-terraform {
-  backend "local" {
-    path = "terraform.tfstate"
-  }
-}
-```
-
-**Not Recommended for Production**:
-- No team collaboration support
-- No state locking across multiple users
-- State file lost if local machine fails
-
-## 5.3 State Locking
-
-Terraform handles locking automatically to prevent concurrent modifications:
-
-| Backend | Locking Mechanism | Configuration Required |
-|---------|------------------|----------------------|
-| **S3** | DynamoDB table | Create table with `LockID` primary key |
-| **GCS** | Object generation metadata | None (automatic) |
-| **Azure Blob** | Blob lease | None (automatic) |
-| **Local** | File locking | None (automatic) |
-
-### Lock Behavior
-
-When `nic deploy` runs:
-1. Terraform acquires lock before `terraform plan`
-2. Lock prevents concurrent modifications
-3. Lock released after `terraform apply` completes
-4. If NIC crashes, lock auto-expires (configurable timeout)
-
-### Lock Conflicts
-
-```bash
-$ nic deploy -f config.yaml
-
 Error: Error acquiring the state lock
-
 Lock Info:
-  ID:        a1b2c3d4-5678-90ef-ghij-klmnopqrstuv
-  Path:      nebari-prod-terraform-state/nic/terraform.tfstate
+  ID:        ...
+  Path:      <bucket>/<project>/terraform.tfstate
   Operation: OperationTypeApply
-  Who:       user@hostname
-  Version:   1.6.0
-  Created:   2025-01-14 15:30:00 UTC
-  Info:
-
-Another operation is currently holding the state lock.
-If you're sure no other operation is running, you can force unlock:
-  nic unlock -f config.yaml
 ```
 
-## 5.4 Drift Detection
+Today there is no `nic unlock` command; recovery from a stuck lock requires manual intervention via `tofu force-unlock` or by deleting the `.tflock` S3 object. Adding `nic unlock` is tracked in [issue #64](https://github.com/nebari-dev/nebari-infrastructure-core/issues/64); Ctrl-C-leaves-state-locked is tracked in [issue #63](https://github.com/nebari-dev/nebari-infrastructure-core/issues/63).
 
-Drift detection compares state file with actual cloud infrastructure via `terraform plan`:
+## 5.3 Drift Detection
 
-```go
-func (p *TofuProvider) DetectDrift(ctx context.Context) (*DriftReport, error) {
-    ctx, span := tracer.Start(ctx, "TofuProvider.DetectDrift")
-    defer span.End()
-
-    slog.InfoContext(ctx, "detecting infrastructure drift")
-
-    // terraform plan compares state file with actual cloud state
-    hasChanges, err := p.executor.Plan(ctx, []string{"terraform.tfvars"})
-    if err != nil {
-        return nil, fmt.Errorf("running terraform plan: %w", err)
-    }
-
-    if !hasChanges {
-        slog.InfoContext(ctx, "no drift detected")
-        return &DriftReport{DriftsDetected: 0}, nil
-    }
-
-    // terraform-exec provides structured plan output
-    plan, err := p.executor.ShowPlanFile(ctx, "tfplan")
-    if err != nil {
-        return nil, fmt.Errorf("parsing plan: %w", err)
-    }
-
-    // Parse changes into drift report
-    drifts := []Drift{}
-    for _, change := range plan.ResourceChanges {
-        if change.Change.Actions.Delete() || change.Change.Actions.Update() {
-            drifts = append(drifts, Drift{
-                Resource: change.Address,
-                Type:     change.Type,
-                Action:   change.Change.Actions.String(),
-            })
-        }
-    }
-
-    slog.WarnContext(ctx, "infrastructure drift detected", "drift_count", len(drifts))
-
-    return &DriftReport{
-        DriftsDetected: len(drifts),
-        Drifts:         drifts,
-    }, nil
-}
-```
-
-### Drift Scenarios
-
-**Scenario 1: Resource Deleted Outside Terraform**
-```
-Plan: 1 to add, 0 to change, 0 to destroy
-
-  # aws_eks_node_group.workers will be created
-  + resource "aws_eks_node_group" "workers" {
-      + arn           = (known after apply)
-      + cluster_name  = "nebari-prod"
-      ...
-    }
-```
-
-**Scenario 2: Resource Modified Outside Terraform**
-```
-Plan: 0 to add, 1 to change, 0 to destroy
-
-  # aws_eks_node_group.workers will be updated in-place
-  ~ resource "aws_eks_node_group" "workers" {
-      ~ desired_size = 3 -> 5
-        ...
-    }
-```
-
-**Scenario 3: No Drift**
-```
-No changes. Your infrastructure matches the configuration.
-```
-
-## 5.5 State Operations
-
-NIC exposes Terraform state commands:
+Drift detection is exposed via `--dry-run`:
 
 ```bash
-# List resources in state
-nic state list
-
-# Show specific resource
-nic state show aws_eks_cluster.main
-
-# Remove resource from state (doesn't destroy infrastructure)
-nic state rm aws_eks_node_group.old_pool
-
-# Move resource to different address
-nic state mv aws_eks_node_group.workers aws_eks_node_group.renamed
+nic deploy -f config.yaml --dry-run
 ```
 
-## 5.6 State Migration
+Under the hood, this calls `Provider.Deploy(ctx, ..., DeployOptions{DryRun: true})`. The AWS provider implementation runs `tofu plan` and streams structured plan output through the status channel; the CLI translates it into a human-readable summary.
 
-When changing backend configuration:
+There is no separate `nic status`, `nic plan`, or `nic state` subcommand today. Drift information is communicated through `--dry-run`.
 
-```bash
-# Old backend configuration
-terraform {
-  backend "local" {
-    path = "terraform.tfstate"
-  }
-}
+## 5.4 State File Security
 
-# New backend configuration
-terraform {
-  backend "s3" {
-    bucket = "nebari-prod-terraform-state"
-    key    = "nic/terraform.tfstate"
-  }
-}
+Terraform state files contain sensitive material (cluster credentials, certificate authority data, etc.). NIC mitigates this via:
 
-# NIC handles migration
-$ nic deploy -f config.yaml
+- **Encryption at rest**: SSE enabled (`encrypt = true`) on the S3 backend
+- **Public-access block**: NIC sets `BlockPublicAcls`, `BlockPublicPolicy`, `IgnorePublicAcls`, and `RestrictPublicBuckets` on the state bucket
+- **IAM**: bucket access is controlled by the IAM identity NIC runs under; restrict it to the smallest set of principals that need to operate the cluster
+- **Versioning**: enabled by default so accidental state corruption can be recovered
 
-Detected backend configuration change.
-Migrating state from local to s3...
+**Operator best practices:**
 
-Terraform will perform the following actions:
-
-  Copying state from "local" backend to "s3" backend.
-
-Do you want to copy existing state to the new backend?
-  Enter a value: yes
-
-Successfully migrated state to new backend.
-```
-
-## 5.7 State File Security
-
-### Encryption at Rest
-
-- **S3**: Enable bucket encryption (SSE-S3 or SSE-KMS)
-- **GCS**: Enable bucket encryption (Google-managed or customer-managed keys)
-- **Azure Blob**: Enable storage account encryption
-
-### Access Control
-
-- **S3**: IAM policies restricting bucket access
-- **GCS**: IAM policies for Cloud Storage
-- **Azure Blob**: RBAC for storage account access
-
-### Sensitive Data in State
-
-Terraform state files contain **sensitive data**:
-- Kubernetes cluster credentials
-- Database passwords
-- API keys
-- Certificate private keys
-
-**Best Practices**:
 1. Never commit state files to version control
-2. Use encrypted remote backends
-3. Restrict state file access via IAM/RBAC
-4. Enable state file versioning for recovery
-5. Regularly rotate credentials stored in state
+2. Restrict state-bucket access to a small operator group
+3. Rotate credentials (e.g., Keycloak admin password) after they appear in plan output
 
-## 5.8 State Backend Setup
+## 5.5 Working Directory
 
-NIC can automatically create state backend resources:
+`pkg/tofu.Setup` creates a fresh temporary working directory for each NIC invocation:
 
-```bash
-# Initialize state backend (creates S3 bucket, DynamoDB table, etc.)
-nic init-backend -f config.yaml
+1. Allocates a temp directory via `afero.TempDir(appFs, "", "nic-tofu")`
+2. Walks the embedded `templates/` filesystem and copies each file into the working dir
+3. Downloads (or reuses, from `~/.cache/nic/tofu/`) the OpenTofu binary and writes it into the working dir
+4. Sets `TF_PLUGIN_CACHE_DIR` to `~/.cache/nic/tofu/plugins` so provider plugins are reused across runs
+5. Marshals provider-supplied tfvars to `terraform.tfvars.json` in the working dir
+6. Returns a `TerraformExecutor` whose `Cleanup()` method removes the working dir
 
-Creating state backend resources...
-  - S3 Bucket: nebari-prod-terraform-state
-  - DynamoDB Table: nebari-prod-terraform-locks
+There is no `.nic/` directory in the user's home or project root; everything is ephemeral except the binary and plugin caches.
 
-State backend initialized successfully.
-```
+For dry-run scenarios where the remote state bucket might not yet exist, `WriteBackendOverride()` writes a `backend_override.tf.json` that overrides the backend with a local backend for that single run.
 
-Or users can create resources manually and configure in config.yaml:
+## 5.6 Future Work
 
-```yaml
-# config.yaml
-project_name: nebari-prod
-provider: aws
+The following are known gaps and tracked in GitHub issues:
 
-state_backend:
-  type: s3
-  bucket: my-existing-state-bucket
-  key: nebari/terraform.tfstate
-  region: us-west-2
-  dynamodb_table: my-existing-lock-table
-```
+- **`nic unlock` command** ([#64](https://github.com/nebari-dev/nebari-infrastructure-core/issues/64)) - graceful recovery from stuck S3 lockfiles
+- **Ctrl-C cleanup during destroy** ([#63](https://github.com/nebari-dev/nebari-infrastructure-core/issues/63)) - currently can leave state locked
+- **Redundant tofu init / module downloads** ([#241](https://github.com/nebari-dev/nebari-infrastructure-core/issues/241)) - module downloads are repeated unnecessarily because the working dir is ephemeral
+- **`nic state` subcommands** - currently the only way to manipulate state is via the bundled tofu binary directly; first-class state subcommands are not implemented
+- **GCP / Azure backend support** - blocked on those providers being implemented at all
 
-## 5.9 Working Directory Management
-
-OpenTofu requires a working directory with state and modules:
-
-```
-.nic/
-├── terraform/          # Working directory
-│   ├── .terraform/    # Terraform plugins and modules
-│   ├── terraform.tfstate  # State file (if using local backend)
-│   ├── vars.json      # Generated from config.yaml
-│   └── backend.tf     # Generated backend configuration
-```
-
-The Go CLI manages this working directory lifecycle:
-1. Create working directory if not exists
-2. Copy Terraform modules from embedded FS or git clone
-3. Generate `vars.json` from `config.yaml`
-4. Generate `backend.tf` from config
-5. Run `tofu init`, `tofu plan`, `tofu apply`
-6. Cleanup temporary files
-
----
-
-## Summary
-
-NIC uses standard Terraform state management with remote backends, providing:
-
-- **Team collaboration**: State locking prevents concurrent modifications
-- **Drift detection**: `terraform plan` compares state with actual infrastructure
-- **State versioning**: Remote backends support versioning for recovery
-- **Ecosystem compatibility**: Works with Atlantis, Terraform Cloud, and other tools
-
-See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md) for how the Go CLI manages state operations.
+See also [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md).

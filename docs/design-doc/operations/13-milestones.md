@@ -1,120 +1,111 @@
 # Timeline and Milestones
 
-### 12.1 Phase 1: Foundation
+Status legend:
 
-**Goals:**
+- ✅ shipped
+- 🟡 partially shipped
+- ⏳ planned, not started or in progress
 
-- Core NIC CLI with provider abstraction
-- AWS provider implementation
-- Basic testing infrastructure
+The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`). v1.0.0 has not shipped.
 
-**Deliverables:**
+## 13.1 Phase 1: Foundation
 
-- ✅ NIC CLI (`deploy`, `destroy`, `status`, `validate`)
-- ✅ Provider interface and registry
-- ✅ AWS provider (EKS, VPC, EFS, node pools)
-- ✅ Configuration parsing (config.yaml)
-- ✅ Integration tests (kind-based)
+**Goals**: A working `Provider` abstraction, a real cluster provisioner, and the cluster-level bits of state and config.
 
-**Milestone:** Deploy Kubernetes cluster on AWS via NIC
+| Deliverable | Status |
+|-------------|--------|
+| `Provider` interface and `InfraSettings` capability struct (`pkg/provider/provider.go`) | ✅ |
+| Unified provider registry (`pkg/registry.Registry` with `ClusterProviders` + `DNSProviders`) | ✅ |
+| AWS cluster provider (EKS via upstream `nebari-dev/eks-cluster` module, EFS, node groups) | ✅ |
+| Hetzner cluster provider (via `hetzner-k3s` binary) | ✅ |
+| Local cluster provider (Kind stub, driven by `make localkind-up`) | ✅ |
+| `existing` cluster provider (adopt a kubeconfig) | ✅ |
+| GCP cluster provider | ⏳ (registered as stub) |
+| Azure cluster provider | ⏳ (registered as stub) |
+| `pkg/tofu` wrapper with streaming JSON output through the status channel | ✅ |
+| AWS S3 state backend with `use_lockfile = true` and auto-managed bucket lifecycle | ✅ |
+| NIC CLI (`deploy`, `destroy`, `validate`, `kubeconfig`, `version`) | ✅ |
+| `status` / `plan` / `state` / `unlock` subcommands | ⏳ |
+| Integration tests against LocalStack via `make test-integration-local` | ✅ |
+| CI: unit tests + lint + race + coverage upload | ✅ |
 
-### 12.2 Phase 2: Foundational Software
+## 13.2 Phase 2: Foundational Software
 
-**Goals:**
+**Goals**: GitOps bootstrap and the opinionated platform stack.
 
-- ArgoCD deployment via Helm
-- Foundational software repository
-- LGTM stack deployment
-- Keycloak deployment
+| Deliverable | Status |
+|-------------|--------|
+| ArgoCD install via embedded Helm Go SDK (`pkg/helm`) | ✅ |
+| GitOps repo bootstrap (`pkg/argocd`, `pkg/git`) | ✅ |
+| `file://` GitOps repos for local development | ✅ |
+| Cert-manager + cluster-issuers + initial Certificates | ✅ |
+| Envoy Gateway + gateway-config + httproutes | ✅ |
+| PostgreSQL + Keycloak (Codecentric keycloakx chart) | ✅ |
+| MetalLB + metallb-config (conditional on `InfraSettings.NeedsMetalLB`) | ✅ |
+| OpenTelemetry Collector | ✅ |
+| Nebari Landing Page | ✅ |
+| Nebari Operator (Kustomized from `nebari-dev/nebari-operator`) | ✅ |
+| Full LGTM backend (Loki, Grafana, Tempo, Mimir, Promtail) | ⏳ |
 
-**Deliverables:**
+## 13.3 Phase 3: Operator Integration
 
-- ✅ ArgoCD installation in NIC
-- ✅ Foundational software repo structure
-- ✅ ArgoCD applications for all 9 components
-- ✅ Health checks and readiness gates
-- ✅ cert-manager + Let's Encrypt integration
-- ✅ Envoy Gateway + HTTPRoute examples
+**Goals**: Apps integrate via the `NebariApp` CRD.
 
-**Milestone:** Full platform deployed on AWS with all foundational software
+The Nebari Operator is developed out-of-tree at [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). This phase's status from NIC's perspective:
 
-### 12.3 Phase 3: Nebari Operator
+| Deliverable | Status |
+|-------------|--------|
+| Operator deployed by NIC via ArgoCD + Kustomize | ✅ |
+| Operator version pinned in the Kustomize manifest | ✅ |
+| `InfraSettings.KeycloakBasePath` and `HTTPSPort` propagated via Kustomize patches | ✅ |
+| Operator-side reconciliation of `NebariApp` CRs | upstream-owned |
+| Operator-side `SecurityPolicy` and OIDC plumbing | upstream-owned |
+| Grafana dashboard provisioning | ⏳ (depends on LGTM stack) |
 
-**Goals:**
+## 13.4 Phase 4: Multi-Cloud Parity
 
-- Kubernetes operator implementation
-- NebariApplication CRD
-- Integration with Keycloak, Envoy, Grafana
+**Goals**: Make the secondary cluster providers real.
 
-**Deliverables:**
+| Deliverable | Status |
+|-------------|--------|
+| GCP provider (GKE, VPC, Filestore) | ⏳ |
+| Azure provider (AKS, VNet, Azure Files) | ⏳ |
+| Provider parity tests | ⏳ |
+| Multi-cloud CI workflows | ⏳ |
 
-- ✅ Operator scaffolding (controller-runtime)
-- ✅ NebariApplication CRD v1alpha1
-- ✅ Keycloak OAuth client automation
-- ✅ Envoy HTTPRoute automation
-- ✅ cert-manager Certificate automation
-- ✅ Grafana dashboard provisioning
-- ✅ OpenTelemetry ServiceMonitor creation
+Note: [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md) (Proposed, 2026-04-15) re-frames the multi-cloud roadmap. Out-of-tree provider plugins would let GCP, Azure, and third-party providers ship independently. The in-tree path above is the original plan; the plugin path is the proposed direction.
 
-**Milestone:** Deploy sample app (JupyterHub) via NebariApplication CRD with full integration
+## 13.5 Phase 5: Observability
 
-### 12.4 Phase 4: Multi-Cloud
+**Goals**: NIC observes itself, and clusters get a real telemetry backend.
 
-**Goals:**
+| Deliverable | Status |
+|-------------|--------|
+| OpenTelemetry instrumentation in library code | 🟡 (per `CLAUDE.md` exemptions for `pkg/status` and byte/line helpers in `pkg/tofu`; operation-granularity `TerraformExecutor` wrappers tracked as outstanding work) |
+| Status-channel seam between `pkg/` and `cmd/` (`pkg/status`, `cmd/nic/status_handler.go`) | ✅ |
+| OTLP exporter wiring (`OTEL_EXPORTER=otlp`, `OTEL_ENDPOINT=...`) | ✅ |
+| LGTM backend deployed on cluster | ⏳ |
+| Grafana dashboards for NIC operations | ⏳ |
 
-- GCP, Azure, Local providers
-- Provider parity testing
-- Cross-provider consistency
+## 13.6 Phase 6: Production Hardening
 
-**Deliverables:**
+**Goals**: GA-readiness items.
 
-- ✅ GCP provider (GKE, VPC, Filestore)
-- ✅ Azure provider (AKS, VNet, Azure Files)
-- ✅ Local provider (K3s)
-- ✅ Provider parity tests
-- ✅ Multi-cloud CI/CD pipelines
+| Deliverable | Status |
+|-------------|--------|
+| Documented upgrade paths between alpha releases | ⏳ |
+| Comprehensive end-to-end testing across providers | ⏳ |
+| Backup and restore for foundational software | ⏳ |
+| Compliance profiles (HIPAA, SOC2, PCI-DSS) | ⏳ |
+| v1.0.0 release | ⏳ |
 
-**Milestone:** Deploy platform on all 4 providers (AWS, GCP, Azure, Local)
+## 13.7 Known Issues Tracked
 
-### 12.5 Phase 5: Observability & Polish
+A few of the open issues that affect the picture above:
 
-**Goals:**
-
-- OpenTelemetry instrumentation throughout NIC
-- Pre-built Grafana dashboards
-- Comprehensive documentation
-
-**Deliverables:**
-
-- ✅ OpenTelemetry tracing in all NIC functions
-- ✅ Custom metrics (deployment time, resource counts)
-- ✅ Structured logging via slog
-- ✅ Export to deployed LGTM stack
-- ✅ Grafana dashboards for NIC operations
-- ✅ User documentation (deployment guides, CRD reference)
-- ✅ Architecture documentation (this doc!)
-
-**Milestone:** NIC self-monitoring and production-ready observability
-
-### 12.6 Phase 6: Hardening & Release
-
-**Goals:**
-
-- Security hardening
-- Performance optimization
-- Comprehensive testing
-- v1.0 release
-
-**Deliverables:**
-
-- ✅ Security audit (RBAC, secrets management)
-- ✅ Performance benchmarks (deployment time targets)
-- ✅ End-to-end tests on all providers
-- ✅ Disaster recovery testing
-- ✅ Documentation review
-- ✅ Release notes and migration guides
-- ✅ v1.0.0 release
-
-**Milestone:** NIC v1.0 released to production
-
----
+- [#63](https://github.com/nebari-dev/nebari-infrastructure-core/issues/63) Ctrl-C during destroy leaves OpenTofu state locked (bug)
+- [#64](https://github.com/nebari-dev/nebari-infrastructure-core/issues/64) Add `nic unlock` command for stuck state locks (enhancement)
+- [#65](https://github.com/nebari-dev/nebari-infrastructure-core/issues/65) MetalLB deployed on AWS (bug; `InfraSettings.NeedsMetalLB` fix)
+- [#66](https://github.com/nebari-dev/nebari-infrastructure-core/issues/66) Pipe OpenTofu output through slog + pretty-print option (enhancement)
+- [#241](https://github.com/nebari-dev/nebari-infrastructure-core/issues/241) Avoid redundant `tofu init` / module downloads during deploy (perf)
+- [#300](https://github.com/nebari-dev/nebari-infrastructure-core/issues/300) Audit and rewrite design docs against current code (this audit)
