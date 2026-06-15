@@ -1,7 +1,7 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.4.0"
-
+  version = "0.6.0"
+  
   project_name                             = var.project_name
   tags                                     = var.tags
   availability_zones                       = var.availability_zones
@@ -21,6 +21,7 @@ module "eks_cluster" {
   existing_node_iam_role_arn               = var.existing_node_iam_role_arn
   iam_role_permissions_boundary            = var.iam_role_permissions_boundary
   enable_cluster_creator_admin_permissions = true
+  enable_cluster_autoscaler_pod_identity   = var.enable_cluster_autoscaler_pod_identity
   node_groups                              = var.node_groups
   efs_enabled                              = var.efs_enabled
   efs_performance_mode                     = var.efs_performance_mode
@@ -29,4 +30,6 @@ module "eks_cluster" {
   efs_encrypted                            = var.efs_encrypted
   efs_kms_key_arn                          = var.efs_kms_key_arn
   node_security_group_additional_rules     = var.node_security_group_additional_rules
+  extra_ca_bundle                          = var.extra_ca_bundle
+  enable_irsa                              = var.enable_irsa
 }

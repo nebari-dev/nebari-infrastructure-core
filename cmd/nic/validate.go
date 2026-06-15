@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -10,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -31,54 +30,41 @@ func init() {
 }
 
 func runValidate(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
-	resolved, err := resolveConfigFile(validateConfigFile)
+	configFile, err := resolveConfigFile(validateConfigFile)
 	if err != nil {
 		return err
 	}
-	validateConfigFile = resolved
 
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.validate")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("config.file", validateConfigFile))
+	span.SetAttributes(attribute.String("config.file", configFile))
 
-	slog.Info("Validating configuration", "config_file", validateConfigFile)
-
-	// Parse configuration
-	cfg, err := config.ParseConfig(ctx, validateConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		slog.Error("Configuration validation failed", "error", err, "file", configFile)
 		return err
 	}
 
-	// Validate configuration with registered providers
-	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
+	client, err := nic.NewClient(ctx)
+	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", validateConfigFile)
+		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
-
-	slog.Info("Configuration is valid",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
+	if err := client.Validate(ctx, cfg); err != nil {
+		span.RecordError(err)
+		slog.Error("Configuration validation failed", "error", err, "file", configFile)
+		return err
+	}
 
 	fmt.Printf("✓ Configuration file is valid\n")
 	fmt.Printf("  Provider: %s\n", cfg.Cluster.ProviderName())
 	fmt.Printf("  Project: %s\n", cfg.ProjectName)
 
 	return nil
-}
-
-func getValidNames(ctx context.Context, reg *registry.Registry) config.ValidateOptions {
-	return config.ValidateOptions{
-		ClusterProviders: reg.ClusterProviders.List(ctx),
-		DNSProviders:     reg.DNSProviders.List(ctx),
-	}
 }

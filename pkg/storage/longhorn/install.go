@@ -18,9 +18,19 @@ import (
 
 const installTimeout = 10 * time.Minute
 
-// nodeStorageLabel is the node label Longhorn uses to identify nodes that
-// should host its storage components when DedicatedNodes is enabled.
-const nodeStorageLabel = "node.longhorn.io/storage"
+// tolerateAllTaints is the Longhorn taint-toleration setting value that tells
+// Longhorn's system-managed components (longhorn-csi-plugin, the replica/engine
+// instance-managers, engine-image, share-manager) to tolerate EVERY taint.
+// Longhorn parses the bare ":" as a toleration with an empty key and
+// Operator=Exists, which matches all taints regardless of key, value, or effect.
+// The csi-plugin is the per-node mount driver, so it must run on every node a
+// workload pod might land on - including tainted pools (the storage taint, a GPU
+// pool's nvidia.com/gpu:NoSchedule, any config-driven taint) - or PVC mounts
+// fail there (#366). Replica DATA is still confined to storage nodes because
+// only they carry CreateDefaultDiskLabel and thus get a Longhorn disk (#369).
+// https://github.com/longhorn/longhorn-manager/blob/v1.11.2/types/setting.go
+// https://longhorn.io/docs/1.11.2/advanced-resources/deploy/taint-toleration/
+const tolerateAllTaints = ":"
 
 // Install installs (or upgrades, if a release exists) Longhorn on the cluster
 // the kubeconfigBytes connect to.
@@ -125,6 +135,11 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage installed").
 		WithResource("longhorn").
 		WithAction("installed").
@@ -168,6 +183,11 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfig
 		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
+	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to verify storage-node disk label: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Longhorn storage upgraded").
 		WithResource("longhorn").
 		WithAction("upgraded").
@@ -204,35 +224,44 @@ func buildHelmValues(cfg *Config) map[string]any {
 		"replicaAutoBalance":          "best-effort",
 	}
 
+	// Only render the autoscaler setting when a provider explicitly sets it.
+	// Leaving it unset keeps Longhorn's default.
+	if cfg != nil && cfg.ClusterAutoscalerEnabled != nil {
+		settings["kubernetesClusterAutoscalerEnabled"] = *cfg.ClusterAutoscalerEnabled
+	}
+
 	values := map[string]any{
 		"persistence":     persistence,
 		"defaultSettings": settings,
 	}
 
 	if cfg != nil && cfg.DedicatedNodes {
+		// Storage nodes auto-provision a Longhorn disk: createDefaultDiskLabeledNodes
+		// makes Longhorn create a default disk only on nodes carrying the
+		// CreateDefaultDiskLabel (the AWS provider adds it to storage node groups;
+		// other providers must label their storage pool — see config.go). Because
+		// only storage nodes get a disk, replicas can only ever land on storage
+		// nodes. We therefore do NOT pin the system components by node selector:
+		// doing so kept longhorn-csi-plugin and longhorn-manager off workload
+		// nodes and broke PVC mounts there (#366).
 		settings["createDefaultDiskLabeledNodes"] = true
 
-		nodeSelector := map[string]string{nodeStorageLabel: "true"}
-		if cfg.NodeSelector != nil {
-			nodeSelector = cfg.NodeSelector
-		}
+		// System-managed components - crucially the per-node longhorn-csi-plugin,
+		// plus the replica/engine instance-managers, engine-image and share-manager
+		// - tolerate EVERY taint via the tolerate-all taintToleration. The csi-plugin
+		// must run wherever a workload pod can be scheduled, including tainted pools
+		// (storage taint, a GPU pool's nvidia.com/gpu:NoSchedule, any config-driven
+		// taint), or PVC mounts fail there (#366). Replica DATA stays on storage
+		// nodes regardless, because only they get a Longhorn disk (#369).
+		settings["taintToleration"] = tolerateAllTaints
 
-		tolerations := []map[string]string{
-			{
-				"key":      nodeStorageLabel,
-				"operator": "Exists",
-				"effect":   "NoSchedule",
-			},
-		}
-
-		values["longhornManager"] = map[string]any{
-			"nodeSelector": nodeSelector,
-			"tolerations":  tolerations,
-		}
-		values["longhornDriver"] = map[string]any{
-			"nodeSelector": nodeSelector,
-			"tolerations":  tolerations,
-		}
+		// longhorn-manager (DaemonSet) and the driver deployer are node-level
+		// infrastructure, not workloads, so they also tolerate all taints (same
+		// rationale as the embedded iSCSI prerequisite DaemonSet) and carry no
+		// nodeSelector (#366).
+		tolerateAll := []map[string]any{{"operator": "Exists"}}
+		values["longhornManager"] = map[string]any{"tolerations": tolerateAll}
+		values["longhornDriver"] = map[string]any{"tolerations": tolerateAll}
 	}
 
 	return values

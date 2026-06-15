@@ -24,6 +24,9 @@ spec:
           repository: otel/opentelemetry-collector-k8s
           tag: ""
         mode: daemonset
+        presets:
+          kubernetesAttributes:
+            enabled: true
         # ClusterRole for the prometheus receiver's kubernetes_sd_configs to
         # discover pods cluster-wide and scrape their /metrics endpoints. The
         # chart defaults to clusterRole.create=false, which would leave the
