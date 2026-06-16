@@ -118,7 +118,7 @@ one fixed ConfigMap (`opentelemetry-collector-overrides`) and the collector
 merges exactly two configs (base + this override). Exactly **one** pack may own
 the override.
 
-This is an unusual case in practice — a cluster has a single observability
+This is the common case in practice — a cluster has a single observability
 backend — so the contract optimizes for that rather than for composition. For
 the record, here is what happens if two packs both try to customize the
 collector:

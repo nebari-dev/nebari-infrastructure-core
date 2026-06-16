@@ -25,15 +25,19 @@ spec:
           tag: ""
         mode: daemonset
         presets:
+          # In daemonset mode the kubernetesAttributes preset also injects the
+          # K8S_NODE_NAME env var (fieldRef: spec.nodeName) and grants
+          # pods/namespaces RBAC. The cAdvisor/kubelet scrape jobs below depend
+          # on that env var for per-node `keep` relabeling, so keep this enabled.
           kubernetesAttributes:
             enabled: true
-        # ClusterRole for the prometheus receiver's kubernetes_sd_configs to
-        # discover pods cluster-wide and scrape their /metrics endpoints. The
-        # chart defaults to clusterRole.create=false, which would leave the
-        # SA unable to list pods and the prometheus receiver silently empty.
-        # Resources scraped: pods (via role: pod), nodes (cAdvisor / kubelet),
-        # endpoints/services (future scrape configs). nodes/metrics + /metrics
-        # cover kubelet and apiserver metrics if scrape configs are added.
+        # ClusterRole additions for the prometheus receiver's node scraping.
+        # The kubernetesAttributes preset already grants pods/namespaces; these
+        # rules add only the node-level permissions it does NOT cover, which the
+        # cAdvisor/kubelet jobs require: nodes (for `role: node` service
+        # discovery) and nodes/proxy (to scrape via the apiserver proxy at
+        # /api/v1/nodes/<name>/proxy/...). Custom rules are merged with the
+        # preset's rules, not replaced.
         #
         # Note: nodes/proxy grants access to the full kubelet proxy, not just
         # /metrics paths. RBAC cannot restrict by URL path; the proxy itself
@@ -43,10 +47,10 @@ spec:
           create: true
           rules:
             - apiGroups: [""]
-              resources: ["pods", "nodes", "services", "endpoints"]
+              resources: ["nodes"]
               verbs: ["get", "list", "watch"]
             - apiGroups: [""]
-              resources: ["nodes/metrics", "nodes/proxy"]
+              resources: ["nodes/proxy"]
               verbs: ["get"]
         resources:
           requests:
@@ -55,11 +59,6 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
-        extraEnvs:
-          - name: K8S_NODE_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: spec.nodeName
         config:
           receivers:
             otlp:
