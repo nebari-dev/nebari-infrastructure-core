@@ -13,6 +13,13 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/telemetry"
 )
 
+// reachedRunE reports whether cobra parsed flags and validated args
+// successfully, i.e. PersistentPreRun ran and a command's RunE is about to (or
+// did) execute. main() uses it to distinguish runtime failures (which we log)
+// from usage-class errors (bad flag, unknown command, wrong number of args),
+// which surface before PersistentPreRun and are already printed by cobra.
+var reachedRunE bool
+
 var rootCmd = &cobra.Command{
 	Use:   "nic",
 	Short: "Nebari Infrastructure Core - Cloud infrastructure management for Nebari",
@@ -32,6 +39,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 		// the error and usage block for those.
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
+		reachedRunE = true
 	},
 }
 
@@ -72,17 +80,15 @@ func main() {
 		}
 	}()
 
-	cmd, err := rootCmd.ExecuteContextC(ctx)
-	if err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if ctx.Err() == context.Canceled {
 			slog.Info("Shutdown complete")
 			os.Exit(130)
 		}
-		// SilenceUsage is set in PersistentPreRun, so it is true only once RunE
-		// is reached. We log just those runtime failures and leave usage-class
-		// errors (bad flag, unknown command, bad args) to cobra, which already
-		// printed them.
-		if cmd != nil && cmd.SilenceUsage {
+		// Log only runtime failures (those that occur once RunE is reached) and
+		// leave usage-class errors (bad flag, unknown command, bad args) to
+		// cobra, which already printed them.
+		if reachedRunE {
 			slog.Error("Command execution failed", "error", err)
 		}
 		os.Exit(1)
