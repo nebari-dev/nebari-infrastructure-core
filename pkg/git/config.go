@@ -17,6 +17,15 @@ const (
 	DefaultBranch = "main"
 )
 
+// DefaultLocalPath returns the host directory NIC manages for a project's
+// local gitops repository when no git_repository is configured. It is a pure
+// function so the deploy orchestrator and providers that mount the directory
+// (e.g. the local kind provider) can derive the same path independently
+// without threading it between them.
+func DefaultLocalPath(projectName string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+}
+
 // Config represents git repository configuration for GitOps bootstrap.
 // Secrets (SSH keys, tokens) are read from environment variables, never stored in config.
 type Config struct {
@@ -66,17 +75,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("git repository url is required")
 	}
 
-	// For local file paths, validate directory exists but skip auth validation
+	// For local file paths, skip auth validation. A missing directory is valid because
+	// Validate runs before Deploy, and for the local (kind) provider the
+	// directory is created during cluster creation.
 	if c.IsLocalPath() {
 		path, err := c.GetLocalPath()
 		if err != nil {
 			return err
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("local path does not exist: %w", err)
-		}
-		if !info.IsDir() {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			return fmt.Errorf("local path must be a directory: %s", path)
 		}
 		return nil
