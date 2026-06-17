@@ -768,7 +768,11 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 		{"initContainers section", "initContainers:", true},
 		{"ensure-overrides init container", "name: ensure-overrides", true},
 		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
-		// Forbidden fragments — old ignoreDifferences design
+		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
+		// OTel collector confmap resolver doesn't treat it as env expansion.
+		{"escaped relabel replacement", "replacement: $$1:$$2", true},
+		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
+		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
 		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
 		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
 		{"jsonPointers (old design)", "jsonPointers:", false},

@@ -88,7 +88,13 @@ spec:
                       - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
                         action: replace
                         regex: ([^:]+)(?::\d+)?;(\d+)
-                        replacement: $1:$2
+                        # $$ escapes the $ for the OTel collector's confmap
+                        # resolver (which expands ${...}); it resolves to a
+                        # literal $1/$2 Prometheus regex backreference. Bare
+                        # $1:$2 is the deprecated form and triggers env-style
+                        # expansion warnings. Matches the $${1} used by the
+                        # cAdvisor/kubelet jobs below.
+                        replacement: $$1:$$2
                         target_label: __address__
 
                   # cAdvisor — per-container CPU/memory/network metrics
