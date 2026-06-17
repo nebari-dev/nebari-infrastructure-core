@@ -201,16 +201,19 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 | `templates/` | Rendered Terraform root module that wraps the external module |
 | `examples/azure-config.yaml` | Working config (at repo root `examples/`) |
 
-### Local Provider (pkg/providers/cluster/local/) - **Stub**
+### Local Provider (pkg/providers/cluster/local/)
 
 **Location:** `pkg/providers/cluster/local/`
 
-**Status:** Stub implementation for K3s local development
+**Status:** NIC-managed kind (Kubernetes-in-Docker) cluster for local development
+
+**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Installs MetalLB so the gateway gets a LoadBalancer IP, deriving the address pool from the kind Docker network so it is routable. To deploy onto a pre-existing cluster instead, use the `existing` provider.
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Stub provider that prints operations |
-| `config.go` | Local-specific config types: `Config` |
+| `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig, derive the MetalLB pool for `InfraSettings` |
+| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, gitops mount, address-pool derivation) |
+| `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount`, `MetalLBConfig` |
 
 ## DNS Provider System (pkg/providers/dns/)
 
@@ -366,7 +369,7 @@ defer cleanup()
 | `examples/aws-config-with-dns.yaml` | AWS config with Cloudflare DNS |
 | `examples/gcp-config.yaml` | Sample GCP configuration |
 | `examples/azure-config.yaml` | Sample Azure configuration |
-| `examples/local-config.yaml` | Sample local K3s configuration |
+| `examples/local-config.yaml` | Sample local kind configuration |
 
 ### Development Tools
 
