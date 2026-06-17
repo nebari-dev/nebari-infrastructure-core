@@ -241,6 +241,16 @@ spec:
     namespace: monitoring
 
   syncPolicy:
+    # Opt the monitoring namespace into Nebari management at creation time.
+    # The collector app (sync-wave 4) is the first thing to create this
+    # namespace, so any later software pack that drops a NebariApp here
+    # (e.g. nebari-lgtm-pack exposing Grafana via the gateway) is reconciled
+    # by the nebari-operator instead of rejected with NamespaceNotOptedIn.
+    # managedNamespaceMetadata only applies the label to a namespace this app
+    # creates, hence it must live on the namespace's creator, not the pack.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
     automated:
       prune: true
       selfHeal: true

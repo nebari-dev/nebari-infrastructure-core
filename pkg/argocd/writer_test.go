@@ -771,6 +771,11 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
 		// OTel collector confmap resolver doesn't treat it as env expansion.
 		{"escaped relabel replacement", "replacement: $$1:$$2", true},
+		// Opts the monitoring namespace into Nebari management at creation so
+		// software packs (e.g. nebari-lgtm-pack) can drop a NebariApp here and
+		// have the nebari-operator reconcile it instead of rejecting it.
+		{"managedNamespaceMetadata block", "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", "nebari.dev/managed: \"true\"", true},
 		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
 		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
 		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
