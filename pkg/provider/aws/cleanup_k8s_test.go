@@ -115,7 +115,7 @@ func TestSweepLoadBalancerServices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			//nolint:staticcheck // fake.NewSimpleClientset is still the standard
+
 			c := k8sfake.NewSimpleClientset(tt.seed...)
 
 			if err := sweepLoadBalancerServices(context.Background(), c); err != nil {
@@ -151,7 +151,7 @@ func TestCleanupKubernetesResources_HappyPath(t *testing.T) {
 		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
 	}
 	dyn := newDynamicClientWithGateway(gw)
-	//nolint:staticcheck
+
 	k8s := k8sfake.NewSimpleClientset(svc)
 
 	// Short wait: we're validating orchestration, not timing. 200ms is enough
@@ -172,7 +172,7 @@ func TestCleanupKubernetesResources_HappyPath(t *testing.T) {
 
 func TestWaitForLoadBalancerServicesGone(t *testing.T) {
 	t.Run("returns nil when no LB services remain", func(t *testing.T) {
-		//nolint:staticcheck
+
 		c := k8sfake.NewSimpleClientset()
 		err := waitForLoadBalancerServicesGone(context.Background(), c, 500*time.Millisecond)
 		if err != nil {
@@ -185,7 +185,7 @@ func TestWaitForLoadBalancerServicesGone(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "stuck"},
 			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
 		}
-		//nolint:staticcheck
+
 		c := k8sfake.NewSimpleClientset(svc)
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
