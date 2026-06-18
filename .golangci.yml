@@ -28,6 +28,10 @@ linters:
       # Default is 3, which flags many genuinely-incidental repeats.
       # Bump to 4 so only repeated strings that clearly warrant a constant get flagged.
       min-occurrences: 4
+      # Don't count occurrences in _test.go toward the threshold. Test files are
+      # already excluded from reporting below, but without this they still
+      # inflate the ocurrence count for production code.
+      ignore-tests: true
       # Skip strings that are too generic to meaningfully name as constants.
       ignore-string-values:
         - "true"

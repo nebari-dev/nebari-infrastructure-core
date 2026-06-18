@@ -2,6 +2,7 @@ package longhorn
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,16 +11,20 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestBuildHelmValues(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *Config
-		checkValues map[string]any
-		wantAbsent  []string // top-level keys that must NOT be set
+		name             string
+		config           *Config
+		checkValues      map[string]any
+		wantAbsent       []string // top-level keys that must NOT be set
+		wantAbsentNested []string // dotted nested paths that must NOT be set
 	}{
 		{
 			name:   "default config produces base values",
@@ -40,21 +45,15 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
-			name: "dedicated nodes adds nodeSelector and tolerations",
-			config: &Config{
-				DedicatedNodes: true,
-				NodeSelector:   map[string]string{"node.longhorn.io/storage": "true"},
-			},
-			checkValues: map[string]any{
-				"defaultSettings.createDefaultDiskLabeledNodes": true,
-			},
-		},
-		{
-			name:   "dedicated nodes without custom nodeSelector uses default",
+			name:   "dedicated nodes set disk + tolerate-all taint setting, not a node selector",
 			config: &Config{DedicatedNodes: true},
 			checkValues: map[string]any{
 				"defaultSettings.createDefaultDiskLabeledNodes": true,
+				"defaultSettings.taintToleration":               ":",
 			},
+			// system components must NOT be pinned by node selector (#366);
+			// confinement comes from disks only existing on storage nodes.
+			wantAbsentNested: []string{"defaultSettings.systemManagedComponentsNodeSelector"},
 		},
 		{
 			name:   "non-dedicated nodes omits nodeSelector and tolerations",
@@ -63,6 +62,20 @@ func TestBuildHelmValues(t *testing.T) {
 				"persistence.defaultClassReplicaCount": 2,
 			},
 			wantAbsent: []string{"longhornManager", "longhornDriver"},
+		},
+		{
+			name:   "cluster autoscaler enabled renders setting true",
+			config: &Config{ClusterAutoscalerEnabled: boolPtr(true)},
+			checkValues: map[string]any{
+				"defaultSettings.kubernetesClusterAutoscalerEnabled": true,
+			},
+		},
+		{
+			name:   "cluster autoscaler disabled renders setting false",
+			config: &Config{ClusterAutoscalerEnabled: boolPtr(false)},
+			checkValues: map[string]any{
+				"defaultSettings.kubernetesClusterAutoscalerEnabled": false,
+			},
 		},
 	}
 
@@ -84,6 +97,11 @@ func TestBuildHelmValues(t *testing.T) {
 					t.Errorf("key %q should not be set", key)
 				}
 			}
+			for _, key := range tt.wantAbsentNested {
+				if got := getNestedValue(values, key); got != nil {
+					t.Errorf("nested key %q should not be set, got %v", key, got)
+				}
+			}
 		})
 	}
 }
@@ -96,44 +114,91 @@ func TestBuildHelmValuesDedicatedNodesStructure(t *testing.T) {
 
 	values := buildHelmValues(cfg)
 
-	manager, ok := values["longhornManager"].(map[string]any)
+	// Full dedicated-nodes contract on defaultSettings: disk auto-creation +
+	// taint-toleration present, and the removed pinning setting absent.
+	settings, ok := values["defaultSettings"].(map[string]any)
 	if !ok {
-		t.Fatal("longhornManager not found or not a map")
+		t.Fatal("defaultSettings not found or not a map")
 	}
-	ns, ok := manager["nodeSelector"].(map[string]string)
-	if !ok {
-		t.Fatal("longhornManager.nodeSelector not found or not a map[string]string")
+	if settings["createDefaultDiskLabeledNodes"] != true {
+		t.Errorf("defaultSettings.createDefaultDiskLabeledNodes = %v, want true", settings["createDefaultDiskLabeledNodes"])
 	}
-	if ns["node.longhorn.io/storage"] != "true" {
-		t.Errorf("longhornManager.nodeSelector[node.longhorn.io/storage] = %q, want %q", ns["node.longhorn.io/storage"], "true")
+	if settings["taintToleration"] != ":" {
+		t.Errorf("defaultSettings.taintToleration = %v, want \":\" (tolerate all taints)", settings["taintToleration"])
+	}
+	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
+		t.Error("defaultSettings.systemManagedComponentsNodeSelector must not be set (pinning removed, #366)")
 	}
 
-	tolerations, ok := manager["tolerations"].([]map[string]string)
+	// longhorn-manager and the driver must run on EVERY node so workloads can
+	// mount volumes anywhere (#366). They must therefore carry NO nodeSelector
+	// and a tolerate-all toleration.
+	for _, comp := range []string{"longhornManager", "longhornDriver"} {
+		c, ok := values[comp].(map[string]any)
+		if !ok {
+			t.Fatalf("%s not found or not a map", comp)
+		}
+		if _, ok := c["nodeSelector"]; ok {
+			t.Errorf("%s must not set a nodeSelector (pinning breaks workload-node mounts, #366)", comp)
+		}
+		tolerations, ok := c["tolerations"].([]map[string]any)
+		if !ok {
+			t.Fatalf("%s.tolerations not found or not a []map[string]any", comp)
+		}
+		if len(tolerations) != 1 {
+			t.Fatalf("%s.tolerations length = %d, want 1", comp, len(tolerations))
+		}
+		if tolerations[0]["operator"] != "Exists" {
+			t.Errorf("%s toleration operator = %v, want Exists", comp, tolerations[0]["operator"])
+		}
+		if _, ok := tolerations[0]["key"]; ok {
+			t.Errorf("%s toleration must have no key (tolerate-all), got %v", comp, tolerations[0]["key"])
+		}
+	}
+}
+
+func TestBuildHelmValuesNonDedicatedOmitsSystemSettings(t *testing.T) {
+	values := buildHelmValues(&Config{DedicatedNodes: false})
+
+	settings, ok := values["defaultSettings"].(map[string]any)
 	if !ok {
-		t.Fatal("longhornManager.tolerations not found or not a []map[string]string")
+		t.Fatal("defaultSettings not found or not a map")
 	}
-	if len(tolerations) != 1 {
-		t.Fatalf("longhornManager.tolerations length = %d, want 1", len(tolerations))
+	// The system-managed-component settings confine instance-managers to
+	// labeled/tainted nodes. On a colocated cluster those nodes don't exist,
+	// so the settings must not be emitted.
+	if _, ok := settings["taintToleration"]; ok {
+		t.Error("defaultSettings.taintToleration should not be set when DedicatedNodes is false")
 	}
-	if tolerations[0]["key"] != "node.longhorn.io/storage" {
-		t.Errorf("toleration key = %q, want %q", tolerations[0]["key"], "node.longhorn.io/storage")
+	if _, ok := settings["systemManagedComponentsNodeSelector"]; ok {
+		t.Error("defaultSettings.systemManagedComponentsNodeSelector should not be set when DedicatedNodes is false")
 	}
-	if tolerations[0]["operator"] != "Exists" {
-		t.Errorf("toleration operator = %q, want %q", tolerations[0]["operator"], "Exists")
-	}
-	if tolerations[0]["effect"] != "NoSchedule" {
-		t.Errorf("toleration effect = %q, want %q", tolerations[0]["effect"], "NoSchedule")
+}
+
+func TestISCSIDaemonSetToleratesAllTaints(t *testing.T) {
+	var ds appsv1.DaemonSet
+	if err := yaml.NewYAMLOrJSONDecoder(
+		strings.NewReader(iscsiDaemonSetYAML), 4096,
+	).Decode(&ds); err != nil {
+		t.Fatalf("failed to parse embedded iSCSI DaemonSet YAML: %v", err)
 	}
 
-	driver, ok := values["longhornDriver"].(map[string]any)
-	if !ok {
-		t.Fatal("longhornDriver not found or not a map")
+	tolerations := ds.Spec.Template.Spec.Tolerations
+	if len(tolerations) == 0 {
+		t.Fatal("iSCSI DaemonSet has no tolerations; it will skip tainted dedicated storage nodes")
 	}
-	if _, ok := driver["nodeSelector"].(map[string]string); !ok {
-		t.Fatal("longhornDriver.nodeSelector not found or not a map[string]string")
+
+	// A node-level prerequisite should tolerate every taint via an unqualified
+	// Exists toleration (no key), so it installs on all nodes regardless of taint.
+	found := false
+	for _, tol := range tolerations {
+		if tol.Key == "" && tol.Operator == corev1.TolerationOpExists {
+			found = true
+			break
+		}
 	}
-	if _, ok := driver["tolerations"].([]map[string]string); !ok {
-		t.Fatal("longhornDriver.tolerations not found or not a []map[string]string")
+	if !found {
+		t.Errorf("iSCSI DaemonSet tolerations = %+v, want an Exists toleration with empty key", tolerations)
 	}
 }
 
@@ -177,6 +242,41 @@ func TestConfigReplicas(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigWithClusterAutoscalerEnabled(t *testing.T) {
+	t.Run("nil receiver yields a fresh config with the flag set", func(t *testing.T) {
+		got := (*Config)(nil).WithClusterAutoscalerEnabled(true)
+		if got == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if got.ClusterAutoscalerEnabled == nil || *got.ClusterAutoscalerEnabled != true {
+			t.Errorf("ClusterAutoscalerEnabled = %v, want true", got.ClusterAutoscalerEnabled)
+		}
+	})
+
+	t.Run("returns a copy and does not mutate the receiver", func(t *testing.T) {
+		base := &Config{
+			ReplicaCount: 3,
+			NodeSelector: map[string]string{"node.longhorn.io/storage": "true"},
+		}
+		got := base.WithClusterAutoscalerEnabled(false)
+
+		// Receiver must be untouched.
+		if base.ClusterAutoscalerEnabled != nil {
+			t.Errorf("receiver was mutated: ClusterAutoscalerEnabled = %v, want nil", base.ClusterAutoscalerEnabled)
+		}
+		// Copy must carry the receiver's other fields plus the new flag.
+		if got == base {
+			t.Error("expected a distinct copy, got the same pointer")
+		}
+		if got.ReplicaCount != 3 {
+			t.Errorf("copy ReplicaCount = %d, want 3", got.ReplicaCount)
+		}
+		if got.ClusterAutoscalerEnabled == nil || *got.ClusterAutoscalerEnabled != false {
+			t.Errorf("copy ClusterAutoscalerEnabled = %v, want false", got.ClusterAutoscalerEnabled)
+		}
+	})
 }
 
 func TestEnsureNamespace(t *testing.T) {

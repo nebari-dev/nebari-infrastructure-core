@@ -988,3 +988,59 @@ func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 		}
 	})
 }
+
+func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
+	var buf bytes.Buffer
+	ctx := context.Background()
+
+	if err := WriteApplication(ctx, &buf, "opentelemetry-collector"); err != nil {
+		t.Fatalf("WriteApplication(opentelemetry-collector) error: %v", err)
+	}
+
+	content := buf.String()
+
+	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
+	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
+	// container resolves it (or falls back to `{}`) into an emptyDir that the
+	// collector reads via an extra --config flag. This sidesteps the upstream
+	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
+	// keeping the base CM and the override CM completely separate.
+	tests := []struct {
+		name        string
+		fragment    string
+		wantPresent bool
+	}{
+		// Required fragments — composite where possible to pin context
+		{"extraVolumes section", "extraVolumes:", true},
+		{"overrides-src volume with configmap name", "name: overrides-src\n            configMap:\n              name: opentelemetry-collector-overrides\n              optional: true", true},
+		{"overrides-resolved emptyDir", "name: overrides-resolved\n            emptyDir: {}", true},
+		{"initContainers section", "initContainers:", true},
+		{"ensure-overrides init container", "name: ensure-overrides", true},
+		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
+		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
+		// OTel collector confmap resolver doesn't treat it as env expansion.
+		{"escaped relabel replacement", "replacement: $$1:$$2", true},
+		// Opts the monitoring namespace into Nebari management at creation so
+		// software packs (e.g. nebari-lgtm-pack) can drop a NebariApp here and
+		// have the nebari-operator reconcile it instead of rejecting it.
+		{"managedNamespaceMetadata block", "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", "nebari.dev/managed: \"true\"", true},
+		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
+		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
+		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", "jsonPointers:", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			found := strings.Contains(content, tc.fragment)
+			if tc.wantPresent && !found {
+				t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", tc.fragment, content)
+			}
+			if !tc.wantPresent && found {
+				t.Errorf("rendered opentelemetry-collector.yaml contains forbidden fragment %q from the old ignoreDifferences design", tc.fragment)
+			}
+		})
+	}
+}
