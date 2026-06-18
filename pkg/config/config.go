@@ -156,13 +156,153 @@ func (c *ClusterConfig) ProviderConfig() map[string]any {
 	return nil
 }
 
+// Certificate type values accepted in CertificateConfig.Type.
+const (
+	// CertificateTypeSelfSigned mints a cert via cert-manager's self-signed ClusterIssuer.
+	CertificateTypeSelfSigned = "selfsigned"
+	// CertificateTypeLetsEncrypt mints a cert via cert-manager's ACME (Let's Encrypt) ClusterIssuer.
+	CertificateTypeLetsEncrypt = "letsencrypt"
+	// CertificateTypeExisting uses a user-supplied TLS certificate instead of cert-manager.
+	CertificateTypeExisting = "existing"
+
+	// DefaultGatewayTLSSecretName is the default name of the TLS secret the gateway references.
+	// The cert is the gateway's, shared across argocd / keycloak / the apex domain.
+	DefaultGatewayTLSSecretName = "nebari-gateway-tls"
+	// DefaultGatewayTLSNamespace is the namespace the gateway expects its TLS secret in.
+	DefaultGatewayTLSNamespace = "envoy-gateway-system"
+)
+
 // CertificateConfig holds TLS certificate configuration
 type CertificateConfig struct {
-	// Type is the certificate type: "selfsigned" or "letsencrypt"
+	// Type is the certificate type: "selfsigned", "letsencrypt", or "existing"
 	Type string `yaml:"type,omitempty"`
 
 	// ACME configuration for Let's Encrypt
 	ACME *ACMEConfig `yaml:"acme,omitempty"`
+
+	// SecretName overrides the name of the TLS secret the gateway references.
+	// Defaults to "nebari-gateway-tls". For type=existing with existing_secret,
+	// the gateway references ExistingSecret.Name instead.
+	SecretName string `yaml:"secret_name,omitempty"`
+
+	// ExistingSecret references a kubernetes.io/tls secret the user already created.
+	// Mutually exclusive with Files and Env. Only valid when Type=existing.
+	ExistingSecret *ExistingSecretRef `yaml:"existing_secret,omitempty"`
+
+	// Files reads PEM material from disk; NIC creates the secret directly.
+	// Mutually exclusive with ExistingSecret and Env. Only valid when Type=existing.
+	Files *CertFiles `yaml:"files,omitempty"`
+
+	// Env reads raw PEM material from environment variables; NIC creates the secret directly.
+	// Mutually exclusive with ExistingSecret and Files. Only valid when Type=existing.
+	Env *CertEnv `yaml:"env,omitempty"`
+}
+
+// ExistingSecretRef references a pre-existing TLS secret.
+type ExistingSecretRef struct {
+	// Name is the secret name (required).
+	Name string `yaml:"name"`
+	// Namespace is the secret's namespace. Defaults to envoy-gateway-system.
+	Namespace string `yaml:"namespace,omitempty"`
+}
+
+// CertFiles points at PEM cert/key files on disk.
+type CertFiles struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+}
+
+// CertEnv names environment variables holding raw (non-base64) PEM material.
+type CertEnv struct {
+	CertEnv string `yaml:"cert_env"`
+	KeyEnv  string `yaml:"key_env"`
+}
+
+// Validate checks the certificate configuration. A nil receiver is valid
+// (no certificate block configured).
+func (c *CertificateConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	switch c.Type {
+	case "", CertificateTypeSelfSigned, CertificateTypeLetsEncrypt:
+		return nil
+	case CertificateTypeExisting:
+		return c.validateExisting()
+	default:
+		return fmt.Errorf("invalid certificate type %q, must be one of: %s, %s, %s",
+			c.Type, CertificateTypeSelfSigned, CertificateTypeLetsEncrypt, CertificateTypeExisting)
+	}
+}
+
+// validateExisting validates the type=existing variant: exactly one source,
+// complete file/env pairs, and no ACME combination.
+func (c *CertificateConfig) validateExisting() error {
+	if c.ACME != nil {
+		return fmt.Errorf("certificate.acme cannot be combined with type=existing")
+	}
+
+	sources := 0
+	if c.ExistingSecret != nil {
+		sources++
+	}
+	if c.Files != nil {
+		sources++
+	}
+	if c.Env != nil {
+		sources++
+	}
+	if sources != 1 {
+		return fmt.Errorf("certificate type=existing requires exactly one of existing_secret, files, or env (found %d)", sources)
+	}
+
+	if c.ExistingSecret != nil {
+		if c.ExistingSecret.Name == "" {
+			return fmt.Errorf("certificate.existing_secret.name is required")
+		}
+		if c.SecretName != "" {
+			return fmt.Errorf("certificate.secret_name cannot be combined with existing_secret (the gateway references existing_secret.name directly)")
+		}
+	}
+	if c.Files != nil && (c.Files.CertFile == "" || c.Files.KeyFile == "") {
+		return fmt.Errorf("certificate.files requires both cert_file and key_file")
+	}
+	if c.Env != nil && (c.Env.CertEnv == "" || c.Env.KeyEnv == "") {
+		return fmt.Errorf("certificate.env requires both cert_env and key_env")
+	}
+	return nil
+}
+
+// ResolvedSecretName returns the name of the TLS secret NIC creates (files/env
+// sources) or, for selfsigned/letsencrypt, the cert-manager secret name.
+// Defaults to DefaultGatewayTLSSecretName.
+func (c *CertificateConfig) ResolvedSecretName() string {
+	if c != nil && c.SecretName != "" {
+		return c.SecretName
+	}
+	return DefaultGatewayTLSSecretName
+}
+
+// GatewaySecretRef returns the (name, namespace) the gateway listener should
+// reference. For existing_secret it points at the user's secret; otherwise it
+// is ResolvedSecretName in DefaultGatewayTLSNamespace.
+func (c *CertificateConfig) GatewaySecretRef() (name, namespace string) {
+	namespace = DefaultGatewayTLSNamespace
+	name = c.ResolvedSecretName()
+	if c != nil && c.Type == CertificateTypeExisting && c.ExistingSecret != nil {
+		name = c.ExistingSecret.Name
+		if c.ExistingSecret.Namespace != "" {
+			namespace = c.ExistingSecret.Namespace
+		}
+	}
+	return name, namespace
+}
+
+// IsCrossNamespaceSecret reports whether the gateway references a TLS secret in
+// a namespace other than DefaultGatewayTLSNamespace, which requires a ReferenceGrant.
+func (c *CertificateConfig) IsCrossNamespaceSecret() bool {
+	_, namespace := c.GatewaySecretRef()
+	return namespace != DefaultGatewayTLSNamespace
 }
 
 // ACMEConfig holds ACME (Let's Encrypt) configuration
@@ -207,6 +347,10 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 		if err := c.GitRepository.Validate(); err != nil {
 			return fmt.Errorf("invalid git_repository: %w", err)
 		}
+	}
+
+	if err := c.Certificate.Validate(); err != nil {
+		return fmt.Errorf("invalid certificate: %w", err)
 	}
 
 	return nil
