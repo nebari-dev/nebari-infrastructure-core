@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -121,7 +121,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
-	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, provider.DestroyOptions{
+	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
 		DryRun:  opts.DryRun,
 		Force:   opts.Force,
 		Timeout: opts.Timeout,

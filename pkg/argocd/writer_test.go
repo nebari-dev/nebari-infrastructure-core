@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestApplications(t *testing.T) {
@@ -106,7 +106,7 @@ func TestWriteAll(t *testing.T) {
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
 		name                    string
-		settings                provider.InfraSettings
+		settings                cluster.InfraSettings
 		wantStorageClass        string
 		wantLBAnnotationCount   int
 		wantKeycloakBasePath    string
@@ -115,13 +115,13 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}{
 		{
 			name:             "aws defaults",
-			settings:         provider.InfraSettings{StorageClass: "gp2"},
+			settings:         cluster.InfraSettings{StorageClass: "gp2"},
 			wantStorageClass: "gp2",
 			wantHTTPSPort:    443,
 		},
 		{
 			name: "hetzner with annotations",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			},
@@ -131,7 +131,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "local with MetalLB",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:       "standard",
 				NeedsMetalLB:       true,
 				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
@@ -142,7 +142,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "custom HTTPS port",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass: "standard",
 				HTTPSPort:    8443,
 			},
@@ -175,7 +175,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 
 func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
@@ -600,7 +600,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: tt.domain}
-			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
+			settings := cluster.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
 			data := NewTemplateData(cfg, nil, settings)
 
 			if data.KeycloakIssuerURL != tt.wantIssuerURL {
@@ -617,7 +617,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	cfg := &config.NebariConfig{
 		Domain: "test.example.com",
 	}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass: "gp2",
 	}
 

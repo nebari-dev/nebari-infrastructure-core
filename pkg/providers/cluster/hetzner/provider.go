@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
@@ -83,7 +83,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	return nil
 }
 
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Deploy")
 	defer span.End()
@@ -242,7 +242,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	return nil
 }
 
-func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Destroy")
 	defer span.End()
@@ -377,8 +377,8 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *con
 	return data, nil
 }
 
-func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	settings := provider.InfraSettings{
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
+	settings := cluster.InfraSettings{
 		StorageClass: longhorn.StorageClassName,
 		NeedsMetalLB: false,
 	}

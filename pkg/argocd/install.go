@@ -14,7 +14,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -27,7 +27,7 @@ const (
 // This is the main entry point called from cmd/nic/deploy.go
 // If gitConfig is a local file:// path, the directory is mounted into the repo-server pod.
 // gitConfig may be nil when no GitOps repository is configured.
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config, argoCDCfg Config) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, prov cluster.Provider, gitConfig *git.Config, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()

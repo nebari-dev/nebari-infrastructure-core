@@ -70,7 +70,7 @@ test-unit: ## Run unit tests only
 test-integration: ## Run integration tests (uses testcontainers, requires Docker)
 	@echo "Running integration tests with testcontainers..."
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
-	go test -v -tags=integration ./pkg/provider/aws -timeout 30m
+	go test -v -tags=integration ./pkg/providers/cluster/aws -timeout 30m
 	@echo "Integration tests passed successfully"
 
 test-all: ## Run all tests (unit + integration)

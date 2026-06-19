@@ -19,7 +19,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 //go:embed templates
@@ -74,7 +74,7 @@ type TemplateData struct {
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
 // configuration, and provider InfraSettings. gitConfig may be nil when no
 // GitOps repository is configured; in that case Git* fields are left empty.
-func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) TemplateData {
+func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -248,7 +248,7 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) error {
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()

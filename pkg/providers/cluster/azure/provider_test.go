@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestProviderName(t *testing.T) {
@@ -81,7 +81,7 @@ func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
 		},
 	}
 	t.Setenv("AZURE_SUBSCRIPTION_ID", "")
-	err := p.Deploy(context.Background(), "p", cc, provider.DeployOptions{})
+	err := p.Deploy(context.Background(), "p", cc, cluster.DeployOptions{})
 	if err == nil {
 		t.Fatal("expected Deploy to fail without subscription ID")
 	}
@@ -105,7 +105,7 @@ func TestProviderDestroyFailsWithoutSubscription(t *testing.T) {
 		},
 	}
 	t.Setenv("AZURE_SUBSCRIPTION_ID", "")
-	err := p.Destroy(context.Background(), "p", cc, provider.DestroyOptions{})
+	err := p.Destroy(context.Background(), "p", cc, cluster.DestroyOptions{})
 	if err == nil {
 		t.Fatal("expected Destroy to fail without subscription ID")
 	}

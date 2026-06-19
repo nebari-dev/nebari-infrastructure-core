@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -45,7 +45,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, _ *config.C
 }
 
 // Deploy deploys GCP infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Deploy")
 	defer span.End()
@@ -82,7 +82,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 }
 
 // Destroy tears down GCP infrastructure (stub implementation)
-func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, _ provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, _ cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Destroy")
 	defer span.End()
@@ -137,8 +137,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns GCP-specific Kubernetes infrastructure settings.
-func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
-	return provider.InfraSettings{
+func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings {
+	return cluster.InfraSettings{
 		StorageClass: "standard-rwo",
 		NeedsMetalLB: false,
 	}

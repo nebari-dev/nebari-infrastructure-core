@@ -9,7 +9,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
@@ -120,7 +120,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // Infrastructure is assumed to already exist (the cluster was provisioned
 // out-of-band), so this is mostly a no-op except for opt-in components like
 // Longhorn that the user can request via the existing-cluster config.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "existing.Deploy")
 	defer span.End()
@@ -159,7 +159,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 }
 
 // Destroy is a no-op for existing clusters.
-func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "existing.Destroy")
 	defer span.End()
@@ -248,8 +248,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns infrastructure settings for the existing cluster.
-func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
-	settings := provider.InfraSettings{
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
+	settings := cluster.InfraSettings{
 		StorageClass: defaultStorageClass,
 		NeedsMetalLB: false,
 	}

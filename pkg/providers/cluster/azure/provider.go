@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
@@ -104,7 +104,7 @@ func initTofuBackend(ctx context.Context, tf *tofu.TerraformExecutor, subID, pro
 // `tofu init` and `tofu apply`, and streams output through the status channel.
 // With opts.DryRun it runs `tofu plan` instead of apply and never creates the
 // state backend for a cluster that hasn't been deployed yet.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()
@@ -212,7 +212,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 // the same state backend used by Deploy. After tofu completes, reportOrphans
 // reports any tagged resources tofu missed (e.g., AKS-managed MC_* siblings)
 // as a non-fatal warning so users can clean them up manually.
-func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Destroy")
 	defer span.End()
@@ -370,8 +370,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns Azure-specific Kubernetes infra settings.
-func (p *Provider) InfraSettings(_ *config.ClusterConfig) provider.InfraSettings {
-	return provider.InfraSettings{
+func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings {
+	return cluster.InfraSettings{
 		StorageClass: "managed-csi",
 		NeedsMetalLB: false,
 	}

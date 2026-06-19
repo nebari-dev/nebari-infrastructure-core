@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 // Compile-time interface compliance check
-var _ provider.Provider = (*Provider)(nil)
+var _ cluster.Provider = (*Provider)(nil)
 
 func TestProviderName(t *testing.T) {
 	p := NewProvider()
@@ -120,7 +120,7 @@ func TestDeploy(t *testing.T) {
 	p := NewProvider()
 	cc := clusterConfig(map[string]any{"context": "my-context"})
 
-	err := p.Deploy(context.Background(), "test", cc, provider.DeployOptions{})
+	err := p.Deploy(context.Background(), "test", cc, cluster.DeployOptions{})
 	if err != nil {
 		t.Errorf("expected Deploy to be no-op, got error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestDestroy(t *testing.T) {
 	p := NewProvider()
 	cc := clusterConfig(map[string]any{"context": "my-context"})
 
-	err := p.Destroy(context.Background(), "test", cc, provider.DestroyOptions{})
+	err := p.Destroy(context.Background(), "test", cc, cluster.DestroyOptions{})
 	if err != nil {
 		t.Errorf("expected Destroy to be no-op, got error: %v", err)
 	}

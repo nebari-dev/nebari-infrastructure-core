@@ -1,10 +1,10 @@
-package dnsprovider
+package dns
 
 import "context"
 
-// DNSProvider defines the interface that all DNS providers must implement.
+// Provider defines the interface that all DNS providers must implement.
 // Providers are stateless - domain and DNS config are passed to each call.
-type DNSProvider interface {
+type Provider interface {
 	// Name returns the DNS provider name (cloudflare, route53, azure-dns, etc.)
 	Name() string
 

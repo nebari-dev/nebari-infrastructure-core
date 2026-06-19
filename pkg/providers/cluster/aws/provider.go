@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
@@ -249,7 +249,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 }
 
 // Deploy deploys AWS infrastructure using stateless reconciliation
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()
@@ -471,7 +471,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 }
 
 // Destroy tears down AWS infrastructure in reverse order
-func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts provider.DestroyOptions) error {
+func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.Destroy")
 	defer span.End()
@@ -741,7 +741,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // aws-load-balancer-scheme annotation defaults to "internet-facing" so the NLB
 // is reachable from outside the VPC; operators with private-only VPCs can
 // override this to "internal" via cluster.aws.load_balancer_scheme.
-func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.InfraSettings {
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	sc := longhorn.StorageClassName
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
@@ -760,7 +760,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) provider.I
 		}
 	}
 
-	return provider.InfraSettings{
+	return cluster.InfraSettings{
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
