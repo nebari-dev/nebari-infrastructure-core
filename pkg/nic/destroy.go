@@ -92,20 +92,20 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		WithMetadata("provider", cfg.Cluster.ProviderName()).
 		WithMetadata("project_name", cfg.ProjectName))
 
-	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	clusterProvider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("get cluster provider: %w", err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
-		WithMetadata("provider", prov.Name()))
+		WithMetadata("provider", clusterProvider.Name()))
 
 	if opts.Confirm != nil && !opts.DryRun {
 		summary := DestroySummary{
 			Provider:    cfg.Cluster.ProviderName(),
 			ProjectName: cfg.ProjectName,
-			Details:     prov.Summary(cfg.Cluster),
+			Details:     clusterProvider.Summary(cfg.Cluster),
 		}
 		if err := opts.Confirm(ctx, summary); err != nil {
 			span.RecordError(err)
@@ -121,7 +121,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
-	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
+	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
 		DryRun:  opts.DryRun,
 		Force:   opts.Force,
 		Timeout: opts.Timeout,
@@ -136,7 +136,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
-		WithMetadata("provider", prov.Name()))
+		WithMetadata("provider", clusterProvider.Name()))
 	return nil
 }
 

@@ -27,13 +27,13 @@ const (
 // This is the main entry point called from cmd/nic/deploy.go
 // If gitConfig is a local file:// path, the directory is mounted into the repo-server pod.
 // gitConfig may be nil when no GitOps repository is configured.
-func Install(ctx context.Context, cfg *config.NebariConfig, prov cluster.Provider, gitConfig *git.Config, argoCDCfg Config) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, gitConfig *git.Config, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", prov.Name()),
+		attribute.String("provider", clusterProvider.Name()),
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
@@ -43,7 +43,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov cluster.Provide
 		WithMetadata("cluster_name", cfg.ProjectName))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get kubeconfig").

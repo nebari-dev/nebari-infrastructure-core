@@ -284,8 +284,8 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 // lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
-func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov cluster.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not get kubeconfig for endpoint lookup").
 			WithMetadata("error", err.Error()))
