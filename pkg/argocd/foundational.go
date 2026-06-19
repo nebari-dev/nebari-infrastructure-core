@@ -32,6 +32,14 @@ const (
 
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// labelPartOf and labelManagedBy are the standard Kubernetes recommended
+	// label keys applied to foundational resources NIC creates.
+	labelPartOf    = "app.kubernetes.io/part-of"
+	labelManagedBy = "app.kubernetes.io/managed-by"
+
+	// labelManagedByValue marks resources as managed by NIC.
+	labelManagedByValue = "nebari-infrastructure-core"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -138,6 +146,23 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak, foundationalCfg.ArgoCD); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
+		}
+
+		// Render the embedded keycloak-config-cli defaults and write them
+		// to the in-cluster Secret the realm-setup Job will mount. The
+		// gitops repo never holds realm content under this design.
+		domain := cfg.Domain
+		if domain == "" {
+			domain = "nebari.local"
+		}
+		importContent, err := RenderKeycloakDefaults(ctx, TemplateData{Domain: domain})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to render keycloak-config-cli defaults: %w", err)
+		}
+		if err := createKeycloakImportSecret(ctx, k8sClient, importContent); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create %s secret: %w", KeycloakImportSecretName, err)
 		}
 
 		// Create namespace for Nebari system services
@@ -287,8 +312,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					labelPartOf:    NebariFoundationalPartOf,
+					labelManagedBy: labelManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -308,8 +333,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					labelPartOf:    NebariFoundationalPartOf,
+					labelManagedBy: labelManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -324,6 +349,33 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	return nil
 }
 
+// createKeycloakImportSecret writes the keycloak-config-cli input to an
+// in-cluster Secret named `keycloak-config-import` in the `keycloak`
+// namespace. The realm-setup Job mounts this Secret read-only and applies
+// the file against Keycloak.
+//
+// The Secret carrier (rather than a gitops-repo ConfigMap) keeps realm
+// structure and any inline credentials out of git: only the Job manifest
+// lives in the gitops repo. Phase 1a writes only the embedded defaults;
+// Phase 1b will overwrite or replace this content with the user's
+// keycloak.yaml.
+func createKeycloakImportSecret(ctx context.Context, client kubernetes.Interface, importContent []byte) error {
+	return createSecret(ctx, client, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      KeycloakImportSecretName,
+			Namespace: KeycloakDefaultNamespace,
+			Labels: map[string]string{
+				labelPartOf:    NebariFoundationalPartOf,
+				labelManagedBy: labelManagedByValue,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			KeycloakImportSecretKey: importContent,
+		},
+	})
+}
+
 // createLandingPageSecrets creates the required secrets for the nebari-landing service
 func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, landingCfg LandingPageConfig) error {
 	namespace := NebariSystemNamespace
@@ -335,8 +387,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				labelPartOf:    NebariFoundationalPartOf,
+				labelManagedBy: labelManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
