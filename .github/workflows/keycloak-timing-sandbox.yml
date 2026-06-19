@@ -1,0 +1,58 @@
+name: Keycloak setup timing (sandbox)
+
+# Manual head-to-head: deploy the full platform stack on a k3d sandbox for
+# both this branch (keycloak-config-cli) and main (shell-based realm setup),
+# with timing-report on. Compare the `argocd-sync: keycloak` and
+# `nic-phase: foundational install` rows in each job's step summary to see
+# whether the kcc-based realm setup is faster than the current shell Job.
+#
+# Triggered on demand only. nic-version '.' builds NIC from the checked-out
+# tree, so each matrix leg measures that ref's own code.
+
+# push trigger scoped to this throwaway test branch so the run fires without
+# the workflow needing to live on the default branch (a workflow_dispatch
+# prerequisite). Remove the push trigger if this workflow is ever promoted to
+# main; keep workflow_dispatch for manual re-runs there.
+on:
+  push:
+    branches: [ test/kcc-keycloak-timing ]
+  workflow_dispatch:
+    inputs:
+      k8s-version:
+        description: "Kubernetes version (k3d image tag)"
+        required: false
+        default: "1.32.4"
+
+permissions:
+  contents: read
+
+jobs:
+  timing:
+    name: deploy (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - feat/keycloak-config-cli-bootstrap
+          - main
+    steps:
+      - name: Checkout ${{ matrix.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.1'
+
+      - name: Deploy platform stack with timing report
+        uses: nebari-dev/action-nebari-sandbox@v2
+        with:
+          profile: platform
+          nic-version: "."
+          k8s-version: ${{ inputs.k8s-version || '1.32.4' }}
+          cluster-name: kcc-timing-${{ github.run_id }}
+          timing-report: "true"
+          resource-summary: "true"
