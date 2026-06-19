@@ -168,7 +168,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
-      - run: go test ./pkg/provider/aws -tags=provider -v
+      - run: go test ./pkg/providers/cluster/aws -tags=provider -v
 ```
 
 ### 11.4 Black Box Health Tests

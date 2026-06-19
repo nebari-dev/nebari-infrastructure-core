@@ -593,7 +593,7 @@ AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111
 
 ## Hetzner Provider Configuration
 
-Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on
+Hetzner Cloud provider configuration defined in `Config` (pkg/providers/cluster/hetzner/config.go). Provisions k3s clusters on
 Hetzner Cloud using the hetzner-k3s CLI tool.
 
 ```yaml
@@ -787,7 +787,7 @@ DNS provider configuration for managing DNS records and Let's Encrypt integratio
 
 ### Cloudflare DNS Provider
 
-Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-8).
+Cloudflare DNS provider defined in `cloudflare.Config` (pkg/providers/dns/cloudflare/config.go:5-8).
 
 ```yaml
 dns:
@@ -1386,4 +1386,4 @@ KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 
 **Last Updated**: 2026-03-27
 **NIC Version**: v0.1.0
-**Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
+**Source**: Generated from pkg/config/config.go and pkg/providers/dns/*/config.go
