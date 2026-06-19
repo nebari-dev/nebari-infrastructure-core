@@ -148,18 +148,24 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 	}
 
 	// Configure a user-supplied gateway TLS certificate (certificate.type=existing).
-	// No-op for cert-manager-issued certs. For files/env sources this creates the
-	// kubernetes.io/tls secret; for existing_secret it performs an advisory SAN check.
+	// No-op for cert-manager-issued certs.
+	//
+	// For the files/env sources this is the only step that materializes the
+	// kubernetes.io/tls secret in the cluster, so a failure here leaves the gateway
+	// with no usable cert. The material is already validated locally during
+	// preflight, so a failure at this point is a real cluster-side error
+	// (RBAC/quota/secret creation) - treat it as fatal rather than reporting a
+	// misleading success with a silently-broken gateway.
+	//
+	// The existing_secret source only performs an advisory SAN check and never
+	// returns an error, so this remains non-fatal for that source.
 	if err := ConfigureGatewayTLS(ctx, k8sClient, cfg); err != nil {
 		span.RecordError(err)
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to configure gateway TLS certificate").
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to configure gateway TLS certificate").
 			WithResource("certificate").
 			WithAction("tls-config-failed").
 			WithMetadata("error", err.Error()))
-		status.Warning(ctx, "Gateway HTTPS may not work until the TLS secret exists in envoy-gateway-system")
-		// Don't fail the overall install - surfaced as a warning so the rest of the deploy proceeds.
-		// Files/env material is pre-validated at deploy start, so a failure here is a
-		// transient cluster/secret-creation issue rather than a local config error.
+		return fmt.Errorf("configure gateway TLS certificate: %w", err)
 	}
 
 	span.SetAttributes(

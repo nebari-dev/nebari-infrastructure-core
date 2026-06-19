@@ -62,6 +62,11 @@ func PreflightGatewayTLS(cfg *config.NebariConfig) error {
 //
 // Certificate and key material is never logged or recorded in span attributes.
 // For non-existing certificate types this is a no-op.
+//
+// A non-nil error is only ever returned for the files/env sources, where this is
+// the sole step that places the secret in the cluster; the existing_secret source
+// is advisory-only and always returns nil. Callers therefore treat any error here
+// as fatal without needing to branch on the source.
 func ConfigureGatewayTLS(ctx context.Context, client kubernetes.Interface, cfg *config.NebariConfig) error {
 	cert := cfg.Certificate
 	if cert == nil || cert.Type != config.CertificateTypeExisting {
