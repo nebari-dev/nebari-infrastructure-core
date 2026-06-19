@@ -149,8 +149,8 @@ func createGatewayTLSSecret(ctx context.Context, client kubernetes.Interface, cf
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":       "nebari-gateway",
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				"app.kubernetes.io/name": "nebari-gateway",
+				ManagedByLabel:           NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeTLS,
