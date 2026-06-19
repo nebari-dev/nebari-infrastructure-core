@@ -2,9 +2,12 @@ package argocd
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"text/template"
+
+	"go.opentelemetry.io/otel"
 )
 
 // keycloakDefaultsRaw is the default keycloak-config-cli input for the nebari
@@ -30,13 +33,23 @@ const (
 // supplied TemplateData. Only the Domain field is substituted today (used
 // to build the argocd client's redirect URI); future fields can be wired
 // in as the schema grows.
-func RenderKeycloakDefaults(data TemplateData) ([]byte, error) {
-	tmpl, err := template.New("keycloak_defaults.yaml").Parse(string(keycloakDefaultsRaw))
+//
+// missingkey=error makes a stray template field (e.g. a future {{ .Typo }})
+// fail loudly here rather than silently emitting "<no value>" into the realm
+// config, where it would surface only as a misconfigured Keycloak at runtime.
+func RenderKeycloakDefaults(ctx context.Context, data TemplateData) ([]byte, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "argocd.RenderKeycloakDefaults")
+	defer span.End()
+
+	tmpl, err := template.New("keycloak_defaults.yaml").Option("missingkey=error").Parse(string(keycloakDefaultsRaw))
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("parse keycloak defaults template: %w", err)
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("render keycloak defaults: %w", err)
 	}
 	return buf.Bytes(), nil

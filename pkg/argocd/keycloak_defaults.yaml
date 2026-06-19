@@ -1,8 +1,8 @@
 # Default keycloak-config-cli input for the nebari realm.
 #
-# Phase 1a of the declarative Keycloak configuration approach (see
-# docs/superpowers/specs/2026-03-12-declarative-keycloak-config-design.md).
-# This file is embedded into the NIC binary via go:embed (see
+# Phase 1a of the declarative Keycloak configuration approach proposed in
+# nebari-infrastructure-core#154. This file is embedded into the NIC binary
+# via go:embed (see
 # keycloak_defaults.go), rendered with TemplateData at deploy time, and
 # written verbatim to the in-cluster Secret `keycloak-config-import`. The
 # kcc Job mounts that Secret read-only and applies the file against

@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,7 @@ import (
 // produce a valid Keycloak state; regressions here are silent (the YAML
 // renders fine but Keycloak gets misconfigured), so we check structure.
 func TestRenderKeycloakDefaults(t *testing.T) {
-	rendered, err := RenderKeycloakDefaults(TemplateData{Domain: "test.example.com"})
+	rendered, err := RenderKeycloakDefaults(context.Background(), TemplateData{Domain: "test.example.com"})
 	if err != nil {
 		t.Fatalf("RenderKeycloakDefaults error: %v", err)
 	}
@@ -40,6 +41,21 @@ func TestRenderKeycloakDefaults(t *testing.T) {
 		"clientId: argocd",
 		"$(env:ARGOCD_CLIENT_SECRET)",
 		"https://argocd.test.example.com/auth/callback",
+		// Realm security posture — silent-but-damaging if a regression flips these.
+		"sslRequired: external",
+		"registrationAllowed: false",
+		"bruteForceProtected: true",
+		// Realm roles assigned to the bootstrap admin user.
+		"- name: admin",
+		"- name: user",
+		// Group-membership mapper emits a multivalued groups claim.
+		`multivalued: "true"`,
+		// argocd client security flags + CORS origin (webOrigins is distinct
+		// from redirectUris and Domain-templated, so assert it renders too).
+		"publicClient: false",
+		"standardFlowEnabled: true",
+		"directAccessGrantsEnabled: false",
+		"https://argocd.test.example.com\n",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("expected %q in rendered realm config, got:\n%s", want, output)
@@ -61,5 +77,11 @@ func TestRenderKeycloakDefaults(t *testing.T) {
 	// land in Keycloak as a literal.
 	if strings.Contains(output, "{{") || strings.Contains(output, "}}") {
 		t.Errorf("rendered output contains unresolved template markers, got:\n%s", output)
+	}
+
+	// missingkey=error should make a stray field error out, but guard against
+	// a rendered "<no value>" leaking into the realm config regardless.
+	if strings.Contains(output, "<no value>") {
+		t.Errorf("rendered output contains \"<no value>\" from an unresolved field, got:\n%s", output)
 	}
 }
