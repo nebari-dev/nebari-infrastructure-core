@@ -21,6 +21,14 @@ Comprehensive design documentation covering:
 - **Operations**: Testing, deployment, and operational procedures
 - **Appendix**: Additional resources and reference materials
 
+### Operational Guides
+
+Task-focused guides for deploying and operating NIC.
+
+- [Deploying behind an enterprise TLS-inspecting proxy](operations/enterprise-tls-proxy.md) — configure an organization CA `trust_bundle` so deployments succeed when egress is TLS-inspected.
+- [Local development with Kind](local-kind-development.md)
+- [CLI reference](cli-reference.md)
+
 ## When to Use Which
 
 | Document Type | Use When |
