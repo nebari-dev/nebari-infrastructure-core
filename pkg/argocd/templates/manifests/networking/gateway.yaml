@@ -31,5 +31,8 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - name: nebari-gateway-tls
+          - name: {{ .GatewayTLSSecretName }}
             kind: Secret
+{{- if .GatewayTLSCrossNamespace }}
+            namespace: {{ .GatewayTLSSecretNamespace }}
+{{- end }}
