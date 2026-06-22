@@ -20,7 +20,9 @@ import (
 const (
 	// kindReadyTimeout bounds how long cluster creation waits for the node
 	// to become Ready. ArgoCD is installed immediately after Deploy, so we
-	// need a schedulable node, not just a responding API server.
+	// need a schedulable node, not just a responding API server. This is fixed
+	// on purpose and not wired through DeployOptions.Timeout which is meant to be
+	// used for the whole deploy.
 	kindReadyTimeout = 90 * time.Second
 )
 
