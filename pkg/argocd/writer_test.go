@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestApplications(t *testing.T) {
@@ -108,7 +108,7 @@ func TestWriteAll(t *testing.T) {
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
 		name                    string
-		settings                provider.InfraSettings
+		settings                cluster.InfraSettings
 		wantStorageClass        string
 		wantLBAnnotationCount   int
 		wantKeycloakBasePath    string
@@ -117,13 +117,13 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}{
 		{
 			name:             "aws defaults",
-			settings:         provider.InfraSettings{StorageClass: "gp2"},
+			settings:         cluster.InfraSettings{StorageClass: "gp2"},
 			wantStorageClass: "gp2",
 			wantHTTPSPort:    443,
 		},
 		{
 			name: "hetzner with annotations",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			},
@@ -133,7 +133,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "local with MetalLB",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:       "standard",
 				NeedsMetalLB:       true,
 				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
@@ -144,7 +144,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "custom HTTPS port",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass: "standard",
 				HTTPSPort:    8443,
 			},
@@ -177,7 +177,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 
 func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
@@ -696,7 +696,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: tt.domain}
-			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
+			settings := cluster.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
 			data := NewTemplateData(cfg, nil, settings)
 
 			if data.KeycloakIssuerURL != tt.wantIssuerURL {
@@ -713,7 +713,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	cfg := &config.NebariConfig{
 		Domain: "test.example.com",
 	}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass: "gp2",
 	}
 
@@ -833,5 +833,61 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	// because cert-manager needs Gateway API CRDs that envoy-gateway installs
 	if envoyWaveNum >= certWaveNum {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
+	}
+}
+
+func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
+	var buf bytes.Buffer
+	ctx := context.Background()
+
+	if err := WriteApplication(ctx, &buf, "opentelemetry-collector"); err != nil {
+		t.Fatalf("WriteApplication(opentelemetry-collector) error: %v", err)
+	}
+
+	content := buf.String()
+
+	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
+	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
+	// container resolves it (or falls back to `{}`) into an emptyDir that the
+	// collector reads via an extra --config flag. This sidesteps the upstream
+	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
+	// keeping the base CM and the override CM completely separate.
+	tests := []struct {
+		name        string
+		fragment    string
+		wantPresent bool
+	}{
+		// Required fragments — composite where possible to pin context
+		{"extraVolumes section", "extraVolumes:", true},
+		{"overrides-src volume with configmap name", "name: overrides-src\n            configMap:\n              name: opentelemetry-collector-overrides\n              optional: true", true},
+		{"overrides-resolved emptyDir", "name: overrides-resolved\n            emptyDir: {}", true},
+		{"initContainers section", "initContainers:", true},
+		{"ensure-overrides init container", "name: ensure-overrides", true},
+		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
+		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
+		// OTel collector confmap resolver doesn't treat it as env expansion.
+		{"escaped relabel replacement", "replacement: $$1:$$2", true},
+		// Opts the monitoring namespace into Nebari management at creation so
+		// software packs (e.g. nebari-lgtm-pack) can drop a NebariApp here and
+		// have the nebari-operator reconcile it instead of rejecting it.
+		{"managedNamespaceMetadata block", "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", "nebari.dev/managed: \"true\"", true},
+		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
+		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
+		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", "jsonPointers:", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			found := strings.Contains(content, tc.fragment)
+			if tc.wantPresent && !found {
+				t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", tc.fragment, content)
+			}
+			if !tc.wantPresent && found {
+				t.Errorf("rendered opentelemetry-collector.yaml contains forbidden fragment %q from the old ignoreDifferences design", tc.fragment)
+			}
+		})
 	}
 }

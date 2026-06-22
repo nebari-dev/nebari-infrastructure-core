@@ -395,15 +395,17 @@ cmd/nic/              CLI entry point and commands
 pkg/
   ├── argocd/         ArgoCD installation, Helm charts, app manifests
   ├── config/         Configuration parsing and validation
-  ├── dnsprovider/    DNS provider interface (Cloudflare)
   ├── git/            Git client for GitOps repository management
   ├── kubeconfig/     Kubeconfig generation
-  ├── provider/       Cloud provider interface
-  │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
-  │   ├── gcp/        GCP provider
-  │   ├── azure/      Azure provider
-  │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
-  │   └── local/      Local Kind/K3s provider
+  ├── providers/      Provider implementations
+  │   ├── cluster/    Cluster/cloud provider interface
+  │   │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
+  │   │   ├── gcp/        GCP provider
+  │   │   ├── azure/      Azure provider
+  │   │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
+  │   │   └── local/      Local Kind/K3s provider
+  │   └── dns/        DNS provider interface
+  │       └── cloudflare/ Cloudflare DNS provider
   ├── telemetry/      OpenTelemetry setup
   └── tofu/           OpenTofu binary management and execution
 terraform/            OpenTofu/Terraform modules per provider
@@ -456,7 +458,7 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ## OpenTofu lockfile updates
 
-If you change provider templates under `pkg/provider/**/templates/`, regenerate the provider lockfile(s) locally:
+If you change provider templates under `pkg/providers/cluster/**/templates/`, regenerate the provider lockfile(s) locally:
 
 ```bash
 ./scripts/pre-commit-tofu-lock.sh

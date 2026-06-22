@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	provider "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 const testCAPEM = `-----BEGIN CERTIFICATE-----

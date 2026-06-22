@@ -14,7 +14,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -27,13 +27,13 @@ const (
 // This is the main entry point called from cmd/nic/deploy.go
 // If gitConfig is a local file:// path, the directory is mounted into the repo-server pod.
 // gitConfig may be nil when no GitOps repository is configured.
-func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config, argoCDCfg Config) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, gitConfig *git.Config, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", prov.Name()),
+		attribute.String("provider", clusterProvider.Name()),
 		attribute.String("project_name", cfg.ProjectName),
 	)
 
@@ -43,7 +43,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 		WithMetadata("cluster_name", cfg.ProjectName))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to get kubeconfig").
@@ -145,6 +145,27 @@ func Install(ctx context.Context, cfg *config.NebariConfig, prov provider.Provid
 				WithMetadata("error", err.Error()))
 			// Don't fail - but this will prevent GitOps from working
 		}
+	}
+
+	// Configure a user-supplied gateway TLS certificate (certificate.type=existing).
+	// No-op for cert-manager-issued certs.
+	//
+	// For the files/env sources this is the only step that materializes the
+	// kubernetes.io/tls secret in the cluster, so a failure here leaves the gateway
+	// with no usable cert. The material is already validated locally during
+	// preflight, so a failure at this point is a real cluster-side error
+	// (RBAC/quota/secret creation) - treat it as fatal rather than reporting a
+	// misleading success with a silently-broken gateway.
+	//
+	// The existing_secret source only performs an advisory SAN check and never
+	// returns an error, so this remains non-fatal for that source.
+	if err := ConfigureGatewayTLS(ctx, k8sClient, cfg); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to configure gateway TLS certificate").
+			WithResource("certificate").
+			WithAction("tls-config-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("configure gateway TLS certificate: %w", err)
 	}
 
 	span.SetAttributes(

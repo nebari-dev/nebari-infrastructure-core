@@ -19,7 +19,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 //go:embed templates
@@ -48,6 +48,19 @@ type TemplateData struct {
 	CertificateIssuer string // "selfsigned-issuer" or "letsencrypt-issuer"
 	ACMEEmail         string
 	ACMEServer        string
+
+	// UseExistingCertificate is true when the user supplies their own TLS cert
+	// (certificate.type=existing). When true, the cert-manager Certificate is
+	// not rendered.
+	UseExistingCertificate bool
+	// GatewayTLSSecretName is the name of the TLS secret the gateway listener references.
+	GatewayTLSSecretName string
+	// GatewayTLSSecretNamespace is the namespace of that secret. Only emitted on the
+	// gateway certificateRef (and used for the ReferenceGrant) when GatewayTLSCrossNamespace.
+	GatewayTLSSecretNamespace string
+	// GatewayTLSCrossNamespace is true when the TLS secret lives outside
+	// envoy-gateway-system, requiring a namespace on certificateRefs and a ReferenceGrant.
+	GatewayTLSCrossNamespace bool
 
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
@@ -82,7 +95,7 @@ type TemplateData struct {
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
 // configuration, and provider InfraSettings. gitConfig may be nil when no
 // GitOps repository is configured; in that case Git* fields are left empty.
-func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings) TemplateData {
+func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -115,22 +128,24 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings p
 	}
 
 	// Set certificate configuration
-	if cfg.Certificate != nil {
-		if cfg.Certificate.Type == "letsencrypt" {
-			data.CertificateIssuer = "letsencrypt-issuer"
-			if cfg.Certificate.ACME != nil {
-				data.ACMEEmail = cfg.Certificate.ACME.Email
-				data.ACMEServer = cfg.Certificate.ACME.Server
-				if data.ACMEServer == "" {
-					data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
-				}
+	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
+		data.CertificateIssuer = "letsencrypt-issuer"
+		if cfg.Certificate.ACME != nil {
+			data.ACMEEmail = cfg.Certificate.ACME.Email
+			data.ACMEServer = cfg.Certificate.ACME.Server
+			if data.ACMEServer == "" {
+				data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
 			}
-		} else {
-			data.CertificateIssuer = certificateIssuerSelfSigned
 		}
 	} else {
 		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
+
+	// Resolve the gateway TLS secret reference. The methods are nil-safe, so
+	// they return sensible defaults when no certificate block is configured.
+	data.UseExistingCertificate = cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeExisting
+	data.GatewayTLSSecretName, data.GatewayTLSSecretNamespace = cfg.Certificate.GatewaySecretRef()
+	data.GatewayTLSCrossNamespace = cfg.Certificate.IsCrossNamespaceSecret()
 
 	// Default domain if not set
 	if data.Domain == "" {
@@ -258,7 +273,7 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 // Templates are processed with Go template syntax for dynamic values.
 // trustBundlePEM is the top-level CA bundle already resolved by the orchestration
 // layer (empty when no bundle is configured); it is not re-read from disk here.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings provider.InfraSettings, trustBundlePEM string) error {
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
@@ -315,6 +330,11 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip certificate templates that don't apply to the configured cert source.
+		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -368,6 +388,33 @@ func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
+}
+
+const (
+	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
+	certificatesAppPath       = "apps/certificates.yaml"
+	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
+)
+
+// skipCertificateTemplate reports whether a cert-related template should be
+// omitted for the configured certificate source. The cert-manager Certificate
+// (and its Argo CD Application) is only rendered for cert-manager-issued certs
+// (selfsigned/letsencrypt); the ReferenceGrant is only rendered for a
+// cross-namespace existing secret.
+//
+// The certificates Application is skipped alongside the Certificate because the
+// gateway cert is the only resource in manifests/security/certificates. Leaving
+// the Application would point it at an empty directory (allowEmpty: false) and
+// it would report as failed.
+func skipCertificateTemplate(relPath string, data TemplateData) bool {
+	switch relPath {
+	case gatewayCertificatePath, certificatesAppPath:
+		return data.UseExistingCertificate
+	case gatewayReferenceGrantPath:
+		return !data.GatewayTLSCrossNamespace
+	default:
+		return false
+	}
 }
 
 // templateFuncs is the single extension point for helpers available to every

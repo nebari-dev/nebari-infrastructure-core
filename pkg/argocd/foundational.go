@@ -13,7 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -32,6 +32,12 @@ const (
 
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// ManagedByLabel is the app.kubernetes.io/managed-by label key.
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+
+	// NebariManagedByValue is the value of the app.kubernetes.io/managed-by label for Nebari-managed resources.
+	NebariManagedByValue = "nebari-infrastructure-core"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -87,13 +93,13 @@ type ArgoCDSSOConfig struct {
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
 // via ArgoCD from the git repository. gitConfig may be either remote or local
 // file:// path; when nil, the root App-of-Apps step is skipped.
-func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, gitConfig *git.Config, foundationalCfg FoundationalConfig) error {
+func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, gitConfig *git.Config, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", prov.Name()),
+		attribute.String("provider", clusterProvider.Name()),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("keycloak_enabled", foundationalCfg.Keycloak.Enabled),
 	)
@@ -103,7 +109,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		WithAction("installing"))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
@@ -287,8 +293,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+					ManagedByLabel:              NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -308,8 +314,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+					ManagedByLabel:              NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -335,8 +341,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+				ManagedByLabel:              NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
