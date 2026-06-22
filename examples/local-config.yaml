@@ -32,7 +32,7 @@ cluster:
   # https_port: 8443
 
   # MetalLB provides the gateway's LoadBalancer IP. NIC derives the address pool
-  # from the kind Docker network automatically so the gateway IP is routable. override
+  # from the kind Docker network automatically so the gateway IP is routable. Override
   # address_pool only to pin a specific range.
   # metallb:
   #   address_pool: 172.18.255.100-172.18.255.110
