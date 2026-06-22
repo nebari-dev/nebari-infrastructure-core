@@ -9,7 +9,7 @@ type Config struct {
 	AdditionalFields map[string]any               `yaml:",inline"`
 }
 
-// KindConfig holds optional confg for the deployed kind cluster. It may be
+// KindConfig holds optional config for the deployed kind cluster. It may be
 // omitted entirely (nil), in which case the cluster is created with defaults.
 type KindConfig struct {
 	// NodeImage is the kindest/node image to use (e.g. "kindest/node:v1.32.2").
