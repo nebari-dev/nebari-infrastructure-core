@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestApplications(t *testing.T) {
@@ -106,7 +106,7 @@ func TestWriteAll(t *testing.T) {
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
 		name                    string
-		settings                provider.InfraSettings
+		settings                cluster.InfraSettings
 		wantStorageClass        string
 		wantLBAnnotationCount   int
 		wantKeycloakBasePath    string
@@ -115,13 +115,13 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	}{
 		{
 			name:             "aws defaults",
-			settings:         provider.InfraSettings{StorageClass: "gp2"},
+			settings:         cluster.InfraSettings{StorageClass: "gp2"},
 			wantStorageClass: "gp2",
 			wantHTTPSPort:    443,
 		},
 		{
 			name: "hetzner with annotations",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:            "hcloud-volumes",
 				LoadBalancerAnnotations: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			},
@@ -131,7 +131,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "local with MetalLB",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass:       "standard",
 				NeedsMetalLB:       true,
 				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
@@ -142,7 +142,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		},
 		{
 			name: "custom HTTPS port",
-			settings: provider.InfraSettings{
+			settings: cluster.InfraSettings{
 				StorageClass: "standard",
 				HTTPSPort:    8443,
 			},
@@ -175,7 +175,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 
 func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
@@ -604,7 +604,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: tt.domain}
-			settings := provider.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
+			settings := cluster.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
 			data := NewTemplateData(cfg, nil, settings)
 
 			if data.KeycloakIssuerURL != tt.wantIssuerURL {
@@ -621,7 +621,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	cfg := &config.NebariConfig{
 		Domain: "test.example.com",
 	}
-	settings := provider.InfraSettings{
+	settings := cluster.InfraSettings{
 		StorageClass: "gp2",
 	}
 
@@ -658,7 +658,7 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 	t.Run("includes longhorn-httproute when LonghornEnabled is true", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{
+		settings := cluster.InfraSettings{
 			StorageClass:    "longhorn",
 			LonghornEnabled: true,
 		}
@@ -694,7 +694,7 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 	t.Run("omits longhorn-httproute body when LonghornEnabled is false", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{
+		settings := cluster.InfraSettings{
 			StorageClass:    "gp2",
 			LonghornEnabled: false,
 		}
@@ -771,7 +771,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	t.Run("includes SecurityPolicy when LonghornEnabled is true", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{
+		settings := cluster.InfraSettings{
 			StorageClass:    "longhorn",
 			LonghornEnabled: true,
 		}
@@ -824,7 +824,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	t.Run("skips SecurityPolicy templates when LonghornEnabled is false", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{
+		settings := cluster.InfraSettings{
 			StorageClass:    "gp2",
 			LonghornEnabled: false,
 		}
@@ -893,7 +893,7 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 	t.Run("realm-setup includes Longhorn client creation when LonghornEnabled is true", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{LonghornEnabled: true}
+		settings := cluster.InfraSettings{LonghornEnabled: true}
 		mock := &mockGitClient{workDir: tmpDir}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, settings); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
@@ -924,7 +924,7 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 	t.Run("realm-setup does NOT mention Longhorn when LonghornEnabled is false", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{LonghornEnabled: false}
+		settings := cluster.InfraSettings{LonghornEnabled: false}
 		mock := &mockGitClient{workDir: tmpDir}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, settings); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
@@ -953,7 +953,7 @@ func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 	t.Run("cert includes longhorn dnsName when LonghornEnabled is true", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{LonghornEnabled: true}
+		settings := cluster.InfraSettings{LonghornEnabled: true}
 		mock := &mockGitClient{workDir: tmpDir}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, settings); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
@@ -972,7 +972,7 @@ func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 	t.Run("cert does NOT include longhorn dnsName when LonghornEnabled is false", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := provider.InfraSettings{LonghornEnabled: false}
+		settings := cluster.InfraSettings{LonghornEnabled: false}
 		mock := &mockGitClient{workDir: tmpDir}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, settings); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)

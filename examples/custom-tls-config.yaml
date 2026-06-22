@@ -1,0 +1,59 @@
+# Example: supply your own TLS certificate for the Nebari gateway.
+#
+# Nebari fronts all in-cluster HTTPS traffic with a single Envoy Gateway that
+# terminates TLS for every hostname under `domain`. With `type: existing` you
+# provide the certificate instead of having cert-manager mint one.
+#
+# The certificate must cover the apex domain and the keycloak/argocd subdomains:
+#   - nebari.example.com
+#   - keycloak.nebari.example.com
+#   - argocd.nebari.example.com
+# A wildcard (*.nebari.example.com) plus the apex (nebari.example.com) also works.
+# NIC warns (does not fail) if a recommended SAN is missing.
+#
+# See docs/custom-tls-certificate.md for the full guide.
+
+project_name: my-nebari-custom-tls
+domain: nebari.example.com
+
+cluster:
+  aws:
+    region: us-west-2
+
+certificate:
+  type: existing
+
+  # Optional. Name of the TLS secret NIC creates for the files/env sources.
+  # Defaults to "nebari-gateway-tls". Cannot be combined with existing_secret
+  # (which references existing_secret.name directly).
+  # secret_name: nebari-gateway-tls
+
+  # Provide exactly ONE of the three sources below.
+
+  # 1. Reference a kubernetes.io/tls secret you already created in the cluster.
+  #    namespace is optional and defaults to envoy-gateway-system. When it lives
+  #    in another namespace, NIC renders a Gateway-API ReferenceGrant so the
+  #    gateway may read it.
+  existing_secret:
+    name: my-gateway-tls
+    # namespace: my-tls-namespace
+
+  # 2. Read PEM material from files on disk. NIC creates the secret directly in
+  #    envoy-gateway-system; the cert/key never enter the GitOps repo.
+  # files:
+  #   cert_file: /path/to/tls.crt
+  #   key_file: /path/to/tls.key
+
+  # 3. Read raw (non-base64) PEM material from environment variables. NIC creates
+  #    the secret directly; the cert/key never enter the GitOps repo.
+  # env:
+  #   cert_env: NEBARI_TLS_CERT
+  #   key_env: NEBARI_TLS_KEY
+
+# GitOps repository configuration (required for foundational services)
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-custom-tls"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY

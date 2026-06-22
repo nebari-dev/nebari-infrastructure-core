@@ -20,7 +20,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -94,6 +94,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		WithMetadata("provider", cfg.Cluster.ProviderName()).
 		WithMetadata("project_name", cfg.ProjectName))
 
+	// For user-supplied certificates sourced from files/env, validate the
+	// material is readable and a valid keypair before provisioning anything.
+	// This turns a local config error into a fast failure instead of a silently
+	// broken gateway discovered after the cluster is up.
+	if err := argocd.PreflightGatewayTLS(cfg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("gateway TLS certificate: %w", err)
+	}
+
 	if opts.Timeout > 0 {
 		span.SetAttributes(attribute.String("timeout", opts.Timeout.String()))
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Using custom timeout").
@@ -114,7 +123,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		WithMetadata("provider", clusterProvider.Name()))
 
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, provider.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -268,7 +277,7 @@ func defaultGitConfig(projectName string) *git.Config {
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For providers that support local gitops without explicit git_repository config, this auto-creates
 // /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
-// The supportsLocalGitOps parameter comes from provider.InfraSettings().SupportsLocalGitOps.
+// The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
 func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
 		return cfg.GitRepository, nil
@@ -301,8 +310,8 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 // lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
-func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not get kubeconfig for endpoint lookup").
 			WithMetadata("error", err.Error()))
@@ -379,7 +388,7 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 // This is the orchestrator function that handles all I/O operations.
 // gitConfig must be non-nil and represents the effective GitOps configuration
 // (either cfg.GitRepository or an auto-generated local config).
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings provider.InfraSettings) error {
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
