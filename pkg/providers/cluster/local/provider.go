@@ -327,6 +327,8 @@ func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSetting
 	// the pool derived from the live cluster network during Deploy, so MetalLB IPs
 	// are routable on whatever subnet Docker picked. If Deploy produced none
 	// (dry-run, tests), defaultMetalLBAddressPool is kept.
+	// This relies on Deploy having populated p.metalLBPool on this same Provider
+	// instance before InfraSettings is called.
 	if !explicitPool && p.metalLBPool != "" {
 		settings.MetalLBAddressPool = p.metalLBPool
 	}
