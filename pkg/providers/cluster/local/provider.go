@@ -109,7 +109,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // cluster's network for InfraSettings to consume.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Deploy")
+	ctx, span := tracer.Start(ctx, "local.Deploy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -141,7 +141,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
-	exists, err := kindClusterExists(kp, projectName)
+	exists, err := kindClusterExists(ctx, kp, projectName)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -158,7 +158,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("gitops_path", git.DefaultLocalPath(projectName)))
 
-		if err := createKindCluster(kp, projectName, kindCfg); err != nil {
+		if err := createKindCluster(ctx, kp, projectName, kindCfg); err != nil {
 			span.RecordError(err)
 			return err
 		}
@@ -173,7 +173,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	// Derive the MetalLB pool from the cluster's network for InfraSettings.
 	// On failure we keep the static default and say so, rather
 	// than failing the deploy over a load-balancer address range.
-	if pool, err := kindNodeAddressPool(kp, projectName); err == nil {
+	if pool, err := kindNodeAddressPool(ctx, kp, projectName); err == nil {
 		p.metalLBPool = pool
 		span.SetAttributes(attribute.String("metallb_address_pool", pool))
 	} else {
@@ -194,7 +194,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 // itself once no clusters remain).
 func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Destroy")
+	ctx, span := tracer.Start(ctx, "local.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
@@ -216,7 +216,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, _ *config.Cl
 		return err
 	}
 
-	exists, err := kindClusterExists(kp, projectName)
+	exists, err := kindClusterExists(ctx, kp, projectName)
 	if err != nil {
 		span.RecordError(err)
 		return err
