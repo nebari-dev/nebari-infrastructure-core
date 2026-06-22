@@ -25,7 +25,7 @@ func TestCreateNamespace(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("creates new namespace", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 
 		err := createNamespace(ctx, client, "test-namespace")
 		if err != nil {
@@ -49,7 +49,7 @@ func TestCreateNamespace(t *testing.T) {
 				Name: "existing-namespace",
 			},
 		}
-		client := fake.NewSimpleClientset(existingNS) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(existingNS)
 
 		err := createNamespace(ctx, client, "existing-namespace")
 		if err != nil {
@@ -68,7 +68,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:               true,
@@ -121,7 +121,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:            true,
@@ -159,7 +159,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:            true,
@@ -196,7 +196,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				"admin-password": []byte("existing-password"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		cfg := KeycloakConfig{
 			Enabled:       true,
@@ -295,7 +295,7 @@ func TestCreateKeycloakSecrets_CreatesArgoCDOIDCSecret(t *testing.T) {
 			Name: "keycloak",
 		},
 	}
-	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(ns)
 
 	keycloakCfg := KeycloakConfig{
 		Enabled:               true,
@@ -338,7 +338,7 @@ func TestCreateKeycloakSecrets_SkipsArgoCDSecretWhenEmpty(t *testing.T) {
 			Name: "keycloak",
 		},
 	}
-	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(ns)
 
 	keycloakCfg := KeycloakConfig{
 		Enabled:       true,
