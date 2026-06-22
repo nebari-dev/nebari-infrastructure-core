@@ -147,6 +147,27 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 		}
 	}
 
+	// Configure a user-supplied gateway TLS certificate (certificate.type=existing).
+	// No-op for cert-manager-issued certs.
+	//
+	// For the files/env sources this is the only step that materializes the
+	// kubernetes.io/tls secret in the cluster, so a failure here leaves the gateway
+	// with no usable cert. The material is already validated locally during
+	// preflight, so a failure at this point is a real cluster-side error
+	// (RBAC/quota/secret creation) - treat it as fatal rather than reporting a
+	// misleading success with a silently-broken gateway.
+	//
+	// The existing_secret source only performs an advisory SAN check and never
+	// returns an error, so this remains non-fatal for that source.
+	if err := ConfigureGatewayTLS(ctx, k8sClient, cfg); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to configure gateway TLS certificate").
+			WithResource("certificate").
+			WithAction("tls-config-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("configure gateway TLS certificate: %w", err)
+	}
+
 	span.SetAttributes(
 		attribute.String("argocd_version", argoCDCfg.Version),
 		attribute.String("argocd_namespace", argoCDCfg.Namespace),

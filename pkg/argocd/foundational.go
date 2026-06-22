@@ -32,6 +32,12 @@ const (
 
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// ManagedByLabel is the app.kubernetes.io/managed-by label key.
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+
+	// NebariManagedByValue is the value of the app.kubernetes.io/managed-by label for Nebari-managed resources.
+	NebariManagedByValue = "nebari-infrastructure-core"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -287,8 +293,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+					ManagedByLabel:              NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -308,8 +314,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+					ManagedByLabel:              NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -335,8 +341,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				"app.kubernetes.io/part-of": NebariFoundationalPartOf,
+				ManagedByLabel:              NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
