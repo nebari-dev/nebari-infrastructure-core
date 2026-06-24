@@ -17,6 +17,11 @@ git_repository:
     ssh_key_env: GIT_SSH_PRIVATE_KEY  # Environment variable containing SSH private key
     # OR use token for HTTPS:
     # token_env: GIT_TOKEN
+    # SSH host keys are verified against known_hosts (SSH_KNOWN_HOSTS,
+    # ~/.ssh/known_hosts, /etc/ssh/ssh_known_hosts). For ephemeral environments
+    # (e.g. CI) without a known_hosts file, verification can be disabled —
+    # this removes man-in-the-middle protection:
+    # insecure_skip_host_key_verification: true
   # Optional: separate read-only credentials for ArgoCD (falls back to auth if not set)
   # argocd_auth:
   #   ssh_key_env: ARGOCD_SSH_KEY
