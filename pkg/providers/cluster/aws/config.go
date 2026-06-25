@@ -169,15 +169,21 @@ func (c *Config) ClusterAutoscalerImageTag() string {
 }
 
 type NodeGroup struct {
-	Instance string            `yaml:"instance" json:"instance"`
-	MinNodes int               `yaml:"min_nodes,omitempty" json:"min_nodes"`
-	MaxNodes int               `yaml:"max_nodes,omitempty" json:"max_nodes"`
-	GPU      bool              `yaml:"gpu,omitempty" json:"-"`
-	AMIType  *string           `yaml:"ami_type,omitempty" json:"ami_type,omitempty"`
-	Spot     bool              `yaml:"spot,omitempty" json:"spot"`
-	DiskSize *int              `yaml:"disk_size,omitempty" json:"disk_size,omitempty"`
-	Labels   map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
-	Taints   []Taint           `yaml:"taints,omitempty" json:"taints,omitempty"`
+	Instance string  `yaml:"instance" json:"instance"`
+	MinNodes int     `yaml:"min_nodes,omitempty" json:"min_nodes"`
+	MaxNodes int     `yaml:"max_nodes,omitempty" json:"max_nodes"`
+	GPU      bool    `yaml:"gpu,omitempty" json:"-"`
+	AMIType  *string `yaml:"ami_type,omitempty" json:"ami_type,omitempty"`
+	Spot     bool    `yaml:"spot,omitempty" json:"spot"`
+	DiskSize *int    `yaml:"disk_size,omitempty" json:"disk_size,omitempty"`
+	// MaxUnavailable caps how many nodes a rolling update takes down at once
+	// (rendered as the EKS managed node group update_config.max_unavailable).
+	// nil leaves the upstream module default (33% unavailable) in place. Set to
+	// 1 on a Longhorn storage pool so replicas rebuild onto the replacement node
+	// before the next old node is drained.
+	MaxUnavailable *int              `yaml:"max_unavailable,omitempty" json:"max_unavailable,omitempty"`
+	Labels         map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Taints         []Taint           `yaml:"taints,omitempty" json:"taints,omitempty"`
 }
 
 type Taint struct {

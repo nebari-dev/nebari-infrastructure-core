@@ -10,6 +10,8 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+func intPtr(i int) *int { return &i }
+
 func durPtr(d time.Duration) *time.Duration { return &d }
 
 func TestLonghornEnabled(t *testing.T) {
