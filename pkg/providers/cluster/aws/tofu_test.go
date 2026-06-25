@@ -509,3 +509,51 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 		}
 	})
 }
+
+func TestToTFVarsNodeGroupMaxUnavailable(t *testing.T) {
+	tests := []struct {
+		name    string
+		group   NodeGroup
+		wantSet bool
+		wantVal int
+	}{
+		{
+			name:    "max_unavailable set flows through to tfvars",
+			group:   NodeGroup{Instance: "m7g.large", MaxUnavailable: intPtr(1)},
+			wantSet: true,
+			wantVal: 1,
+		},
+		{
+			name:    "max_unavailable unset stays nil (module default preserved)",
+			group:   NodeGroup{Instance: "m7g.large"},
+			wantSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Region:            "us-west-2",
+				KubernetesVersion: "1.33",
+				NodeGroups:        map[string]NodeGroup{"storage": tt.group},
+			}
+
+			vars, err := cfg.toTFVars("test-project")
+			if err != nil {
+				t.Fatalf("toTFVars: %v", err)
+			}
+
+			got := vars.NodeGroups["storage"].MaxUnavailable
+			if tt.wantSet {
+				if got == nil {
+					t.Fatalf("MaxUnavailable = nil, want %d", tt.wantVal)
+				}
+				if *got != tt.wantVal {
+					t.Errorf("MaxUnavailable = %d, want %d", *got, tt.wantVal)
+				}
+			} else if got != nil {
+				t.Errorf("MaxUnavailable = %d, want nil", *got)
+			}
+		})
+	}
+}
