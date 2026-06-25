@@ -1,5 +1,7 @@
 package openshift
 
+import "github.com/nebari-dev/nebari-infrastructure-core/pkg/kubeconfig"
+
 // Mode values for the OpenShift provider.
 const (
 	// ModeProvision provisions a fresh ROSA HCP cluster via OpenTofu.
@@ -70,4 +72,13 @@ func (c *Config) StorageClassOrDefault() string {
 // LonghornEnabled reports whether Longhorn install was opted into.
 func (c *Config) LonghornEnabled() bool {
 	return c.Longhorn.Enabled
+}
+
+// GetKubeconfigPath returns the configured kubeconfig path (existing mode), or
+// the default resolution (KUBECONFIG env → ~/.kube/config) when unset.
+func (c *Config) GetKubeconfigPath() (string, error) {
+	if c.Kubeconfig != "" {
+		return c.Kubeconfig, nil
+	}
+	return kubeconfig.GetPath()
 }
