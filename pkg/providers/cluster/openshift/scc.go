@@ -30,12 +30,18 @@ var foundationalNamespaces = []string{
 	"nebari",
 }
 
-// defaultSCC is the SecurityContextConstraints granted to foundational service
-// accounts. anyuid lets pods run with their image's declared UID while still
-// blocking host access / privilege escalation — the minimum that reliably starts
-// the foundational stack. Longhorn (privileged) is handled separately and stays
-// opt-in.
-const defaultSCC = "anyuid"
+// defaultSCCName is the SecurityContextConstraints granted to foundational
+// service accounts.
+//
+// It is "privileged" rather than the lighter "anyuid" because Nebari's upstream
+// foundational charts pin BOTH a fixed UID (runAsUser: 999) AND a seccomp
+// profile (RuntimeDefault). No stock OpenShift SCC permits that combination
+// except privileged: anyuid allows the fixed UID but forbids any seccomp
+// profile, while restricted-v2 allows the seccomp profile but forbids the fixed
+// UID. This was proven on a live ROSA HCP cluster, where argocd-redis (UID 999 +
+// seccomp) could not schedule under anyuid. Operators wanting least privilege can
+// ship a custom SCC (RunAsAny + seccomp RuntimeDefault) and set scc.name to it.
+const defaultSCCName = "privileged"
 
 // sccClusterRoleName returns the auto-generated ClusterRole that backs an SCC.
 // OpenShift exposes each SCC as a ClusterRole named system:openshift:scc:<name>;

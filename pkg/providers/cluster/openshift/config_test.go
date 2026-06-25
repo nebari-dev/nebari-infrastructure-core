@@ -22,6 +22,29 @@ func TestConfigDefaults(t *testing.T) {
 	if c.LonghornEnabled() {
 		t.Error("LonghornEnabled() = true, want false by default")
 	}
+	if !c.SCCManageEnabled() {
+		t.Error("SCCManageEnabled() = false, want true by default")
+	}
+	if c.SCCName() != "privileged" {
+		t.Errorf("SCCName() = %q, want privileged", c.SCCName())
+	}
+}
+
+func TestConfigSCCOverrides(t *testing.T) {
+	raw := map[string]any{
+		"mode": "existing",
+		"scc":  map[string]any{"manage": false, "name": "anyuid"},
+	}
+	var c Config
+	if err := config.UnmarshalProviderConfig(context.Background(), raw, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.SCCManageEnabled() {
+		t.Error("SCCManageEnabled() = true, want false when manage: false")
+	}
+	if c.SCCName() != "anyuid" {
+		t.Errorf("SCCName() = %q, want anyuid", c.SCCName())
+	}
 }
 
 func TestConfigModeDefaultsToProvision(t *testing.T) {

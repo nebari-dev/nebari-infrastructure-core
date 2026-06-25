@@ -27,6 +27,19 @@ type LonghornConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 }
 
+// SCCConfig controls the SecurityContextConstraints bootstrap. Nebari's upstream
+// foundational charts pin a fixed UID and a seccomp profile, a combination only
+// the privileged SCC permits on OpenShift, so SCC bootstrap is enabled by default.
+type SCCConfig struct {
+	// Manage enables/disables applying SCC bindings. Pointer so an unset value
+	// defaults to true (managed). Set to false to manage SCCs out-of-band.
+	Manage *bool `yaml:"manage,omitempty"`
+	// Name is the SCC granted to the foundational namespaces. Defaults to
+	// "privileged" (the only stock SCC allowing fixed-UID + seccomp pods like
+	// argocd-redis). Override with a custom least-privilege SCC if desired.
+	Name string `yaml:"name,omitempty"`
+}
+
 // Config is the cluster.openshift provider configuration. It is dual-mode: a
 // `mode` discriminator selects between provisioning a ROSA HCP cluster
 // (provision) and targeting an existing OpenShift cluster (existing). Fields not
@@ -49,6 +62,7 @@ type Config struct {
 
 	// --- shared ---
 	StorageClass string         `yaml:"storage_class,omitempty"`
+	SCC          SCCConfig      `yaml:"scc,omitempty"`
 	Longhorn     LonghornConfig `yaml:"longhorn,omitempty"`
 }
 
@@ -72,6 +86,24 @@ func (c *Config) StorageClassOrDefault() string {
 // LonghornEnabled reports whether Longhorn install was opted into.
 func (c *Config) LonghornEnabled() bool {
 	return c.Longhorn.Enabled
+}
+
+// SCCManageEnabled reports whether NIC should apply SCC bindings. Defaults to
+// true when unset.
+func (c *Config) SCCManageEnabled() bool {
+	if c.SCC.Manage == nil {
+		return true
+	}
+	return *c.SCC.Manage
+}
+
+// SCCName returns the SCC to grant foundational namespaces, defaulting to
+// "privileged".
+func (c *Config) SCCName() string {
+	if c.SCC.Name != "" {
+		return c.SCC.Name
+	}
+	return defaultSCCName
 }
 
 // GetKubeconfigPath returns the configured kubeconfig path (existing mode), or

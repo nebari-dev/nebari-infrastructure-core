@@ -3,17 +3,17 @@ package openshift
 import "testing"
 
 func TestSCCBindingManifests(t *testing.T) {
-	bindings := sccBindingManifests([]string{"keycloak", "cert-manager"}, "anyuid")
+	bindings := sccBindingManifests([]string{"keycloak", "cert-manager"}, "privileged")
 	if len(bindings) != 2 {
 		t.Fatalf("got %d bindings, want 2", len(bindings))
 	}
 
 	b := bindings[0]
-	if b.Name != "nic-openshift-scc-anyuid-keycloak" {
-		t.Errorf("Name = %q, want nic-openshift-scc-anyuid-keycloak", b.Name)
+	if b.Name != "nic-openshift-scc-privileged-keycloak" {
+		t.Errorf("Name = %q, want nic-openshift-scc-privileged-keycloak", b.Name)
 	}
-	if b.RoleRef.Kind != "ClusterRole" || b.RoleRef.Name != "system:openshift:scc:anyuid" {
-		t.Errorf("RoleRef = %+v, want ClusterRole system:openshift:scc:anyuid", b.RoleRef)
+	if b.RoleRef.Kind != "ClusterRole" || b.RoleRef.Name != "system:openshift:scc:privileged" {
+		t.Errorf("RoleRef = %+v, want ClusterRole system:openshift:scc:privileged", b.RoleRef)
 	}
 	if len(b.Subjects) != 1 {
 		t.Fatalf("got %d subjects, want 1", len(b.Subjects))

@@ -1,9 +1,11 @@
 package openshift
 
 import (
+	"context"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestProviderName(t *testing.T) {
@@ -25,5 +27,27 @@ func TestSummaryReportsMode(t *testing.T) {
 	got := NewProvider().Summary(cc)
 	if got["Mode"] != "existing" {
 		t.Errorf("Summary Mode = %q, want existing", got["Mode"])
+	}
+	if got["Context"] != "ctx" {
+		t.Errorf("Summary Context = %q, want ctx", got["Context"])
+	}
+	if got["SCC"] != "privileged" {
+		t.Errorf("Summary SCC = %q, want privileged", got["SCC"])
+	}
+}
+
+func TestDeployDryRunExistingIsNoop(t *testing.T) {
+	cc := clusterConfig(map[string]any{"mode": "existing", "context": "ctx"})
+	err := NewProvider().Deploy(context.Background(), "proj", cc, cluster.DeployOptions{DryRun: true})
+	if err != nil {
+		t.Errorf("dry-run Deploy = %v, want nil", err)
+	}
+}
+
+func TestDeployProvisionNotWired(t *testing.T) {
+	cc := clusterConfig(map[string]any{"mode": "provision", "region": "us-east-1"})
+	err := NewProvider().Deploy(context.Background(), "proj", cc, cluster.DeployOptions{})
+	if err == nil {
+		t.Fatal("provision Deploy = nil, want not-wired error")
 	}
 }
