@@ -37,6 +37,13 @@ spec:
                   key: client-secret
             - name: DOMAIN
               value: {{ .Domain }}
+            # OpenShift runs this pod as an arbitrary high UID with no /etc/passwd
+            # entry, so $HOME defaults to "/" (read-only) and kcadm cannot write
+            # its ~/.keycloak/kcadm.config token file. Point HOME at a writable,
+            # UID-agnostic dir so realm setup works on OpenShift (and is a no-op
+            # on vanilla Kubernetes).
+            - name: HOME
+              value: /tmp
           command:
             - /bin/bash
             - -c
@@ -45,14 +52,23 @@ spec:
               KCADM="/opt/keycloak/bin/kcadm.sh"
 
               echo "Waiting for Keycloak to be ready..."
+              ready=""
               for i in $(seq 1 60); do
                 if $KCADM config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" 2>/dev/null; then
                   echo "Keycloak is ready"
+                  ready=1
                   break
                 fi
                 echo "Keycloak not ready, waiting... ($i/60)"
                 sleep 5
               done
+              # Fail loudly (with the real error) instead of proceeding against an
+              # unauthenticated kcadm, which would silently no-op realm creation.
+              if [ -z "$ready" ]; then
+                echo "ERROR: Keycloak readiness/login never succeeded; last error:"
+                $KCADM config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" || true
+                exit 1
+              fi
 
               echo "Creating nebari realm..."
               $KCADM create realms \
