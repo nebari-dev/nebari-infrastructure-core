@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down config-docs
 
 # Variables
 BINARY_NAME=nic
@@ -15,6 +15,10 @@ LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X m
 help: ## Display this help message
 	@echo "Nebari Infrastructure Core - Makefile commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+config-docs: ## Generate configuration reference documentation
+	@mkdir -p docs/configuration
+	go run ./cmd/docgen -output docs/configuration
 
 build: ## Build the binary
 	@echo "Building $(BINARY_NAME)..."
