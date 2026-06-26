@@ -49,12 +49,20 @@ spec:
             - -c
             - |
               set -e
-              KCADM="/opt/keycloak/bin/kcadm.sh"
+              # kcadm stores its authenticated session in a config file. On
+              # OpenShift this pod runs as an arbitrary UID with no /etc/passwd
+              # entry, so kcadm's default ~/.keycloak/kcadm.config resolves to a
+              # non-writable home: `config credentials` cannot persist the token
+              # and every later call fails with "No server specified". Pin the
+              # config file to an explicit, world-writable path via --config on
+              # every invocation (UID-independent; a no-op on vanilla k8s).
+              KCCFG=/tmp/kcadm.config
+              kcadm() { /opt/keycloak/bin/kcadm.sh "$@" --config "$KCCFG"; }
 
               echo "Waiting for Keycloak to be ready..."
               ready=""
               for i in $(seq 1 60); do
-                if $KCADM config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" 2>/dev/null; then
+                if kcadm config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" 2>/dev/null; then
                   echo "Keycloak is ready"
                   ready=1
                   break
@@ -66,12 +74,12 @@ spec:
               # unauthenticated kcadm, which would silently no-op realm creation.
               if [ -z "$ready" ]; then
                 echo "ERROR: Keycloak readiness/login never succeeded; last error:"
-                $KCADM config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" || true
+                kcadm config credentials --server "$KEYCLOAK_URL" --realm master --user admin --password "$KEYCLOAK_ADMIN_PASSWORD" || true
                 exit 1
               fi
 
               echo "Creating nebari realm..."
-              $KCADM create realms \
+              kcadm create realms \
                 -s realm=nebari \
                 -s enabled=true \
                 -s displayName="Nebari" \
@@ -82,11 +90,11 @@ spec:
                 -s bruteForceProtected=true || echo "Realm may already exist"
 
               echo "Creating realm roles..."
-              $KCADM create roles -r nebari -s name=admin -s description="Administrator role" || true
-              $KCADM create roles -r nebari -s name=user -s description="Regular user role" || true
+              kcadm create roles -r nebari -s name=admin -s description="Administrator role" || true
+              kcadm create roles -r nebari -s name=user -s description="Regular user role" || true
 
               echo "Creating admin user in nebari realm..."
-              $KCADM create users -r nebari \
+              kcadm create users -r nebari \
                 -s username=admin \
                 -s enabled=true \
                 -s emailVerified=true \
@@ -95,43 +103,43 @@ spec:
                 -s email=admin@nebari.local || echo "User may already exist"
 
               echo "Setting admin user password..."
-              $KCADM set-password -r nebari \
+              kcadm set-password -r nebari \
                 --username admin \
                 --new-password "$REALM_ADMIN_PASSWORD"
 
               echo "Assigning roles to admin user..."
-              $KCADM add-roles -r nebari --uusername admin --rolename admin || true
-              $KCADM add-roles -r nebari --uusername admin --rolename user || true
+              kcadm add-roles -r nebari --uusername admin --rolename admin || true
+              kcadm add-roles -r nebari --uusername admin --rolename user || true
 
               echo "Configuring groups client scope with group-membership mapper..."
               # Look up the groups client scope ID using grep/sed (no python3 in keycloak image)
-              GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
+              GROUPS_SCOPE_ID=$(kcadm get client-scopes -r nebari --fields id,name | \
                 grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
 
               if [ -z "$GROUPS_SCOPE_ID" ]; then
                 echo "Creating groups client scope..."
-                $KCADM create client-scopes -r nebari \
+                kcadm create client-scopes -r nebari \
                   -s name=groups \
                   -s protocol=openid-connect \
                   -s 'attributes={"include.in.token.scope":"true","display.on.consent.screen":"true"}' || true
-                GROUPS_SCOPE_ID=$($KCADM get client-scopes -r nebari --fields id,name | \
+                GROUPS_SCOPE_ID=$(kcadm get client-scopes -r nebari --fields id,name | \
                   grep -B1 '"name" *: *"groups"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
               fi
 
               if [ -n "$GROUPS_SCOPE_ID" ]; then
                 echo "Adding group-membership mapper to groups scope (id=$GROUPS_SCOPE_ID)..."
-                $KCADM create client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models -r nebari \
+                kcadm create client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models -r nebari \
                   -s name=group-membership \
                   -s protocol=openid-connect \
                   -s protocolMapper=oidc-group-membership-mapper \
                   -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || echo "Mapper may already exist"
 
                 echo "Ensuring groups is a realm default client scope..."
-                $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
+                kcadm update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
 
               echo "Creating ArgoCD OIDC client..."
-              $KCADM create clients -r nebari \
+              kcadm create clients -r nebari \
                 -s clientId=argocd \
                 -s enabled=true \
                 -s protocol=openid-connect \
@@ -142,26 +150,26 @@ spec:
                 -s standardFlowEnabled=true || echo "Client may already exist"
 
               # Add groups scope to argocd client as a default scope
-              ARGOCD_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
+              ARGOCD_CLIENT_ID=$(kcadm get clients -r nebari --fields id,clientId | \
                 grep -B1 '"clientId" *: *"argocd"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
 
               if [ -n "$ARGOCD_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
                 echo "Adding groups scope to argocd client..."
-                $KCADM update clients/$ARGOCD_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
+                kcadm update clients/$ARGOCD_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
 
               echo "Creating ArgoCD access groups..."
-              $KCADM create groups -r nebari -s name=argocd-admins || echo "Group may already exist"
-              $KCADM create groups -r nebari -s name=argocd-viewers || echo "Group may already exist"
+              kcadm create groups -r nebari -s name=argocd-admins || echo "Group may already exist"
+              kcadm create groups -r nebari -s name=argocd-viewers || echo "Group may already exist"
 
               echo "Adding admin user to argocd-admins group..."
-              ADMIN_USER_ID=$($KCADM get users -r nebari -q username=admin --fields id | \
+              ADMIN_USER_ID=$(kcadm get users -r nebari -q username=admin --fields id | \
                 sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
-              ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \
+              ADMINS_GROUP_ID=$(kcadm get groups -r nebari --fields id,name | \
                 grep -B1 '"name" *: *"argocd-admins"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
 
               if [ -n "$ADMIN_USER_ID" ] && [ -n "$ADMINS_GROUP_ID" ]; then
-                $KCADM update users/$ADMIN_USER_ID/groups/$ADMINS_GROUP_ID -r nebari \
+                kcadm update users/$ADMIN_USER_ID/groups/$ADMINS_GROUP_ID -r nebari \
                   -s realm=nebari -s userId=$ADMIN_USER_ID -s groupId=$ADMINS_GROUP_ID -n || true
               fi
 
