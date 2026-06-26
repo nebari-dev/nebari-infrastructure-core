@@ -34,3 +34,37 @@ func TestSCCClusterRoleName(t *testing.T) {
 		t.Errorf("sccClusterRoleName = %q", got)
 	}
 }
+
+func TestSCCNamespacesMergesExtras(t *testing.T) {
+	c := &Config{}
+	c.SCC.ExtraNamespaces = []string{"mlflow", "argocd"} // argocd is already foundational (dup)
+	ns := c.sccNamespaces()
+
+	// foundational set is included
+	if !containsStr(ns, "keycloak") || !containsStr(ns, "argocd") {
+		t.Errorf("expected foundational namespaces in %v", ns)
+	}
+	// extra is appended
+	if !containsStr(ns, "mlflow") {
+		t.Errorf("expected mlflow in %v", ns)
+	}
+	// no duplicates (argocd appears once)
+	count := 0
+	for _, n := range ns {
+		if n == "argocd" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("argocd appears %d times, want 1 (deduped)", count)
+	}
+}
+
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

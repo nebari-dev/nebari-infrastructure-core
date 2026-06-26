@@ -30,6 +30,22 @@ var foundationalNamespaces = []string{
 	"nebari",
 }
 
+// sccNamespaces returns the full set of namespaces to grant the SCC to: the
+// built-in foundational namespaces plus any extras from config (pack
+// namespaces). Deduplicated, preserving order.
+func (c *Config) sccNamespaces() []string {
+	seen := make(map[string]bool, len(foundationalNamespaces))
+	out := make([]string, 0, len(foundationalNamespaces)+len(c.SCC.ExtraNamespaces))
+	for _, ns := range append(append([]string{}, foundationalNamespaces...), c.SCC.ExtraNamespaces...) {
+		if ns == "" || seen[ns] {
+			continue
+		}
+		seen[ns] = true
+		out = append(out, ns)
+	}
+	return out
+}
+
 // defaultSCCName is the SecurityContextConstraints granted to foundational
 // service accounts.
 //

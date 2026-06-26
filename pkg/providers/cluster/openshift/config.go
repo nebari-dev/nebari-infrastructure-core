@@ -38,6 +38,12 @@ type SCCConfig struct {
 	// "privileged" (the only stock SCC allowing fixed-UID + seccomp pods like
 	// argocd-redis). Override with a custom least-privilege SCC if desired.
 	Name string `yaml:"name,omitempty"`
+	// ExtraNamespaces are additional namespaces (beyond the built-in
+	// foundational set) to grant the SCC to — e.g. software-pack namespaces
+	// whose charts also pin a fixed UID + seccomp (mlflow, langfuse, ...).
+	// Bindings are created before the namespaces exist, so packs deployed via
+	// ArgoCD schedule on first sync.
+	ExtraNamespaces []string `yaml:"extra_namespaces,omitempty"`
 }
 
 // Config is the cluster.openshift provider configuration. It is dual-mode: a

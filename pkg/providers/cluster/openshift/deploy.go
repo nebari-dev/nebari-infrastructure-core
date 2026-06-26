@@ -69,10 +69,11 @@ func (p *Provider) deployExisting(ctx context.Context, projectName string, clust
 		if err != nil {
 			return fmt.Errorf("failed to get kubeconfig for SCC bootstrap: %w", err)
 		}
+		namespaces := cfg.sccNamespaces()
 		status.Send(ctx, status.NewUpdate(status.LevelInfo,
-			fmt.Sprintf("Granting SCC %q to %d foundational namespaces", cfg.SCCName(), len(foundationalNamespaces))).
+			fmt.Sprintf("Granting SCC %q to %d namespaces (foundational + %d pack)", cfg.SCCName(), len(namespaces), len(cfg.SCC.ExtraNamespaces))).
 			WithResource("scc").WithAction("granting"))
-		if err := applySCCBindings(ctx, kubeconfigBytes, foundationalNamespaces, cfg.SCCName()); err != nil {
+		if err := applySCCBindings(ctx, kubeconfigBytes, namespaces, cfg.SCCName()); err != nil {
 			return fmt.Errorf("failed to apply SCC bindings: %w", err)
 		}
 	}
