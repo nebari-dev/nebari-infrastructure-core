@@ -15,12 +15,7 @@ var (
 		Use:    "__gendocs",
 		Short:  "Generate markdown reference documentation",
 		Hidden: true,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
-			reachedRunE = true
-		},
-		RunE: runGendocs,
+		RunE:   runGendocs,
 	}
 )
 
