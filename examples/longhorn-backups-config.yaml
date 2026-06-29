@@ -1,0 +1,101 @@
+project_name: my-nebari-aws-backups
+domain: nebari.example.com
+
+# TLS certificate configuration
+certificate:
+  type: letsencrypt
+  acme:
+    email: admin@example.com
+
+# GitOps repository configuration (required for foundational services)
+git_repository:
+  url: "git@github.com:my-org/my-gitops-repo.git"
+  branch: main
+  path: "clusters/my-nebari-aws-backups"
+  auth:
+    ssh_key_env: GIT_SSH_PRIVATE_KEY
+
+cluster:
+  aws:
+    region: us-east-1
+    kubernetes_version: "1.34"
+    availability_zones:
+      - us-east-1a
+      - us-east-1b
+    vpc_cidr_block: "10.10.0.0/16"
+    endpoint_private_access: true
+    endpoint_public_access: true
+
+    node_groups:
+      user:
+        instance: m7i.xlarge
+        min_nodes: 1
+        max_nodes: 5
+
+      storage:
+        instance: m7i.large
+        min_nodes: 2
+        max_nodes: 2
+        disk_size: 500 # GiB gp3 root volume backing /var/lib/longhorn
+        labels:
+          node.longhorn.io/storage: "true"
+          node.longhorn.io/create-default-disk: "true"
+        taints:
+          - key: node.longhorn.io/storage
+            value: "true"
+            effect: NO_SCHEDULE
+
+    longhorn:
+      dedicated_nodes: true
+      replica_count: 2
+
+    efs:
+      enabled: true
+      performance_mode: generalPurpose
+      throughput_mode: bursting
+      encrypted: true
+
+    tags:
+      Environment: development
+      Project: nebari
+
+# Off-cluster backups via Longhorn's native S3 target.
+#
+# Required environment variables (set before running `nic deploy`):
+#   LONGHORN_S3_ACCESS_KEY_ID      — AWS access key with s3:PutObject/GetObject/etc.
+#   LONGHORN_S3_SECRET_ACCESS_KEY  — Corresponding secret key
+#
+# NIC creates the `longhorn-backup-credentials` Secret in longhorn-system,
+# provisions two RecurringJobs (default-hourly-snapshot, default-daily-backup),
+# sets the BackupTarget/default, and configures the
+# allow-recurring-job-while-volume-detached cluster Setting.
+backups:
+  longhorn:
+    enabled: true
+    s3:
+      bucket: my-nebari-backups
+      region: us-east-1
+      prefix: clusterA/
+      create_bucket: true
+      retain_on_destroy: true
+      # For third-party S3 (MinIO/Wasabi/R2), set endpoint instead of create_bucket:
+      # endpoint: https://s3.us-west-1.wasabisys.com
+      # virtual_hosted_style: false
+      access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
+      secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
+      # Optional custom CA for self-hosted TLS (references a pre-existing resource):
+      # ca_cert:
+      #   kind: secret
+      #   name: longhorn-s3-ca
+      #   namespace: longhorn-system
+      #   key: ca.crt
+    allow_recurring_job_while_volume_detached: true
+    schedules:
+      snapshot:
+        cron: "0 * * * *"
+        retain: 24
+        concurrency: 5
+      backup:
+        cron: "0 3 * * *"
+        retain: 30
+        concurrency: 3
