@@ -34,6 +34,12 @@ type DestroyOptions struct {
 	DryRun  bool
 	Force   bool
 	Timeout time.Duration
+
+	// BackupBucket, when non-nil, describes a NIC-provisioned Longhorn backup
+	// bucket/container. When its ForceDestroy is false (retain_on_destroy on),
+	// providers remove it from Terraform state before destroy so it (and its
+	// backups) survive teardown.
+	BackupBucket *BackupBucketSpec
 }
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.

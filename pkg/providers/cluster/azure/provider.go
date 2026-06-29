@@ -266,8 +266,10 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
-	// Destroy never provisions the Longhorn backup bucket; the spec is omitted
-	// (nil) so retain-on-destroy is enforced by simply not threading it here.
+	// Destroy never provisions the Longhorn backup container; the spec is
+	// omitted (nil) from toTFVars so tofu does not try to recreate it. When
+	// retain_on_destroy is on, opts.BackupBucket drives retainBackupBucket
+	// below to drop it from state before destroy.
 	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName, nil))
 	if err != nil {
 		span.RecordError(err)
@@ -308,6 +310,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		// Dry run: skip the actual destroy and the orphan sweep below.
 		return nil
 	}
+
+	// Preserve a retained Longhorn backup storage account + container: drop
+	// them from Terraform state so `tofu destroy` leaves them — and their
+	// backups — intact. Only when NIC provisioned them and retain_on_destroy is
+	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
+	// fails teardown, even if the storage was never created.
+	retainBackupBucket(ctx, span, tf, opts.BackupBucket)
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Terraform-managed resources").
 		WithResource("tofu").

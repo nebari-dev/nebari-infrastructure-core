@@ -640,6 +640,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Preserve a retained Longhorn backup bucket: drop it (and its dependent
+	// resources) from Terraform state so `tofu destroy` leaves it — and its
+	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
+	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
+	// fails teardown, even if the bucket was never created.
+	retainBackupBucket(ctx, span, tf, opts.BackupBucket)
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)

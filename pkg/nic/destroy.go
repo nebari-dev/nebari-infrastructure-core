@@ -122,9 +122,10 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
-		DryRun:  opts.DryRun,
-		Force:   opts.Force,
-		Timeout: opts.Timeout,
+		DryRun:       opts.DryRun,
+		Force:        opts.Force,
+		Timeout:      opts.Timeout,
+		BackupBucket: backupBucketSpec(cfg),
 	}); err != nil {
 		span.RecordError(err)
 		if opts.Force {
