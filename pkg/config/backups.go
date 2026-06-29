@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // BackupsConfig is the top-level `backups:` block. Today it only carries
 // Longhorn backup configuration, but the block exists to group future backup
 // concerns under one key.
@@ -126,4 +128,32 @@ func (t *AzureBackupTarget) RetainOnDestroyEnabled() bool {
 		return true
 	}
 	return *t.RetainOnDestroy
+}
+
+// normalizePrefix returns the prefix with a single trailing slash, or "" when
+// empty. Longhorn requires the backupTargetURL to end in "/".
+func normalizePrefix(p string) string {
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return ""
+	}
+	return p + "/"
+}
+
+// BackupTargetURL builds the Longhorn backupTargetURL for the configured target.
+//   - S3:    s3://<bucket>@<region>/<prefix>
+//   - azblob: azblob://<container>@core.windows.net/<prefix>
+//
+// Returns "" when no target is set.
+func (c *LonghornBackupConfig) BackupTargetURL() string {
+	switch {
+	case c == nil:
+		return ""
+	case c.S3 != nil:
+		return "s3://" + c.S3.Bucket + "@" + c.S3.Region + "/" + normalizePrefix(c.S3.Prefix)
+	case c.Azure != nil:
+		return "azblob://" + c.Azure.Container + "@core.windows.net/" + normalizePrefix(c.Azure.Prefix)
+	default:
+		return ""
+	}
 }

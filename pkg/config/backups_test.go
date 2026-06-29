@@ -83,3 +83,44 @@ func TestRetainOnDestroyDefaultsTrue(t *testing.T) {
 		t.Fatal("retain_on_destroy=false should disable retain")
 	}
 }
+
+func TestBackupTargetURL(t *testing.T) {
+	tests := []struct {
+		name string
+		lh   *LonghornBackupConfig
+		want string
+	}{
+		{
+			name: "s3 with prefix",
+			lh:   &LonghornBackupConfig{S3: &S3BackupTarget{Bucket: "b", Region: "us-east-1", Prefix: "clusterA/"}},
+			want: "s3://b@us-east-1/clusterA/",
+		},
+		{
+			name: "s3 no prefix",
+			lh:   &LonghornBackupConfig{S3: &S3BackupTarget{Bucket: "b", Region: "us-east-1"}},
+			want: "s3://b@us-east-1/",
+		},
+		{
+			name: "s3 prefix without trailing slash gets one",
+			lh:   &LonghornBackupConfig{S3: &S3BackupTarget{Bucket: "b", Region: "eu-west-1", Prefix: "p"}},
+			want: "s3://b@eu-west-1/p/",
+		},
+		{
+			name: "azure with prefix",
+			lh:   &LonghornBackupConfig{Azure: &AzureBackupTarget{Container: "c", Prefix: "clusterA/"}},
+			want: "azblob://c@core.windows.net/clusterA/",
+		},
+		{
+			name: "azure no prefix",
+			lh:   &LonghornBackupConfig{Azure: &AzureBackupTarget{Container: "c"}},
+			want: "azblob://c@core.windows.net/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.lh.BackupTargetURL(); got != tt.want {
+				t.Fatalf("BackupTargetURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
