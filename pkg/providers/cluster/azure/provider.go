@@ -152,7 +152,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName, opts.BackupBucket))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu setup: %w", err)
@@ -266,7 +266,9 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	// Destroy never provisions the Longhorn backup bucket; the spec is omitted
+	// (nil) so retain-on-destroy is enforced by simply not threading it here.
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName, nil))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu setup: %w", err)

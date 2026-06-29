@@ -3,6 +3,8 @@ package azure
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 func TestToTFVarsSystemPoolResolution(t *testing.T) {
@@ -13,7 +15,7 @@ func TestToTFVarsSystemPoolResolution(t *testing.T) {
 			"user": {Instance: "Standard_D4_v3", MinNodes: 0, MaxNodes: 5},
 		},
 	}
-	vars := cfg.toTFVars("myproj")
+	vars := cfg.toTFVars("myproj", nil)
 
 	if got := vars.NodeGroups["sys"].Mode; got != modeSystem {
 		t.Errorf("sys.mode = %q, want %s", got, modeSystem)
@@ -26,7 +28,7 @@ func TestToTFVarsSystemPoolResolution(t *testing.T) {
 func TestToTFVarsCreateFlags(t *testing.T) {
 	t.Run("create RG by default", func(t *testing.T) {
 		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
-		vars := cfg.toTFVars("p")
+		vars := cfg.toTFVars("p", nil)
 		if !vars.CreateResourceGroup {
 			t.Error("CreateResourceGroup should default to true")
 		}
@@ -37,7 +39,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 			ResourceGroupName: "my-rg",
 			NodeGroups:        map[string]NodeGroup{"s": {Mode: modeSystem}},
 		}
-		vars := cfg.toTFVars("p")
+		vars := cfg.toTFVars("p", nil)
 		if vars.CreateResourceGroup {
 			t.Error("CreateResourceGroup should be false when ResourceGroupName is set")
 		}
@@ -47,7 +49,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 	})
 	t.Run("create VNet by default", func(t *testing.T) {
 		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
-		vars := cfg.toTFVars("p")
+		vars := cfg.toTFVars("p", nil)
 		if !vars.CreateVNet {
 			t.Error("CreateVNet should default to true")
 		}
@@ -58,7 +60,7 @@ func TestToTFVarsCreateFlags(t *testing.T) {
 			NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
 			Network:    &NetworkConfig{ExistingVNetID: "/subs/.../vn1", ExistingNodeSubnetID: "/subs/.../sub1"},
 		}
-		vars := cfg.toTFVars("p")
+		vars := cfg.toTFVars("p", nil)
 		if vars.CreateVNet {
 			t.Error("CreateVNet should be false when ExistingVNetID is set")
 		}
@@ -71,7 +73,7 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 		NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
 		Tags:       map[string]string{"Env": "dev"},
 	}
-	vars := cfg.toTFVars("nebari-x")
+	vars := cfg.toTFVars("nebari-x", nil)
 
 	if got := vars.Tags["nic.nebari.dev_cluster-name"]; got != "nebari-x" {
 		t.Errorf("cluster-name tag = %q, want nebari-x", got)
@@ -92,7 +94,7 @@ func TestToTFVarsDataPlaneAndNAP(t *testing.T) {
 			NodeProvisioningMode: napModeAuto,
 			Network:              &NetworkConfig{DataPlane: dataPlaneCilium},
 		}
-		vars := cfg.toTFVars("p")
+		vars := cfg.toTFVars("p", nil)
 		if vars.NetworkDataPlane != dataPlaneCilium {
 			t.Errorf("NetworkDataPlane = %q, want %q", vars.NetworkDataPlane, dataPlaneCilium)
 		}
@@ -102,7 +104,7 @@ func TestToTFVarsDataPlaneAndNAP(t *testing.T) {
 	})
 	t.Run("omits dataplane and NAP when unset so module defaults win", func(t *testing.T) {
 		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
-		b, err := json.Marshal(cfg.toTFVars("p"))
+		b, err := json.Marshal(cfg.toTFVars("p", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,7 +119,7 @@ func TestToTFVarsDataPlaneAndNAP(t *testing.T) {
 
 func TestToTFVarsOmitsEmptyPointers(t *testing.T) {
 	cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
-	vars := cfg.toTFVars("p")
+	vars := cfg.toTFVars("p", nil)
 
 	b, err := json.Marshal(vars)
 	if err != nil {
@@ -134,6 +136,23 @@ func TestToTFVarsOmitsEmptyPointers(t *testing.T) {
 			t.Errorf("expected %q to be omitted from JSON, got: %s", key, s)
 		}
 	}
+}
+
+func TestToTFVarsBackupContainer(t *testing.T) {
+	c := &Config{Region: "eastus", NodeGroups: map[string]NodeGroup{}}
+
+	t.Run("no spec disables container", func(t *testing.T) {
+		v := c.toTFVars("proj", nil)
+		if v.BackupContainerCreate {
+			t.Fatal("expected BackupContainerCreate false")
+		}
+	})
+	t.Run("spec enables container", func(t *testing.T) {
+		v := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "c", StorageAccount: "sa"})
+		if !v.BackupContainerCreate || v.BackupContainerName != "c" || v.BackupStorageAccount != "sa" {
+			t.Fatalf("bad tfvars: %+v", v)
+		}
+	})
 }
 
 func contains(haystack, needle string) bool {
