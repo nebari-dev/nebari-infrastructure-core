@@ -122,8 +122,23 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Resolve the top-level trust bundle once, here at the orchestration layer.
+	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
+	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
+	// store. Resolving once avoids a second disk read and the TOCTOU window
+	// between two reads.
+	trustPEM, err := cfg.TrustBundle.ResolvePEM()
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+	var caBundle string
+	if trustPEM != "" {
+		caBundle = base64.StdEncoding.EncodeToString([]byte(trustPEM))
+	}
+
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -149,7 +164,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("resolve gitops configuration: %w", err)
 	}
 	if gitConfig != nil && !opts.DryRun {
-		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings); err != nil {
+		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings, trustPEM); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
 				WithMetadata("error", err.Error()))
@@ -370,7 +385,7 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 // This is the orchestrator function that handles all I/O operations.
 // gitConfig must be non-nil and represents the effective GitOps configuration
 // (either cfg.GitRepository or an auto-generated local config).
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings) error {
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
@@ -446,7 +461,7 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	status.Progress(ctx, "Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings, trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
