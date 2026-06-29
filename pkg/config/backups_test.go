@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -122,5 +123,86 @@ func TestBackupTargetURL(t *testing.T) {
 				t.Fatalf("BackupTargetURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLonghornBackupValidate(t *testing.T) {
+	valid := func() *LonghornBackupConfig {
+		return &LonghornBackupConfig{
+			S3: &S3BackupTarget{
+				Bucket: "b", Region: "us-east-1",
+				AccessKeyIDEnv: "K", SecretAccessKeyEnv: "S",
+			},
+			Schedules: BackupSchedules{
+				Snapshot: ScheduleConfig{Cron: "0 * * * *", Retain: 24, Concurrency: 5},
+				Backup:   ScheduleConfig{Cron: "0 3 * * *", Retain: 30, Concurrency: 3},
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		provider string
+		mutate   func(*LonghornBackupConfig)
+		wantErr  string // substring; "" means no error
+	}{
+		{name: "valid s3 on aws", provider: "aws", mutate: func(*LonghornBackupConfig) {}},
+		{name: "both targets set", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.Azure = &AzureBackupTarget{Container: "c", StorageAccount: "sa", AccountNameEnv: "N", AccountKeyEnv: "K"}
+		}, wantErr: "exactly one"},
+		{name: "no target set", provider: "aws", mutate: func(c *LonghornBackupConfig) { c.S3 = nil }, wantErr: "exactly one"},
+		{name: "bad snapshot cron", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.Schedules.Snapshot.Cron = "not a cron"
+		}, wantErr: "snapshot.cron"},
+		{name: "bad backup cron", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.Schedules.Backup.Cron = "0 3 * *"
+		}, wantErr: "backup.cron"},
+		{name: "non-positive snapshot retain", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.Schedules.Snapshot.Retain = 0
+		}, wantErr: "snapshot.retain"},
+		{name: "non-positive backup concurrency", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.Schedules.Backup.Concurrency = 0
+		}, wantErr: "backup.concurrency"},
+		{name: "create_bucket on unsupported provider", provider: "gcp", mutate: func(c *LonghornBackupConfig) {
+			c.S3.CreateBucket = true
+		}, wantErr: "create_bucket"},
+		{name: "create_bucket on aws ok", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3.CreateBucket = true
+		}},
+		{name: "endpoint with create_bucket", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3.CreateBucket = true
+			c.S3.Endpoint = "https://minio.example.com"
+		}, wantErr: "endpoint"},
+		{name: "missing access_key_id_env", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3.AccessKeyIDEnv = ""
+		}, wantErr: "access_key_id_env"},
+		{name: "azure create_container requires azure provider", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3 = nil
+			c.Azure = &AzureBackupTarget{Container: "c", StorageAccount: "sa", AccountNameEnv: "N", AccountKeyEnv: "K", CreateContainer: true}
+		}, wantErr: "azure provider"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := valid()
+			tt.mutate(c)
+			err := c.Validate(tt.provider)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBackupsValidateNilSafe(t *testing.T) {
+	var c *BackupsConfig
+	if err := c.Validate("aws"); err != nil {
+		t.Fatalf("nil BackupsConfig should validate clean: %v", err)
 	}
 }

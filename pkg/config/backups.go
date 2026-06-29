@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // BackupsConfig is the top-level `backups:` block. Today it only carries
 // Longhorn backup configuration, but the block exists to group future backup
@@ -138,6 +142,123 @@ func normalizePrefix(p string) string {
 		return ""
 	}
 	return p + "/"
+}
+
+// fiveFieldCron matches a 5-field cron expression (same guard the
+// nebari-longhorn-backup-pack chart used). It is intentionally permissive about
+// field contents — it only enforces the 5-field shape.
+var fiveFieldCron = regexp.MustCompile(`^(\S+\s+){4}\S+$`)
+
+// providersWithBucketModule lists cluster providers whose OpenTofu module can
+// provision a backup bucket/container. Others must use an external endpoint.
+var providersWithBucketModule = map[string]bool{"aws": true, "azure": true}
+
+// Validate checks the backups block. nil-safe: a nil BackupsConfig (or disabled
+// Longhorn block) validates clean. providerName is the selected cluster provider.
+func (c *BackupsConfig) Validate(providerName string) error {
+	if c == nil || c.Longhorn == nil {
+		return nil
+	}
+	if !c.Longhorn.IsEnabled() {
+		return nil
+	}
+	return c.Longhorn.Validate(providerName)
+}
+
+// Validate checks a single Longhorn backup block. Assumes the block is enabled.
+func (c *LonghornBackupConfig) Validate(providerName string) error {
+	// Exactly one target.
+	if (c.S3 == nil) == (c.Azure == nil) {
+		return fmt.Errorf("backups.longhorn: exactly one of s3 / azure must be set")
+	}
+
+	if err := validateSchedule("snapshot", c.Schedules.Snapshot); err != nil {
+		return err
+	}
+	if err := validateSchedule("backup", c.Schedules.Backup); err != nil {
+		return err
+	}
+
+	if c.S3 != nil {
+		return c.S3.validate(providerName)
+	}
+	return c.Azure.validate(providerName)
+}
+
+func validateSchedule(name string, s ScheduleConfig) error {
+	if !fiveFieldCron.MatchString(s.Cron) {
+		return fmt.Errorf("backups.longhorn.schedules.%s.cron is not a valid 5-field cron expression: %q", name, s.Cron)
+	}
+	if s.Retain <= 0 {
+		return fmt.Errorf("backups.longhorn.schedules.%s.retain must be > 0 (got %d)", name, s.Retain)
+	}
+	if s.Concurrency <= 0 {
+		return fmt.Errorf("backups.longhorn.schedules.%s.concurrency must be > 0 (got %d)", name, s.Concurrency)
+	}
+	return nil
+}
+
+func (t *S3BackupTarget) validate(providerName string) error {
+	if t.Bucket == "" {
+		return fmt.Errorf("backups.longhorn.s3.bucket is required")
+	}
+	if t.Region == "" {
+		return fmt.Errorf("backups.longhorn.s3.region is required")
+	}
+	if t.AccessKeyIDEnv == "" {
+		return fmt.Errorf("backups.longhorn.s3.access_key_id_env is required")
+	}
+	if t.SecretAccessKeyEnv == "" {
+		return fmt.Errorf("backups.longhorn.s3.secret_access_key_env is required")
+	}
+	if t.CreateBucket {
+		if t.Endpoint != "" {
+			return fmt.Errorf("backups.longhorn.s3: create_bucket cannot be set when endpoint is set (an external bucket is never created by NIC)")
+		}
+		if !providersWithBucketModule[providerName] {
+			return fmt.Errorf("backups.longhorn.s3.create_bucket is only supported on providers with a Terraform module (aws, azure); provider %q must reference a pre-existing bucket via endpoint", providerName)
+		}
+	}
+	if t.CACert != nil {
+		if err := t.CACert.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *AzureBackupTarget) validate(providerName string) error {
+	if t.Container == "" {
+		return fmt.Errorf("backups.longhorn.azure.container is required")
+	}
+	if t.StorageAccount == "" {
+		return fmt.Errorf("backups.longhorn.azure.storage_account is required")
+	}
+	if t.AccountNameEnv == "" {
+		return fmt.Errorf("backups.longhorn.azure.account_name_env is required")
+	}
+	if t.AccountKeyEnv == "" {
+		return fmt.Errorf("backups.longhorn.azure.account_key_env is required")
+	}
+	if t.CreateContainer && providerName != "azure" {
+		return fmt.Errorf("backups.longhorn.azure.create_container requires the azure provider (got %q)", providerName)
+	}
+	return nil
+}
+
+func (r *CACertRef) validate() error {
+	switch r.Kind {
+	case "secret", "configmap":
+	default:
+		return fmt.Errorf("backups.longhorn.s3.ca_cert.kind must be \"secret\" or \"configmap\" (got %q)", r.Kind)
+	}
+	if r.Name == "" {
+		return fmt.Errorf("backups.longhorn.s3.ca_cert.name is required")
+	}
+	if r.Key == "" {
+		return fmt.Errorf("backups.longhorn.s3.ca_cert.key is required")
+	}
+	return nil
 }
 
 // BackupTargetURL builds the Longhorn backupTargetURL for the configured target.

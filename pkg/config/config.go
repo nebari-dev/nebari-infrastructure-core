@@ -34,6 +34,9 @@ type NebariConfig struct {
 
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
+
+	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
+	Backups *BackupsConfig `yaml:"backups,omitempty"`
 }
 
 // DNSConfig holds typed DNS provider configuration.
@@ -351,6 +354,10 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 
 	if err := c.Certificate.Validate(); err != nil {
 		return fmt.Errorf("invalid certificate: %w", err)
+	}
+
+	if err := c.Backups.Validate(c.Cluster.ProviderName()); err != nil {
+		return fmt.Errorf("invalid backups: %w", err)
 	}
 
 	return nil
