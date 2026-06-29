@@ -339,6 +339,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip Longhorn backup templates when backups are disabled.
+		if isBackupPath(relPath) && !data.LonghornBackupEnabled {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		// Skip certificate templates that don't apply to the configured cert source.
 		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
 			return nil
@@ -382,6 +390,13 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	}
 
 	return nil
+}
+
+// isBackupPath reports whether relPath is part of the Longhorn backup app or its
+// rendered manifests, so it can be skipped when backups are disabled.
+func isBackupPath(relPath string) bool {
+	return relPath == "apps/longhorn-backup.yaml" ||
+		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup")
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
