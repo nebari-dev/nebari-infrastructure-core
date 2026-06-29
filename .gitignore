@@ -59,6 +59,3 @@ docs/plans/
 
 # Test Configs
 test-configs/
-
-# local build output
-bin/
