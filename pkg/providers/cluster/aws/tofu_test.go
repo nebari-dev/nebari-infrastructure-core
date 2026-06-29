@@ -532,4 +532,13 @@ func TestToTFVarsBackupBucket(t *testing.T) {
 			t.Fatalf("bad tfvars: %+v", v)
 		}
 	})
+	t.Run("spec retain (force destroy false)", func(t *testing.T) {
+		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", ForceDestroy: false})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !v.BackupBucketCreate || v.BackupBucketName != "b" || v.BackupBucketForceDestroy {
+			t.Fatalf("bad tfvars: %+v", v)
+		}
+	})
 }
