@@ -2,6 +2,7 @@ package longhorn
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -104,8 +105,8 @@ func TestResolveCredentialsMissingEnv(t *testing.T) {
 		},
 	}
 	_, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg) //nolint:staticcheck
-	if err == nil {
-		t.Fatal("expected error for unset env var")
+	if err == nil || !strings.Contains(err.Error(), "DEFINITELY_UNSET_AK") {
+		t.Fatalf("expected error mentioning DEFINITELY_UNSET_AK, got: %v", err)
 	}
 }
 
@@ -121,6 +122,29 @@ func TestResolveCredentialsCAFromSecret(t *testing.T) {
 			Bucket: "b", Region: "us-east-1",
 			AccessKeyIDEnv: "TEST_AK", SecretAccessKeyEnv: "TEST_SK",
 			CACert: &config.CACertRef{Kind: "secret", Name: "ca", Namespace: "longhorn-system", Key: "ca.crt"},
+		},
+	}
+	creds, err := ResolveCredentials(context.Background(), client, cfg)
+	if err != nil {
+		t.Fatalf("ResolveCredentials: %v", err)
+	}
+	if creds.CACert != "PEMDATA" {
+		t.Fatalf("CA cert = %q, want PEMDATA", creds.CACert)
+	}
+}
+
+func TestResolveCredentialsCAFromConfigMap(t *testing.T) {
+	t.Setenv("TEST_AK", "AKIA")
+	t.Setenv("TEST_SK", "secret")
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{ //nolint:staticcheck
+		ObjectMeta: metav1.ObjectMeta{Name: "ca", Namespace: "longhorn-system"},
+		Data:       map[string]string{"ca.crt": "PEMDATA"},
+	})
+	cfg := &config.LonghornBackupConfig{
+		S3: &config.S3BackupTarget{
+			Bucket: "b", Region: "us-east-1",
+			AccessKeyIDEnv: "TEST_AK", SecretAccessKeyEnv: "TEST_SK",
+			CACert: &config.CACertRef{Kind: "configmap", Name: "ca", Namespace: "longhorn-system", Key: "ca.crt"},
 		},
 	}
 	creds, err := ResolveCredentials(context.Background(), client, cfg)

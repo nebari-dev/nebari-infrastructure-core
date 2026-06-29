@@ -88,7 +88,7 @@ func ResolveCredentials(ctx context.Context, client kubernetes.Interface, cfg *c
 		if cfg.S3.CACert != nil {
 			pem, err := fetchCACert(ctx, client, cfg.S3.CACert)
 			if err != nil {
-				return creds, err
+				return creds, fmt.Errorf("s3 ca_cert: %w", err)
 			}
 			creds.CACert = pem
 		}
