@@ -82,6 +82,13 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
+	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
+	// rendered. Keycloak is mandatory infrastructure in this codebase (always
+	// provisioned during foundational install), so a separate Keycloak-enabled
+	// gate is not part of the conditional.
+	LonghornEnabled bool
 }
 
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
@@ -102,6 +109,7 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
+		LonghornEnabled:         settings.LonghornEnabled,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -307,6 +315,18 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip Longhorn-only templates when Longhorn is disabled. The
+		// securitypolicies Application targets manifests/networking/policies,
+		// whose only content is the Longhorn SecurityPolicy; writing the app
+		// without its manifest would create an Application with zero resources
+		// (rejected by allowEmpty: false).
+		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		// Skip certificate templates that don't apply to the configured cert source.
 		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
 			return nil
@@ -357,6 +377,14 @@ func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+// isLonghornOnlyPath returns true if the relative path is a template that only
+// produces Longhorn resources and must be skipped entirely when Longhorn is
+// disabled.
+func isLonghornOnlyPath(relPath string) bool {
+	return relPath == "apps/securitypolicies.yaml" ||
+		strings.HasPrefix(relPath, "manifests/networking/policies")
 }
 
 const (

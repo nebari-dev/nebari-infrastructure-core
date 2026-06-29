@@ -743,6 +743,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	sc := longhorn.StorageClassName
+	longhornEnabled := true // AWS default — see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
 
@@ -750,7 +751,8 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
-			if !awsCfg.LonghornEnabled() {
+			longhornEnabled = awsCfg.LonghornEnabled()
+			if !longhornEnabled {
 				sc = storageClassGP2
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
@@ -764,6 +766,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LonghornEnabled: longhornEnabled,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

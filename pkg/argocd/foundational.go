@@ -33,11 +33,29 @@ const (
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
 
+	// LabelKeyPartOf is the standard Kubernetes label key identifying the higher-level app a resource belongs to.
+	LabelKeyPartOf = "app.kubernetes.io/part-of"
+
+	// LabelKeyManagedBy is the standard Kubernetes label key identifying the controller/tool that manages a resource.
+	LabelKeyManagedBy = "app.kubernetes.io/managed-by"
+
+	// LabelValueManagedBy is the value used for the app.kubernetes.io/managed-by label on resources NIC provisions.
+	LabelValueManagedBy = "nebari-infrastructure-core"
+
 	// ManagedByLabel is the app.kubernetes.io/managed-by label key.
 	ManagedByLabel = "app.kubernetes.io/managed-by"
 
 	// NebariManagedByValue is the value of the app.kubernetes.io/managed-by label for Nebari-managed resources.
 	NebariManagedByValue = "nebari-infrastructure-core"
+
+	// LonghornDefaultNamespace is the namespace where Longhorn (and its UI) is deployed.
+	LonghornDefaultNamespace = "longhorn-system"
+
+	// LonghornOIDCClientSecretName is the name of the Kubernetes secret holding the
+	// pre-generated OIDC client secret for the Longhorn UI Keycloak client. The same
+	// value is written into both the keycloak namespace (read by realm-setup-job) and
+	// the longhorn-system namespace (read by the SecurityPolicy that fronts the UI).
+	LonghornOIDCClientSecretName = "longhorn-oidc-client-secret" //nolint:gosec // Secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -47,6 +65,9 @@ type FoundationalConfig struct {
 
 	// ArgoCD SSO configuration
 	ArgoCD ArgoCDSSOConfig
+
+	// Longhorn UI SSO configuration
+	Longhorn LonghornSSOConfig
 
 	// LandingPage configuration
 	LandingPage LandingPageConfig
@@ -82,6 +103,14 @@ type MetalLBConfig struct {
 // ArgoCDSSOConfig holds ArgoCD SSO configuration
 type ArgoCDSSOConfig struct {
 	ClientSecret string // Pre-generated OIDC client secret for ArgoCD's Keycloak integration
+}
+
+// LonghornSSOConfig holds Longhorn UI SSO configuration.
+// ClientSecret is the pre-generated OIDC client secret used by the Envoy Gateway
+// SecurityPolicy that protects longhorn.<domain>. Empty when Longhorn UI exposure
+// is disabled — either because Longhorn is not installed or Keycloak is not enabled.
+type LonghornSSOConfig struct {
+	ClientSecret string
 }
 
 // InstallFoundationalServices installs foundational services via GitOps.
@@ -156,6 +185,19 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		if err := createLandingPageSecrets(ctx, k8sClient, foundationalCfg.LandingPage); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create landing page secrets: %w", err)
+		}
+
+		// Create namespace + dual OIDC client-secret Secret for Longhorn UI exposure.
+		// No-op when foundationalCfg.Longhorn.ClientSecret == "" (Longhorn disabled or Keycloak off).
+		if foundationalCfg.Longhorn.ClientSecret != "" {
+			if err := createNamespace(ctx, k8sClient, LonghornDefaultNamespace); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn namespace: %w", err)
+			}
+			if err := createLonghornSecrets(ctx, k8sClient, foundationalCfg.Longhorn); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn secrets: %w", err)
+			}
 		}
 	}
 
@@ -293,8 +335,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -314,8 +356,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -324,6 +366,37 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			},
 		}); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// createLonghornSecrets writes the OIDC client secret used to protect the
+// Longhorn UI into both the keycloak namespace (for realm-setup-job) and the
+// longhorn-system namespace (for the Envoy Gateway SecurityPolicy). When
+// longhornSSO.ClientSecret is empty, nothing is created.
+func createLonghornSecrets(ctx context.Context, client kubernetes.Interface, longhornSSO LonghornSSOConfig) error {
+	if longhornSSO.ClientSecret == "" {
+		return nil
+	}
+
+	for _, ns := range []string{KeycloakDefaultNamespace, LonghornDefaultNamespace} {
+		if err := createSecret(ctx, client, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      LonghornOIDCClientSecretName,
+				Namespace: ns,
+				Labels: map[string]string{
+					LabelKeyPartOf:    NebariFoundationalPartOf,
+					LabelKeyManagedBy: LabelValueManagedBy,
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"client-secret": longhornSSO.ClientSecret,
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to create %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
 		}
 	}
 
@@ -341,8 +414,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-				ManagedByLabel:              NebariManagedByValue,
+				LabelKeyPartOf:    NebariFoundationalPartOf,
+				LabelKeyManagedBy: LabelValueManagedBy,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

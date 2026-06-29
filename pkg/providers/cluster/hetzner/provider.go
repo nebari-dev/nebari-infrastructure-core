@@ -379,8 +379,9 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *con
 
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
-		StorageClass: longhorn.StorageClassName,
-		NeedsMetalLB: false,
+		StorageClass:    longhorn.StorageClassName,
+		NeedsMetalLB:    false,
+		LonghornEnabled: true, // Hetzner default — see Config.LonghornEnabled
 	}
 
 	// Derive LB annotations from location, and fall back to "hcloud-volumes"
@@ -398,7 +399,8 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 					"load-balancer.hetzner.cloud/location": hCfg.Location,
 				}
 			}
-			if !hCfg.LonghornEnabled() {
+			settings.LonghornEnabled = hCfg.LonghornEnabled()
+			if !settings.LonghornEnabled {
 				settings.StorageClass = "hcloud-volumes"
 			}
 		}

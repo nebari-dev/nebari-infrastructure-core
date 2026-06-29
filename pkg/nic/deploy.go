@@ -199,6 +199,20 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				return nil, fmt.Errorf("generate foundational secrets: %w", err)
 			}
 
+			// Generate a Longhorn OIDC client secret only when the provider installs
+			// Longhorn. When Longhorn is disabled, longhornClientSecret stays "" and
+			// InstallFoundationalServices no-ops on the empty string.
+			var longhornClientSecret string
+			if infraSettings.LonghornEnabled {
+				longhornClientSecret, err = generateSecurePassword(rand.Reader)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate Longhorn client secret").
+						WithMetadata("error", err.Error()))
+					return nil, fmt.Errorf("generate Longhorn client secret: %w", err)
+				}
+			}
+
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
@@ -213,6 +227,9 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
+				},
+				Longhorn: argocd.LonghornSSOConfig{
+					ClientSecret: longhornClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
