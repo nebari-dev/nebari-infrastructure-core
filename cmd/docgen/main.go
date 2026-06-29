@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 )
 
+const nodeGroup = "NodeGroup"
+
 // configFile represents a source file and the structs to extract from it.
 type configFile struct {
 	path     string
@@ -44,7 +46,7 @@ var configFiles = []configFile{
 		path: "pkg/providers/cluster/aws/config.go",
 		structs: []string{
 			"Config",
-			"NodeGroup",
+			nodeGroup,
 			"Taint",
 			"EFSConfig",
 			"AWSLoadBalancerControllerConfig",
@@ -58,7 +60,7 @@ var configFiles = []configFile{
 		path: "pkg/providers/cluster/gcp/config.go",
 		structs: []string{
 			"Config",
-			"NodeGroup",
+			nodeGroup,
 			"Taint",
 			"GuestAccelerator",
 		},
@@ -70,7 +72,7 @@ var configFiles = []configFile{
 		structs: []string{
 			"Config",
 			"NetworkConfig",
-			"NodeGroup",
+			nodeGroup,
 		},
 		docTitle: "Azure Provider Configuration",
 		docDesc:  "Configuration options specific to Microsoft Azure (AKS).",
@@ -79,7 +81,7 @@ var configFiles = []configFile{
 		path: "pkg/providers/cluster/hetzner/config.go",
 		structs: []string{
 			"Config",
-			"NodeGroup",
+			nodeGroup,
 			"Autoscaling",
 			"NetworkConfig",
 			"SSHConfig",

@@ -43,7 +43,7 @@ func TestGendocsDeployFlagsDocumented(t *testing.T) {
 		t.Fatalf("GenMarkdownTree: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(tmpDir, "nic_deploy.md"))
+	content, err := os.ReadFile(filepath.Join(tmpDir, "nic_deploy.md")) //nolint:gosec
 	if err != nil {
 		t.Fatalf("read nic_deploy.md: %v", err)
 	}

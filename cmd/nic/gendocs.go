@@ -25,7 +25,7 @@ func init() {
 }
 
 func runGendocs(cmd *cobra.Command, args []string) error {
-	if err := os.MkdirAll(gendocsOutputDir, 0755); err != nil {
+	if err := os.MkdirAll(gendocsOutputDir, 0750); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
