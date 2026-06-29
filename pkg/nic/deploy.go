@@ -248,9 +248,8 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // defaultGitConfig returns a default local git configuration for development workflows.
 // This is a pure function with no side effects — directory creation happens separately.
 func defaultGitConfig(projectName string) *git.Config {
-	localPath := filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	return &git.Config{
-		URL:    fmt.Sprintf("file://%s", localPath),
+		URL:    fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
 		Branch: git.DefaultBranch,
 		Path:   "",
 		Auth:   git.AuthConfig{},
