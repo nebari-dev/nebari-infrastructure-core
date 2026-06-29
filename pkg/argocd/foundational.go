@@ -15,6 +15,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 const (
@@ -53,6 +54,9 @@ type FoundationalConfig struct {
 
 	// MetalLB configuration (local deployments only)
 	MetalLB MetalLBConfig
+
+	// Backups configures Longhorn backup credentials (nil when disabled).
+	Backups *config.LonghornBackupConfig
 }
 
 // KeycloakConfig holds Keycloak-specific configuration
@@ -156,6 +160,21 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		if err := createLandingPageSecrets(ctx, k8sClient, foundationalCfg.LandingPage); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create landing page secrets: %w", err)
+		}
+	}
+
+	// Create the Longhorn backup credential Secret if backups are enabled. Not
+	// gated on Keycloak — backups can be enabled independently. Must run before
+	// ApplyRootAppOfApps so the BackupTarget (synced from git) can bind it.
+	if foundationalCfg.Backups.IsEnabled() {
+		k8sClient, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Kubernetes client: %w", err)
+		}
+		if err := createLonghornBackupSecret(ctx, k8sClient, foundationalCfg.Backups); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Longhorn backup secret: %w", err)
 		}
 	}
 
@@ -328,6 +347,21 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	}
 
 	return nil
+}
+
+// createLonghornBackupSecret resolves backup credentials and applies the
+// Longhorn credential Secret into the longhorn-system namespace. The Secret is
+// referenced by the BackupTarget that ArgoCD syncs from git, so it must exist
+// before the root App-of-Apps is applied.
+func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig) error {
+	if err := createNamespace(ctx, client, longhorn.Namespace); err != nil {
+		return fmt.Errorf("ensure longhorn namespace: %w", err)
+	}
+	secret, err := longhorn.BuildCredentialSecret(ctx, client, backupCfg)
+	if err != nil {
+		return fmt.Errorf("build longhorn backup secret: %w", err)
+	}
+	return createSecret(ctx, client, secret)
 }
 
 // createLandingPageSecrets creates the required secrets for the nebari-landing service
