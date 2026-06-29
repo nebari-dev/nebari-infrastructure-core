@@ -168,7 +168,14 @@ func (c *BackupsConfig) Validate(providerName string) error {
 // Validate checks a single Longhorn backup block. Assumes the block is enabled.
 func (c *LonghornBackupConfig) Validate(providerName string) error {
 	// Exactly one target.
-	if (c.S3 == nil) == (c.Azure == nil) {
+	targets := 0
+	if c.S3 != nil {
+		targets++
+	}
+	if c.Azure != nil {
+		targets++
+	}
+	if targets != 1 {
 		return fmt.Errorf("backups.longhorn: exactly one of s3 / azure must be set")
 	}
 
@@ -239,6 +246,9 @@ func (t *AzureBackupTarget) validate(providerName string) error {
 	}
 	if t.AccountKeyEnv == "" {
 		return fmt.Errorf("backups.longhorn.azure.account_key_env is required")
+	}
+	if t.CreateContainer && t.Endpoint != "" {
+		return fmt.Errorf("backups.longhorn.azure: create_container cannot be set when endpoint is set (an external container is never created by NIC)")
 	}
 	if t.CreateContainer && providerName != "azure" {
 		return fmt.Errorf("backups.longhorn.azure.create_container requires the azure provider (got %q)", providerName)

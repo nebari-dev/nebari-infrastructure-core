@@ -180,6 +180,10 @@ func TestLonghornBackupValidate(t *testing.T) {
 			c.S3 = nil
 			c.Azure = &AzureBackupTarget{Container: "c", StorageAccount: "sa", AccountNameEnv: "N", AccountKeyEnv: "K", CreateContainer: true}
 		}, wantErr: "azure provider"},
+		{name: "azure endpoint with create_container", provider: "azure", mutate: func(c *LonghornBackupConfig) {
+			c.S3 = nil
+			c.Azure = &AzureBackupTarget{Container: "c", StorageAccount: "sa", AccountNameEnv: "N", AccountKeyEnv: "K", CreateContainer: true, Endpoint: "https://blob.example.com"}
+		}, wantErr: "endpoint"},
 	}
 
 	for _, tt := range tests {
@@ -204,5 +208,34 @@ func TestBackupsValidateNilSafe(t *testing.T) {
 	var c *BackupsConfig
 	if err := c.Validate("aws"); err != nil {
 		t.Fatalf("nil BackupsConfig should validate clean: %v", err)
+	}
+}
+
+func TestCACertRefValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		ref     CACertRef
+		wantErr string // substring; "" means no error
+	}{
+		{name: "valid secret ref", ref: CACertRef{Kind: "secret", Name: "ca", Key: "ca.crt"}},
+		{name: "valid configmap ref", ref: CACertRef{Kind: "configmap", Name: "ca", Key: "ca.crt"}},
+		{name: "bad kind", ref: CACertRef{Kind: "bogus", Name: "ca", Key: "ca.crt"}, wantErr: "kind"},
+		{name: "missing name", ref: CACertRef{Kind: "secret", Key: "ca.crt"}, wantErr: "name"},
+		{name: "missing key", ref: CACertRef{Kind: "secret", Name: "ca"}, wantErr: "key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.ref.validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
