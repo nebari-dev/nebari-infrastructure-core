@@ -3,8 +3,6 @@ package aws
 import (
 	"testing"
 
-	tfjson "github.com/hashicorp/terraform-json"
-
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
@@ -21,12 +19,12 @@ func TestBackupStateAddrs(t *testing.T) {
 		},
 		{
 			name: "force destroy returns no addresses (delete on destroy)",
-			spec: &cluster.BackupBucketSpec{Name: "b", ForceDestroy: true},
+			spec: &cluster.BackupBucketSpec{ForceDestroy: true},
 			want: nil,
 		},
 		{
 			name: "retain returns all dependent addresses, dependents first",
-			spec: &cluster.BackupBucketSpec{Name: "b", ForceDestroy: false},
+			spec: &cluster.BackupBucketSpec{ForceDestroy: false},
 			want: []string{
 				"aws_s3_bucket_public_access_block.longhorn_backup[0]",
 				"aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",
@@ -53,52 +51,4 @@ func TestBackupStateAddrs(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPresentAddresses(t *testing.T) {
-	t.Run("nil and empty states return empty set", func(t *testing.T) {
-		for _, s := range []*tfjson.State{
-			nil,
-			{},
-			{Values: &tfjson.StateValues{}},
-		} {
-			if got := presentAddresses(s); len(got) != 0 {
-				t.Fatalf("expected empty set, got %v", got)
-			}
-		}
-	})
-
-	t.Run("collects root and child module addresses", func(t *testing.T) {
-		state := &tfjson.State{
-			Values: &tfjson.StateValues{
-				RootModule: &tfjson.StateModule{
-					Resources: []*tfjson.StateResource{
-						{Address: "aws_s3_bucket.longhorn_backup[0]"},
-						{Address: "aws_vpc.main"},
-						nil, // defensively skipped
-						{Address: ""},
-					},
-					ChildModules: []*tfjson.StateModule{
-						{Resources: []*tfjson.StateResource{
-							{Address: "module.eks.aws_eks_cluster.this[0]"},
-						}},
-					},
-				},
-			},
-		}
-		got := presentAddresses(state)
-		want := []string{
-			"aws_s3_bucket.longhorn_backup[0]",
-			"aws_vpc.main",
-			"module.eks.aws_eks_cluster.this[0]",
-		}
-		if len(got) != len(want) {
-			t.Fatalf("got %d addresses, want %d: %v", len(got), len(want), got)
-		}
-		for _, addr := range want {
-			if !got[addr] {
-				t.Fatalf("missing address %q in %v", addr, got)
-			}
-		}
-	})
 }

@@ -645,7 +645,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
 	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
 	// fails teardown, even if the bucket was never created.
-	retainBackupBucket(ctx, span, tf, opts.BackupBucket)
+	cluster.RetainBackupResources(ctx, span, tf, opts.BackupBucket, backupStateAddrs(opts.BackupBucket))
 
 	err = tf.Destroy(ctx)
 	if err != nil {
