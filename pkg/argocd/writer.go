@@ -20,6 +20,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	longhorn "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 //go:embed templates
@@ -82,6 +83,18 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// Longhorn backup configuration (rendered into manifests/storage/longhorn-backup)
+	LonghornBackupEnabled          bool
+	LonghornBackupTargetURL        string
+	LonghornBackupCredentialSecret string
+	LonghornSnapshotCron           string
+	LonghornSnapshotRetain         int
+	LonghornSnapshotConcurrency    int
+	LonghornBackupCron             string
+	LonghornBackupRetain           int
+	LonghornBackupConcurrency      int
+	LonghornAllowDetached          string // "true" | "false"
 }
 
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
@@ -161,6 +174,25 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 	// template will need a guard or a separate value for the OIDC issuer URL.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
+	}
+
+	// Longhorn backup configuration.
+	if cfg.Backups.LonghornEnabled() {
+		lh := cfg.Backups.Longhorn
+		data.LonghornBackupEnabled = true
+		data.LonghornBackupTargetURL = lh.BackupTargetURL()
+		data.LonghornBackupCredentialSecret = longhorn.BackupCredentialSecretName
+		data.LonghornSnapshotCron = lh.Schedules.Snapshot.Cron
+		data.LonghornSnapshotRetain = lh.Schedules.Snapshot.Retain
+		data.LonghornSnapshotConcurrency = lh.Schedules.Snapshot.Concurrency
+		data.LonghornBackupCron = lh.Schedules.Backup.Cron
+		data.LonghornBackupRetain = lh.Schedules.Backup.Retain
+		data.LonghornBackupConcurrency = lh.Schedules.Backup.Concurrency
+		if lh.AllowDetached() {
+			data.LonghornAllowDetached = "true"
+		} else {
+			data.LonghornAllowDetached = "false"
+		}
 	}
 
 	return data
