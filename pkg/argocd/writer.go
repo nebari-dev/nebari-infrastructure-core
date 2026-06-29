@@ -396,7 +396,8 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 // rendered manifests, so it can be skipped when backups are disabled.
 func isBackupPath(relPath string) bool {
 	return relPath == "apps/longhorn-backup.yaml" ||
-		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup")
+		relPath == "manifests/storage/longhorn-backup" ||
+		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup/")
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.

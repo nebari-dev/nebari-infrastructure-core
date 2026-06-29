@@ -28,6 +28,8 @@ spec:
       selfHeal: true
       allowEmpty: false
     syncOptions:
+      # longhorn-system is created by the Longhorn Helm install, which runs before
+      # ArgoCD syncs this app — so CreateNamespace is intentionally omitted.
       - ServerSideApply=true
     retry:
       limit: 5
