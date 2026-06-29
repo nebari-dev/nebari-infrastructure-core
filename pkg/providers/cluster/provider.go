@@ -7,10 +7,26 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
+// BackupBucketSpec describes an object-storage bucket/container the provider's
+// Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec
+// in DeployOptions means "do not provision" (external or pre-existing bucket).
+type BackupBucketSpec struct {
+	// Name is the S3 bucket name (AWS) or storage container name (Azure).
+	Name string
+	// StorageAccount is the Azure storage account name (Azure only; empty for AWS).
+	StorageAccount string
+	// ForceDestroy allows `tofu destroy` to remove a non-empty bucket. Derived
+	// from the inverse of the target's retain_on_destroy (default false => retain).
+	ForceDestroy bool
+}
+
 // DeployOptions holds runtime flags for infrastructure deployment.
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
+	// BackupBucket, when non-nil, asks the provider to provision a Longhorn
+	// backup bucket/container in its Terraform module.
+	BackupBucket *BackupBucketSpec
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.

@@ -123,7 +123,11 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		WithMetadata("provider", clusterProvider.Name()))
 
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
+		DryRun:       opts.DryRun,
+		Timeout:      opts.Timeout,
+		BackupBucket: backupBucketSpec(cfg),
+	}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -222,6 +226,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
+				Backups: cfg.Backups.LonghornConfig(),
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
@@ -520,6 +525,30 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.Neb
 		out.GitRepository = &gitRepo
 	}
 	return &out
+}
+
+// backupBucketSpec derives the provider bucket-provisioning request from config.
+// Returns nil unless a cloud-native bucket/container should be created
+// (create_bucket/create_container set and no external endpoint).
+func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
+	if !cfg.Backups.LonghornEnabled() {
+		return nil
+	}
+	lh := cfg.Backups.LonghornConfig()
+	if s3 := lh.S3; s3 != nil && s3.CreateBucket && s3.Endpoint == "" {
+		return &cluster.BackupBucketSpec{
+			Name:         s3.Bucket,
+			ForceDestroy: !s3.RetainOnDestroyEnabled(),
+		}
+	}
+	if az := lh.Azure; az != nil && az.CreateContainer {
+		return &cluster.BackupBucketSpec{
+			Name:           az.Container,
+			StorageAccount: az.StorageAccount,
+			ForceDestroy:   !az.RetainOnDestroyEnabled(),
+		}
+	}
+	return nil
 }
 
 // generateSecurePassword generates a cryptographically secure random password.
