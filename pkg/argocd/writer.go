@@ -49,6 +49,19 @@ type TemplateData struct {
 	ACMEEmail         string
 	ACMEServer        string
 
+	// UseExistingCertificate is true when the user supplies their own TLS cert
+	// (certificate.type=existing). When true, the cert-manager Certificate is
+	// not rendered.
+	UseExistingCertificate bool
+	// GatewayTLSSecretName is the name of the TLS secret the gateway listener references.
+	GatewayTLSSecretName string
+	// GatewayTLSSecretNamespace is the namespace of that secret. Only emitted on the
+	// gateway certificateRef (and used for the ReferenceGrant) when GatewayTLSCrossNamespace.
+	GatewayTLSSecretNamespace string
+	// GatewayTLSCrossNamespace is true when the TLS secret lives outside
+	// envoy-gateway-system, requiring a namespace on certificateRefs and a ReferenceGrant.
+	GatewayTLSCrossNamespace bool
+
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
@@ -106,22 +119,24 @@ func NewTemplateData(cfg *config.NebariConfig, src repo.Source, settings cluster
 	}
 
 	// Set certificate configuration
-	if cfg.Certificate != nil {
-		if cfg.Certificate.Type == "letsencrypt" {
-			data.CertificateIssuer = "letsencrypt-issuer"
-			if cfg.Certificate.ACME != nil {
-				data.ACMEEmail = cfg.Certificate.ACME.Email
-				data.ACMEServer = cfg.Certificate.ACME.Server
-				if data.ACMEServer == "" {
-					data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
-				}
+	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
+		data.CertificateIssuer = "letsencrypt-issuer"
+		if cfg.Certificate.ACME != nil {
+			data.ACMEEmail = cfg.Certificate.ACME.Email
+			data.ACMEServer = cfg.Certificate.ACME.Server
+			if data.ACMEServer == "" {
+				data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
 			}
-		} else {
-			data.CertificateIssuer = certificateIssuerSelfSigned
 		}
 	} else {
 		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
+
+	// Resolve the gateway TLS secret reference. The methods are nil-safe, so
+	// they return sensible defaults when no certificate block is configured.
+	data.UseExistingCertificate = cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeExisting
+	data.GatewayTLSSecretName, data.GatewayTLSSecretNamespace = cfg.Certificate.GatewaySecretRef()
+	data.GatewayTLSCrossNamespace = cfg.Certificate.IsCrossNamespaceSecret()
 
 	// Default domain if not set
 	if data.Domain == "" {
@@ -290,6 +305,11 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 			return nil
 		}
 
+		// Skip certificate templates that don't apply to the configured cert source.
+		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
@@ -335,6 +355,33 @@ func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+const (
+	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
+	certificatesAppPath       = "apps/certificates.yaml"
+	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
+)
+
+// skipCertificateTemplate reports whether a cert-related template should be
+// omitted for the configured certificate source. The cert-manager Certificate
+// (and its Argo CD Application) is only rendered for cert-manager-issued certs
+// (selfsigned/letsencrypt); the ReferenceGrant is only rendered for a
+// cross-namespace existing secret.
+//
+// The certificates Application is skipped alongside the Certificate because the
+// gateway cert is the only resource in manifests/security/certificates. Leaving
+// the Application would point it at an empty directory (allowEmpty: false) and
+// it would report as failed.
+func skipCertificateTemplate(relPath string, data TemplateData) bool {
+	switch relPath {
+	case gatewayCertificatePath, certificatesAppPath:
+		return data.UseExistingCertificate
+	case gatewayReferenceGrantPath:
+		return !data.GatewayTLSCrossNamespace
+	default:
+		return false
+	}
 }
 
 // processTemplate processes a template file with the given data.

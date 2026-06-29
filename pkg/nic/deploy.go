@@ -95,6 +95,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		WithMetadata("provider", cfg.Cluster.ProviderName()).
 		WithMetadata("project_name", cfg.ProjectName))
 
+	// For user-supplied certificates sourced from files/env, validate the
+	// material is readable and a valid keypair before provisioning anything.
+	// This turns a local config error into a fast failure instead of a silently
+	// broken gateway discovered after the cluster is up.
+	if err := argocd.PreflightGatewayTLS(cfg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("gateway TLS certificate: %w", err)
+	}
+
 	if opts.Timeout > 0 {
 		span.SetAttributes(attribute.String("timeout", opts.Timeout.String()))
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Using custom timeout").
