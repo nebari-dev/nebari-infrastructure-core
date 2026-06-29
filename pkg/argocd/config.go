@@ -55,8 +55,16 @@ requestedScopes:
   - email
   - groups`, issuerURL)
 
+	// Group names are matched both with and without a leading slash because the
+	// Keycloak group-membership mapper's full.path setting differs by deployment
+	// phase: the realm-setup job creates it with full.path=false ("argocd-admins"),
+	// but the data-science-pack rbac-bootstrap job reconciles it to full.path=true
+	// ("/argocd-admins") on every sync, which JupyterHub requires for shared-dir
+	// mounts. Matching both keeps ArgoCD access working regardless of which ran last.
 	rbacPolicy := `g, argocd-admins, role:admin
-g, argocd-viewers, role:readonly`
+g, /argocd-admins, role:admin
+g, argocd-viewers, role:readonly
+g, /argocd-viewers, role:readonly`
 
 	configs := cfg.Values["configs"].(map[string]any)
 	configs["cm"] = map[string]any{
