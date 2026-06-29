@@ -180,8 +180,7 @@ func TestWriteAllToGit_SkipsCertManagerForExisting(t *testing.T) {
 			ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
 		},
 	}
-	mock := &mockGitClient{workDir: tmpDir}
-	if err := WriteAllToGit(ctx, mock, cfg, nil, cluster.InfraSettings{}); err != nil {
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}); err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
@@ -209,8 +208,7 @@ func TestWriteAllToGit_RendersCertManagerForSelfSigned(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	mock := &mockGitClient{workDir: tmpDir}
-	if err := WriteAllToGit(ctx, mock, cfg, nil, cluster.InfraSettings{}); err != nil {
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}); err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
@@ -235,8 +233,7 @@ func TestWriteAllToGit_RendersReferenceGrantCrossNamespace(t *testing.T) {
 			ExistingSecret: &config.ExistingSecretRef{Name: "user-tls", Namespace: "user-ns"},
 		},
 	}
-	mock := &mockGitClient{workDir: tmpDir}
-	if err := WriteAllToGit(ctx, mock, cfg, nil, cluster.InfraSettings{}); err != nil {
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}); err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
