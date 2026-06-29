@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 func TestBackupsConfigParse(t *testing.T) {
@@ -71,6 +71,15 @@ func TestRetainOnDestroyDefaultsTrue(t *testing.T) {
 	f := false
 	s3.RetainOnDestroy = &f
 	if s3.RetainOnDestroyEnabled() {
+		t.Fatal("retain_on_destroy=false should disable retain")
+	}
+
+	az := &AzureBackupTarget{}
+	if !az.RetainOnDestroyEnabled() {
+		t.Fatal("retain_on_destroy should default to true")
+	}
+	az.RetainOnDestroy = &f
+	if az.RetainOnDestroyEnabled() {
 		t.Fatal("retain_on_destroy=false should disable retain")
 	}
 }
