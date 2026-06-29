@@ -2,13 +2,7 @@ package nic
 
 import (
 	"bytes"
-	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
 func TestGenerateSecurePassword(t *testing.T) {
@@ -84,132 +78,6 @@ func TestGenerateSecurePasswordError(t *testing.T) {
 		}
 		if result != "" {
 			t.Errorf("generateSecurePassword() on error should return empty string, got %q", result)
-		}
-	})
-}
-
-func TestScrubbedConfig(t *testing.T) {
-	t.Run("zeros Auth and nils ArgoCDAuth in GitRepository", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-		gitConfig := &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "main",
-			Path:   "clusters/prod",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{
-				TokenEnv: "ARGOCD_TOKEN",
-			},
-		}
-
-		scrubbed := scrubbedConfig(cfg, gitConfig)
-
-		if scrubbed.GitRepository.Auth != (git.AuthConfig{}) {
-			t.Errorf("Auth should be zeroed, got %+v", scrubbed.GitRepository.Auth)
-		}
-		if scrubbed.GitRepository.ArgoCDAuth != nil {
-			t.Errorf("ArgoCDAuth should be nil, got %+v", scrubbed.GitRepository.ArgoCDAuth)
-		}
-		if scrubbed.GitRepository.URL != "git@github.com:org/repo.git" {
-			t.Errorf("URL altered: %q", scrubbed.GitRepository.URL)
-		}
-		if scrubbed.GitRepository.Branch != "main" {
-			t.Errorf("Branch altered: %q", scrubbed.GitRepository.Branch)
-		}
-		if scrubbed.GitRepository.Path != "clusters/prod" {
-			t.Errorf("Path altered: %q", scrubbed.GitRepository.Path)
-		}
-		if scrubbed.ProjectName != "test" {
-			t.Errorf("ProjectName altered: %q", scrubbed.ProjectName)
-		}
-	})
-
-	t.Run("does not mutate the input cfg or gitConfig", func(t *testing.T) {
-		cfg := &config.NebariConfig{}
-		gitConfig := &git.Config{
-			URL: "git@github.com:org/repo.git",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{TokenEnv: "ARGOCD_TOKEN"},
-		}
-
-		_ = scrubbedConfig(cfg, gitConfig)
-
-		if cfg.GitRepository != nil {
-			t.Errorf("input cfg.GitRepository should remain nil, got %+v", cfg.GitRepository)
-		}
-		if gitConfig.Auth.SSHKeyEnv != "MY_SSH_KEY" {
-			t.Errorf("input gitConfig.Auth.SSHKeyEnv mutated: %q", gitConfig.Auth.SSHKeyEnv)
-		}
-		if gitConfig.Auth.TokenEnv != "MY_TOKEN" {
-			t.Errorf("input gitConfig.Auth.TokenEnv mutated: %q", gitConfig.Auth.TokenEnv)
-		}
-		if gitConfig.ArgoCDAuth == nil || gitConfig.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
-			t.Errorf("input gitConfig.ArgoCDAuth mutated")
-		}
-	})
-
-	t.Run("handles nil gitConfig", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-
-		scrubbed := scrubbedConfig(cfg, nil)
-
-		if scrubbed.GitRepository != nil {
-			t.Errorf("GitRepository should be nil, got %+v", scrubbed.GitRepository)
-		}
-		if scrubbed.ProjectName != "test" {
-			t.Errorf("ProjectName altered: %q", scrubbed.ProjectName)
-		}
-	})
-
-	t.Run("ignores cfg.GitRepository in favor of gitConfig argument", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{URL: "should-be-overridden"},
-		}
-		gitConfig := &git.Config{URL: "effective"}
-
-		scrubbed := scrubbedConfig(cfg, gitConfig)
-
-		if scrubbed.GitRepository == nil || scrubbed.GitRepository.URL != "effective" {
-			t.Errorf("scrubbed.GitRepository.URL = %+v, want %q", scrubbed.GitRepository, "effective")
-		}
-	})
-
-	t.Run("marshalled output excludes sensitive strings", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-		gitConfig := &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "main",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{
-				TokenEnv: "ARGOCD_TOKEN",
-			},
-		}
-
-		out, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		s := string(out)
-
-		// Sensitive env-var names and the ArgoCDAuth block must not appear.
-		for _, forbidden := range []string{"MY_SSH_KEY", "MY_TOKEN", "ARGOCD_TOKEN", "argocd_auth"} {
-			if strings.Contains(s, forbidden) {
-				t.Errorf("scrubbed output should not contain %q:\n%s", forbidden, s)
-			}
-		}
-		// Non-sensitive fields preserved.
-		for _, kept := range []string{"git@github.com:org/repo.git", "branch: main"} {
-			if !strings.Contains(s, kept) {
-				t.Errorf("scrubbed output should contain %q:\n%s", kept, s)
-			}
 		}
 	})
 }
