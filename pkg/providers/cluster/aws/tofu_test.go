@@ -3,6 +3,7 @@ package aws
 import (
 	"testing"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -48,7 +49,7 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vars, err := tt.config.toTFVars("test-project")
+			vars, err := tt.config.toTFVars("test-project", nil)
 			if err != nil {
 				t.Fatalf("toTFVars: %v", err)
 			}
@@ -104,7 +105,7 @@ func TestToTFVarsClusterAutoscalerPodIdentity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vars, err := tt.config.toTFVars("test-project")
+			vars, err := tt.config.toTFVars("test-project", nil)
 			if err != nil {
 				t.Fatalf("toTFVars() returned error: %v", err)
 			}
@@ -122,7 +123,7 @@ func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 		NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 	}
 
-	vars, err := cfg.toTFVars("test-project")
+	vars, err := cfg.toTFVars("test-project", nil)
 	if err != nil {
 		t.Fatalf("toTFVars: %v", err)
 	}
@@ -367,7 +368,7 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 
 	t.Run("unset omits the field so the upstream default applies", func(t *testing.T) {
 		cfg := baseConfig()
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -379,7 +380,7 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 	t.Run("explicit false propagates through", func(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnableIRSA = boolPtr(false)
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -394,7 +395,7 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 	t.Run("explicit true propagates through", func(t *testing.T) {
 		cfg := baseConfig()
 		cfg.EnableIRSA = boolPtr(true)
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -424,7 +425,7 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 
 	t.Run("dedicated nodes injects disk label onto storage group only", func(t *testing.T) {
 		cfg := newCfg(true, nil)
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -438,7 +439,7 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 
 	t.Run("disk label not injected when dedicated_nodes is false", func(t *testing.T) {
 		cfg := newCfg(false, nil)
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -457,7 +458,7 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 				"user":    {Instance: "m7i.xlarge", Labels: map[string]string{longhorn.NodeStorageLabel: "true"}},
 			},
 		}
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -483,7 +484,7 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 				}},
 			},
 		}
-		vars, err := cfg.toTFVars("test")
+		vars, err := cfg.toTFVars("test", nil)
 		if err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
@@ -500,12 +501,35 @@ func TestToTFVarsLonghornDiskLabel(t *testing.T) {
 		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
 			t.Fatal("precondition: input already has the disk label")
 		}
-		if _, err := cfg.toTFVars("test"); err != nil {
+		if _, err := cfg.toTFVars("test", nil); err != nil {
 			t.Fatalf("toTFVars: %v", err)
 		}
 		// the original config's label map must be untouched (no aliasing)
 		if _, ok := cfg.NodeGroups["storage"].Labels[diskLabel]; ok {
 			t.Error("toTFVars mutated the caller's NodeGroup.Labels map")
+		}
+	})
+}
+
+func TestToTFVarsBackupBucket(t *testing.T) {
+	c := &Config{Region: "us-east-1", KubernetesVersion: "1.30", NodeGroups: map[string]NodeGroup{}}
+
+	t.Run("no spec leaves bucket disabled", func(t *testing.T) {
+		v, err := c.toTFVars("proj", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.BackupBucketCreate {
+			t.Fatal("expected BackupBucketCreate false")
+		}
+	})
+	t.Run("spec enables bucket", func(t *testing.T) {
+		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", ForceDestroy: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !v.BackupBucketCreate || v.BackupBucketName != "b" || !v.BackupBucketForceDestroy {
+			t.Fatalf("bad tfvars: %+v", v)
 		}
 	})
 }

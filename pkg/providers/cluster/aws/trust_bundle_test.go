@@ -119,7 +119,7 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 				TrustBundle:       tt.bundle,
 			}
-			vars, err := cfg.toTFVars("test-project")
+			vars, err := cfg.toTFVars("test-project", nil)
 			if err != nil {
 				t.Fatalf("toTFVars: %v", err)
 			}

@@ -4,6 +4,7 @@ import (
 	"embed"
 	"maps"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -55,8 +56,11 @@ type TFVars struct {
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
 	// No omitempty: a false value must be emitted so it overrides the module's
 	// `true` default when the autoscaler is disabled.
-	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
-	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
+	EnableClusterAutoscalerPodIdentity bool   `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableIRSA                         *bool  `json:"enable_irsa,omitempty"`
+	BackupBucketCreate                 bool   `json:"backup_bucket_create"`
+	BackupBucketName                   string `json:"backup_bucket_name,omitempty"`
+	BackupBucketForceDestroy           bool   `json:"backup_bucket_force_destroy"`
 }
 
 // resolveNodeGroupDefaults derives per-node-group defaults from the parsed
@@ -141,7 +145,7 @@ func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
 	return true
 }
 
-func (c *Config) toTFVars(projectName string) (TFVars, error) {
+func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) (TFVars, error) {
 	nodeGroups := resolveNodeGroupDefaults(c.NodeGroups)
 	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
 	// the create-default-disk label or Longhorn provisions no disks and every
@@ -239,6 +243,12 @@ func (c *Config) toTFVars(projectName string) (TFVars, error) {
 		if c.EFS.KMSKeyArn != "" {
 			vars.EFSKMSKeyArn = &c.EFS.KMSKeyArn
 		}
+	}
+
+	if backup != nil {
+		vars.BackupBucketCreate = true
+		vars.BackupBucketName = backup.Name
+		vars.BackupBucketForceDestroy = backup.ForceDestroy
 	}
 
 	return vars, nil
