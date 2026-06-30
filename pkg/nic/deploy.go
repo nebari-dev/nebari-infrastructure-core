@@ -123,9 +123,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
-	// Provider infrastructure settings drive GitOps and foundational services.
-	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
-
 	// Deploy infrastructure
 	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
 		span.RecordError(err)
@@ -137,6 +134,9 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
+
+	// Get provider infrastructure settings for GitOps and foundational services
+	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved
