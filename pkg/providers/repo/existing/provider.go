@@ -1,6 +1,7 @@
 package existing
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -13,6 +14,9 @@ import (
 
 // ProviderName is the registry key and config block name for this provider.
 const ProviderName = "existing"
+
+// defaultBranch is used when the config does not specify a branch.
+const defaultBranch = "main"
 
 // Provider implements the existing-repository provider.
 type Provider struct{}
@@ -114,7 +118,7 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 
 	return repo.RemoteSource{
 		URL:      existingCfg.URL,
-		Branch:   existingCfg.Branch,
+		Branch:   cmp.Or(existingCfg.Branch, defaultBranch),
 		Path:     existingCfg.Path,
 		PushAuth: pushAuth,
 		ReadAuth: readAuth,

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 )
@@ -215,6 +217,13 @@ func (r *RepoConfig) ProviderConfig() map[string]any {
 		return nil
 	}
 	return nil
+}
+
+// DefaultLocalRepoPath returns the host directory NIC manages for a project's
+// local GitOps repository when the local repo provider is used without an
+// explicit path.
+func DefaultLocalRepoPath(projectName string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 }
 
 // Certificate type values accepted in CertificateConfig.Type.

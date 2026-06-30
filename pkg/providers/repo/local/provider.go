@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -63,7 +62,7 @@ func resolveDir(cfg *Config, projectName string) string {
 	if cfg.Path != "" {
 		return cfg.Path
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	return repo.DefaultLocalDir(projectName)
 }
 
 // Validate checks that the local-repository configuration is valid.

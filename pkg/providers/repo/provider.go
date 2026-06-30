@@ -2,12 +2,25 @@ package repo
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // DefaultBranch is the branch used when a Source does not specify one.
 const DefaultBranch = "main"
+
+// DefaultLocalDir returns the host directory NIC manages for a project's local
+// GitOps repository when the local provider is used without an explicit path.
+//
+// It is a pure function so independent components derive the same path without
+// threading it between them: the local repo provider that writes to it, and the
+// local (kind) cluster provider that mounts it into the node.
+func DefaultLocalDir(projectName string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+}
 
 // Provider provisions or resolves the GitOps repository for a deployment.
 //
