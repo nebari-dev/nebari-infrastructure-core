@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
 func TestClusterConfig_NilReceiver(t *testing.T) {
@@ -65,61 +63,32 @@ cluster:
 			},
 		},
 		{
-			name: "config with git_repository",
+			name: "config with repo block",
 			yaml: `
 project_name: test-project
 cluster:
   aws: {}
-git_repository:
-  url: "git@github.com:org/repo.git"
-  branch: main
-  path: "clusters/test"
-  auth:
-    ssh_key_env: GIT_SSH_KEY
+repo:
+  existing:
+    url: "git@github.com:org/repo.git"
+    branch: main
+    auth:
+      token:
+        env: GIT_TOKEN
 `,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.GitRepository == nil {
-					t.Fatal("GitRepository is nil")
+				if cfg.Repo == nil {
+					t.Fatal("Repo is nil")
 				}
-				if cfg.GitRepository.URL != "git@github.com:org/repo.git" {
-					t.Errorf("GitRepository.URL = %q, want %q", cfg.GitRepository.URL, "git@github.com:org/repo.git")
+				if cfg.Repo.ProviderName() != "existing" {
+					t.Errorf("Repo.ProviderName() = %q, want %q", cfg.Repo.ProviderName(), "existing")
 				}
-				if cfg.GitRepository.Branch != "main" {
-					t.Errorf("GitRepository.Branch = %q, want %q", cfg.GitRepository.Branch, "main")
+				pc := cfg.Repo.ProviderConfig()
+				if pc == nil {
+					t.Fatal("Repo.ProviderConfig() is nil")
 				}
-				if cfg.GitRepository.Path != "clusters/test" {
-					t.Errorf("GitRepository.Path = %q, want %q", cfg.GitRepository.Path, "clusters/test")
-				}
-				if cfg.GitRepository.Auth.SSHKeyEnv != "GIT_SSH_KEY" {
-					t.Errorf("GitRepository.Auth.SSHKeyEnv = %q, want %q", cfg.GitRepository.Auth.SSHKeyEnv, "GIT_SSH_KEY")
-				}
-			},
-		},
-		{
-			name: "config with git_repository and argocd_auth",
-			yaml: `
-project_name: test-project
-cluster:
-  aws: {}
-git_repository:
-  url: "https://github.com/org/repo.git"
-  auth:
-    token_env: GIT_TOKEN
-  argocd_auth:
-    token_env: ARGOCD_TOKEN
-`,
-			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.GitRepository == nil {
-					t.Fatal("GitRepository is nil")
-				}
-				if cfg.GitRepository.Auth.TokenEnv != "GIT_TOKEN" {
-					t.Errorf("GitRepository.Auth.TokenEnv = %q, want %q", cfg.GitRepository.Auth.TokenEnv, "GIT_TOKEN")
-				}
-				if cfg.GitRepository.ArgoCDAuth == nil {
-					t.Fatal("GitRepository.ArgoCDAuth is nil")
-				}
-				if cfg.GitRepository.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
-					t.Errorf("GitRepository.ArgoCDAuth.TokenEnv = %q, want %q", cfg.GitRepository.ArgoCDAuth.TokenEnv, "ARGOCD_TOKEN")
+				if pc["url"] != "git@github.com:org/repo.git" {
+					t.Errorf("repo url = %v, want %q", pc["url"], "git@github.com:org/repo.git")
 				}
 			},
 		},
@@ -330,21 +299,21 @@ func TestNebariConfigValidate(t *testing.T) {
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
+				Repo: &RepoConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid config with git_repository",
+			name: "valid config with repo",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				GitRepository: &git.Config{
-					URL: "git@github.com:org/repo.git",
-					Auth: git.AuthConfig{
-						SSHKeyEnv: "GIT_SSH_KEY",
-					},
+				Repo: &RepoConfig{
+					Providers: map[string]any{"existing": map[string]any{"url": "git@github.com:org/repo.git"}},
 				},
 			},
 			wantErr: false,
@@ -402,6 +371,9 @@ func TestNebariConfigValidate(t *testing.T) {
 						"cloudflare": map[string]any{"zone_name": "example.com"},
 					},
 				},
+				Repo: &RepoConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
 			},
 			wantErr: false,
 		},
@@ -436,19 +408,29 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid DNS provider",
 		},
 		{
-			name: "invalid git_repository",
+			name: "invalid repo - no provider",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				GitRepository: &git.Config{
-					URL: "git@github.com:org/repo.git",
-					// missing auth
+				Repo: &RepoConfig{
+					Providers: map[string]any{},
 				},
 			},
 			wantErr:     true,
-			errContains: "invalid git_repository",
+			errContains: "invalid repo",
+		},
+		{
+			name: "missing repo",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+			},
+			wantErr:     true,
+			errContains: "repo field is required",
 		},
 	}
 
@@ -756,44 +738,6 @@ func TestClusterConfigValidate(t *testing.T) {
 				t.Errorf("Validate() unexpected error: %v", err)
 			}
 		})
-	}
-}
-
-func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
-	// Test that the git.Config type works correctly when embedded in NebariConfig
-	cfg := &NebariConfig{
-		ProjectName: "test",
-		Cluster: &ClusterConfig{
-			Providers: map[string]any{"aws": map[string]any{}},
-		},
-		GitRepository: &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "develop",
-			Path:   "clusters/prod",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-			},
-		},
-	}
-
-	// Verify GetBranch works
-	if cfg.GitRepository.GetBranch() != "develop" {
-		t.Errorf("GetBranch() = %q, want %q", cfg.GitRepository.GetBranch(), "develop")
-	}
-
-	// Verify GetArgoCDAuth falls back to Auth
-	argoAuth := cfg.GitRepository.GetArgoCDAuth()
-	if argoAuth.SSHKeyEnv != "MY_SSH_KEY" {
-		t.Errorf("GetArgoCDAuth().SSHKeyEnv = %q, want %q", argoAuth.SSHKeyEnv, "MY_SSH_KEY")
-	}
-
-	// Verify NebariConfig.Validate works
-	opts := ValidateOptions{
-		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
-		DNSProviders:     []string{"cloudflare"},
-	}
-	if err := cfg.Validate(opts); err != nil {
-		t.Errorf("Validate() unexpected error: %v", err)
 	}
 }
 

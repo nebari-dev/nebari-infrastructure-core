@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -23,36 +23,30 @@ const (
 )
 
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
-func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, gitConfig *git.Config, namespace string) error {
+func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, src repo.RemoteSource, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ConfigureGitRepoAccess")
 	defer span.End()
-
-	if gitConfig == nil {
-		return nil
-	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Configuring Git repository access for Argo CD").
 		WithResource("argocd").
 		WithAction("configuring-git"))
 
-	// Get the ArgoCD auth config (falls back to main auth if not specified)
-	authCfg := gitConfig.GetArgoCDAuth()
-
 	// Create repository secret data
 	secretData := map[string]string{
 		"name": "gitops-repo",
 		"type": gitRepoType,
-		"url":  gitConfig.URL,
+		"url":  src.URL,
 	}
 
-	// Try SSH key first, then token
-	if sshKey, err := authCfg.GetSSHKey(); err == nil && sshKey != "" {
-		secretData["sshPrivateKey"] = sshKey
-	} else if token, err := authCfg.GetToken(); err == nil && token != "" {
-		secretData["password"] = token
+	// Use the ArgoCD read credentials (falling back to push credentials)
+	switch a := src.ArgoCDAuth().(type) {
+	case repo.SSHKeyAuth:
+		secretData["sshPrivateKey"] = a.Key
+	case repo.TokenAuth:
+		secretData["password"] = a.Token
 		secretData["username"] = gitTokenUsername
-	} else {
+	default:
 		return fmt.Errorf("no valid credentials found for git repository")
 	}
 
@@ -79,7 +73,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, gi
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Git repository access configured").
 			WithResource("argocd").
 			WithAction("git-configured").
-			WithMetadata("repo_url", gitConfig.URL))
+			WithMetadata("repo_url", src.URL))
 	} else {
 		// Secret exists, update it
 		_, err = client.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
@@ -89,7 +83,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, gi
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Git repository access updated").
 			WithResource("argocd").
 			WithAction("git-updated").
-			WithMetadata("repo_url", gitConfig.URL))
+			WithMetadata("repo_url", src.URL))
 	}
 
 	return nil

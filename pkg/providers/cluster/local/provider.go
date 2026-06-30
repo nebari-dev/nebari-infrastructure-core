@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -156,7 +155,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName).
-			WithMetadata("gitops_path", git.DefaultLocalPath(projectName)))
+			WithMetadata("gitops_path", config.DefaultLocalRepoPath(projectName)))
 
 		if err := createKindCluster(ctx, kp, projectName, kindCfg); err != nil {
 			span.RecordError(err)

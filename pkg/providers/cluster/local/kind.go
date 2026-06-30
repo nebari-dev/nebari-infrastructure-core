@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 const (
@@ -73,7 +73,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	// host directory has to be visible from within the node. kind requires a mount's
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
-	defaultGitOps := git.DefaultLocalPath(name)
+	defaultGitOps := config.DefaultLocalRepoPath(name)
 	if err := os.MkdirAll(defaultGitOps, 0o750); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("create local gitops directory %s: %w", defaultGitOps, err)

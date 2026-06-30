@@ -2,14 +2,13 @@ package argocd
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
 )
 
 // getSecretVal retrieves a value from a secret, checking both Data and StringData
@@ -102,46 +101,23 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	ctx := context.Background()
 	namespace := "argocd"
 
-	t.Run("returns nil when no git repository configured", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
-
-		err := ConfigureGitRepoAccess(ctx, client, nil, namespace)
-		if err != nil {
-			t.Fatalf("ConfigureGitRepoAccess() should return nil when no git repo configured, got error = %v", err)
-		}
-	})
-
 	t.Run("creates git secret with token auth", func(t *testing.T) {
-		// Set environment variable for token
-		if err := os.Setenv("TEST_GIT_TOKEN", "ghp_test_token_123"); err != nil {
-			t.Fatalf("failed to set env: %v", err)
-		}
-		defer func() { _ = os.Unsetenv("TEST_GIT_TOKEN") }()
-
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: namespace},
-		}
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		gitConfig := &git.Config{
-			URL: "https://github.com/example/repo.git",
-			Auth: git.AuthConfig{
-				TokenEnv: "TEST_GIT_TOKEN",
-			},
+		src := repo.RemoteSource{
+			URL:      "https://github.com/example/repo.git",
+			PushAuth: repo.TokenAuth{Token: "ghp_test_token_123"},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
-		if err != nil {
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}
 
-		// Verify secret was created
 		secret, err := client.CoreV1().Secrets(namespace).Get(ctx, "gitops-repo-creds", metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("failed to get secret: %v", err)
 		}
-
-		// Check secret fields
 		if secret.Labels["argocd.argoproj.io/secret-type"] != "repository" {
 			t.Error("secret should have argocd repository label")
 		}
@@ -163,99 +139,77 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	})
 
 	t.Run("returns error when no credentials provided", func(t *testing.T) {
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: namespace},
-		}
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		gitConfig := &git.Config{
-			URL:  "https://github.com/example/repo.git",
-			Auth: git.AuthConfig{}, // Empty auth - no env vars set
-		}
+		src := repo.RemoteSource{URL: "https://github.com/example/repo.git"}
 
-		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
-		if err == nil {
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err == nil {
 			t.Error("ConfigureGitRepoAccess() should return error when no credentials provided")
 		}
 	})
 
 	t.Run("updates existing git secret", func(t *testing.T) {
-		// Set environment variable for token
-		if err := os.Setenv("TEST_GIT_TOKEN_UPDATE", "new_token"); err != nil {
-			t.Fatalf("failed to set env: %v", err)
-		}
-		defer func() { _ = os.Unsetenv("TEST_GIT_TOKEN_UPDATE") }()
-
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: namespace},
-		}
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		existingSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "gitops-repo-creds",
-				Namespace: namespace,
-			},
-			Data: map[string][]byte{
-				"old-key": []byte("old-value"),
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: "gitops-repo-creds", Namespace: namespace},
+			Data:       map[string][]byte{"old-key": []byte("old-value")},
 		}
 		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		gitConfig := &git.Config{
-			URL: "https://github.com/example/new-repo.git",
-			Auth: git.AuthConfig{
-				TokenEnv: "TEST_GIT_TOKEN_UPDATE",
-			},
+		src := repo.RemoteSource{
+			URL:      "https://github.com/example/new-repo.git",
+			PushAuth: repo.TokenAuth{Token: "new_token"},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
-		if err != nil {
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}
-
-		// Verify secret was updated
 		secret, err := client.CoreV1().Secrets(namespace).Get(ctx, "gitops-repo-creds", metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("failed to get secret: %v", err)
 		}
-
 		if got := getSecretVal(secret, "url"); got != "https://github.com/example/new-repo.git" {
 			t.Errorf("secret url should be updated, got %q", got)
 		}
 	})
 
-	t.Run("creates git secret with SSH key auth", func(t *testing.T) {
-		// Set environment variable for SSH key
-		sshKey := `-----BEGIN OPENSSH PRIVATE KEY-----
-test-ssh-key-content
------END OPENSSH PRIVATE KEY-----`
-		if err := os.Setenv("TEST_SSH_KEY", sshKey); err != nil {
-			t.Fatalf("failed to set env: %v", err)
-		}
-		defer func() { _ = os.Unsetenv("TEST_SSH_KEY") }()
-
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: namespace},
-		}
+	t.Run("prefers ArgoCD read credentials over push credentials", func(t *testing.T) {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		gitConfig := &git.Config{
-			URL: "git@github.com:example/repo.git",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "TEST_SSH_KEY",
-			},
+		src := repo.RemoteSource{
+			URL:      "https://github.com/example/repo.git",
+			PushAuth: repo.TokenAuth{Token: "push_token"},
+			ReadAuth: repo.TokenAuth{Token: "read_token"},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
-		if err != nil {
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}
+		secret, _ := client.CoreV1().Secrets(namespace).Get(ctx, "gitops-repo-creds", metav1.GetOptions{})
+		if got := getSecretVal(secret, "password"); got != "read_token" {
+			t.Errorf("secret password = %q, want read_token (ReadAuth wins)", got)
+		}
+	})
 
-		// Verify secret was created with SSH key
+	t.Run("creates git secret with SSH key auth", func(t *testing.T) {
+		sshKey := "-----BEGIN OPENSSH PRIVATE KEY-----\ntest-ssh-key-content\n-----END OPENSSH PRIVATE KEY-----"
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		src := repo.RemoteSource{
+			URL:      "git@github.com:example/repo.git",
+			PushAuth: repo.SSHKeyAuth{Key: sshKey},
+		}
+
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
+			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
+		}
 		secret, err := client.CoreV1().Secrets(namespace).Get(ctx, "gitops-repo-creds", metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("failed to get secret: %v", err)
 		}
-
 		if got := getSecretVal(secret, "sshPrivateKey"); got != sshKey {
 			t.Error("secret should contain SSH private key")
 		}

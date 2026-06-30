@@ -621,8 +621,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		StorageClass: "gp2",
 	}
 
-	mock := &mockGitClient{workDir: tmpDir}
-	err := WriteAllToGit(ctx, mock, cfg, nil, settings)
+	err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings)
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
@@ -647,19 +646,6 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		t.Errorf("redirect route should target sectionName: http, got:\n%s", output)
 	}
 }
-
-// mockGitClient satisfies git.Client for tests that only need WorkDir().
-type mockGitClient struct {
-	workDir string
-}
-
-func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
-func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
-func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
-func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
-func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
-func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
-func (m *mockGitClient) Cleanup() error                                  { return nil }
 
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {

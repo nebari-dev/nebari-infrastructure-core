@@ -1,11 +1,13 @@
-// Package registry provides a unified registry for cluster and DNS providers.
-// It consolidates provider registration, lookup, and listing behind a single
-// thread-safe Registry struct, used by CLI commands to manage all provider types.
+// Package registry provides a unified registry for cluster, DNS, and repo
+// providers. It consolidates provider registration, lookup, and listing behind a
+// single thread-safe Registry struct, used by CLI commands to manage all
+// provider types.
 package registry
 
 import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
 )
 
 // Registry holds all registered providers as ProviderList instances
@@ -15,6 +17,7 @@ import (
 type Registry struct {
 	ClusterProviders *ProviderList[cluster.Provider]
 	DNSProviders     *ProviderList[dns.Provider]
+	RepoProviders    *ProviderList[repo.Provider]
 }
 
 // NewRegistry creates and returns a new empty Registry.
@@ -22,5 +25,6 @@ func NewRegistry() *Registry {
 	return &Registry{
 		ClusterProviders: newProviderList[cluster.Provider]("ClusterProviders"),
 		DNSProviders:     newProviderList[dns.Provider]("DNSProviders"),
+		RepoProviders:    newProviderList[repo.Provider]("RepoProviders"),
 	}
 }
