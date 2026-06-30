@@ -44,10 +44,22 @@ func TestDeployDryRunExistingIsNoop(t *testing.T) {
 	}
 }
 
-func TestDeployProvisionNotWired(t *testing.T) {
-	cc := clusterConfig(map[string]any{"mode": "provision", "region": "us-east-1"})
+// TestDeployProvisionRequiresRegion exercises the fast-fail guard at the top of
+// the provision path: with no region we must error before touching AWS/STS, so
+// the test stays hermetic (no credentials or network).
+func TestDeployProvisionRequiresRegion(t *testing.T) {
+	cc := clusterConfig(map[string]any{"mode": "provision"})
 	err := NewProvider().Deploy(context.Background(), "proj", cc, cluster.DeployOptions{})
 	if err == nil {
-		t.Fatal("provision Deploy = nil, want not-wired error")
+		t.Fatal("provision Deploy without region = nil, want error")
+	}
+}
+
+// TestDestroyExistingIsNoop confirms existing-mode Destroy does nothing (NIC did
+// not provision the cluster).
+func TestDestroyExistingIsNoop(t *testing.T) {
+	cc := clusterConfig(map[string]any{"mode": "existing", "context": "ctx"})
+	if err := NewProvider().Destroy(context.Background(), "proj", cc, cluster.DestroyOptions{}); err != nil {
+		t.Errorf("existing Destroy = %v, want nil", err)
 	}
 }
