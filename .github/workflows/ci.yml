@@ -64,3 +64,13 @@ jobs:
 
       - name: Test binary
         run: ./nic --help || true
+
+      - name: Verify docs are up-to-date
+        run: |
+          make docs
+          git diff --exit-code docs/reference/cli/
+
+      - name: Verify config docs are up-to-date
+        run: |
+          make config-docs
+          git diff --exit-code docs/configuration/

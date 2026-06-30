@@ -1,0 +1,22 @@
+## nic version
+
+Show version information
+
+### Synopsis
+
+Display the version information for Nebari Infrastructure Core (NIC).
+
+```
+nic version [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for version
+```
+
+### SEE ALSO
+
+* [nic](nic.md)	 - Nebari Infrastructure Core - Cloud infrastructure management for Nebari
+
