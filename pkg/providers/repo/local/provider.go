@@ -5,6 +5,7 @@
 package local
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -19,6 +20,9 @@ import (
 const (
 	// ProviderName is the registry key and config block name for this provider.
 	ProviderName = "local"
+
+	// defaultBranch is used when the config does not specify a branch.
+	defaultBranch = "main"
 
 	dirPerm = 0o750
 )
@@ -62,7 +66,7 @@ func resolveDir(cfg *Config, projectName string) string {
 	if cfg.Path != "" {
 		return cfg.Path
 	}
-	return repo.DefaultLocalDir(projectName)
+	return config.DefaultLocalRepoPath(projectName)
 }
 
 // Validate checks that the local-repository configuration is valid.
@@ -122,6 +126,6 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 
 	return repo.LocalSource{
 		Dir:    dir,
-		Branch: localCfg.Branch,
+		Branch: cmp.Or(localCfg.Branch, defaultBranch),
 	}, nil
 }

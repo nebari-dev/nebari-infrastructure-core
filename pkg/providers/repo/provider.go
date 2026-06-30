@@ -2,25 +2,9 @@ package repo
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
-
-// DefaultBranch is the branch used when a Source does not specify one.
-const DefaultBranch = "main"
-
-// DefaultLocalDir returns the host directory NIC manages for a project's local
-// GitOps repository when the local provider is used without an explicit path.
-//
-// It is a pure function so independent components derive the same path without
-// threading it between them: the local repo provider that writes to it, and the
-// local (kind) cluster provider that mounts it into the node.
-func DefaultLocalDir(projectName string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
-}
 
 // Provider provisions or resolves the GitOps repository for a deployment.
 //
@@ -70,7 +54,8 @@ type Source interface {
 	// manifest templates render.
 	RepoURL() string
 
-	// GetBranch returns the configured branch, or DefaultBranch when unset.
+	// GetBranch returns the git branch to use. Providers resolve the default
+	// when constructing the Source, so this is never empty.
 	GetBranch() string
 
 	// RepoPath returns the optional subdirectory within the repository that
@@ -86,7 +71,7 @@ type RemoteSource struct {
 	// URL is the repository URL (ssh or https).
 	URL string
 
-	// Branch is the git branch to use. Empty means DefaultBranch.
+	// Branch is the git branch to use, already resolved by the provider.
 	Branch string
 
 	// Path is an optional subdirectory within the repository.
@@ -102,7 +87,7 @@ type RemoteSource struct {
 
 func (RemoteSource) isSource()           {}
 func (s RemoteSource) RepoURL() string   { return s.URL }
-func (s RemoteSource) GetBranch() string { return branchOrDefault(s.Branch) }
+func (s RemoteSource) GetBranch() string { return s.Branch }
 func (s RemoteSource) RepoPath() string  { return s.Path }
 
 // ArgoCDAuth returns the credential ArgoCD should use to read the repository,
@@ -119,7 +104,7 @@ type LocalSource struct {
 	// Dir is the filesystem path of the repository.
 	Dir string
 
-	// Branch is the git branch to use. Empty means DefaultBranch.
+	// Branch is the git branch to use, already resolved by the provider.
 	Branch string
 
 	// Path is an optional subdirectory within the repository.
@@ -128,12 +113,5 @@ type LocalSource struct {
 
 func (LocalSource) isSource()           {}
 func (s LocalSource) RepoURL() string   { return "file://" + s.Dir }
-func (s LocalSource) GetBranch() string { return branchOrDefault(s.Branch) }
+func (s LocalSource) GetBranch() string { return s.Branch }
 func (s LocalSource) RepoPath() string  { return s.Path }
-
-func branchOrDefault(b string) string {
-	if b == "" {
-		return DefaultBranch
-	}
-	return b
-}
