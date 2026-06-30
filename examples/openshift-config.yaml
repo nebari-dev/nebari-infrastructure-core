@@ -1,0 +1,52 @@
+project_name: my-nebari-openshift
+domain: nebari.example.com
+
+# Self-signed for quick demos; use letsencrypt with real DNS for trusted certs.
+certificate:
+  type: selfsigned
+
+# GitOps repo ArgoCD reconciles. Required for cloud clusters (in-cluster ArgoCD
+# cannot read a local file:// repo).
+git_repository:
+  url: "https://github.com/my-org/my-gitops-repo.git"
+  branch: main
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  openshift:
+    # mode: provision  -> NIC stands up a ROSA HCP cluster via OpenTofu (aws-style).
+    # mode: existing    -> NIC deploys onto an already-running OpenShift cluster.
+    mode: existing
+
+    # --- existing mode ---
+    kubeconfig: /path/to/kubeconfig
+    context: "my-openshift-context"
+
+    # --- provision mode (ROSA HCP) ---
+    # region: us-east-1
+    # openshift_version: "4.20.25"
+    # availability_zones: [us-east-1a]   # single-AZ keeps cost low
+    # machine_cidr: "10.0.0.0/16"
+    # compute:
+    #   instance_type: m5.xlarge
+    #   replicas: 2
+    # Requires AWS credentials + RHCS_TOKEN (Red Hat OCM offline token) in env.
+
+    # --- shared ---
+    # Native CSI storage class. gp3-csi on ROSA, managed-csi on ARO.
+    storage_class: gp3-csi
+
+    # SecurityContextConstraints bootstrap. NIC grants this SCC to Nebari's
+    # foundational namespaces BEFORE installing ArgoCD, so pods that pin a fixed
+    # UID + seccomp profile (e.g. argocd-redis) can schedule. Defaults to
+    # privileged (the only stock SCC permitting that combo); set a custom
+    # least-privilege SCC name to override, or manage: false to handle SCCs
+    # out-of-band.
+    scc:
+      manage: true
+      name: privileged
+
+    # Longhorn is opt-in and not yet wired on OpenShift; prefer a CSI storage_class.
+    # longhorn:
+    #   enabled: false

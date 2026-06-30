@@ -13,6 +13,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/gcp"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/hetzner"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/local"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/openshift"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
@@ -61,6 +62,9 @@ func defaultRegistry(ctx context.Context) (*registry.Registry, error) {
 	}
 	if err := r.ClusterProviders.Register(ctx, "existing", existing.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register existing cluster provider: %w", err)
+	}
+	if err := r.ClusterProviders.Register(ctx, "openshift", openshift.NewProvider()); err != nil {
+		return nil, fmt.Errorf("register openshift cluster provider: %w", err)
 	}
 
 	if err := r.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
