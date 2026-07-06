@@ -9,7 +9,7 @@ certificate:
 
 # GitOps repository configuration (required for foundational services)
 # ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
-repo:
+repository:
   existing:
     url: "git@github.com:my-org/my-gitops-repo.git"
     branch: main

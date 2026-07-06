@@ -21,7 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -141,20 +141,20 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved
 	// source is reused by the ArgoCD install below.
-	var repoSource repo.Source
+	var repoSource repository.Source
 	if !opts.DryRun {
-		repoSource, err = c.resolveRepoSource(ctx, cfg, reg)
+		repoSource, err = c.resolveRepositorySource(ctx, cfg, reg)
 		if err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps repository resolution failed").
 				WithMetadata("error", err.Error()))
-			return nil, fmt.Errorf("resolve repo source: %w", err)
+			return nil, fmt.Errorf("resolve repository source: %w", err)
 		}
 		// A local repository requires a local cluster that can host it (e.g. a kind cluster).
-		if _, isLocal := repoSource.(repo.LocalSource); isLocal && !infraSettings.SupportsLocalGitOps {
-			err := fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repo provider", cfg.Cluster.ProviderName())
+		if _, isLocal := repoSource.(repository.LocalSource); isLocal && !infraSettings.SupportsLocalGitOps {
+			err := fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repository provider", cfg.Cluster.ProviderName())
 			span.RecordError(err)
-			status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repo and cluster providers").
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
 				WithMetadata("error", err.Error()))
 			return nil, err
 		}
@@ -254,29 +254,29 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	return result, nil
 }
 
-// resolveRepoSource provisions the GitOps repository via the configured repo
-// provider. The repo block is mandatory (enforced by config validation), so
-// cfg.Repo is non-nil here. Provision may have side effects (e.g. creating a
+// resolveRepositorySource provisions the GitOps repository via the configured repo
+// provider. The repository block is mandatory (enforced by config validation), so
+// cfg.Repository is non-nil here. Provision may have side effects (e.g. creating a
 // local directory), so callers run it only outside dry-run.
-func (c *Client) resolveRepoSource(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) (repo.Source, error) {
-	provider, err := reg.RepoProviders.Get(ctx, cfg.Repo.ProviderName())
+func (c *Client) resolveRepositorySource(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) (repository.Source, error) {
+	provider, err := reg.RepositoryProviders.Get(ctx, cfg.Repository.ProviderName())
 	if err != nil {
-		return nil, fmt.Errorf("get repo provider %q: %w", cfg.Repo.ProviderName(), err)
+		return nil, fmt.Errorf("get repository provider %q: %w", cfg.Repository.ProviderName(), err)
 	}
-	src, err := provider.Provision(ctx, cfg.ProjectName, cfg.Repo)
+	src, err := provider.Provision(ctx, cfg.ProjectName, cfg.Repository)
 	if err != nil {
-		return nil, fmt.Errorf("provision repo %q: %w", cfg.Repo.ProviderName(), err)
+		return nil, fmt.Errorf("provision repository %q: %w", cfg.Repository.ProviderName(), err)
 	}
 	return src, nil
 }
 
-// gitAuth maps a resolved repo.Auth onto the git client's auth. A nil auth
+// gitAuth maps a resolved repository.Auth onto the git client's auth. A nil auth
 // (e.g. a local repository) yields the zero Auth (anonymous).
-func gitAuth(a repo.Auth) git.Auth {
+func gitAuth(a repository.Auth) git.Auth {
 	switch a := a.(type) {
-	case repo.TokenAuth:
+	case repository.TokenAuth:
 		return git.NewAuthToken(a.Token)
-	case repo.SSHKeyAuth:
+	case repository.SSHKeyAuth:
 		return git.NewSSHKeyAuth(a.Key)
 	default:
 		return git.Auth{}
@@ -364,13 +364,13 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 // manifests. It acquires the working copy according to the source kind — open a
 // local directory, or authenticate and clone a remote — writes the manifests,
 // commits, and (for a remote) pushes.
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, src repo.Source, regenApps bool, settings cluster.InfraSettings) error {
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, src repository.Source, regenApps bool, settings cluster.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("repo.url", src.RepoURL()),
+		attribute.String("repository.url", src.RepoURL()),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
@@ -386,14 +386,14 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	// sources are authenticated and cloned, then pushed after commit.
 	remote := false
 	switch s := src.(type) {
-	case repo.LocalSource:
+	case repository.LocalSource:
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing local GitOps directory").
 			WithMetadata("path", s.Dir))
 		if err := gitClient.Init(ctx, s.Dir); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to initialize local git repository: %w", err)
 		}
-	case repo.RemoteSource:
+	case repository.RemoteSource:
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing GitOps repository").
 			WithMetadata("url", s.URL))
 		auth := gitAuth(s.PushAuth)

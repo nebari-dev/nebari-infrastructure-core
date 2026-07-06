@@ -15,11 +15,11 @@ certificate:
 
 # GitOps repository configuration (required)
 # Configures the repository that ArgoCD will use to manage cluster resources
-repo:
+repository:
   existing:
     url: "git@github.com:my-org/my-gitops-repo.git"
     branch: main
-    path: "clusters/my-nebari-existing" # Optional subdirectory within the repo
+    path: "clusters/my-nebari-existing" # Optional subdirectory within the repository
     auth:
       ssh:
         env: GIT_SSH_PRIVATE_KEY # Environment variable containing SSH private key

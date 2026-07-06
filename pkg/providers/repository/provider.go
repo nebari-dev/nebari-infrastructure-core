@@ -1,4 +1,4 @@
-package repo
+package repository
 
 import (
 	"context"
@@ -16,12 +16,12 @@ type Provider interface {
 
 	// Validate checks that the provider configuration is well-formed and that
 	// any referenced credentials are available. It does not mutate state.
-	Validate(ctx context.Context, projectName string, repoConfig *config.RepoConfig) error
+	Validate(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) error
 
 	// Provision resolves (or creates) the backing repository and returns a
 	// Source describing how to reach it. Credentials in the returned Source are
 	// already resolved from their sources (e.g. environment variables).
-	Provision(ctx context.Context, projectName string, repoConfig *config.RepoConfig) (Source, error)
+	Provision(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) (Source, error)
 }
 
 // Auth is resolved git credentials. It is a sealed interface with two kinds:

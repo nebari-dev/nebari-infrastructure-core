@@ -51,7 +51,7 @@ certificate:
   #   key_env: NEBARI_TLS_KEY
 
 # GitOps repository configuration (required for foundational services)
-repo:
+repository:
   existing:
     url: "git@github.com:my-org/my-gitops-repo.git"
     branch: main

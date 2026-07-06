@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 // ProviderName is the registry key and config block name for this provider.
@@ -32,14 +32,14 @@ func (p *Provider) Name() string {
 }
 
 // extractConfig converts the generic provider config to the existing Config type.
-func extractConfig(ctx context.Context, repoConfig *config.RepoConfig) (*Config, error) {
+func extractConfig(ctx context.Context, repoConfig *config.RepositoryConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "existing.extractConfig")
 	defer span.End()
 
 	rawCfg := repoConfig.ProviderConfig()
 	if rawCfg == nil {
-		err := fmt.Errorf("existing repo configuration is required")
+		err := fmt.Errorf("existing repository configuration is required")
 		span.RecordError(err)
 		return nil, err
 	}
@@ -47,14 +47,14 @@ func extractConfig(ctx context.Context, repoConfig *config.RepoConfig) (*Config,
 	var existingCfg Config
 	if err := config.UnmarshalProviderConfig(ctx, rawCfg, &existingCfg); err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("failed to unmarshal existing repo config: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal existing repository config: %w", err)
 	}
 
 	return &existingCfg, nil
 }
 
 // Validate checks that the existing-repository configuration is valid.
-func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig *config.RepoConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "existing.Validate")
 	defer span.End()
@@ -81,7 +81,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig 
 // RemoteSource. The repository must already exist; this provider does not
 // create one. Credentials are resolved from their configured environment
 // variables.
-func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig *config.RepoConfig) (repo.Source, error) {
+func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) (repository.Source, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "existing.Provision")
 	defer span.End()
@@ -102,7 +102,7 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 		return nil, err
 	}
 
-	span.SetAttributes(attribute.String("repo.url", existingCfg.URL))
+	span.SetAttributes(attribute.String("repository.url", existingCfg.URL))
 
 	pushAuth, err := existingCfg.Auth.resolve()
 	if err != nil {
@@ -116,7 +116,7 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 		return nil, fmt.Errorf("resolve argocd credentials: %w", err)
 	}
 
-	return repo.RemoteSource{
+	return repository.RemoteSource{
 		URL:      existingCfg.URL,
 		Branch:   cmp.Or(existingCfg.Branch, defaultBranch),
 		Path:     existingCfg.Path,

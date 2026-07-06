@@ -1,5 +1,5 @@
-// Package local implements the "local" repo provider: it provisions a GitOps
-// repository as a directory on disk and returns a repo.LocalSource. NIC commits
+// Package local implements the "local" repository provider: it provisions a GitOps
+// repository as a directory on disk and returns a repository.LocalSource. NIC commits
 // to it in place; ArgoCD's repo-server reads it via a hostPath mount. It is the
 // zero-dependency, no-network option for local/dev clusters.
 package local
@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 const (
@@ -43,7 +43,7 @@ func (p *Provider) Name() string {
 // extractConfig converts the generic provider config to the local Config type.
 // An empty or absent provider config is valid and yields the zero Config, which
 // Provision fills with per-project defaults.
-func extractConfig(ctx context.Context, repoConfig *config.RepoConfig) (*Config, error) {
+func extractConfig(ctx context.Context, repoConfig *config.RepositoryConfig) (*Config, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.extractConfig")
 	defer span.End()
@@ -55,7 +55,7 @@ func extractConfig(ctx context.Context, repoConfig *config.RepoConfig) (*Config,
 	}
 	if err := config.UnmarshalProviderConfig(ctx, rawCfg, &localCfg); err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("failed to unmarshal local repo config: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal local repository config: %w", err)
 	}
 	return &localCfg, nil
 }
@@ -66,11 +66,11 @@ func resolveDir(cfg *Config, projectName string) string {
 	if cfg.Path != "" {
 		return cfg.Path
 	}
-	return config.DefaultLocalRepoPath(projectName)
+	return config.DefaultLocalRepositoryPath(projectName)
 }
 
 // Validate checks that the local-repository configuration is valid.
-func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig *config.RepoConfig) error {
+func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Validate")
 	defer span.End()
@@ -95,7 +95,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig 
 
 // Provision resolves the repository directory, creates it if needed, and returns
 // a LocalSource.
-func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig *config.RepoConfig) (repo.Source, error) {
+func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) (repository.Source, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.Provision")
 	defer span.End()
@@ -119,12 +119,12 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 	dir := resolveDir(localCfg, projectName)
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("create local repo directory %s: %w", dir, err)
+		return nil, fmt.Errorf("create local repository directory %s: %w", dir, err)
 	}
 
-	span.SetAttributes(attribute.String("repo.dir", dir))
+	span.SetAttributes(attribute.String("repository.dir", dir))
 
-	return repo.LocalSource{
+	return repository.LocalSource{
 		Dir:    dir,
 		Branch: cmp.Or(localCfg.Branch, defaultBranch),
 	}, nil

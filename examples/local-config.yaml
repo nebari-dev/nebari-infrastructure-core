@@ -13,9 +13,9 @@ cluster:
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path
     #       read_only: true
-    #     # GitOps repo mount: only needed for a CUSTOM repo.local.path file://
+    #     # GitOps repo mount: only needed for a CUSTOM repository.local.path file://
     #     # location (OPTION 2 below). The default gitops repo is auto-mounted, so
-    #     # omit this unless you set repo.local.path. host_path must match it exactly.
+    #     # omit this unless you set repository.local.path. host_path must match it exactly.
     #     - host_path: /home/user/my-gitops-repo
     #       container_path: /home/user/my-gitops-repo
     #       read_only: true
@@ -43,7 +43,7 @@ cluster:
 # OPTION 1: Auto-managed local directory (zero-config for development)
 # NIC creates /tmp/nebari-gitops-{project_name} and auto-mounts it on the kind
 # cluster. Just declare the local provider with no path:
-repo:
+repository:
   local: {}
 #
 # OPTION 2: Explicit local directory (custom location)
@@ -51,17 +51,17 @@ repo:
 # entry for the same path (see the kind block above). NIC only auto-mounts the
 # OPTION 1 default, so a custom file:// path is invisible to the in-cluster
 # ArgoCD repo-server unless you mount it yourself. The paths must match exactly.
-# repo:
+# repository:
 #   local:
 #     path: /home/user/my-gitops-repo   # must be an absolute path
 #     branch: main
 #
 # OPTION 3: Remote git repository (production setup)
-# repo:
+# repository:
 #   existing:
 #     url: "git@github.com:my-org/my-gitops-repo.git"
 #     branch: main
-#     path: "clusters/test1"  # optional subdirectory within the repo
+#     path: "clusters/test1"  # optional subdirectory within the repository
 #     auth:
 #       ssh:
 #         env: GIT_SSH_PRIVATE_KEY  # environment variable containing the SSH private key

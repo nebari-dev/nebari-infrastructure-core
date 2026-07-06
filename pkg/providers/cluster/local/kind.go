@@ -73,7 +73,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	// host directory has to be visible from within the node. kind requires a mount's
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
-	defaultGitOps := config.DefaultLocalRepoPath(name)
+	defaultGitOps := config.DefaultLocalRepositoryPath(name)
 	if err := os.MkdirAll(defaultGitOps, 0o750); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("create local gitops directory %s: %w", defaultGitOps, err)

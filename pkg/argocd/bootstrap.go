@@ -14,7 +14,7 @@ import (
 	yamlserializer "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -62,7 +62,7 @@ spec:
 
 // ApplyRootAppOfApps applies the root App-of-Apps Application which triggers
 // ArgoCD to sync all child applications from the git repository or local path.
-func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, src repo.Source) error {
+func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, src repository.Source) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ApplyRootAppOfApps")
 	defer span.End()

@@ -19,7 +19,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 //go:embed templates
@@ -86,7 +86,7 @@ type TemplateData struct {
 
 // NewTemplateData creates TemplateData from NebariConfig, the resolved GitOps
 // repository source, and provider InfraSettings.
-func NewTemplateData(cfg *config.NebariConfig, src repo.Source, settings cluster.InfraSettings) TemplateData {
+func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -262,7 +262,7 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) into workDir.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig, src repo.Source, settings cluster.InfraSettings) error {
+func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()

@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -23,7 +23,7 @@ const (
 )
 
 // ConfigureGitRepoAccess configures Argo CD to access the GitOps repository
-func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, src repo.RemoteSource, namespace string) error {
+func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, src repository.RemoteSource, namespace string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.ConfigureGitRepoAccess")
 	defer span.End()
@@ -41,9 +41,9 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, sr
 
 	// Use the ArgoCD read credentials (falling back to push credentials)
 	switch a := src.ArgoCDAuth().(type) {
-	case repo.SSHKeyAuth:
+	case repository.SSHKeyAuth:
 		secretData["sshPrivateKey"] = a.Key
-	case repo.TokenAuth:
+	case repository.TokenAuth:
 		secretData["password"] = a.Token
 		secretData["username"] = gitTokenUsername
 	default:

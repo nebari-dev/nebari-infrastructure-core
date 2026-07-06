@@ -63,12 +63,12 @@ cluster:
 			},
 		},
 		{
-			name: "config with repo block",
+			name: "config with repository block",
 			yaml: `
 project_name: test-project
 cluster:
   aws: {}
-repo:
+repository:
   existing:
     url: "git@github.com:org/repo.git"
     branch: main
@@ -77,18 +77,18 @@ repo:
         env: GIT_TOKEN
 `,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.Repo == nil {
-					t.Fatal("Repo is nil")
+				if cfg.Repository == nil {
+					t.Fatal("Repository is nil")
 				}
-				if cfg.Repo.ProviderName() != "existing" {
-					t.Errorf("Repo.ProviderName() = %q, want %q", cfg.Repo.ProviderName(), "existing")
+				if cfg.Repository.ProviderName() != "existing" {
+					t.Errorf("Repository.ProviderName() = %q, want %q", cfg.Repository.ProviderName(), "existing")
 				}
-				pc := cfg.Repo.ProviderConfig()
+				pc := cfg.Repository.ProviderConfig()
 				if pc == nil {
-					t.Fatal("Repo.ProviderConfig() is nil")
+					t.Fatal("Repository.ProviderConfig() is nil")
 				}
 				if pc["url"] != "git@github.com:org/repo.git" {
-					t.Errorf("repo url = %v, want %q", pc["url"], "git@github.com:org/repo.git")
+					t.Errorf("repository url = %v, want %q", pc["url"], "git@github.com:org/repo.git")
 				}
 			},
 		},
@@ -299,20 +299,20 @@ func TestNebariConfigValidate(t *testing.T) {
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				Repo: &RepoConfig{
+				Repository: &RepositoryConfig{
 					Providers: map[string]any{"existing": map[string]any{}},
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid config with repo",
+			name: "valid config with repository",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				Repo: &RepoConfig{
+				Repository: &RepositoryConfig{
 					Providers: map[string]any{"existing": map[string]any{"url": "git@github.com:org/repo.git"}},
 				},
 			},
@@ -371,7 +371,7 @@ func TestNebariConfigValidate(t *testing.T) {
 						"cloudflare": map[string]any{"zone_name": "example.com"},
 					},
 				},
-				Repo: &RepoConfig{
+				Repository: &RepositoryConfig{
 					Providers: map[string]any{"existing": map[string]any{}},
 				},
 			},
@@ -408,21 +408,21 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid DNS provider",
 		},
 		{
-			name: "invalid repo - no provider",
+			name: "invalid repository - no provider",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				Repo: &RepoConfig{
+				Repository: &RepositoryConfig{
 					Providers: map[string]any{},
 				},
 			},
 			wantErr:     true,
-			errContains: "invalid repo",
+			errContains: "invalid repository",
 		},
 		{
-			name: "missing repo",
+			name: "missing repository",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
@@ -430,7 +430,7 @@ func TestNebariConfigValidate(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errContains: "repo field is required",
+			errContains: "repository field is required",
 		},
 	}
 

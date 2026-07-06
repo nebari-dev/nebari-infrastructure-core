@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 // Config holds the configuration for the existing repository provider.
@@ -56,7 +56,7 @@ type EnvRef struct {
 // Validate checks that the configuration is well-formed.
 func (c *Config) Validate() error {
 	if c.URL == "" {
-		return fmt.Errorf("repo url is required")
+		return fmt.Errorf("repository url is required")
 	}
 	if strings.HasPrefix(c.URL, "file://") {
 		return fmt.Errorf("the existing provider is for remote repositories; use the local provider for a file:// directory")
@@ -97,20 +97,20 @@ func (a *AuthConfig) Validate() error {
 
 // resolve reads the configured environment variable and returns the resolved
 // auth.
-func (a *AuthConfig) resolve() (repo.Auth, error) {
+func (a *AuthConfig) resolve() (repository.Auth, error) {
 	switch {
 	case a.Token != nil:
 		v := os.Getenv(a.Token.Env)
 		if v == "" {
 			return nil, fmt.Errorf("environment variable %s is not set or empty", a.Token.Env)
 		}
-		return repo.TokenAuth{Token: v}, nil
+		return repository.TokenAuth{Token: v}, nil
 	case a.SSH != nil:
 		v := os.Getenv(a.SSH.Env)
 		if v == "" {
 			return nil, fmt.Errorf("environment variable %s is not set or empty", a.SSH.Env)
 		}
-		return repo.SSHKeyAuth{Key: v}, nil
+		return repository.SSHKeyAuth{Key: v}, nil
 	default:
 		return nil, fmt.Errorf("no auth method configured")
 	}

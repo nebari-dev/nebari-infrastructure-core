@@ -13,7 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -92,7 +92,7 @@ type ArgoCDSSOConfig struct {
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
 // via ArgoCD from the git repository. src may be a local or remote repository
-func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repo.Source, foundationalCfg FoundationalConfig) error {
+func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repository.Source, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
 	defer span.End()

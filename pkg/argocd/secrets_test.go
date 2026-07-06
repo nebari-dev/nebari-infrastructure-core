@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 // getSecretVal retrieves a value from a secret, checking both Data and StringData
@@ -105,9 +105,9 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		src := repo.RemoteSource{
+		src := repository.RemoteSource{
 			URL:      "https://github.com/example/repo.git",
-			PushAuth: repo.TokenAuth{Token: "ghp_test_token_123"},
+			PushAuth: repository.TokenAuth{Token: "ghp_test_token_123"},
 		}
 
 		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
@@ -142,7 +142,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		src := repo.RemoteSource{URL: "https://github.com/example/repo.git"}
+		src := repository.RemoteSource{URL: "https://github.com/example/repo.git"}
 
 		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err == nil {
 			t.Error("ConfigureGitRepoAccess() should return error when no credentials provided")
@@ -157,9 +157,9 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		}
 		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		src := repo.RemoteSource{
+		src := repository.RemoteSource{
 			URL:      "https://github.com/example/new-repo.git",
-			PushAuth: repo.TokenAuth{Token: "new_token"},
+			PushAuth: repository.TokenAuth{Token: "new_token"},
 		}
 
 		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
@@ -178,10 +178,10 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		src := repo.RemoteSource{
+		src := repository.RemoteSource{
 			URL:      "https://github.com/example/repo.git",
-			PushAuth: repo.TokenAuth{Token: "push_token"},
-			ReadAuth: repo.TokenAuth{Token: "read_token"},
+			PushAuth: repository.TokenAuth{Token: "push_token"},
+			ReadAuth: repository.TokenAuth{Token: "read_token"},
 		}
 
 		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
@@ -198,9 +198,9 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
-		src := repo.RemoteSource{
+		src := repository.RemoteSource{
 			URL:      "git@github.com:example/repo.git",
-			PushAuth: repo.SSHKeyAuth{Key: sshKey},
+			PushAuth: repository.SSHKeyAuth{Key: sshKey},
 		}
 
 		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {

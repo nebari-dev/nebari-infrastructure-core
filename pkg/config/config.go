@@ -12,9 +12,9 @@ import (
 // Provider lists are injected by the caller (typically from a registry)
 // to keep the config package decoupled from provider implementations.
 type ValidateOptions struct {
-	ClusterProviders []string
-	DNSProviders     []string
-	RepoProviders    []string
+	ClusterProviders    []string
+	DNSProviders        []string
+	RepositoryProviders []string
 }
 
 // NebariConfig represents the parsed nebari-config.yaml structure
@@ -30,9 +30,9 @@ type NebariConfig struct {
 	// Only one provider can be configured at a time.
 	DNS *DNSConfig `yaml:"dns,omitempty"`
 
-	// Repo configures the GitOps repository provider (optional).
+	// Repository configures the GitOps repository provider (optional).
 	// Only one provider can be configured at a time.
-	Repo *RepoConfig `yaml:"repo,omitempty"`
+	Repository *RepositoryConfig `yaml:"repository,omitempty"`
 
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
@@ -158,42 +158,42 @@ func (c *ClusterConfig) ProviderConfig() map[string]any {
 	return nil
 }
 
-// RepoConfig holds typed GitOps repository provider configuration.
+// RepositoryConfig holds typed GitOps repository provider configuration.
 // The provider name is the map key, the provider config is the map value.
 // Example YAML:
 //
-//	repo:
+//	repository:
 //	  existing:
 //	    url: "git@github.com:my-org/my-gitops-repo.git"
 //	    branch: main
-type RepoConfig struct {
+type RepositoryConfig struct {
 	// Providers captures the provider name as key and its config as value.
 	Providers map[string]any `yaml:",inline"`
 }
 
-// Validate checks that exactly one valid repo provider is configured.
+// Validate checks that exactly one valid repository provider is configured.
 // When validProviders is non-empty, the provider name is checked against the list.
-func (r *RepoConfig) Validate(validProviders []string) error {
+func (r *RepositoryConfig) Validate(validProviders []string) error {
 	if len(r.Providers) == 0 {
-		return fmt.Errorf("repo block is present but no provider is configured")
+		return fmt.Errorf("repository block is present but no provider is configured")
 	}
 	if len(r.Providers) > 1 {
-		return fmt.Errorf("only one repo provider can be configured at a time")
+		return fmt.Errorf("only one repository provider can be configured at a time")
 	}
 	name := r.ProviderName()
 	if len(validProviders) > 0 && !slices.Contains(validProviders, name) {
-		return fmt.Errorf("invalid repo provider %q, must be one of: %v", name, validProviders)
+		return fmt.Errorf("invalid repository provider %q, must be one of: %v", name, validProviders)
 	}
 	if r.ProviderConfig() == nil {
-		return fmt.Errorf("repo provider %q config must be a mapping, not a scalar value", name)
+		return fmt.Errorf("repository provider %q config must be a mapping, not a scalar value", name)
 	}
 	return nil
 }
 
-// ProviderName returns the name of the configured repo provider,
+// ProviderName returns the name of the configured repository provider,
 // or an empty string if none is configured.
 // Precondition: Validate() ensures exactly one entry in the map.
-func (r *RepoConfig) ProviderName() string {
+func (r *RepositoryConfig) ProviderName() string {
 	if r == nil {
 		return ""
 	}
@@ -203,10 +203,10 @@ func (r *RepoConfig) ProviderName() string {
 	return ""
 }
 
-// ProviderConfig returns the repo provider config as a map.
+// ProviderConfig returns the repository provider config as a map.
 // Returns nil if no provider is configured or the value is not a map.
 // Precondition: Validate() ensures exactly one entry in the map.
-func (r *RepoConfig) ProviderConfig() map[string]any {
+func (r *RepositoryConfig) ProviderConfig() map[string]any {
 	if r == nil {
 		return nil
 	}
@@ -219,10 +219,10 @@ func (r *RepoConfig) ProviderConfig() map[string]any {
 	return nil
 }
 
-// DefaultLocalRepoPath returns the host directory NIC manages for a project's
-// local GitOps repository when the local repo provider is used without an
+// DefaultLocalRepositoryPath returns the host directory NIC manages for a project's
+// local GitOps repository when the local repository provider is used without an
 // explicit path.
-func DefaultLocalRepoPath(projectName string) string {
+func DefaultLocalRepositoryPath(projectName string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 }
 
@@ -413,11 +413,11 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 		}
 	}
 
-	if c.Repo == nil {
-		return fmt.Errorf("repo field is required")
+	if c.Repository == nil {
+		return fmt.Errorf("repository field is required")
 	}
-	if err := c.Repo.Validate(opts.RepoProviders); err != nil {
-		return fmt.Errorf("invalid repo: %w", err)
+	if err := c.Repository.Validate(opts.RepositoryProviders); err != nil {
+		return fmt.Errorf("invalid repository: %w", err)
 	}
 
 	if err := c.Certificate.Validate(); err != nil {

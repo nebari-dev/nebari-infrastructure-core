@@ -14,7 +14,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -27,7 +27,7 @@ const (
 // This is the main entry point called from cmd/nic/deploy.go
 // If src is a LocalSource, its directory is mounted into the repo-server pod.
 // If it is a RemoteSource, a repository-credentials Secret is created.
-func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repo.Source, argoCDCfg Config) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repository.Source, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -83,7 +83,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 	}
 
 	// If using a local repository, mount its directory into the repo-server pod
-	if local, ok := src.(repo.LocalSource); ok {
+	if local, ok := src.(repository.LocalSource); ok {
 		addLocalGitopsMount(ctx, argoCDCfg.Values, local.Dir)
 
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", local.Dir)).
@@ -132,7 +132,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 	}
 
 	// Configure Git repository access for a remote repository
-	if remote, ok := src.(repo.RemoteSource); ok {
+	if remote, ok := src.(repository.RemoteSource); ok {
 		if err := ConfigureGitRepoAccess(ctx, k8sClient, remote, argoCDCfg.Namespace); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to configure Git repository access").

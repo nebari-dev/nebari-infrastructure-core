@@ -155,7 +155,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName).
-			WithMetadata("gitops_path", config.DefaultLocalRepoPath(projectName)))
+			WithMetadata("gitops_path", config.DefaultLocalRepositoryPath(projectName)))
 
 		if err := createKindCluster(ctx, kp, projectName, kindCfg); err != nil {
 			span.RecordError(err)
