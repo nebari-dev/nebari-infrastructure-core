@@ -77,3 +77,29 @@ jobs:
 
       - name: Test binary
         run: ./nic --help || true
+
+  deploy:
+    name: Deploy (k3d)
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.1'
+
+      - name: Deploy platform on k3d
+        id: sandbox
+        uses: nebari-dev/action-nebari-sandbox@v2
+        with:
+          profile: platform
+          nic-version: '.'
+
+      - name: Cleanup
+        if: always()
+        run: k3d cluster delete ${{ steps.sandbox.outputs.cluster-name }}
