@@ -1,7 +1,13 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.6.0"
-  
+  # TEMPORARY: consuming the module from a branch while the Longhorn backup
+  # bucket support (nebari-dev/terraform-aws-eks-cluster#39) is unreleased.
+  # TODO(#431): revert to the registry source + pinned version once a release
+  # containing the longhorn_backup_bucket_* variables is cut:
+  #   source  = "nebari-dev/eks-cluster/aws"
+  #   version = "0.7.0"  # or whatever release includes the backup bucket
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feat/longhorn-backup-bucket"
+
+
   project_name                             = var.project_name
   tags                                     = var.tags
   availability_zones                       = var.availability_zones
@@ -32,4 +38,8 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
+
+  longhorn_backup_bucket_create        = var.backup_bucket_create
+  longhorn_backup_bucket_name          = var.backup_bucket_name
+  longhorn_backup_bucket_force_destroy = var.backup_bucket_force_destroy
 }

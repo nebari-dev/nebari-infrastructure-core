@@ -46,5 +46,5 @@ output "efs_id" {
 
 output "longhorn_backup_bucket" {
   description = "Name of the Longhorn backup S3 bucket; empty when not created by NIC"
-  value       = var.backup_bucket_create ? aws_s3_bucket.longhorn_backup[0].id : ""
+  value       = module.eks_cluster.longhorn_backup_bucket
 }

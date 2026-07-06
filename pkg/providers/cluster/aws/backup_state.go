@@ -17,13 +17,15 @@ func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
 	if spec == nil || spec.ForceDestroy {
 		return nil
 	}
-	// The [0] indices correspond to the `count = ... ? 1 : 0` form these
-	// resources use in the provider's backup.tf. If that module ever moves to
-	// `for_each`, these addresses (e.g. [0] -> ["<key>"]) must be updated to match.
+	// These resources live inside the eks_cluster module (see the module's
+	// longhorn_backup.tf), so addresses are prefixed with module.eks_cluster.
+	// The [0] indices correspond to the `count = ... ? 1 : 0` form the module
+	// uses; if it ever moves to `for_each`, these addresses (e.g. [0] ->
+	// ["<key>"]) must be updated to match.
 	return []string{
-		"aws_s3_bucket_public_access_block.longhorn_backup[0]",
-		"aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",
-		"aws_s3_bucket_versioning.longhorn_backup[0]",
-		"aws_s3_bucket.longhorn_backup[0]",
+		"module.eks_cluster.aws_s3_bucket_public_access_block.longhorn_backup[0]",
+		"module.eks_cluster.aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",
+		"module.eks_cluster.aws_s3_bucket_versioning.longhorn_backup[0]",
+		"module.eks_cluster.aws_s3_bucket.longhorn_backup[0]",
 	}
 }

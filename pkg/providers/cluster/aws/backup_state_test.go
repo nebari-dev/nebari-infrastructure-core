@@ -26,10 +26,10 @@ func TestBackupStateAddrs(t *testing.T) {
 			name: "retain returns all dependent addresses, dependents first",
 			spec: &cluster.BackupBucketSpec{ForceDestroy: false},
 			want: []string{
-				"aws_s3_bucket_public_access_block.longhorn_backup[0]",
-				"aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",
-				"aws_s3_bucket_versioning.longhorn_backup[0]",
-				"aws_s3_bucket.longhorn_backup[0]",
+				"module.eks_cluster.aws_s3_bucket_public_access_block.longhorn_backup[0]",
+				"module.eks_cluster.aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",
+				"module.eks_cluster.aws_s3_bucket_versioning.longhorn_backup[0]",
+				"module.eks_cluster.aws_s3_bucket.longhorn_backup[0]",
 			},
 		},
 	}
@@ -46,7 +46,7 @@ func TestBackupStateAddrs(t *testing.T) {
 			}
 			// The bucket itself must always be last so its dependents are
 			// removed first.
-			if len(got) > 0 && got[len(got)-1] != "aws_s3_bucket.longhorn_backup[0]" {
+			if len(got) > 0 && got[len(got)-1] != "module.eks_cluster.aws_s3_bucket.longhorn_backup[0]" {
 				t.Fatalf("expected bucket address last, got %q", got[len(got)-1])
 			}
 		})

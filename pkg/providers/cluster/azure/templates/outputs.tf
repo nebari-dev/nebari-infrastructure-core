@@ -71,5 +71,5 @@ output "node_subnet_id" {
 
 output "longhorn_backup_container" {
   description = "Name of the Longhorn backup container; empty when not created by NIC"
-  value       = var.backup_container_create ? azurerm_storage_container.longhorn_backup[0].name : ""
+  value       = module.aks_cluster.longhorn_backup_container
 }
