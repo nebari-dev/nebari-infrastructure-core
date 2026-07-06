@@ -79,7 +79,7 @@ jobs:
         run: ./nic --help || true
 
   deploy:
-    name: Deploy (k3d)
+    name: Deploy
     runs-on: ubuntu-latest
     needs: build
     timeout-minutes: 20
