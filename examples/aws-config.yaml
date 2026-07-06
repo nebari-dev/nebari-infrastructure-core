@@ -157,3 +157,17 @@ cluster:
     tags:
       Environment: development
       Project: nebari
+
+# Optional: off-cluster Longhorn backups — hourly in-cluster snapshots plus a
+# daily backup pushed to S3. Requires Longhorn (enabled above). Credentials come
+# from environment variables, never this file. Full reference:
+# examples/longhorn-backups-config.yaml and docs/longhorn-backups.md.
+# backups:
+#   longhorn:
+#     enabled: true
+#     s3:
+#       bucket: my-nebari-backups
+#       region: us-west-2
+#       create_bucket: true            # provision the bucket in the AWS Terraform module
+#       access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
+#       secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY

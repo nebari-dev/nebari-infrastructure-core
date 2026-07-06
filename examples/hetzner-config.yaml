@@ -38,3 +38,20 @@ cluster:
 
 certificate:
   type: selfsigned
+
+# Optional: off-cluster Longhorn backups — hourly in-cluster snapshots plus a
+# daily backup pushed to S3-compatible object storage. Requires Longhorn
+# (installed by default on Hetzner). Hetzner has no bucket-provisioning Terraform
+# module, so `create_bucket` is unsupported here — point at an existing
+# S3-compatible bucket (e.g. Hetzner Object Storage) via `endpoint`. Credentials
+# come from environment variables, never this file. Full reference:
+# examples/longhorn-backups-config.yaml and docs/longhorn-backups.md.
+# backups:
+#   longhorn:
+#     enabled: true
+#     s3:
+#       bucket: my-nebari-backups
+#       region: fsn1
+#       endpoint: https://fsn1.your-objectstorage.com   # Hetzner Object Storage (S3-compatible)
+#       access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
+#       secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
