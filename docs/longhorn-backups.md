@@ -121,6 +121,14 @@ See the Longhorn docs for further detail:
 
 ## Azure (azblob)
 
+> **Not yet functional.** NIC does not install Longhorn on Azure clusters — the
+> Azure provider's storage layer is `managed-csi`, not Longhorn — so the
+> `longhorn.io` CRDs that backups depend on are never present. Enabling
+> `backups.longhorn` on an Azure cluster currently **fails `nic validate` /
+> `nic deploy`** with a clear error. The `azure:` configuration below is
+> documented as forward-looking scaffolding for a future "Longhorn on Azure"
+> prerequisite; it will become usable once NIC can install Longhorn on Azure.
+
 Azure uses Longhorn's native `azblob://` target. Configure the `azure:` sub-block
 instead of `s3:`:
 

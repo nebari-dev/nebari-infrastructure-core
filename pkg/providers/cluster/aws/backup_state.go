@@ -17,6 +17,9 @@ func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
 	if spec == nil || spec.ForceDestroy {
 		return nil
 	}
+	// The [0] indices correspond to the `count = ... ? 1 : 0` form these
+	// resources use in the provider's backup.tf. If that module ever moves to
+	// `for_each`, these addresses (e.g. [0] -> ["<key>"]) must be updated to match.
 	return []string{
 		"aws_s3_bucket_public_access_block.longhorn_backup[0]",
 		"aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",

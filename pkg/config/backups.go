@@ -283,6 +283,9 @@ func (c *LonghornBackupConfig) BackupTargetURL() string {
 	case c.S3 != nil:
 		return "s3://" + c.S3.Bucket + "@" + c.S3.Region + "/" + normalizePrefix(c.S3.Prefix)
 	case c.Azure != nil:
+		// The "core.windows.net" suffix is intentional even for custom endpoints:
+		// Longhorn drives the real endpoint via the AZBLOB_ENDPOINT secret key, so
+		// this URL suffix is cosmetic and does not need to match a custom endpoint.
 		return "azblob://" + c.Azure.Container + "@core.windows.net/" + normalizePrefix(c.Azure.Prefix)
 	default:
 		return ""

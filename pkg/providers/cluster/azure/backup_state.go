@@ -18,6 +18,9 @@ func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
 	if spec == nil || spec.ForceDestroy {
 		return nil
 	}
+	// The [0] indices correspond to the `count = ... ? 1 : 0` form these
+	// resources use in the provider's backup.tf. If that module ever moves to
+	// `for_each`, these addresses (e.g. [0] -> ["<key>"]) must be updated to match.
 	return []string{
 		"azurerm_storage_container.longhorn_backup[0]",
 		"azurerm_storage_account.longhorn_backup[0]",

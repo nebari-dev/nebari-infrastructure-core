@@ -122,6 +122,22 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Get provider infrastructure settings up front. InfraSettings is a pure
+	// getter, so it is safe to compute before Deploy and lets us fail fast on
+	// misconfiguration before provisioning anything.
+	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
+
+	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
+	// (e.g. Azure, or AWS with longhorn disabled). Without Longhorn installed the
+	// longhorn.io CRDs are absent and the backups ArgoCD app would never sync.
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Backups configuration is invalid for this provider").
+			WithMetadata("provider", cfg.Cluster.ProviderName()).
+			WithMetadata("error", err.Error()))
+		return nil, fmt.Errorf("validate backups configuration: %w", err)
+	}
+
 	// Deploy infrastructure
 	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
 		DryRun:       opts.DryRun,
@@ -137,9 +153,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
-
-	// Get provider infrastructure settings for GitOps and foundational services
-	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Resolve the effective GitOps configuration. This may auto-create a
 	// local directory for providers that support it, or fall back to the
@@ -541,7 +554,7 @@ func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
 			ForceDestroy: !s3.RetainOnDestroyEnabled(),
 		}
 	}
-	if az := lh.Azure; az != nil && az.CreateContainer {
+	if az := lh.Azure; az != nil && az.CreateContainer && az.Endpoint == "" {
 		return &cluster.BackupBucketSpec{
 			Name:           az.Container,
 			StorageAccount: az.StorageAccount,
