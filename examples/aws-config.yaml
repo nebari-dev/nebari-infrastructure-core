@@ -162,6 +162,15 @@ cluster:
 # daily backup pushed to S3. Requires Longhorn (enabled above). Credentials come
 # from environment variables, never this file. Full reference:
 # examples/longhorn-backups-config.yaml and docs/longhorn-backups.md.
+#
+# Schedules are set here — there are NO defaults: when backups are enabled, BOTH
+# the `snapshot` and `backup` schedules are required and are checked at
+# `nic validate`. Each schedule is one Longhorn RecurringJob:
+#   cron        — standard 5-field cron ("min hour day-of-month month day-of-week"), UTC
+#   retain      — how many of that job's snapshots/backups to keep (rolling window); must be > 0
+#   concurrency — max volumes the job processes in parallel; must be > 0
+# `snapshot` is a fast in-cluster copy-on-write snapshot (no S3 traffic); `backup`
+# streams changed blocks to the S3 bucket for durable, off-cluster storage.
 # backups:
 #   longhorn:
 #     enabled: true
@@ -171,3 +180,16 @@ cluster:
 #       create_bucket: true            # provision the bucket in the AWS Terraform module
 #       access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
 #       secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
+#     # Auto-attach idle/detached volumes long enough to capture them (default true).
+#     # JupyterHub user PVCs detach when servers idle out; without this they'd be
+#     # silently skipped at the cron tick.
+#     allow_recurring_job_while_volume_detached: true
+#     schedules:
+#       snapshot:
+#         cron: "0 * * * *"            # top of every hour
+#         retain: 24                   # keep the last 24 hourly snapshots (~1 day)
+#         concurrency: 5
+#       backup:
+#         cron: "0 3 * * *"            # daily at 03:00 UTC
+#         retain: 30                   # keep the last 30 daily backups (~1 month)
+#         concurrency: 3
