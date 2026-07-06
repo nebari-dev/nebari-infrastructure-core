@@ -19,7 +19,7 @@ import (
 const (
 	repoName       = "argo"
 	repoURL        = "https://argoproj.github.io/argo-helm"
-	chartName      = "argo/argo-cd"
+	chartName      = "argo/foobar"
 	versionUnknown = "unknown"
 )
 
