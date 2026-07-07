@@ -42,10 +42,17 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 		t.Fatalf("spec missing or wrong type in:\n%s", processed)
 	}
 	sources, ok := spec["sources"].([]any)
-	if !ok || len(sources) != 1 {
-		t.Fatalf("expected exactly one source, got %v", spec["sources"])
+	if !ok || len(sources) != 2 {
+		t.Fatalf("expected exactly two sources (useDefaultCAs + inLine), got %v", spec["sources"])
 	}
-	src, _ := sources[0].(map[string]any)
+	// System roots must be included alongside the org CA: consumers point
+	// SSL_CERT_FILE-style vars at the projected file, which replaces the
+	// default pool rather than extending it.
+	defaultCAs, _ := sources[0].(map[string]any)
+	if useDefault, _ := defaultCAs["useDefaultCAs"].(bool); !useDefault {
+		t.Errorf("first source should set useDefaultCAs: true, got %v", sources[0])
+	}
+	src, _ := sources[1].(map[string]any)
 	inLine, _ := src["inLine"].(string)
 	if !strings.Contains(inLine, "BEGIN CERTIFICATE") {
 		t.Errorf("inLine source did not preserve the PEM, got %q", inLine)

@@ -11,6 +11,14 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   sources:
+    # The projected file must be system roots + org CA, not org-only: consumers
+    # point SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS at it, and
+    # those REPLACE the default pool rather than extend it. An org-only file
+    # breaks TLS to anything allow-listed past the proxy or publicly signed
+    # (e.g. pip install from PyPI). useDefaultCAs pulls in trust-manager's
+    # default CA package (public roots), which apps/trust-manager.yaml
+    # explicitly enables.
+    - useDefaultCAs: true
     - inLine: |-
 {{ indent 8 .TrustBundlePEM }}
   target:
