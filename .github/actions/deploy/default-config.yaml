@@ -1,0 +1,15 @@
+# Built-in default config for the deploy action: a local kind cluster with
+# the full NIC platform, suitable for CI out of the box.
+#
+# Used when the action's `config` input is not set. Everything here relies on
+# NIC defaults: the gitops repository is auto-created locally and mounted into
+# the cluster, and MetalLB's address pool is derived from the kind Docker
+# network. Need anything custom? Copy this file into your repo, edit it, and
+# pass it via the `config` input instead.
+project_name: nic-ci
+domain: nebari.local
+certificate:
+  type: selfsigned
+
+cluster:
+  local: {}

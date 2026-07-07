@@ -1,0 +1,65 @@
+name: Deploy NIC
+description: >-
+  Deploy a NIC platform from a config file using the nic CLI, and destroy it
+  automatically when the job ends (post step), even on failure or
+  cancellation. Acquires nic from a prebuilt binary (nic-binary) or a release
+  or git ref (nic-version). Exports KUBECONFIG so the steps after this action
+  run against the deployed cluster, and by default waits for all Argo CD
+  Applications to become Synced and Healthy.
+
+inputs:
+  config:
+    description: >-
+      Path to the NIC config file, relative to the workspace. When unset, the
+      action deploys its built-in default: a local kind cluster with an
+      auto-created local gitops repository (see default-config.yaml in the
+      action directory. Copy it into your repo as a starting point for a
+      custom config).
+    required: false
+    default: ''
+  nic-binary:
+    description: >-
+      Path to a local prebuilt nic binary. Set exactly one of nic-binary and nic-version.
+    required: false
+    default: ''
+  nic-version:
+    description: >-
+      NIC version to acquire. Mutually exclusive with nic-binary.
+      - 'latest': download the latest release binary (checksum-verified).
+      - 'vX.Y.Z': download that release binary (checksum-verified).
+      - any other string: fetch that git ref (branch, tag, or commit SHA) of
+        nebari-dev/nebari-infrastructure-core and build from source
+        (requires Go, e.g. via actions/setup-go).
+    required: false
+    default: ''
+  wait:
+    description: Wait for all Argo CD Applications to be Synced and Healthy after deploy.
+    required: false
+    default: 'true'
+  wait-timeout:
+    description: Seconds to wait for Applications to converge.
+    required: false
+    default: '600'
+  destroy:
+    description: Destroy the deployment in the post step when the job ends.
+    required: false
+    default: 'true'
+  force:
+    description: Pass --force to nic destroy so teardown continues past individual resource failures.
+    required: false
+    default: 'true'
+  token:
+    description: GitHub token used to resolve and download NIC releases (nic-version mode).
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  kubeconfig:
+    description: Path to a kubeconfig for the deployed cluster (also exported as KUBECONFIG).
+  nic-binary:
+    description: Path to the nic binary used, for running further nic commands in later steps.
+
+runs:
+  using: node24
+  main: dist/main/index.js
+  post: dist/post/index.js
