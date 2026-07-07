@@ -455,7 +455,7 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		status.Progress(ctx, "Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir()); err != nil {
+	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir(), trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -500,8 +500,8 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 // effective gitConfig substituted in) and writes the result into the git
 // working directory. Sourcing from the parsed config keeps this feature
 // available to library consumers who don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string) error {
-	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
+func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string, trustBundlePEM string) error {
+	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig, trustBundlePEM))
 	if err != nil {
 		return fmt.Errorf("marshal scrubbed config to YAML: %w", err)
 	}
@@ -526,7 +526,13 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 // struct means renaming a sensitive field on the source type fails to
 // compile here, instead of silently leaking once a deny-list of string
 // keys drifts out of sync.
-func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.NebariConfig {
+//
+// trustBundlePEM is the already-resolved trust bundle (empty when unset). A
+// path:-based trust_bundle references a file on the operator's machine, which
+// is meaningless (and leaks a local path) in the committed record, so any
+// configured bundle is rewritten to its resolved inline form; this also keeps
+// the committed config self-contained and reflecting the deployed value.
+func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundlePEM string) *config.NebariConfig {
 	out := *cfg
 	out.GitRepository = nil
 	if gitConfig != nil {
@@ -534,6 +540,10 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.Neb
 		gitRepo.Auth = git.AuthConfig{} // value type with no omitempty: zero the env-var names
 		gitRepo.ArgoCDAuth = nil        // *AuthConfig with omitempty: nil → omitted
 		out.GitRepository = &gitRepo
+	}
+	out.TrustBundle = nil
+	if cfg.TrustBundle != nil && trustBundlePEM != "" {
+		out.TrustBundle = &config.TrustBundleConfig{Inline: trustBundlePEM}
 	}
 	return &out
 }
