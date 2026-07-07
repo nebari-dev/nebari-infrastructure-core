@@ -42,6 +42,15 @@ const (
 	systemCAPath         = "/etc/ssl/certs/ca-certificates.crt"
 	combineCAInitName    = "combine-ca-bundle"
 
+	// orgCAChecksumAnnotation stamps the SHA-256 of the org CA bundle onto the
+	// repo-server pod template. The combined bundle is built by an init container
+	// into an emptyDir, so it is only rebuilt on pod restart; without this, a
+	// rotated trust_bundle updates the argocd-org-ca ConfigMap but the running
+	// pod keeps serving the stale combined bundle. A changed annotation changes
+	// the pod template, so any applied Helm upgrade rolls the pod and the init
+	// container re-runs. See the #364 caveat on when upgrades actually apply.
+	orgCAChecksumAnnotation = "nebari.dev/org-ca-checksum"
+
 	// repoServerImageTpl resolves, via the chart's own tpl pass over
 	// repoServer.initContainers, to the same image the repo-server runs — so the
 	// init container's system CA bundle matches the runtime. This mirrors how the
@@ -443,12 +452,13 @@ func configureRepoServerCATrust(ctx context.Context, client kubernetes.Interface
 	if err := createOrgCAConfigMap(ctx, client, namespace, orgCABundlePEM); err != nil {
 		return err
 	}
-	addOrgCAMount(ctx, values)
+	caFingerprint := sha256Fingerprint(orgCABundlePEM)
+	addOrgCAMount(ctx, values, caFingerprint)
 	// Log a fingerprint, never the PEM body, so rotation is observable.
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configured repo-server to trust org CA bundle").
 		WithResource("argocd").
 		WithAction("ca-configured").
-		WithMetadata("ca_fingerprint", sha256Fingerprint(orgCABundlePEM)).
+		WithMetadata("ca_fingerprint", caFingerprint).
 		WithMetadata("ca_bytes", strconv.Itoa(len(orgCABundlePEM))))
 	return nil
 }
@@ -468,7 +478,7 @@ func configureRepoServerCATrust(ctx context.Context, client kubernetes.Interface
 // The override is additive (system ∪ org), so it does not affect the in-cluster
 // Kubernetes API connection, which client-go validates against the service
 // account's own ca.crt rather than the system store.
-func addOrgCAMount(ctx context.Context, values map[string]any) {
+func addOrgCAMount(ctx context.Context, values map[string]any, caFingerprint string) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.addOrgCAMount")
 	defer span.End()
@@ -528,6 +538,17 @@ func addOrgCAMount(ctx context.Context, values map[string]any) {
 			"value": combinedCAPath,
 		})
 	}
+
+	// Stamp the bundle checksum on the pod template so a rotated trust_bundle
+	// rolls the repo-server (re-running the combine init container) whenever the
+	// values are actually applied. Merge into any existing podAnnotations rather
+	// than replacing them.
+	podAnnotations, ok := repoServer["podAnnotations"].(map[string]any)
+	if !ok {
+		podAnnotations = map[string]any{}
+		repoServer["podAnnotations"] = podAnnotations
+	}
+	podAnnotations[orgCAChecksumAnnotation] = caFingerprint
 }
 
 // sha256Fingerprint returns a hex SHA-256 of the bundle, for logging without

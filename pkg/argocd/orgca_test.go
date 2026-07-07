@@ -27,7 +27,7 @@ func entryByName(t *testing.T, list any, name string) map[string]any {
 
 func TestAddOrgCAMount(t *testing.T) {
 	values := map[string]any{}
-	addOrgCAMount(context.Background(), values)
+	addOrgCAMount(context.Background(), values, "test-fingerprint")
 
 	repoServer, ok := values["repoServer"].(map[string]any)
 	if !ok {
@@ -95,16 +95,26 @@ func TestAddOrgCAMount(t *testing.T) {
 			t.Errorf("env %s = %v, want %s", name, env[name], wantPath)
 		}
 	}
+
+	// Rotation: the org CA fingerprint is stamped on the pod template so an
+	// applied upgrade rolls the repo-server and re-runs the combine init container.
+	pa, ok := repoServer["podAnnotations"].(map[string]any)
+	if !ok || pa["nebari.dev/org-ca-checksum"] != "test-fingerprint" {
+		t.Errorf("podAnnotations = %v, want nebari.dev/org-ca-checksum=test-fingerprint", repoServer["podAnnotations"])
+	}
 }
 
 // addOrgCAMount must preserve existing repoServer keys and coexist with the
 // local-gitops mount (both append to repoServer.volumes).
 func TestAddOrgCAMountPreservesAndCoexists(t *testing.T) {
 	values := map[string]any{
-		"repoServer": map[string]any{"replicas": 2},
+		"repoServer": map[string]any{
+			"replicas":       2,
+			"podAnnotations": map[string]any{"existing/annotation": "keep"},
+		},
 	}
 	addLocalGitopsMount(context.Background(), values, "/tmp/gitops")
-	addOrgCAMount(context.Background(), values)
+	addOrgCAMount(context.Background(), values, "fp")
 
 	repoServer := values["repoServer"].(map[string]any)
 	if repoServer["replicas"] != 2 {
@@ -114,6 +124,12 @@ func TestAddOrgCAMountPreservesAndCoexists(t *testing.T) {
 		if entryByName(t, repoServer["volumes"], name) == nil {
 			t.Errorf("volume %q missing after both mounts applied", name)
 		}
+	}
+
+	// Existing podAnnotations are preserved and the checksum is merged in.
+	pa := repoServer["podAnnotations"].(map[string]any)
+	if pa["existing/annotation"] != "keep" || pa["nebari.dev/org-ca-checksum"] != "fp" {
+		t.Errorf("podAnnotations not merged: %v", pa)
 	}
 }
 
@@ -206,6 +222,10 @@ func TestConfigureRepoServerCATrust(t *testing.T) {
 		repoServer, ok := values["repoServer"].(map[string]any)
 		if !ok || entryByName(t, repoServer["volumes"], "org-ca") == nil {
 			t.Error("repoServer values were not wired with the org-ca mount")
+		}
+		// The full path also stamps a (non-empty) checksum annotation for rotation.
+		if pa, ok := repoServer["podAnnotations"].(map[string]any); !ok || pa["nebari.dev/org-ca-checksum"] == nil || pa["nebari.dev/org-ca-checksum"] == "" {
+			t.Errorf("pod checksum annotation not wired end-to-end: %v", repoServer["podAnnotations"])
 		}
 	})
 }
