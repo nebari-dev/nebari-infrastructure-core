@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localkind-up localkind-down docs config-docs
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot docs config-docs
 
 # Variables
 BINARY_NAME=nic
@@ -18,6 +18,7 @@ help: ## Display this help message
 
 config-docs: ## Generate configuration reference documentation
 	@mkdir -p docs/configuration
+	@rm -f docs/configuration/*.md
 	go run ./cmd/docgen -output docs/configuration
 
 build: ## Build the binary
@@ -27,6 +28,7 @@ build: ## Build the binary
 
 docs: ## Generate CLI reference documentation
 	@mkdir -p docs/reference/cli
+	@rm -f docs/reference/cli/*.md
 	go run $(CMD_DIR) __gendocs --output-dir docs/reference/cli
 
 build-all: ## Build binaries for all platforms
