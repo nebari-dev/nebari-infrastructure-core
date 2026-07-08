@@ -369,17 +369,17 @@ func TestGenerateOutputName(t *testing.T) {
 		},
 		{
 			name:       "aws provider",
-			sourcePath: "pkg/provider/aws/config.go",
+			sourcePath: "pkg/providers/cluster/aws/config.go",
 			want:       "aws.md",
 		},
 		{
 			name:       "gcp provider",
-			sourcePath: "pkg/provider/gcp/config.go",
+			sourcePath: "pkg/providers/cluster/gcp/config.go",
 			want:       "gcp.md",
 		},
 		{
 			name:       "cloudflare dns",
-			sourcePath: "pkg/dnsprovider/cloudflare/config.go",
+			sourcePath: "pkg/providers/dns/cloudflare/config.go",
 			want:       "cloudflare.md",
 		},
 		{
