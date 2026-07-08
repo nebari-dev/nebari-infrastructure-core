@@ -194,7 +194,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
-		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, argoCDConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, trustPEM, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
 				WithMetadata("error", err.Error()))
