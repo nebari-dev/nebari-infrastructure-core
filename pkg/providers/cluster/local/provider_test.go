@@ -1,6 +1,8 @@
 package local
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -38,28 +40,6 @@ func TestInfraSettings(t *testing.T) {
 			wantHTTPSPort:  0,
 		},
 		{
-			name: "storage_class override",
-			providerConfig: map[string]any{
-				"local": map[string]any{"storage_class": "local-path"},
-			},
-			wantSC:        "local-path",
-			wantMetalLB:   true,
-			wantPool:      "192.168.1.100-192.168.1.110",
-			wantHTTPSPort: 0,
-		},
-		{
-			name: "metallb disabled",
-			providerConfig: map[string]any{
-				"local": map[string]any{
-					"metallb": map[string]any{"enabled": false},
-				},
-			},
-			wantSC:        "standard",
-			wantMetalLB:   false,
-			wantPool:      "192.168.1.100-192.168.1.110",
-			wantHTTPSPort: 0,
-		},
-		{
 			name: "metallb address_pool override",
 			providerConfig: map[string]any{
 				"local": map[string]any{
@@ -84,19 +64,17 @@ func TestInfraSettings(t *testing.T) {
 			wantHTTPSPort: 8443,
 		},
 		{
-			name: "full override",
+			name: "https_port and address_pool override together",
 			providerConfig: map[string]any{
 				"local": map[string]any{
-					"storage_class": "local-path",
-					"https_port":    8443,
+					"https_port": 8443,
 					"metallb": map[string]any{
-						"enabled":      false,
 						"address_pool": "10.0.0.100-10.0.0.110",
 					},
 				},
 			},
-			wantSC:        "local-path",
-			wantMetalLB:   false,
+			wantSC:        "standard",
+			wantMetalLB:   true,
 			wantPool:      "10.0.0.100-10.0.0.110",
 			wantHTTPSPort: 8443,
 		},
@@ -143,5 +121,121 @@ func TestInfraSettings(t *testing.T) {
 				t.Error("SupportsLocalGitOps = false, want true")
 			}
 		})
+	}
+}
+
+func TestValidateKindMode(t *testing.T) {
+	p := NewProvider()
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		providerConfig map[string]any
+		wantErr        string
+	}{
+		{
+			name:           "no config block is valid (kind with defaults)",
+			providerConfig: nil,
+		},
+		{
+			name: "empty kind block is valid",
+			providerConfig: map[string]any{
+				"local": map[string]any{"kind": map[string]any{}},
+			},
+		},
+		{
+			name: "kind with node_image and mounts is valid",
+			providerConfig: map[string]any{
+				"local": map[string]any{
+					"kind": map[string]any{
+						"node_image": "kindest/node:v1.32.2",
+						"extra_mounts": []any{
+							map[string]any{
+								"host_path":      "/tmp/data",
+								"container_path": "/data",
+								"read_only":      true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "relative mount paths are rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{
+					"kind": map[string]any{
+						"extra_mounts": []any{
+							map[string]any{
+								"host_path":      "data",
+								"container_path": "/data",
+							},
+						},
+					},
+				},
+			},
+			wantErr: "must be absolute",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: tt.providerConfig}
+
+			err := p.Validate(ctx, "test-project", cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate returned error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Validate returned nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate error = %q, want it to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestInfraSettingsKindModeExplicitPool(t *testing.T) {
+	p := NewProvider()
+
+	// An explicit address_pool must win over network-derived pools.
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{
+			"local": map[string]any{
+				"kind": map[string]any{},
+				"metallb": map[string]any{
+					"address_pool": "10.0.0.100-10.0.0.110",
+				},
+			},
+		},
+	}
+
+	settings := p.InfraSettings(cfg)
+	if settings.MetalLBAddressPool != "10.0.0.100-10.0.0.110" {
+		t.Errorf("MetalLBAddressPool = %q, want explicit pool to win", settings.MetalLBAddressPool)
+	}
+}
+
+func TestSummaryKindMode(t *testing.T) {
+	p := NewProvider()
+
+	cfg := &config.ClusterConfig{
+		Providers: map[string]any{
+			"local": map[string]any{
+				"kind": map[string]any{"node_image": "kindest/node:v1.32.2"},
+			},
+		},
+	}
+
+	summary := p.Summary(cfg)
+	if summary["Kind Cluster"] == "" {
+		t.Error("Summary missing Kind Cluster entry for managed mode")
+	}
+	if summary["Kind Node Image"] != "kindest/node:v1.32.2" {
+		t.Errorf("Kind Node Image = %q, want kindest/node:v1.32.2", summary["Kind Node Image"])
 	}
 }

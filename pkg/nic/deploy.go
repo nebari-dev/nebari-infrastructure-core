@@ -122,8 +122,23 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Resolve the top-level trust bundle once, here at the orchestration layer.
+	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
+	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
+	// store. Resolving once avoids a second disk read and the TOCTOU window
+	// between two reads.
+	trustPEM, err := cfg.TrustBundle.ResolvePEM()
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+	var caBundle string
+	if trustPEM != "" {
+		caBundle = base64.StdEncoding.EncodeToString([]byte(trustPEM))
+	}
+
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -149,7 +164,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("resolve gitops configuration: %w", err)
 	}
 	if gitConfig != nil && !opts.DryRun {
-		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings); err != nil {
+		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings, trustPEM); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
 				WithMetadata("error", err.Error()))
@@ -265,9 +280,8 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // defaultGitConfig returns a default local git configuration for development workflows.
 // This is a pure function with no side effects — directory creation happens separately.
 func defaultGitConfig(projectName string) *git.Config {
-	localPath := filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	return &git.Config{
-		URL:    fmt.Sprintf("file://%s", localPath),
+		URL:    fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
 		Branch: git.DefaultBranch,
 		Path:   "",
 		Auth:   git.AuthConfig{},
@@ -388,7 +402,7 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 // This is the orchestrator function that handles all I/O operations.
 // gitConfig must be non-nil and represents the effective GitOps configuration
 // (either cfg.GitRepository or an auto-generated local config).
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings) error {
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
@@ -457,14 +471,14 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		status.Progress(ctx, "Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir()); err != nil {
+	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir(), trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	status.Progress(ctx, "Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings, trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
@@ -502,8 +516,8 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 // effective gitConfig substituted in) and writes the result into the git
 // working directory. Sourcing from the parsed config keeps this feature
 // available to library consumers who don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string) error {
-	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
+func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string, trustBundlePEM string) error {
+	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig, trustBundlePEM))
 	if err != nil {
 		return fmt.Errorf("marshal scrubbed config to YAML: %w", err)
 	}
@@ -528,7 +542,13 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 // struct means renaming a sensitive field on the source type fails to
 // compile here, instead of silently leaking once a deny-list of string
 // keys drifts out of sync.
-func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.NebariConfig {
+//
+// trustBundlePEM is the already-resolved trust bundle (empty when unset). A
+// path:-based trust_bundle references a file on the operator's machine, which
+// is meaningless (and leaks a local path) in the committed record, so any
+// configured bundle is rewritten to its resolved inline form; this also keeps
+// the committed config self-contained and reflecting the deployed value.
+func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundlePEM string) *config.NebariConfig {
 	out := *cfg
 	out.GitRepository = nil
 	if gitConfig != nil {
@@ -536,6 +556,10 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.Neb
 		gitRepo.Auth = git.AuthConfig{} // value type with no omitempty: zero the env-var names
 		gitRepo.ArgoCDAuth = nil        // *AuthConfig with omitempty: nil → omitted
 		out.GitRepository = &gitRepo
+	}
+	out.TrustBundle = nil
+	if cfg.TrustBundle != nil && trustBundlePEM != "" {
+		out.TrustBundle = &config.TrustBundleConfig{Inline: trustBundlePEM}
 	}
 	return &out
 }

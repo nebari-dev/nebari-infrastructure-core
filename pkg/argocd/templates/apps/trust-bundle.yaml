@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trust-bundle
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: foundational
+
+  source:
+    repoURL: {{ .GitRepoURL }}
+    targetRevision: {{ .GitBranch }}
+    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/security/trust-bundle
+
+  destination:
+    server: https://kubernetes.default.svc
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # allowEmpty: false guards against a rendering bug that produces an empty
+      # manifests/security/trust-bundle/ directory: ArgoCD refuses to prune
+      # everything and keep a stale Bundle CR, rather than silently deleting it
+      # and breaking trust distribution cluster-wide. (Unlike trust-manager.yaml,
+      # which tracks a Helm chart that is never empty, this source is git-backed.)
+      allowEmpty: false
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

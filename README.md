@@ -93,7 +93,7 @@ flowchart TD
 
   subgraph CP["Cloud Provider"]
     direction LR
-    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ hz["Hetzner K3s"] ~~~ k3s["Local K3s"]
+    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ hz["Hetzner k3s"] ~~~ knd["Local kind"]
   end
 
   SP --> NO --> FS --> K8 --> CP
@@ -135,7 +135,7 @@ Every NIC deployment includes a landing page where users discover and access all
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | **Opinionated Defaults**      | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices               |
 | **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing                       |
-| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), Hetzner (K3s), and local (K3s) from the same config format                |
+| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), Hetzner (k3s), and local (kind) from the same config format               |
 | **GitOps Native**             | ArgoCD manages all foundational software with dependency ordering and health checks                          |
 | **OpenTelemetry Native**      | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
 | **SSO Everywhere**            | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically                  |
@@ -269,7 +269,7 @@ NIC uses a YAML configuration file. See the `examples/` directory for sample con
 - `examples/gcp-config.yaml` - GCP/GKE configuration
 - `examples/azure-config.yaml` - Azure/AKS configuration
 - `examples/hetzner-config.yaml` - Hetzner Cloud/K3s configuration
-- `examples/local-config.yaml` - Local Kind/K3s configuration
+- `examples/local-config.yaml` - Local kind configuration
 
 ### Environment Variables
 
@@ -299,60 +299,23 @@ OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
 
 ### Local Cluster Testing with Kind
 
-For local development, you can deploy a Kind cluster with foundational services:
+For local development, you can deploy a kind cluster with foundational services via:
 
 ```bash
-make localkind-up    # Create Kind cluster and deploy
-make localkind-down  # Tear down
+./nic deploy  -f examples/local-config.yaml
 ```
 
-When using a remote repo, a repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the `GIT_SSH_PRIVATE_KEY` environment variable. 
+The cluster is named after `project_name` (kube context `kind-<project_name>`) and requires Docker.
 
-Ommitting the `git_repository` or explicitely setting a local git path will result in a local git directory being used for gitops. 
+**GitOps repository:**
 
-### Local Cluster Testing with an Existing Cluster (k3s/k3d/minikube)
+- Omit `git_repository` and NIC auto-creates and mounts a local repo at `/tmp/nebari-gitops-<project_name>` — zero configuration.
+- For a remote repo, set `git_repository.url` to an SSH/HTTPS URL and supply credentials via the `GIT_SSH_PRIVATE_KEY` environment variable (or a token).
+- For a custom local `file://` path, you must also declare a matching `cluster.local.kind.extra_mounts` entry so the kind node can read it — see `examples/local-config.yaml`.
 
-The `local` provider works against any cluster already present in your kubeconfig — it does not create the cluster. To use a tool other than Kind:
+### Using a pre-existing Cluster (k3d / k3s / minikube / cloud)
 
-1. **Create the cluster** with your tool of choice.
-2. **Point NIC at it** by setting `kube_context` in your `local-config.yaml` to the context name of that cluster (NIC reads the kubeconfig from `$KUBECONFIG`, falling back to `~/.kube/config`). `kube_context` is a context *name*, not a file path — list available names with `kubectl config get-contexts -o name`.
-3. **Make the local GitOps directory visible to the cluster.** When `git_repository` is omitted (or set to a `file://` path), NIC uses a local GitOps directory at `/tmp/nebari-gitops-<project_name>`, where `project_name` comes from your config. ArgoCD's repo-server mounts this path via a `hostPath` volume, so it must exist *inside* the cluster node, not just on your host. Cluster nodes run in containers/VMs that don't share your host filesystem, so the directory must be bind-mounted in when the cluster is created. The `make localkind-up` target does this for you by generating a kind config with `extraMounts`; for k3d and minikube you mount it manually as shown below.
-
-#### k3d
-
-k3d nodes run as Docker containers and don't see your host's `/tmp` by default. Create the directory first, then mount it into the nodes at the same path:
-
-```bash
-mkdir -p /tmp/nebari-gitops-my-nebari-local
-
-k3d cluster create \
-  --volume /tmp/nebari-gitops-my-nebari-local:/tmp/nebari-gitops-my-nebari-local@all
-
-k3d kubeconfig get --all > kubeconfig
-export KUBECONFIG=$(pwd)/kubeconfig
-
-./nic deploy --file local-config.yaml
-```
-
-Set `kube_context: "k3d-<cluster-name>"` in your config (k3d prefixes the context with `k3d-`). For k3s clusters, also set `storage_class: local-path` and disable MetalLB (k3s ships ServiceLB) as noted in `examples/local-config.yaml`.
-
-#### minikube
-
-minikube runs the node inside a VM/container. Mount the host directory before deploying:
-
-```bash
-mkdir -p /tmp/nebari-gitops-my-nebari-local
-
-minikube start
-minikube mount /tmp/nebari-gitops-my-nebari-local:/tmp/nebari-gitops-my-nebari-local &
-
-export KUBECONFIG=$HOME/.kube/config   # minikube updates this automatically
-./nic deploy --file local-config.yaml
-```
-
-`minikube mount` runs in the foreground and must stay running for the duration of the deploy (and while ArgoCD is reconciling), so launch it in a separate terminal or background it as shown. Set `kube_context: "minikube"` in your config.
-
-> If you'd rather avoid the host-path mount entirely, set an explicit remote `git_repository` (see OPTION 3 in `examples/local-config.yaml`); ArgoCD then clones the repo over HTTPS/SSH and no local directory needs to be mounted into the node.
+The `local` provider always creates its own kind cluster. To deploy onto a cluster you provisioned yourself (e.g., k3d, k3s, minikube, or a managed cloud cluster) use the `existing` provider instead. It connects to a context in your kubeconfig and installs the platform without provisioning any infrastructure. Note that it assumes the cluster already provides its own LoadBalancer. See `examples/existing-config.yaml`.
 
 ### Running Tests
 
@@ -403,7 +366,7 @@ pkg/
   │   │   ├── gcp/        GCP provider
   │   │   ├── azure/      Azure provider
   │   │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
-  │   │   └── local/      Local Kind/K3s provider
+  │   │   └── local/      Local kind provider
   │   └── dns/        DNS provider interface
   │       └── cloudflare/ Cloudflare DNS provider
   ├── telemetry/      OpenTelemetry setup
