@@ -109,7 +109,10 @@ cmd/nic/                # CLI entry point - thin cobra commands over pkg/nic
   ├── validate.go       # Validate command
   ├── kubeconfig.go     # Kubeconfig command
   ├── version.go        # Version command
+  ├── gendocs.go         # Hidden __gendocs command, generates docs/reference/cli/
   └── config_discovery.go # Resolve config file path
+
+cmd/docgen/              # Standalone tool: generates docs/configuration/ from provider config structs
 
 pkg/
   ├── nic/              # Orchestration + programmatic entrypoint; cmd/nic is a thin wrapper over this
@@ -414,7 +417,8 @@ References:
   - **ADR-0003** - Software pack codegen
   - **ADR-0004** - Out-of-tree provider plugin architecture (Proposed)
 - **`docs/design-doc/`** - Living design docs (architecture / implementation / operations / appendix)
-- **`docs/cli-reference.md`** - CLI command reference
+- **`docs/reference/cli/`** - Generated CLI command reference (from `cmd/nic`'s cobra tree; regenerate with `make docs`)
+- **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make config-docs`)
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
 
