@@ -160,9 +160,11 @@ func parseTag(tagValue string, doc *FieldDoc) {
 			doc.YAMLKey = parts[0]
 		}
 
-		// Check for omitempty to determine required status
+		// Check the tag options (everything after the key) for omitempty/inline.
+		// parts[0] is the key itself and must not be scanned here, or a field
+		// whose yaml key is literally "inline" gets misread as the inline option.
 		doc.Required = true
-		for _, opt := range parts {
+		for _, opt := range parts[1:] {
 			if opt == "omitempty" {
 				doc.Required = false
 			}
