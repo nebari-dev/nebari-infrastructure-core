@@ -53,6 +53,7 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(kubeconfigCmd)
+	rootCmd.AddCommand(gendocsCmd)
 }
 
 func main() {
