@@ -265,11 +265,11 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 
 	// Ensure working directory exists
 	if c.cfg.Path != "" {
-		if err := os.MkdirAll(c.workDir, LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps path must be readable by ArgoCD's non-root repo-server.
+		if err := os.MkdirAll(c.workDir, LocalGitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
 		}
-		if err := os.Chmod(c.workDir, LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps path must be readable by ArgoCD's non-root repo-server.
+		if err := os.Chmod(c.workDir, LocalGitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to set subdirectory permissions %s: %w", c.cfg.Path, err)
 		}
@@ -538,11 +538,11 @@ func (c *ClientImpl) WriteBootstrapMarker(ctx context.Context) error {
 
 	content := fmt.Sprintf("bootstrapped_at: %s\n", time.Now().UTC().Format(time.RFC3339))
 
-	if err := os.WriteFile(markerPath, []byte(content), LocalGitOpsFileMode); err != nil { //nolint:gosec // Bootstrap marker is non-secret and must be pod-readable.
+	if err := os.WriteFile(markerPath, []byte(content), LocalGitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
-	if err := os.Chmod(markerPath, LocalGitOpsFileMode); err != nil { //nolint:gosec // Bootstrap marker is non-secret and must be pod-readable.
+	if err := os.Chmod(markerPath, LocalGitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to set bootstrap marker permissions: %w", err)
 	}

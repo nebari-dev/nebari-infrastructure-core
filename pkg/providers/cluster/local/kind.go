@@ -74,11 +74,11 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
 	defaultGitOps := git.DefaultLocalPath(name)
-	if err := os.MkdirAll(defaultGitOps, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
+	if err := os.MkdirAll(defaultGitOps, git.LocalGitOpsDirMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("create local gitops directory %s: %w", defaultGitOps, err)
 	}
-	if err := os.Chmod(defaultGitOps, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
+	if err := os.Chmod(defaultGitOps, git.LocalGitOpsDirMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("set local gitops directory permissions %s: %w", defaultGitOps, err)
 	}
@@ -89,7 +89,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	})
 
 	for _, m := range kindCfg.ExtraMounts {
-		if err := os.MkdirAll(m.HostPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Missing kind hostPath directories must be pod-readable when mounted.
+		if err := os.MkdirAll(m.HostPath, git.LocalGitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("create extra_mount host path %s: %w", m.HostPath, err)
 		}

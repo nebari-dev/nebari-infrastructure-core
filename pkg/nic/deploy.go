@@ -283,10 +283,10 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
 		WithMetadata("path", localPath))
 
-	if err := os.MkdirAll(localPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
+	if err := os.MkdirAll(localPath, git.LocalGitOpsDirMode); err != nil {
 		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
 	}
-	if err := os.Chmod(localPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
+	if err := os.Chmod(localPath, git.LocalGitOpsDirMode); err != nil {
 		return nil, fmt.Errorf("failed to set auto-generated directory permissions %s: %w", localPath, err)
 	}
 
@@ -508,16 +508,16 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps config snapshot must be pod-readable.
+	if err := os.MkdirAll(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.Chmod(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps config snapshot must be pod-readable.
+	if err := os.Chmod(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil {
 		return fmt.Errorf("set config directory permissions: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Scrubbed config snapshot is non-secret and must be pod-readable.
+	if err := os.WriteFile(configDest, configBytes, git.LocalGitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
-	if err := os.Chmod(configDest, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Scrubbed config snapshot is non-secret and must be pod-readable.
+	if err := os.Chmod(configDest, git.LocalGitOpsFileMode); err != nil {
 		return fmt.Errorf("set config file permissions: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
@@ -534,16 +534,28 @@ func ensureLocalGitOpsPermissions(ctx context.Context, root string) error {
 	defer span.End()
 	span.SetAttributes(attribute.String("local_path", root))
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	rootDir, err := os.OpenRoot(root)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("open local gitops root %s: %w", root, err)
+	}
+	defer func() {
+		_ = rootDir.Close()
+	}()
+
+	err = fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
 		}
 
 		mode := git.LocalGitOpsFileMode
 		if d.IsDir() {
 			mode = git.LocalGitOpsDirMode
 		}
-		if err := os.Chmod(path, mode); err != nil {
+		if err := rootDir.Chmod(path, mode); err != nil {
 			return fmt.Errorf("set permissions on %s: %w", path, err)
 		}
 		return nil

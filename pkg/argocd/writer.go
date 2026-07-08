@@ -315,10 +315,10 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
-			if err := os.MkdirAll(destPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Generated GitOps manifests must be pod-readable.
+			if err := os.MkdirAll(destPath, git.LocalGitOpsDirMode); err != nil {
 				return err
 			}
-			return os.Chmod(destPath, git.LocalGitOpsDirMode) //nolint:gosec // Generated GitOps manifests must be pod-readable.
+			return os.Chmod(destPath, git.LocalGitOpsDirMode)
 		}
 
 		// Read template content
@@ -334,18 +334,18 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Generated GitOps manifests must be pod-readable.
+		if err := os.MkdirAll(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
-		if err := os.Chmod(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Generated GitOps manifests must be pod-readable.
+		if err := os.Chmod(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to set directory permissions for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Generated GitOps manifests are non-secret and must be pod-readable.
+		if err := os.WriteFile(destPath, processed, git.LocalGitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
-		if err := os.Chmod(destPath, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Generated GitOps manifests are non-secret and must be pod-readable.
+		if err := os.Chmod(destPath, git.LocalGitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to set file permissions for %s: %w", destPath, err)
 		}
 
