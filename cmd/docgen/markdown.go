@@ -74,9 +74,10 @@ func (g *MarkdownGenerator) writeFieldRow(field FieldDoc, required string) {
 	desc := strings.ReplaceAll(field.Doc, "|", "\\|")
 	// Replace newlines with spaces
 	desc = strings.ReplaceAll(desc, "\n", " ")
-	// Truncate long descriptions
-	if len(desc) > 200 {
-		desc = desc[:197] + "..."
+	// Truncate long descriptions, slicing by rune so a multibyte character
+	// isn't split and emitted as invalid UTF-8.
+	if runes := []rune(desc); len(runes) > 200 {
+		desc = string(runes[:197]) + "..."
 	}
 
 	yamlKey := field.YAMLKey
