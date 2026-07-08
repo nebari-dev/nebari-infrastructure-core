@@ -19,7 +19,7 @@ type Config struct {
 	ExistingVPCID             string                           `yaml:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs  []string                         `yaml:"existing_private_subnet_ids,omitempty"`
 	ExistingSecurityGroupID   string                           `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion         string                           `yaml:"kubernetes_version"`
+	KubernetesVersion         string                           `yaml:"kubernetes_version,omitempty"`
 	EndpointPrivateAccess     bool                             `yaml:"endpoint_private_access,omitempty"`
 	EndpointPublicAccess      bool                             `yaml:"endpoint_public_access,omitempty"`
 	EKSKMSArn                 string                           `yaml:"eks_kms_arn,omitempty"`
