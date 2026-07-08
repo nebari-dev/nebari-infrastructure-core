@@ -16,7 +16,9 @@ import (
 
 // mockEKSClient implements EKSClient for testing.
 type mockEKSClient struct {
-	DescribeClusterFunc func(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	DescribeClusterFunc                func(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	ListPodIdentityAssociationsFunc    func(ctx context.Context, params *eks.ListPodIdentityAssociationsInput, optFns ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error)
+	DescribePodIdentityAssociationFunc func(ctx context.Context, params *eks.DescribePodIdentityAssociationInput, optFns ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error)
 }
 
 func (m *mockEKSClient) DescribeCluster(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
@@ -24,6 +26,77 @@ func (m *mockEKSClient) DescribeCluster(ctx context.Context, params *eks.Describ
 		return m.DescribeClusterFunc(ctx, params, optFns...)
 	}
 	return &eks.DescribeClusterOutput{}, nil
+}
+
+func (m *mockEKSClient) ListPodIdentityAssociations(ctx context.Context, params *eks.ListPodIdentityAssociationsInput, optFns ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+	if m.ListPodIdentityAssociationsFunc != nil {
+		return m.ListPodIdentityAssociationsFunc(ctx, params, optFns...)
+	}
+	return &eks.ListPodIdentityAssociationsOutput{}, nil
+}
+
+func (m *mockEKSClient) DescribePodIdentityAssociation(ctx context.Context, params *eks.DescribePodIdentityAssociationInput, optFns ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error) {
+	if m.DescribePodIdentityAssociationFunc != nil {
+		return m.DescribePodIdentityAssociationFunc(ctx, params, optFns...)
+	}
+	return &eks.DescribePodIdentityAssociationOutput{}, nil
+}
+
+func TestFetchBackupPodIdentityRoleARN(t *testing.T) {
+	t.Run("returns role arn from the association", func(t *testing.T) {
+		mock := &mockEKSClient{
+			ListPodIdentityAssociationsFunc: func(_ context.Context, params *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+				if *params.Namespace != "longhorn-system" || *params.ServiceAccount != "longhorn-service-account" {
+					t.Fatalf("unexpected filter: ns=%q sa=%q", *params.Namespace, *params.ServiceAccount)
+				}
+				return &eks.ListPodIdentityAssociationsOutput{
+					Associations: []ekstypes.PodIdentityAssociationSummary{{AssociationId: aws.String("a-123")}},
+				}, nil
+			},
+			DescribePodIdentityAssociationFunc: func(_ context.Context, params *eks.DescribePodIdentityAssociationInput, _ ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error) {
+				if *params.AssociationId != "a-123" {
+					t.Fatalf("unexpected association id %q", *params.AssociationId)
+				}
+				return &eks.DescribePodIdentityAssociationOutput{
+					Association: &ekstypes.PodIdentityAssociation{RoleArn: aws.String("arn:aws:iam::111:role/proj-longhorn-backup")},
+				}, nil
+			},
+		}
+		arn, err := fetchBackupPodIdentityRoleARN(context.Background(), mock, "proj")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if arn != "arn:aws:iam::111:role/proj-longhorn-backup" {
+			t.Fatalf("got %q", arn)
+		}
+	})
+
+	t.Run("no association returns empty, no describe call", func(t *testing.T) {
+		mock := &mockEKSClient{
+			ListPodIdentityAssociationsFunc: func(_ context.Context, _ *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+				return &eks.ListPodIdentityAssociationsOutput{}, nil
+			},
+			DescribePodIdentityAssociationFunc: func(_ context.Context, _ *eks.DescribePodIdentityAssociationInput, _ ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error) {
+				t.Fatal("describe must not be called when no association exists")
+				return nil, nil
+			},
+		}
+		arn, err := fetchBackupPodIdentityRoleARN(context.Background(), mock, "proj")
+		if err != nil || arn != "" {
+			t.Fatalf("want empty/no-error, got %q err=%v", arn, err)
+		}
+	})
+
+	t.Run("list error propagates", func(t *testing.T) {
+		mock := &mockEKSClient{
+			ListPodIdentityAssociationsFunc: func(_ context.Context, _ *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+				return nil, errors.New("boom")
+			},
+		}
+		if _, err := fetchBackupPodIdentityRoleARN(context.Background(), mock, "proj"); err == nil {
+			t.Fatal("expected error")
+		}
+	})
 }
 
 // validCAData is a base64-encoded blob accepted by buildKubeconfig.

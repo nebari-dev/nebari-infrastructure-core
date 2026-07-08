@@ -721,6 +721,32 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	return kubeconfigBytes, nil
 }
 
+// BackupPodIdentityRoleARN returns the IAM role ARN of the EKS Pod Identity
+// association bound to Longhorn's service account for keyless S3 backups, or ""
+// when the cluster has none. NIC writes this into the Longhorn credential Secret
+// as AWS_IAM_ROLE_ARN so Longhorn accepts the secret without static keys (the
+// Pod Identity association supplies the actual credentials). Reads live cluster
+// state via the EKS API, mirroring GetKubeconfig, so it works after Deploy
+// without re-running Terraform. Satisfies the nic.backupRoleARNResolver
+// optional capability.
+func (p *Provider) BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.BackupPodIdentityRoleARN")
+	defer span.End()
+
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return "", err
+	}
+	eksClient, err := newEKSClient(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to create EKS client: %w", err)
+	}
+	return fetchBackupPodIdentityRoleARN(ctx, eksClient, projectName)
+}
+
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := make(map[string]string)

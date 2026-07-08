@@ -239,7 +239,8 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
-				Backups: cfg.Backups.LonghornConfig(),
+				Backups:       cfg.Backups.LonghornConfig(),
+				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
@@ -540,17 +541,63 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config) *config.Neb
 	return &out
 }
 
+// backupRoleARNResolver is an optional capability: providers that provision a
+// keyless Longhorn backup role (EKS Pod Identity) implement it to report that
+// role's ARN, which NIC writes into the credential Secret as AWS_IAM_ROLE_ARN.
+// Only the AWS provider implements it; the type assertion in Deploy yields ok
+// == false for others, and no role ARN is set.
+type backupRoleARNResolver interface {
+	BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error)
+}
+
+// resolveBackupRoleARN returns the Pod Identity role ARN for a keyless S3 backup
+// target, or "" when backups are disabled, not keyless, or the provider doesn't
+// support it. A resolution error is surfaced as a warning and returns "" — the
+// credential Secret is then built without AWS_IAM_ROLE_ARN, which Longhorn
+// rejects, so the user sees a clear backup-target error rather than a silent
+// half-configured state.
+func resolveBackupRoleARN(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) string {
+	lh := cfg.Backups.LonghornConfig()
+	if lh == nil || !lh.S3.PodIdentityAuth(cfg.Cluster.ProviderName()) {
+		return ""
+	}
+	resolver, ok := clusterProvider.(backupRoleARNResolver)
+	if !ok {
+		return ""
+	}
+	arn, err := resolver.BackupPodIdentityRoleARN(ctx, cfg.ProjectName, cfg.Cluster)
+	if err != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not resolve Longhorn backup IAM role; keyless backups will not authenticate").
+			WithMetadata("error", err.Error()))
+		return ""
+	}
+	if arn == "" {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Longhorn backup Pod Identity role not found; keyless backups will not authenticate"))
+	}
+	return arn
+}
+
 // backupBucketSpec derives the provider bucket-provisioning request from config.
-// Returns nil unless a cloud-native bucket/container should be created
-// (create_bucket/create_container set and no external endpoint).
+// Returns nil unless the module has work to do: creating a cloud-native
+// bucket/container (create_bucket/create_container set and no external endpoint)
+// or provisioning a keyless Pod Identity association for an AWS S3 target.
 func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
 	if !cfg.Backups.LonghornEnabled() {
 		return nil
 	}
+	provider := cfg.Cluster.ProviderName()
 	lh := cfg.Backups.LonghornConfig()
-	if s3 := lh.S3; s3 != nil && s3.CreateBucket && s3.Endpoint == "" {
+	if s3 := lh.S3; s3 != nil {
+		create := s3.CreateBucket && s3.Endpoint == ""
+		podIdentity := s3.PodIdentityAuth(provider)
+		if !create && !podIdentity {
+			// External/pre-existing bucket with static keys: nothing for the module.
+			return nil
+		}
 		return &cluster.BackupBucketSpec{
 			Name:         s3.Bucket,
+			Create:       create,
+			PodIdentity:  podIdentity,
 			ForceDestroy: !s3.RetainOnDestroyEnabled(),
 		}
 	}
@@ -558,6 +605,7 @@ func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
 		return &cluster.BackupBucketSpec{
 			Name:           az.Container,
 			StorageAccount: az.StorageAccount,
+			Create:         true,
 			ForceDestroy:   !az.RetainOnDestroyEnabled(),
 		}
 	}

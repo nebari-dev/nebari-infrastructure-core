@@ -61,6 +61,9 @@ type TFVars struct {
 	BackupBucketCreate                 bool   `json:"backup_bucket_create"`
 	BackupBucketName                   string `json:"backup_bucket_name,omitempty"`
 	BackupBucketForceDestroy           bool   `json:"backup_bucket_force_destroy"`
+	// BackupPodIdentityEnable provisions a keyless IAM-role (EKS Pod Identity)
+	// association for Longhorn's service account, scoped to the backup bucket.
+	BackupPodIdentityEnable bool `json:"backup_pod_identity_enable"`
 }
 
 // resolveNodeGroupDefaults derives per-node-group defaults from the parsed
@@ -246,9 +249,10 @@ func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) 
 	}
 
 	if backup != nil {
-		vars.BackupBucketCreate = true
+		vars.BackupBucketCreate = backup.Create
 		vars.BackupBucketName = backup.Name
 		vars.BackupBucketForceDestroy = backup.ForceDestroy
+		vars.BackupPodIdentityEnable = backup.PodIdentity
 	}
 
 	return vars, nil

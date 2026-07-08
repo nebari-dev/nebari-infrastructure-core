@@ -524,7 +524,7 @@ func TestToTFVarsBackupBucket(t *testing.T) {
 		}
 	})
 	t.Run("spec enables bucket", func(t *testing.T) {
-		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", ForceDestroy: true})
+		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", Create: true, ForceDestroy: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -533,11 +533,20 @@ func TestToTFVarsBackupBucket(t *testing.T) {
 		}
 	})
 	t.Run("spec retain (force destroy false)", func(t *testing.T) {
-		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", ForceDestroy: false})
+		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", Create: true, ForceDestroy: false})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !v.BackupBucketCreate || v.BackupBucketName != "b" || v.BackupBucketForceDestroy {
+			t.Fatalf("bad tfvars: %+v", v)
+		}
+	})
+	t.Run("pod identity only, no bucket create", func(t *testing.T) {
+		v, err := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "b", Create: false, PodIdentity: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.BackupBucketCreate || !v.BackupPodIdentityEnable || v.BackupBucketName != "b" {
 			t.Fatalf("bad tfvars: %+v", v)
 		}
 	})

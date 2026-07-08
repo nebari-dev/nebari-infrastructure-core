@@ -19,12 +19,17 @@ func TestBackupStateAddrs(t *testing.T) {
 		},
 		{
 			name: "force destroy returns no addresses (delete on destroy)",
-			spec: &cluster.BackupBucketSpec{ForceDestroy: true},
+			spec: &cluster.BackupBucketSpec{Create: true, ForceDestroy: true},
+			want: nil,
+		},
+		{
+			name: "create false returns no addresses (external container)",
+			spec: &cluster.BackupBucketSpec{Create: false, ForceDestroy: false},
 			want: nil,
 		},
 		{
 			name: "retain returns container before account",
-			spec: &cluster.BackupBucketSpec{ForceDestroy: false},
+			spec: &cluster.BackupBucketSpec{Create: true, ForceDestroy: false},
 			want: []string{
 				"module.aks_cluster.azurerm_storage_container.longhorn_backup[0]",
 				"module.aks_cluster.azurerm_storage_account.longhorn_backup[0]",

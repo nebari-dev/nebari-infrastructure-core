@@ -19,12 +19,17 @@ func TestBackupStateAddrs(t *testing.T) {
 		},
 		{
 			name: "force destroy returns no addresses (delete on destroy)",
-			spec: &cluster.BackupBucketSpec{ForceDestroy: true},
+			spec: &cluster.BackupBucketSpec{Create: true, ForceDestroy: true},
+			want: nil,
+		},
+		{
+			name: "create false returns no addresses (pod-identity only / external bucket)",
+			spec: &cluster.BackupBucketSpec{Create: false, ForceDestroy: false, PodIdentity: true},
 			want: nil,
 		},
 		{
 			name: "retain returns all dependent addresses, dependents first",
-			spec: &cluster.BackupBucketSpec{ForceDestroy: false},
+			spec: &cluster.BackupBucketSpec{Create: true, ForceDestroy: false},
 			want: []string{
 				"module.eks_cluster.aws_s3_bucket_public_access_block.longhorn_backup[0]",
 				"module.eks_cluster.aws_s3_bucket_server_side_encryption_configuration.longhorn_backup[0]",

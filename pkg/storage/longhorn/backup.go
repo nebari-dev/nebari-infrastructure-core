@@ -23,6 +23,13 @@ type Credentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
 	CACert          string // PEM; optional
+	// IAMRoleARN is set for keyless S3 auth (EKS Pod Identity). Longhorn's
+	// credential gate requires AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY *or* a
+	// non-empty AWS_IAM_ROLE_ARN in the secret; this supplies the latter. The
+	// value is not passed to the S3 client (Pod Identity provides the actual
+	// credentials) — it only unlocks keyless mode and annotates the
+	// instance-manager pods.
+	IAMRoleARN string
 
 	// Azure azblob
 	AccountName string
@@ -36,8 +43,21 @@ func CredentialSecretData(cfg *config.LonghornBackupConfig, creds Credentials) m
 	data := map[string]string{}
 	switch {
 	case cfg.S3 != nil:
-		data["AWS_ACCESS_KEY_ID"] = creds.AccessKeyID
-		data["AWS_SECRET_ACCESS_KEY"] = creds.SecretAccessKey
+		// Keyless (IAM-role / Pod Identity) auth leaves both empty; omit the keys
+		// so Longhorn's AWS SDK falls back to the ambient credential chain (the
+		// EKS Pod Identity association) instead of trying to use blank creds.
+		if creds.AccessKeyID != "" || creds.SecretAccessKey != "" {
+			data["AWS_ACCESS_KEY_ID"] = creds.AccessKeyID
+			data["AWS_SECRET_ACCESS_KEY"] = creds.SecretAccessKey
+		}
+		// Keyless auth: AWS_IAM_ROLE_ARN is required for Longhorn to accept a
+		// secret with no access keys (its credential gate rejects a secret that
+		// has neither the keys nor a role ARN). Longhorn does not pass this to the
+		// S3 client — the EKS Pod Identity association supplies the real creds —
+		// so it only unlocks keyless mode.
+		if creds.IAMRoleARN != "" {
+			data["AWS_IAM_ROLE_ARN"] = creds.IAMRoleARN
+		}
 		if cfg.S3.Endpoint != "" {
 			data["AWS_ENDPOINTS"] = cfg.S3.Endpoint
 		}
@@ -75,16 +95,23 @@ func ResolveCredentials(ctx context.Context, client kubernetes.Interface, cfg *c
 	var creds Credentials
 	switch {
 	case cfg.S3 != nil:
-		ak, err := getenvRequired(cfg.S3.AccessKeyIDEnv)
-		if err != nil {
-			return creds, fmt.Errorf("s3 access key: %w", err)
+		// Keyless (IAM-role / Pod Identity) auth: both env vars unset. Skip the
+		// env lookup entirely and leave the credentials empty — the credential
+		// Secret then carries no AWS keys and Longhorn uses the cluster role.
+		// Config validation guarantees this only happens for a native AWS S3
+		// target; a lone env var is rejected there, not silently ignored here.
+		if cfg.S3.AccessKeyIDEnv != "" || cfg.S3.SecretAccessKeyEnv != "" {
+			ak, err := getenvRequired(cfg.S3.AccessKeyIDEnv)
+			if err != nil {
+				return creds, fmt.Errorf("s3 access key: %w", err)
+			}
+			sk, err := getenvRequired(cfg.S3.SecretAccessKeyEnv)
+			if err != nil {
+				return creds, fmt.Errorf("s3 secret key: %w", err)
+			}
+			creds.AccessKeyID = ak
+			creds.SecretAccessKey = sk
 		}
-		sk, err := getenvRequired(cfg.S3.SecretAccessKeyEnv)
-		if err != nil {
-			return creds, fmt.Errorf("s3 secret key: %w", err)
-		}
-		creds.AccessKeyID = ak
-		creds.SecretAccessKey = sk
 		if cfg.S3.CACert != nil {
 			pem, err := fetchCACert(ctx, client, cfg.S3.CACert)
 			if err != nil {
@@ -142,11 +169,16 @@ func fetchCACert(ctx context.Context, client kubernetes.Interface, ref *config.C
 
 // BuildCredentialSecret resolves credentials and returns the corev1.Secret to
 // apply into the Longhorn namespace. The caller applies it (create-or-update).
-func BuildCredentialSecret(ctx context.Context, client kubernetes.Interface, cfg *config.LonghornBackupConfig) (*corev1.Secret, error) {
+//
+// iamRoleARN, when non-empty, is the EKS Pod Identity role ARN for a keyless S3
+// target; it is written as AWS_IAM_ROLE_ARN so Longhorn accepts the credential
+// secret without static access keys. Pass "" for static-key or Azure targets.
+func BuildCredentialSecret(ctx context.Context, client kubernetes.Interface, cfg *config.LonghornBackupConfig, iamRoleARN string) (*corev1.Secret, error) {
 	creds, err := ResolveCredentials(ctx, client, cfg)
 	if err != nil {
 		return nil, err
 	}
+	creds.IAMRoleARN = iamRoleARN
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      BackupCredentialSecretName,

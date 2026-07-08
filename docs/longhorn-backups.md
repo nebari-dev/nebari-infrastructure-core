@@ -53,11 +53,37 @@ backups:
         concurrency: 3
 ```
 
-### Required environment variables
+### Authentication
 
-NIC reads the env var names from `s3.access_key_id_env` /
-`s3.secret_access_key_env` (or `azure.account_name_env` / `azure.account_key_env`
-for Azure). The defaults shown above map to:
+There are two ways to authenticate Longhorn to S3.
+
+**Keyless (recommended on AWS).** On a native AWS S3 target — the `aws` provider
+with no custom `endpoint` — **omit** both `s3.access_key_id_env` and
+`s3.secret_access_key_env`. NIC then provisions an [EKS Pod
+Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html)
+association for Longhorn's service account (`longhorn-service-account` in
+`longhorn-system`), scoped to the backup bucket. It writes **no** static keys
+into the credential Secret — only `AWS_IAM_ROLE_ARN` (the association's role
+ARN, resolved from the EKS API at deploy time). That field is what unlocks
+Longhorn's keyless mode: its credential gate rejects a secret with neither the
+access keys nor a role ARN. Longhorn does **not** pass the ARN to the S3 client;
+the Pod Identity association supplies the actual credentials via the ambient AWS
+SDK chain — the same role-based pattern NIC already uses for the AWS Load
+Balancer Controller and the EBS/EFS CSI drivers. Nothing to export before
+`nic deploy`; nothing to rotate.
+
+> Longhorn's docs bless IRSA/kube2iam for role-based S3 but do not name EKS Pod
+> Identity; mechanically it uses the same ambient SDK chain, and it is verified
+> working (BackupTarget reaches `available`, backups land in S3). If a future
+> Longhorn release regresses this, the fallback is IRSA (annotate the same
+> service account) with the identical IAM role and policy.
+
+**Static keys.** Set both `s3.access_key_id_env` and `s3.secret_access_key_env`
+(or `azure.account_name_env` / `azure.account_key_env` for Azure) to the names of
+environment variables holding the credentials. This is **required** for any
+non-AWS provider or S3-compatible `endpoint` (MinIO, Wasabi, R2, Hetzner), where
+Pod Identity cannot reach the store. Setting only one of the pair is rejected by
+`nic validate`. The defaults shown above map to:
 
 | Variable | Purpose |
 |----------|---------|

@@ -118,6 +118,23 @@ func (c *LonghornBackupConfig) AllowDetached() bool {
 	return *c.AllowRecurringJobWhileVolumeDetached
 }
 
+// PodIdentityAuth reports whether this S3 target uses keyless IAM-role
+// authentication (EKS Pod Identity) rather than static access keys. That path
+// applies only to a native AWS S3 target — the aws provider with no custom
+// endpoint — when neither credential env var is set. In that case NIC omits the
+// AWS keys from the Longhorn credential Secret and provisions a Pod Identity
+// association for Longhorn's service account so its AWS SDK resolves creds from
+// the cluster role.
+func (t *S3BackupTarget) PodIdentityAuth(providerName string) bool {
+	if t == nil {
+		return false
+	}
+	return providerName == "aws" &&
+		t.Endpoint == "" &&
+		t.AccessKeyIDEnv == "" &&
+		t.SecretAccessKeyEnv == ""
+}
+
 // RetainOnDestroyEnabled defaults to true for an S3 target.
 func (t *S3BackupTarget) RetainOnDestroyEnabled() bool {
 	if t == nil || t.RetainOnDestroy == nil {
@@ -212,11 +229,19 @@ func (t *S3BackupTarget) validate(providerName string) error {
 	if t.Region == "" {
 		return fmt.Errorf("backups.longhorn.s3.region is required")
 	}
-	if t.AccessKeyIDEnv == "" {
-		return fmt.Errorf("backups.longhorn.s3.access_key_id_env is required")
-	}
-	if t.SecretAccessKeyEnv == "" {
-		return fmt.Errorf("backups.longhorn.s3.secret_access_key_env is required")
+	// Credentials are optional only for a real AWS S3 target (aws provider, no
+	// custom endpoint): omitting both env vars selects keyless auth, where
+	// Longhorn assumes an IAM role via the EKS Pod Identity association NIC
+	// provisions for its service account (see PodIdentityAuth). For any other
+	// target — a non-aws provider, or an S3-compatible endpoint (e.g. Hetzner) —
+	// Pod Identity cannot reach the store, so static keys stay required.
+	switch {
+	case t.AccessKeyIDEnv == "" && t.SecretAccessKeyEnv == "":
+		if !t.PodIdentityAuth(providerName) {
+			return fmt.Errorf("backups.longhorn.s3.access_key_id_env and secret_access_key_env are required (keyless IAM-role auth is only available for a native AWS S3 target: the aws provider with no custom endpoint)")
+		}
+	case t.AccessKeyIDEnv == "" || t.SecretAccessKeyEnv == "":
+		return fmt.Errorf("backups.longhorn.s3: set both access_key_id_env and secret_access_key_env, or neither (neither selects keyless IAM-role auth on AWS)")
 	}
 	if t.CreateBucket {
 		if t.Endpoint != "" {

@@ -152,3 +152,8 @@ variable "backup_bucket_force_destroy" {
   type    = bool
   default = false
 }
+
+variable "backup_pod_identity_enable" {
+  type    = bool
+  default = false
+}

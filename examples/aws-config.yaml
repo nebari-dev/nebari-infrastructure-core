@@ -159,8 +159,11 @@ cluster:
       Project: nebari
 
 # Optional: off-cluster Longhorn backups — hourly in-cluster snapshots plus a
-# daily backup pushed to S3. Requires Longhorn (enabled above). Credentials come
-# from environment variables, never this file. Full reference:
+# daily backup pushed to S3. Requires Longhorn (enabled above). On AWS the
+# recommended setup is keyless: OMIT the two *_env fields below and NIC grants
+# Longhorn scoped S3 access via an EKS Pod Identity association (no static keys
+# to manage). Set the env-var fields only for static-key auth. Either way,
+# credentials never live in this file. Full reference:
 # examples/longhorn-backups-config.yaml and docs/longhorn-backups.md.
 #
 # Schedules are set here — there are NO defaults: when backups are enabled, BOTH
@@ -178,8 +181,10 @@ cluster:
 #       bucket: my-nebari-backups
 #       region: us-west-2
 #       create_bucket: true            # provision the bucket in the AWS Terraform module
-#       access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
-#       secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
+#       # Keyless (recommended): leave the two lines below commented out to use
+#       # EKS Pod Identity. Uncomment them only for static-key auth.
+#       # access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
+#       # secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
 #     # Auto-attach idle/detached volumes long enough to capture them (default true).
 #     # JupyterHub user PVCs detach when servers idle out; without this they'd be
 #     # silently skipped at the cron tick.

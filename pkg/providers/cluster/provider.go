@@ -15,8 +15,17 @@ type BackupBucketSpec struct {
 	Name string
 	// StorageAccount is the Azure storage account name (Azure only; empty for AWS).
 	StorageAccount string
+	// Create asks the module to provision the bucket/container. When false the
+	// spec still carries the bucket Name for other wiring (e.g. scoping the Pod
+	// Identity IAM policy to a pre-existing bucket), but no bucket is created.
+	Create bool
+	// PodIdentity asks the module to provision a keyless IAM-role association
+	// (EKS Pod Identity) for Longhorn's service account, scoped to Name. AWS-only;
+	// set when the S3 target uses keyless auth (no static credentials).
+	PodIdentity bool
 	// ForceDestroy allows `tofu destroy` to remove a non-empty bucket. Derived
 	// from the inverse of the target's retain_on_destroy (default false => retain).
+	// Only meaningful when Create is true.
 	ForceDestroy bool
 }
 

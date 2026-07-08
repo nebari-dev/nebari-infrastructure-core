@@ -12,6 +12,13 @@ const (
 	// Namespace is the Kubernetes namespace Longhorn is installed into.
 	Namespace = "longhorn-system"
 
+	// ServiceAccountName is the service account the Longhorn Helm chart creates
+	// and that longhorn-manager / instance-manager pods run under. Keyless S3
+	// backups bind an EKS Pod Identity association to this SA so Longhorn's AWS
+	// SDK resolves credentials from the cluster role. Must match the account name
+	// the association targets in the terraform-aws-eks-cluster module.
+	ServiceAccountName = "longhorn-service-account"
+
 	// ReleaseName is the Helm release name used for Longhorn.
 	ReleaseName = "longhorn"
 

@@ -10,6 +10,14 @@ func TestBackupBucketSpec(t *testing.T) {
 	mk := func(lh *config.LonghornBackupConfig) *config.NebariConfig {
 		return &config.NebariConfig{Backups: &config.BackupsConfig{Longhorn: lh}}
 	}
+	// mkAWS attaches an aws cluster provider so PodIdentityAuth (which requires
+	// provider=="aws") can trigger the keyless path.
+	mkAWS := func(lh *config.LonghornBackupConfig) *config.NebariConfig {
+		return &config.NebariConfig{
+			Cluster: &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{}}},
+			Backups: &config.BackupsConfig{Longhorn: lh},
+		}
+	}
 	enabled := true
 
 	t.Run("nil when no backups", func(t *testing.T) {
@@ -42,6 +50,32 @@ func TestBackupBucketSpec(t *testing.T) {
 		got := backupBucketSpec(cfg)
 		if got == nil || !got.ForceDestroy {
 			t.Fatalf("want ForceDestroy true, got %+v", got)
+		}
+	})
+	t.Run("aws keyless (no keys) => pod identity, no bucket create", func(t *testing.T) {
+		cfg := mkAWS(&config.LonghornBackupConfig{Enabled: &enabled, S3: &config.S3BackupTarget{Bucket: "b", Region: "r"}})
+		got := backupBucketSpec(cfg)
+		if got == nil || got.Name != "b" || got.Create || !got.PodIdentity {
+			t.Fatalf("want {Name:b Create:false PodIdentity:true}, got %+v", got)
+		}
+	})
+	t.Run("aws keyless + create_bucket => pod identity and create", func(t *testing.T) {
+		cfg := mkAWS(&config.LonghornBackupConfig{Enabled: &enabled, S3: &config.S3BackupTarget{Bucket: "b", Region: "r", CreateBucket: true}})
+		got := backupBucketSpec(cfg)
+		if got == nil || !got.Create || !got.PodIdentity {
+			t.Fatalf("want {Create:true PodIdentity:true}, got %+v", got)
+		}
+	})
+	t.Run("aws with static keys, no create => nil", func(t *testing.T) {
+		cfg := mkAWS(&config.LonghornBackupConfig{Enabled: &enabled, S3: &config.S3BackupTarget{Bucket: "b", Region: "r", AccessKeyIDEnv: "K", SecretAccessKeyEnv: "S"}})
+		if got := backupBucketSpec(cfg); got != nil {
+			t.Fatalf("want nil (external bucket, static keys), got %+v", got)
+		}
+	})
+	t.Run("aws keyless with endpoint => nil (not real AWS S3)", func(t *testing.T) {
+		cfg := mkAWS(&config.LonghornBackupConfig{Enabled: &enabled, S3: &config.S3BackupTarget{Bucket: "b", Region: "r", Endpoint: "https://minio"}})
+		if got := backupBucketSpec(cfg); got != nil {
+			t.Fatalf("want nil (custom endpoint disables pod identity), got %+v", got)
 		}
 	})
 	t.Run("azure create_container", func(t *testing.T) {

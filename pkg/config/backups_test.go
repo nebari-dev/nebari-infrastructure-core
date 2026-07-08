@@ -176,6 +176,19 @@ func TestLonghornBackupValidate(t *testing.T) {
 		{name: "missing access_key_id_env", provider: "aws", mutate: func(c *LonghornBackupConfig) {
 			c.S3.AccessKeyIDEnv = ""
 		}, wantErr: "access_key_id_env"},
+		{name: "keyless s3 on aws ok", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3.AccessKeyIDEnv = ""
+			c.S3.SecretAccessKeyEnv = ""
+		}},
+		{name: "keyless requires aws provider", provider: "gcp", mutate: func(c *LonghornBackupConfig) {
+			c.S3.AccessKeyIDEnv = ""
+			c.S3.SecretAccessKeyEnv = ""
+		}, wantErr: "keyless"},
+		{name: "keyless not allowed with endpoint", provider: "aws", mutate: func(c *LonghornBackupConfig) {
+			c.S3.AccessKeyIDEnv = ""
+			c.S3.SecretAccessKeyEnv = ""
+			c.S3.Endpoint = "https://minio.example.com"
+		}, wantErr: "keyless"},
 		{name: "azure create_container requires azure provider", provider: "aws", mutate: func(c *LonghornBackupConfig) {
 			c.S3 = nil
 			c.Azure = &AzureBackupTarget{Container: "c", StorageAccount: "sa", AccountNameEnv: "N", AccountKeyEnv: "K", CreateContainer: true}

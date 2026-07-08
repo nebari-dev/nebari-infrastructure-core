@@ -81,6 +81,14 @@ backups:
       # For third-party S3 (MinIO/Wasabi/R2), set endpoint instead of create_bucket:
       # endpoint: https://s3.us-west-1.wasabisys.com
       # virtual_hosted_style: false
+      #
+      # Credentials: on a native AWS S3 target (aws provider, no custom endpoint)
+      # you may OMIT both env vars below to use keyless IAM-role auth — NIC then
+      # provisions an EKS Pod Identity association for Longhorn's service account
+      # scoped to this bucket, and writes no static keys. This is the recommended
+      # AWS setup (no long-lived keys to rotate). Set both env vars only when you
+      # need static keys, or for a non-AWS / S3-compatible endpoint (where keyless
+      # is unavailable and both are required):
       access_key_id_env: LONGHORN_S3_ACCESS_KEY_ID
       secret_access_key_env: LONGHORN_S3_SECRET_ACCESS_KEY
       # Optional custom CA for self-hosted TLS (references a pre-existing resource):

@@ -15,7 +15,7 @@ import (
 // removal that processes them in order never references an already-removed
 // parent.
 func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
-	if spec == nil || spec.ForceDestroy {
+	if spec == nil || !spec.Create || spec.ForceDestroy {
 		return nil
 	}
 	// These resources live inside the aks_cluster module (see the module's

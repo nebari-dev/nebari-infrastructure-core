@@ -145,7 +145,7 @@ func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) 
 	}
 
 	if backup != nil {
-		vars.BackupContainerCreate = true
+		vars.BackupContainerCreate = backup.Create
 		vars.BackupStorageAccount = backup.StorageAccount
 		vars.BackupContainerName = backup.Name
 	}

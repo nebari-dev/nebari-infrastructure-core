@@ -148,7 +148,7 @@ func TestToTFVarsBackupContainer(t *testing.T) {
 		}
 	})
 	t.Run("spec enables container", func(t *testing.T) {
-		v := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "c", StorageAccount: "sa"})
+		v := c.toTFVars("proj", &cluster.BackupBucketSpec{Name: "c", StorageAccount: "sa", Create: true})
 		if !v.BackupContainerCreate || v.BackupContainerName != "c" || v.BackupStorageAccount != "sa" {
 			t.Fatalf("bad tfvars: %+v", v)
 		}

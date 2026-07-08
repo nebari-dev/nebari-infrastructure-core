@@ -57,6 +57,11 @@ type FoundationalConfig struct {
 
 	// Backups configures Longhorn backup credentials (nil when disabled).
 	Backups *config.LonghornBackupConfig
+
+	// BackupRoleARN is the EKS Pod Identity role ARN for a keyless S3 backup
+	// target. Written to the credential Secret as AWS_IAM_ROLE_ARN so Longhorn
+	// accepts it without static keys. Empty for static-key / Azure targets.
+	BackupRoleARN string
 }
 
 // KeycloakConfig holds Keycloak-specific configuration
@@ -172,7 +177,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Kubernetes client: %w", err)
 		}
-		if err := createLonghornBackupSecret(ctx, k8sClient, foundationalCfg.Backups); err != nil {
+		if err := createLonghornBackupSecret(ctx, k8sClient, foundationalCfg.Backups, foundationalCfg.BackupRoleARN); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Longhorn backup secret: %w", err)
 		}
@@ -353,11 +358,11 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 // Longhorn credential Secret into the longhorn-system namespace. The Secret is
 // referenced by the BackupTarget that ArgoCD syncs from git, so it must exist
 // before the root App-of-Apps is applied.
-func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig) error {
+func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig, iamRoleARN string) error {
 	if err := createNamespace(ctx, client, longhorn.Namespace); err != nil {
 		return fmt.Errorf("ensure longhorn namespace: %w", err)
 	}
-	secret, err := longhorn.BuildCredentialSecret(ctx, client, backupCfg)
+	secret, err := longhorn.BuildCredentialSecret(ctx, client, backupCfg, iamRoleARN)
 	if err != nil {
 		return fmt.Errorf("build longhorn backup secret: %w", err)
 	}
