@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
@@ -628,8 +629,21 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 
 	redirectPath := filepath.Join(tmpDir, "manifests", "networking", "routes", "http-to-https-redirect.yaml")
-	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
+	redirectInfo, err := os.Stat(redirectPath)
+	if os.IsNotExist(err) {
 		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
+	} else if err != nil {
+		t.Fatalf("stat redirect route: %v", err)
+	} else if got := redirectInfo.Mode().Perm(); got != git.LocalGitOpsFileMode {
+		t.Errorf("redirect route mode = %v, want %v", got, git.LocalGitOpsFileMode)
+	}
+
+	routesInfo, err := os.Stat(filepath.Dir(redirectPath))
+	if err != nil {
+		t.Fatalf("stat routes directory: %v", err)
+	}
+	if got := routesInfo.Mode().Perm(); got != git.LocalGitOpsDirMode {
+		t.Errorf("routes directory mode = %v, want %v", got, git.LocalGitOpsDirMode)
 	}
 
 	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant

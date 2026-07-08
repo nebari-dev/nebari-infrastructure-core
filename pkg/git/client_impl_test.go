@@ -302,6 +302,14 @@ func TestClientWriteBootstrapMarker(t *testing.T) {
 		t.Errorf("marker file content = %q, want to contain 'bootstrapped_at'", content)
 	}
 
+	markerInfo, err := os.Stat(markerPath)
+	if err != nil {
+		t.Fatalf("failed to stat marker file: %v", err)
+	}
+	if got := markerInfo.Mode().Perm(); got != LocalGitOpsFileMode {
+		t.Errorf("marker file mode = %v, want %v", got, LocalGitOpsFileMode)
+	}
+
 	// Verify IsBootstrapped returns true
 	bootstrapped, err := client.IsBootstrapped(context.Background())
 	if err != nil {
@@ -774,7 +782,7 @@ func TestClientCommitAndPush(t *testing.T) {
 
 func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 	// Exercise CommitAndPush on a freshly PlainInit'd local repo with zero commits.
-	// This is the path taken when the auto-generated /tmp/nebari-gitops-{name}
+	// This is the path taken when the auto-generated local GitOps
 	// directory is brand new.
 	tmpDir, err := os.MkdirTemp("", "test-fresh-local-*")
 	if err != nil {

@@ -2,11 +2,25 @@ package git
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
+
+func TestDefaultLocalPath(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		t.Skipf("user home directory unavailable: %v", err)
+	}
+
+	got := DefaultLocalPath("my-nebari-local")
+	want := filepath.Join(homeDir, ".nebari", "gitops", "my-nebari-local")
+	if got != want {
+		t.Fatalf("DefaultLocalPath() = %q, want %q", got, want)
+	}
+}
 
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {

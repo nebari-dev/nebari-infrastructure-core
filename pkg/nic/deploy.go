@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -258,7 +259,7 @@ func defaultGitConfig(projectName string) *git.Config {
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For providers that support local gitops without explicit git_repository config, this auto-creates
-// /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
+// ~/.nebari/gitops/{project_name}. For other providers, explicit git_repository config is required.
 // The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
 func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
@@ -282,8 +283,11 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
 		WithMetadata("path", localPath))
 
-	if err := os.MkdirAll(localPath, 0750); err != nil {
+	if err := os.MkdirAll(localPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
 		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
+	}
+	if err := os.Chmod(localPath, git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps repo must be readable by ArgoCD's non-root repo-server.
+		return nil, fmt.Errorf("failed to set auto-generated directory permissions %s: %w", localPath, err)
 	}
 
 	return gitCfg, nil
@@ -428,6 +432,12 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	if bootstrapped && !regenApps {
+		if isLocal && cfg.GitRepository == nil {
+			if err := ensureLocalGitOpsPermissions(ctx, localPath); err != nil {
+				span.RecordError(err)
+				return err
+			}
+		}
 		status.Info(ctx, "GitOps repository already bootstrapped, skipping manifest generation")
 		span.SetAttributes(attribute.Bool("skipped", true))
 		return nil
@@ -470,6 +480,13 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
+	if isLocal && cfg.GitRepository == nil {
+		if err := ensureLocalGitOpsPermissions(ctx, localPath); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	if isLocal {
 		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Local GitOps directory bootstrapped successfully").
 			WithMetadata("path", localPath))
@@ -491,14 +508,50 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps config snapshot must be pod-readable.
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+	if err := os.Chmod(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil { //nolint:gosec // Local GitOps config snapshot must be pod-readable.
+		return fmt.Errorf("set config directory permissions: %w", err)
+	}
+	if err := os.WriteFile(configDest, configBytes, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Scrubbed config snapshot is non-secret and must be pod-readable.
 		return fmt.Errorf("write config to repository: %w", err)
+	}
+	if err := os.Chmod(configDest, git.LocalGitOpsFileMode); err != nil { //nolint:gosec // Scrubbed config snapshot is non-secret and must be pod-readable.
+		return fmt.Errorf("set config file permissions: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
 		WithMetadata("path", configDest))
+	return nil
+}
+
+// ensureLocalGitOpsPermissions normalizes NIC-managed local GitOps repositories
+// so ArgoCD's non-root repo-server can read refs and generated manifests through
+// a read-only kind hostPath mount.
+func ensureLocalGitOpsPermissions(ctx context.Context, root string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "nic.ensureLocalGitOpsPermissions")
+	defer span.End()
+	span.SetAttributes(attribute.String("local_path", root))
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		mode := git.LocalGitOpsFileMode
+		if d.IsDir() {
+			mode = git.LocalGitOpsDirMode
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			return fmt.Errorf("set permissions on %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set local gitops permissions under %s: %w", root, err)
+	}
 	return nil
 }
 

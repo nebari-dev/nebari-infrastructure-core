@@ -309,7 +309,7 @@ The cluster is named after `project_name` (kube context `kind-<project_name>`) a
 
 **GitOps repository:**
 
-- Omit `git_repository` and NIC auto-creates and mounts a local repo at `/tmp/nebari-gitops-<project_name>` — zero configuration.
+- Omit `git_repository` and NIC auto-creates and mounts a local repo at `~/.nebari/gitops/<project_name>` — zero configuration.
 - For a remote repo, set `git_repository.url` to an SSH/HTTPS URL and supply credentials via the `GIT_SSH_PRIVATE_KEY` environment variable (or a token).
 - For a custom local `file://` path, you must also declare a matching `cluster.local.kind.extra_mounts` entry so the kind node can read it — see `examples/local-config.yaml`.
 

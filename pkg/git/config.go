@@ -15,15 +15,25 @@ import (
 const (
 	// DefaultBranch is the default git branch name when none is specified.
 	DefaultBranch = "main"
+
+	// LocalGitOpsDirMode is the directory mode for local file:// GitOps repos
+	// that must be readable by non-root ArgoCD pods through a kind hostPath mount.
+	LocalGitOpsDirMode os.FileMode = 0o755
+
+	// LocalGitOpsFileMode is the file mode for generated non-secret GitOps files.
+	LocalGitOpsFileMode os.FileMode = 0o644
 )
 
 // DefaultLocalPath returns the host directory NIC manages for a project's
-// local gitops repository when no git_repository is configured. It is a pure
-// function so the deploy orchestrator and providers that mount the directory
-// (e.g. the local kind provider) can derive the same path independently
-// without threading it between them.
+// local gitops repository when no git_repository is configured. It lives under
+// the user's home directory so the repo is durable and stays on host paths that
+// kind/Docker Desktop can mount reliably.
 func DefaultLocalPath(projectName string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	}
+	return filepath.Join(homeDir, ".nebari", "gitops", projectName)
 }
 
 // Config represents git repository configuration for GitOps bootstrap.

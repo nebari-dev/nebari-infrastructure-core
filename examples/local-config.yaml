@@ -41,7 +41,7 @@ cluster:
 # Configures the repository that ArgoCD will use to manage cluster resources
 #
 # OPTION 1: Auto-generated local directory (zero configuration for development)
-# Simply omit the git_repository section and NIC will auto-create /tmp/nebari-gitops-{project_name}
+# Simply omit the git_repository section and NIC will auto-create ~/.nebari/gitops/{project_name}
 # and mount it on the kind cluster
 #
 # OPTION 2: Explicit local directory (custom location)
