@@ -305,11 +305,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, opts.BackupBucket)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, opts.BackupBucket)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -528,11 +524,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName, nil)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, nil)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)

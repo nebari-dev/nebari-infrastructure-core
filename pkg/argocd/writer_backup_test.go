@@ -91,7 +91,7 @@ func TestWriteAllToGitRendersBackupManifests(t *testing.T) {
 		}},
 	}
 	gitCfg := &git.Config{URL: "https://example.com/repo.git", Branch: "main"}
-	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}); err != nil {
+	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestWriteAllToGitSkipsBackupWhenDisabled(t *testing.T) {
 
 	cfg := &config.NebariConfig{ProjectName: "p"}
 	gitCfg := &git.Config{URL: "https://example.com/repo.git", Branch: "main"}
-	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}); err != nil {
+	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "apps/longhorn-backup.yaml")); !os.IsNotExist(err) {

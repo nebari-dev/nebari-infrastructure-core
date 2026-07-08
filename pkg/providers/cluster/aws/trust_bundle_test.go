@@ -3,8 +3,6 @@ package aws
 import (
 	"encoding/base64"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,98 +12,24 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 -----END CERTIFICATE-----
 `
 
-func TestTrustBundleResolveBase64(t *testing.T) {
-	tmp := t.TempDir()
-	pemPath := filepath.Join(tmp, "ca.pem")
-	if err := os.WriteFile(pemPath, []byte(samplePEM), 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
-	tests := []struct {
-		name      string
-		bundle    *TrustBundleConfig
-		wantEmpty bool
-		wantErr   string
-	}{
-		{
-			name:      "nil bundle is empty no-op",
-			bundle:    nil,
-			wantEmpty: true,
-		},
-		{
-			name:      "empty struct is no-op",
-			bundle:    &TrustBundleConfig{},
-			wantEmpty: true,
-		},
-		{
-			name:    "both path and inline is an error",
-			bundle:  &TrustBundleConfig{Path: pemPath, Inline: samplePEM},
-			wantErr: "only one of path or inline",
-		},
-		{
-			name:   "inline PEM is base64-encoded verbatim",
-			bundle: &TrustBundleConfig{Inline: samplePEM},
-		},
-		{
-			name:   "path is read from disk",
-			bundle: &TrustBundleConfig{Path: pemPath},
-		},
-		{
-			name:    "missing path returns a clear error",
-			bundle:  &TrustBundleConfig{Path: filepath.Join(tmp, "does-not-exist.pem")},
-			wantErr: "read",
-		},
-		{
-			name:    "inline without a PEM block is rejected",
-			bundle:  &TrustBundleConfig{Inline: "not a certificate"},
-			wantErr: "no PEM certificate",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.bundle.ResolveBase64()
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("expected empty result, got %q", got)
-				}
-				return
-			}
-			decoded, err := base64.StdEncoding.DecodeString(got)
-			if err != nil {
-				t.Fatalf("ResolveBase64 returned a non-base64 value: %v", err)
-			}
-			if !strings.Contains(string(decoded), "BEGIN CERTIFICATE") {
-				t.Errorf("decoded payload did not contain a PEM certificate; got %q", decoded)
-			}
-		})
-	}
-}
-
+// TestToTFVarsExtraCABundle covers how the top-level trust bundle resolved by
+// the orchestration layer is threaded into the extra_ca_bundle tfvar.
 func TestToTFVarsExtraCABundle(t *testing.T) {
 	tests := []struct {
 		name        string
-		bundle      *TrustBundleConfig
+		caBundle    string
 		wantInJSON  bool
 		wantDecoded string
 	}{
 		{
-			name:       "unset bundle is omitted from tfvars",
-			bundle:     nil,
+			name:       "unset is omitted from tfvars",
 			wantInJSON: false,
 		},
 		{
-			name:        "inline bundle ends up base64 in tfvars",
-			bundle:      &TrustBundleConfig{Inline: samplePEM},
+			name:        "resolved top-level bundle is passed through",
+			caBundle:    b64(samplePEM),
 			wantInJSON:  true,
 			wantDecoded: samplePEM,
 		},
@@ -117,12 +41,8 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				Region:            "us-west-2",
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
-				TrustBundle:       tt.bundle,
 			}
-			vars, err := cfg.toTFVars("test-project", nil)
-			if err != nil {
-				t.Fatalf("toTFVars: %v", err)
-			}
+			vars := cfg.toTFVars("test-project", tt.caBundle, nil)
 
 			raw, err := json.Marshal(vars)
 			if err != nil {

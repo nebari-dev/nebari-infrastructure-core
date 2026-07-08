@@ -129,7 +129,7 @@ func (t *S3BackupTarget) PodIdentityAuth(providerName string) bool {
 	if t == nil {
 		return false
 	}
-	return providerName == "aws" &&
+	return providerName == providerNameAWS &&
 		t.Endpoint == "" &&
 		t.AccessKeyIDEnv == "" &&
 		t.SecretAccessKeyEnv == ""
@@ -166,9 +166,14 @@ func normalizePrefix(p string) string {
 // field contents — it only enforces the 5-field shape.
 var fiveFieldCron = regexp.MustCompile(`^(\S+\s+){4}\S+$`)
 
+// providerNameAWS is the cluster provider name for AWS/EKS. Kept local to the
+// config package (the aws provider package can't be imported here without a
+// cycle) so provider-name comparisons read from one source.
+const providerNameAWS = "aws"
+
 // providersWithBucketModule lists cluster providers whose OpenTofu module can
 // provision a backup bucket/container. Others must use an external endpoint.
-var providersWithBucketModule = map[string]bool{"aws": true, "azure": true}
+var providersWithBucketModule = map[string]bool{providerNameAWS: true, "azure": true}
 
 // Validate checks the backups block. nil-safe: a nil BackupsConfig (or disabled
 // Longhorn block) validates clean. providerName is the selected cluster provider.

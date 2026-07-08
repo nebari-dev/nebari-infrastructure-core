@@ -35,6 +35,11 @@ type NebariConfig struct {
 	// Certificate configuration (optional)
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
 
+	// TrustBundle, when set, propagates an enterprise CA bundle both to worker-node
+	// OS trust stores (via the cluster provider) and into the cluster via
+	// trust-manager. Required when egress is TLS-inspected by a corporate proxy.
+	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+
 	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
 	Backups *BackupsConfig `yaml:"backups,omitempty"`
 }
@@ -349,6 +354,12 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	if c.GitRepository != nil {
 		if err := c.GitRepository.Validate(); err != nil {
 			return fmt.Errorf("invalid git_repository: %w", err)
+		}
+	}
+
+	if c.TrustBundle != nil {
+		if err := c.TrustBundle.Validate(); err != nil {
+			return fmt.Errorf("invalid trust_bundle: %w", err)
 		}
 	}
 

@@ -33,6 +33,11 @@ type BackupBucketSpec struct {
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
+
+	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
+	// passed so providers can apply it without seeing the full NebariConfig.
+	TrustBundle string
+
 	// BackupBucket, when non-nil, asks the provider to provision a Longhorn
 	// backup bucket/container in its Terraform module.
 	BackupBucket *BackupBucketSpec
@@ -43,6 +48,10 @@ type DestroyOptions struct {
 	DryRun  bool
 	Force   bool
 	Timeout time.Duration
+
+	// TrustBundle mirrors DeployOptions.TrustBundle; destroy must compute the
+	// same tofu variables as deploy for the plan to match.
+	TrustBundle string
 
 	// BackupBucket, when non-nil, describes a NIC-provisioned Longhorn backup
 	// bucket/container. When its ForceDestroy is false (retain_on_destroy on),
