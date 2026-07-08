@@ -24,7 +24,7 @@ The Makefile reads `examples/local-config.yaml` and automatically handles three 
 
 | Config | What happens |
 |--------|-------------|
-| No `git_repository` section | Auto-creates `~/.nebari/gitops/{project_name}` and mounts it into the cluster |
+| No `git_repository` section | Auto-creates `~/.nic/gitops/{project_name}` and mounts it into the cluster |
 | `url: "file:///path/to/repo"` | Mounts that local path into the cluster |
 | `url: "git@github.com:..."` | No mount — ArgoCD pulls from the remote repo directly |
 

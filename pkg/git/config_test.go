@@ -16,7 +16,7 @@ func TestDefaultLocalPath(t *testing.T) {
 	}
 
 	got := DefaultLocalPath("my-nebari-local")
-	want := filepath.Join(homeDir, ".nebari", "gitops", "my-nebari-local")
+	want := filepath.Join(homeDir, ".nic", "gitops", "my-nebari-local")
 	if got != want {
 		t.Fatalf("DefaultLocalPath() = %q, want %q", got, want)
 	}

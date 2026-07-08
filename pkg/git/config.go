@@ -33,7 +33,7 @@ func DefaultLocalPath(projectName string) string {
 	if err != nil || homeDir == "" {
 		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	}
-	return filepath.Join(homeDir, ".nebari", "gitops", projectName)
+	return filepath.Join(homeDir, ".nic", "gitops", projectName)
 }
 
 // Config represents git repository configuration for GitOps bootstrap.

@@ -259,7 +259,7 @@ func defaultGitConfig(projectName string) *git.Config {
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For providers that support local gitops without explicit git_repository config, this auto-creates
-// ~/.nebari/gitops/{project_name}. For other providers, explicit git_repository config is required.
+// ~/.nic/gitops/{project_name}. For other providers, explicit git_repository config is required.
 // The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
 func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
