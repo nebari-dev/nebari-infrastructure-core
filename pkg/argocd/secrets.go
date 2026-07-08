@@ -41,9 +41,9 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, gi
 
 	// Create repository secret data
 	secretData := map[string]string{
-		"name": "gitops-repo",
-		"type": gitRepoType,
-		"url":  gitConfig.URL,
+		"name":  "gitops-repo",
+		keyType: gitRepoType,
+		"url":   gitConfig.URL,
 	}
 
 	// Try SSH key first, then token
@@ -117,7 +117,7 @@ func ConfigureOCIAccess(ctx context.Context, client kubernetes.Interface, namesp
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
 			"name":      "docker-oci",
-			"type":      "helm",
+			keyType:     "helm",
 			"url":       "oci://docker.io",
 			"enableOCI": "true",
 		},

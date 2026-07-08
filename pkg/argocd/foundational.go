@@ -32,6 +32,9 @@ const (
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
 
+	// PartOfLabel is the app.kubernetes.io/part-of label key.
+	PartOfLabel = "app.kubernetes.io/part-of"
+
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
 
@@ -287,8 +290,8 @@ func createOrgCAConfigMap(ctx context.Context, client kubernetes.Interface, name
 			Name:      orgCAConfigMapName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
 			},
 		},
 		Data: map[string]string{orgCAConfigMapKey: orgCABundlePEM},
@@ -371,8 +374,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -392,8 +395,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -419,8 +422,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-				ManagedByLabel:              NebariManagedByValue,
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

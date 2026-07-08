@@ -57,6 +57,10 @@ const (
 	// chart's built-in copyutil init container picks its image, and avoids pinning
 	// a tag that would drift from defaultChartVersion.
 	repoServerImageTpl = `{{ default .Values.global.image.repository .Values.repoServer.image.repository }}:{{ default (include "argo-cd.defaultTag" .) .Values.repoServer.image.tag }}`
+
+	// Keys reused when building unstructured Helm-value / pod-spec map fragments.
+	keyType      = "type"
+	keyMountPath = "mountPath"
 )
 
 // Install installs Argo CD on a Kubernetes cluster
@@ -424,17 +428,17 @@ func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath s
 	newVolume := map[string]any{
 		"name": localGitopsVolumeName,
 		"hostPath": map[string]any{
-			"path": localPath,
-			"type": "Directory",
+			"path":  localPath,
+			keyType: "Directory",
 		},
 	}
 	repoServer["volumes"] = appendToSlice(repoServer["volumes"], newVolume)
 
 	// Append to existing volumeMounts
 	newMount := map[string]any{
-		"name":      localGitopsVolumeName,
-		"mountPath": localPath,
-		"readOnly":  true,
+		"name":       localGitopsVolumeName,
+		keyMountPath: localPath,
+		"readOnly":   true,
 	}
 	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], newMount)
 }
@@ -502,9 +506,9 @@ func addOrgCAMount(ctx context.Context, values map[string]any, caFingerprint str
 
 	// The repo-server container reads the combined bundle (read-only).
 	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], map[string]any{
-		"name":      combinedCAVolumeName,
-		"mountPath": combinedCADir,
-		"readOnly":  true,
+		"name":       combinedCAVolumeName,
+		keyMountPath: combinedCADir,
+		"readOnly":   true,
 	})
 
 	// Init container builds system-CA ∪ org-CA. The `cat` tolerates a missing
@@ -518,15 +522,15 @@ func addOrgCAMount(ctx context.Context, values map[string]any, caFingerprint str
 		"image":   repoServerImageTpl,
 		"command": []any{"sh", "-c", combineScript},
 		"volumeMounts": []any{
-			map[string]any{"name": orgCAVolumeName, "mountPath": orgCAMountDir, "readOnly": true},
-			map[string]any{"name": combinedCAVolumeName, "mountPath": combinedCADir},
+			map[string]any{"name": orgCAVolumeName, keyMountPath: orgCAMountDir, "readOnly": true},
+			map[string]any{"name": combinedCAVolumeName, keyMountPath: combinedCADir},
 		},
 		"securityContext": map[string]any{
 			"runAsNonRoot":             true,
 			"allowPrivilegeEscalation": false,
 			"readOnlyRootFilesystem":   true,
 			"capabilities":             map[string]any{"drop": []any{"ALL"}},
-			"seccompProfile":           map[string]any{"type": "RuntimeDefault"},
+			"seccompProfile":           map[string]any{keyType: "RuntimeDefault"},
 		},
 	})
 
