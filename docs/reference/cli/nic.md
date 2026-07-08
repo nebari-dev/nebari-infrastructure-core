@@ -15,7 +15,6 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 
 ### SEE ALSO
 
-* [nic completion](nic_completion.md)	 - Generate the autocompletion script for the specified shell
 * [nic deploy](nic_deploy.md)	 - Deploy infrastructure based on configuration file
 * [nic destroy](nic_destroy.md)	 - Destroy cloud infrastructure
 * [nic kubeconfig](nic_kubeconfig.md)	 - Generate kubeconfig for the deployed Nebari cluster
