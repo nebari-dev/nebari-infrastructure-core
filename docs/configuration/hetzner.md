@@ -28,7 +28,7 @@ Parsed from the "hetzner_cloud" key in nebari-config.yaml.
 | PersistData | `persist_data` | bool | No | PersistData controls whether CSI volumes survive cluster destruction. When true, volumes are labeled persist=true during deploy, and destroy skips them. When false (the default), destroy deletes al... |
 | SSH | `ssh` | `*SSHConfig` | No |  |
 | Network | `network` | `*NetworkConfig` | No |  |
-| Longhorn | `longhorn` | `*longhorn.Config` | No | Longhorn configures the Longhorn distributed block storage install. Hetzner's hcloud-volumes CSI is RWO-only; charts that need RWX (e.g. jupyterhub shared-storage for group dirs) require Longhorn â... |
+| Longhorn | `longhorn` | `*longhorn.Config` | No | Longhorn configures the Longhorn distributed block storage install. Hetzner's hcloud-volumes CSI is RWO-only; charts that need RWX (e.g. jupyterhub shared-storage for group dirs) require Longhorn â€”... |
 
 ---
 

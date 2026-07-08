@@ -9,18 +9,18 @@ This directory contains auto-generated documentation for Nebari Infrastructure C
 
 ### Core Configuration
 
-- [Core Configuration](core.md) - Main Nebari configuration (project name, provider, domain, certificates)
+- [Core Configuration](core.md) - Core Nebari configuration options used by all providers.
 
 ### Cloud Providers
 
-- [AWS Configuration](aws.md) - Amazon Web Services (EKS) provider options
-- [GCP Configuration](gcp.md) - Google Cloud Platform (GKE) provider options
-- [Azure Configuration](azure.md) - Microsoft Azure (AKS) provider options
-- [Hetzner Configuration](hetzner.md) - Hetzner Cloud provider options
-- [Local Configuration](local.md) - Local Kubernetes provider options
-- [Existing Cluster Configuration](existing.md) - Attach to an existing Kubernetes cluster
+- [AWS Provider Configuration](aws.md) - Configuration options specific to Amazon Web Services (EKS).
+- [Azure Provider Configuration](azure.md) - Configuration options specific to Microsoft Azure (AKS).
+- [Existing Cluster Configuration](existing.md) - Configuration options for attaching to an existing Kubernetes cluster.
+- [GCP Provider Configuration](gcp.md) - Configuration options specific to Google Cloud Platform (GKE).
+- [Hetzner Provider Configuration](hetzner.md) - Configuration options specific to Hetzner Cloud.
+- [Local Provider Configuration](local.md) - Configuration options for local Kubernetes deployments.
 
 ### Additional Configuration
 
-- [Cloudflare DNS](cloudflare.md) - Cloudflare DNS provider configuration
-- [Git Repository](git.md) - GitOps repository configuration for ArgoCD
+- [Git Repository Configuration](git.md) - Configuration options for GitOps repository integration with ArgoCD.
+- [Cloudflare DNS Configuration](cloudflare.md) - Configuration options for Cloudflare DNS provider.

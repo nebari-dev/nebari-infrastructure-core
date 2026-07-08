@@ -7,12 +7,12 @@ Configuration options specific to Amazon Web Services (EKS).
 ## Table of Contents
 
 - [Config](#config)
+- [TrustBundleConfig](#trustbundleconfig)
+- [AWSLoadBalancerControllerConfig](#awsloadbalancercontrollerconfig)
+- [ClusterAutoscalerConfig](#clusterautoscalerconfig)
 - [NodeGroup](#nodegroup)
 - [Taint](#taint)
 - [EFSConfig](#efsconfig)
-- [AWSLoadBalancerControllerConfig](#awsloadbalancercontrollerconfig)
-- [ClusterAutoscalerConfig](#clusterautoscalerconfig)
-- [TrustBundleConfig](#trustbundleconfig)
 
 ---
 
@@ -27,7 +27,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | ExistingVPCID | `existing_vpc_id` | string | No |  |
 | ExistingPrivateSubnetIDs | `existing_private_subnet_ids` | `[]string` | No |  |
 | ExistingSecurityGroupID | `existing_security_group_id` | string | No |  |
-| KubernetesVersion | `kubernetes_version` | string | Yes |  |
+| KubernetesVersion | `kubernetes_version` | string | No |  |
 | EndpointPrivateAccess | `endpoint_private_access` | bool | No |  |
 | EndpointPublicAccess | `endpoint_public_access` | bool | No |  |
 | EKSKMSArn | `eks_kms_arn` | string | No |  |
@@ -44,6 +44,39 @@ Configuration options specific to Amazon Web Services (EKS).
 | LoadBalancerScheme | `load_balancer_scheme` | string | No |  |
 | TrustBundle | `trust_bundle` | `*TrustBundleConfig` | No | TrustBundle, when set, installs the given PEM bundle into the OS trust store of every EKS worker node before kubelet starts. Required when nodes must reach the EKS control plane, ECR, or pull conta... |
 | EnableIRSA | `enable_irsa` | `*bool` | No | EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for Service Accounts. When unset, the upstream module default (true) applies. Set false when the cluster relies exclusively on EKS... |
+
+---
+
+## TrustBundleConfig
+
+TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
+Path or Inline must be set. Path is a filesystem path to a PEM file on the
+operator's machine; Inline is the PEM text itself.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Path | `path` | string | No |  |
+| Inline | `inline` | string | No |  |
+
+---
+
+## AWSLoadBalancerControllerConfig
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | `*bool` | No |  |
+| ChartVersion | `chart_version` | string | No |  |
+| DestroyTimeout | `destroy_timeout` | `*time.Duration` | No |  |
+
+---
+
+## ClusterAutoscalerConfig
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | `*bool` | No |  |
+| ChartVersion | `chart_version` | string | No |  |
+| ImageTag | `image_tag` | string | No |  |
 
 ---
 
@@ -84,36 +117,4 @@ Configuration options specific to Amazon Web Services (EKS).
 | Encrypted | `encrypted` | bool | No | default: true |
 | KMSKeyArn | `kms_key_arn` | string | No |  |
 | StorageClassName | `storage_class_name` | string | No | default: efs-sc |
-
----
-
-## AWSLoadBalancerControllerConfig
-
-| Field | YAML Key | Type | Required | Description |
-|-------|----------|------|----------|-------------|
-| Enabled | `enabled` | `*bool` | No |  |
-| ChartVersion | `chart_version` | string | No |  |
-| DestroyTimeout | `destroy_timeout` | `*time.Duration` | No |  |
-
----
-
-## ClusterAutoscalerConfig
-
-| Field | YAML Key | Type | Required | Description |
-|-------|----------|------|----------|-------------|
-| Enabled | `enabled` | `*bool` | No |  |
-| ChartVersion | `chart_version` | string | No |  |
-| ImageTag | `image_tag` | string | No |  |
-
----
-
-## TrustBundleConfig
-
-TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
-Path or Inline must be set. Path is a filesystem path to a PEM file on the
-operator's machine; Inline is the PEM text itself.
-
-| Field | YAML Key | Type | Required | Description |
-|-------|----------|------|----------|-------------|
-| Path | `path` | string | No |  |
 
