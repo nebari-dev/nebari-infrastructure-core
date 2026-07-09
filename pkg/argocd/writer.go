@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -97,6 +98,11 @@ type TemplateData struct {
 	// provisioned during foundational install), so a separate Keycloak-enabled
 	// gate is not part of the conditional.
 	LonghornEnabled bool
+
+	// LonghornOIDCSecretName is the name of the Kubernetes secret holding the
+	// Longhorn UI OIDC client secret, threaded from LonghornOIDCClientSecretName
+	// so the Go constant and the rendered manifests cannot drift.
+	LonghornOIDCSecretName string
 }
 
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
@@ -118,6 +124,7 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 		LonghornEnabled:         settings.LonghornEnabled,
+		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -322,40 +329,36 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for providers that don't need it
+		destPath := filepath.Join(workDir, relPath)
+
+		// Gated templates are removed (not just skipped) when their gate is
+		// off, so toggling a feature off on an already-bootstrapped repo
+		// deletes its manifests and lets ArgoCD prune the resources, instead
+		// of leaving them orphaned in git.
+
+		// MetalLB templates only apply to providers that need it
 		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+			return removeStaleTemplate(destPath, d)
 		}
 
-		// Skip Longhorn-only templates when Longhorn is disabled. The
+		// Longhorn-only templates are gated on LonghornEnabled. The
 		// securitypolicies Application targets manifests/networking/policies,
 		// whose only content is the Longhorn SecurityPolicy; writing the app
 		// without its manifest would create an Application with zero resources
 		// (rejected by allowEmpty: false).
 		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+			return removeStaleTemplate(destPath, d)
 		}
 
-		// Skip trust-manager templates unless a trust bundle is configured
+		// trust-manager templates only apply when a trust bundle is configured
 		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+			return removeStaleTemplate(destPath, d)
 		}
 
-		// Skip certificate templates that don't apply to the configured cert source.
+		// Certificate templates that don't apply to the configured cert source.
 		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
-			return nil
+			return removeStaleTemplate(destPath, d)
 		}
-
-		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
 			// Create directory
@@ -392,6 +395,24 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		return fmt.Errorf("failed to write templates to git: %w", err)
 	}
 
+	return nil
+}
+
+// removeStaleTemplate deletes the previously written output of a template
+// whose gate is now off, so a feature toggled from enabled to disabled has its
+// files removed from the gitops repo rather than skipped-but-retained. Missing
+// files are a no-op (the common case: the feature was never enabled). Returns
+// fs.SkipDir for directories so the walk does not descend into them.
+func removeStaleTemplate(destPath string, d fs.DirEntry) error {
+	if d.IsDir() {
+		if err := os.RemoveAll(destPath); err != nil {
+			return fmt.Errorf("failed to remove stale directory %s: %w", destPath, err)
+		}
+		return fs.SkipDir
+	}
+	if err := os.Remove(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale file %s: %w", destPath, err)
+	}
 	return nil
 }
 

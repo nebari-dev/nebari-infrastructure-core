@@ -444,32 +444,87 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	return nil
 }
 
-// createLonghornSecrets writes the OIDC client secret used to protect the
-// Longhorn UI into both the keycloak namespace (for realm-setup-job) and the
-// longhorn-system namespace (for the Envoy Gateway SecurityPolicy). When
-// longhornSSO.ClientSecret is empty, nothing is created.
+// createLonghornSecrets ensures the OIDC client secret used to protect the
+// Longhorn UI holds a single value in both the keycloak namespace (read by
+// realm-setup-job) and the longhorn-system namespace (read by the Envoy
+// Gateway SecurityPolicy). A fresh random value is generated on every deploy,
+// so a value already present in either namespace is canonical and wins over
+// the generated one: a partial failure on a prior deploy (one namespace
+// written, the other not) must reconcile both namespaces to the surviving
+// value, not leave the Keycloak client and the SecurityPolicy presenting
+// different secrets. The keycloak copy takes precedence because realm-setup-job
+// registers the Keycloak client from it. When longhornSSO.ClientSecret is
+// empty, nothing is created.
 func createLonghornSecrets(ctx context.Context, client kubernetes.Interface, longhornSSO LonghornSSOConfig) error {
 	if longhornSSO.ClientSecret == "" {
 		return nil
 	}
 
-	for _, ns := range []string{KeycloakDefaultNamespace, LonghornDefaultNamespace} {
-		if err := createSecret(ctx, client, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      LonghornOIDCClientSecretName,
-				Namespace: ns,
-				Labels: map[string]string{
-					PartOfLabel:    NebariFoundationalPartOf,
-					ManagedByLabel: NebariManagedByValue,
-				},
-			},
-			Type: corev1.SecretTypeOpaque,
-			StringData: map[string]string{
-				"client-secret": longhornSSO.ClientSecret,
-			},
-		}); err != nil {
-			return fmt.Errorf("failed to create %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+	namespaces := []string{KeycloakDefaultNamespace, LonghornDefaultNamespace}
+
+	existing := make(map[string]*corev1.Secret, len(namespaces))
+	for _, ns := range namespaces {
+		secret, err := client.CoreV1().Secrets(ns).Get(ctx, LonghornOIDCClientSecretName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			// A transient/permission error must not be mistaken for "absent" —
+			// creating with a fresh value here is exactly the divergence we
+			// are trying to prevent.
+			return fmt.Errorf("failed to get %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
 		}
+		existing[ns] = secret
+	}
+
+	canonical := longhornSSO.ClientSecret
+	for _, ns := range namespaces {
+		if secret, ok := existing[ns]; ok {
+			if v := secret.Data["client-secret"]; len(v) > 0 {
+				canonical = string(v)
+				break
+			}
+		}
+	}
+
+	for _, ns := range namespaces {
+		secret, ok := existing[ns]
+		if !ok {
+			if _, err := client.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      LonghornOIDCClientSecretName,
+					Namespace: ns,
+					Labels: map[string]string{
+						PartOfLabel:    NebariFoundationalPartOf,
+						ManagedByLabel: NebariManagedByValue,
+					},
+				},
+				Type: corev1.SecretTypeOpaque,
+				StringData: map[string]string{
+					"client-secret": canonical,
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				return fmt.Errorf("failed to create %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created secret %s in %s", LonghornOIDCClientSecretName, ns)).
+				WithResource("secret").
+				WithAction("created").
+				WithMetadata("secret_name", LonghornOIDCClientSecretName))
+			continue
+		}
+
+		if string(secret.Data["client-secret"]) == canonical {
+			continue
+		}
+		secret.Data = nil
+		secret.StringData = map[string]string{"client-secret": canonical}
+		if _, err := client.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Reconciled secret %s in %s to the canonical value", LonghornOIDCClientSecretName, ns)).
+			WithResource("secret").
+			WithAction("updated").
+			WithMetadata("secret_name", LonghornOIDCClientSecretName))
 	}
 
 	return nil

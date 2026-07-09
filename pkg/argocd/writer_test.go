@@ -657,6 +657,12 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 			output := string(processed)
 
+			// This skips ANY route that renders empty with the zero-value test
+			// data, not just longhorn-httproute.yaml — so a conditionally
+			// rendered route silently drops out of this generic https check.
+			// Each such route needs its own test pinning the https-listener
+			// property with its gate enabled (see
+			// TestWriteAllToGit_LonghornHTTPRoute for the Longhorn one).
 			if strings.TrimSpace(output) == "" {
 				t.Skipf("skipping %s: empty render with default test data", name)
 			}
@@ -914,6 +920,31 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
 		if _, err := os.Stat(appPath); err != nil {
 			t.Errorf("apps/securitypolicies.yaml should be written when LonghornEnabled=true: %v", err)
+		}
+	})
+
+	t.Run("removes previously written SecurityPolicy templates on an enable-to-disable toggle", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		mock := &mockGitClient{workDir: tmpDir}
+
+		enabled := cluster.InfraSettings{StorageClass: "longhorn", LonghornEnabled: true}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() enabled error: %v", err)
+		}
+
+		disabled := cluster.InfraSettings{StorageClass: "gp2", LonghornEnabled: false}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, disabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() disabled error: %v", err)
+		}
+
+		for _, stale := range []string{
+			filepath.Join(tmpDir, "apps", "securitypolicies.yaml"),
+			filepath.Join(tmpDir, "manifests", "networking", "policies"),
+		} {
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Errorf("%s should be removed when Longhorn is toggled off, stat err: %v", stale, err)
+			}
 		}
 	})
 
