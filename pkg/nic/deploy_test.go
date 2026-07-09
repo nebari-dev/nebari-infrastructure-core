@@ -137,7 +137,7 @@ func TestScrubbedConfig(t *testing.T) {
 			},
 		}
 
-		scrubbed := scrubbedConfig(cfg, gitConfig)
+		scrubbed := scrubbedConfig(cfg, gitConfig, "")
 
 		if scrubbed.GitRepository.Auth != (git.AuthConfig{}) {
 			t.Errorf("Auth should be zeroed, got %+v", scrubbed.GitRepository.Auth)
@@ -170,7 +170,7 @@ func TestScrubbedConfig(t *testing.T) {
 			ArgoCDAuth: &git.AuthConfig{TokenEnv: "ARGOCD_TOKEN"},
 		}
 
-		_ = scrubbedConfig(cfg, gitConfig)
+		_ = scrubbedConfig(cfg, gitConfig, "")
 
 		if cfg.GitRepository != nil {
 			t.Errorf("input cfg.GitRepository should remain nil, got %+v", cfg.GitRepository)
@@ -189,7 +189,7 @@ func TestScrubbedConfig(t *testing.T) {
 	t.Run("handles nil gitConfig", func(t *testing.T) {
 		cfg := &config.NebariConfig{ProjectName: "test"}
 
-		scrubbed := scrubbedConfig(cfg, nil)
+		scrubbed := scrubbedConfig(cfg, nil, "")
 
 		if scrubbed.GitRepository != nil {
 			t.Errorf("GitRepository should be nil, got %+v", scrubbed.GitRepository)
@@ -205,10 +205,74 @@ func TestScrubbedConfig(t *testing.T) {
 		}
 		gitConfig := &git.Config{URL: "effective"}
 
-		scrubbed := scrubbedConfig(cfg, gitConfig)
+		scrubbed := scrubbedConfig(cfg, gitConfig, "")
 
 		if scrubbed.GitRepository == nil || scrubbed.GitRepository.URL != "effective" {
 			t.Errorf("scrubbed.GitRepository.URL = %+v, want %q", scrubbed.GitRepository, "effective")
+		}
+	})
+
+	t.Run("rewrites path-based trust_bundle to resolved inline", func(t *testing.T) {
+		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+		cfg := &config.NebariConfig{
+			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
+		}
+
+		scrubbed := scrubbedConfig(cfg, nil, pem)
+
+		if scrubbed.TrustBundle == nil {
+			t.Fatal("TrustBundle should be preserved as inline, got nil")
+		}
+		if scrubbed.TrustBundle.Path != "" {
+			t.Errorf("machine-local path should be dropped, got %q", scrubbed.TrustBundle.Path)
+		}
+		if scrubbed.TrustBundle.Inline != pem {
+			t.Errorf("Inline = %q, want resolved PEM", scrubbed.TrustBundle.Inline)
+		}
+		// Input must not be mutated.
+		if cfg.TrustBundle.Path != "/home/operator/org-ca.pem" || cfg.TrustBundle.Inline != "" {
+			t.Errorf("input cfg.TrustBundle mutated: %+v", cfg.TrustBundle)
+		}
+	})
+
+	t.Run("strips trust_bundle that resolved to empty", func(t *testing.T) {
+		cfg := &config.NebariConfig{
+			TrustBundle: &config.TrustBundleConfig{Path: "   "},
+		}
+
+		scrubbed := scrubbedConfig(cfg, nil, "")
+
+		if scrubbed.TrustBundle != nil {
+			t.Errorf("TrustBundle should be stripped when resolved PEM is empty, got %+v", scrubbed.TrustBundle)
+		}
+	})
+
+	t.Run("leaves unset trust_bundle nil", func(t *testing.T) {
+		scrubbed := scrubbedConfig(&config.NebariConfig{}, nil, "")
+
+		if scrubbed.TrustBundle != nil {
+			t.Errorf("TrustBundle should stay nil, got %+v", scrubbed.TrustBundle)
+		}
+	})
+
+	t.Run("marshalled output excludes machine-local trust_bundle path", func(t *testing.T) {
+		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+		cfg := &config.NebariConfig{
+			ProjectName: "test",
+			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
+		}
+
+		out, err := yaml.Marshal(scrubbedConfig(cfg, nil, pem))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		s := string(out)
+
+		if strings.Contains(s, "/home/operator/org-ca.pem") {
+			t.Errorf("scrubbed output should not contain the local path:\n%s", s)
+		}
+		if !strings.Contains(s, "-----BEGIN CERTIFICATE-----") {
+			t.Errorf("scrubbed output should contain the resolved inline PEM:\n%s", s)
 		}
 	})
 
@@ -226,7 +290,7 @@ func TestScrubbedConfig(t *testing.T) {
 			},
 		}
 
-		out, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig))
+		out, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig, ""))
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
