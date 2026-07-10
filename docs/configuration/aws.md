@@ -7,7 +7,6 @@ Configuration options specific to Amazon Web Services (EKS).
 ## Table of Contents
 
 - [Config](#config)
-- [TrustBundleConfig](#trustbundleconfig)
 - [AWSLoadBalancerControllerConfig](#awsloadbalancercontrollerconfig)
 - [ClusterAutoscalerConfig](#clusterautoscalerconfig)
 - [NodeGroup](#nodegroup)
@@ -42,21 +41,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | AWSLoadBalancerController | `aws_load_balancer_controller` | `*AWSLoadBalancerControllerConfig` | No |  |
 | ClusterAutoscaler | `cluster_autoscaler` | `*ClusterAutoscalerConfig` | No |  |
 | LoadBalancerScheme | `load_balancer_scheme` | string | No |  |
-| TrustBundle | `trust_bundle` | `*TrustBundleConfig` | No | TrustBundle, when set, installs the given PEM bundle into the OS trust store of every EKS worker node before kubelet starts. Required when nodes must reach the EKS control plane, ECR, or pull conta... |
 | EnableIRSA | `enable_irsa` | `*bool` | No | EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for Service Accounts. When unset, the upstream module default (true) applies. Set false when the cluster relies exclusively on EKS... |
-
----
-
-## TrustBundleConfig
-
-TrustBundleConfig specifies the source of an extra CA bundle. Exactly one of
-Path or Inline must be set. Path is a filesystem path to a PEM file on the
-operator's machine; Inline is the PEM text itself.
-
-| Field | YAML Key | Type | Required | Description |
-|-------|----------|------|----------|-------------|
-| Path | `path` | string | No |  |
-| Inline | `inline` | string | No |  |
 
 ---
 

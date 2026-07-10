@@ -27,6 +27,7 @@ NebariConfig represents the parsed nebari-config.yaml structure
 | DNS | `dns` | `*DNSConfig` | No | DNS provider configuration (optional). Only one provider can be configured at a time. |
 | GitRepository | `git_repository` | `*git.Config` | No | GitRepository configures the GitOps repository for ArgoCD bootstrap (optional) |
 | Certificate | `certificate` | `*CertificateConfig` | No | Certificate configuration (optional) |
+| TrustBundle | `trust_bundle` | `*TrustBundleConfig` | No | TrustBundle, when set, propagates an enterprise CA bundle both to worker-node OS trust stores (via the cluster provider) and into the cluster via trust-manager. Required when egress is TLS-inspecte... |
 
 ---
 
