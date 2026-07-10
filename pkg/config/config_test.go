@@ -652,6 +652,197 @@ func TestDNSConfigNilReceiver(t *testing.T) {
 	}
 }
 
+func TestRepositoryConfigValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		repo        RepositoryConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid single provider",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "no provider configured",
+			repo: RepositoryConfig{
+				Providers: map[string]any{},
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "nil providers map",
+			repo: RepositoryConfig{
+				Providers: nil,
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "multiple providers",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+					"local":    map[string]any{"path": "/tmp/gitops"},
+				},
+			},
+			wantErr:     true,
+			errContains: "only one repository provider",
+		},
+		{
+			name: "invalid provider name",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"notreal": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid repository provider",
+		},
+		{
+			name: "scalar provider value rejected",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": "not-a-map",
+				},
+			},
+			wantErr:     true,
+			errContains: "must be a mapping",
+		},
+	}
+
+	validRepositoryProviders := []string{"existing", "local"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.repo.Validate(validRepositoryProviders)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigProviderName(t *testing.T) {
+	tests := []struct {
+		name string
+		repo RepositoryConfig
+		want string
+	}{
+		{
+			name: "existing provider",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			want: "existing",
+		},
+		{
+			name: "empty config",
+			repo: RepositoryConfig{},
+			want: "",
+		},
+		{
+			name: "nil providers",
+			repo: RepositoryConfig{Providers: nil},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.repo.ProviderName()
+			if got != tt.want {
+				t.Errorf("ProviderName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigProviderConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    RepositoryConfig
+		wantNil bool
+		wantKey string
+		wantVal string
+	}{
+		{
+			name: "returns provider config map",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantNil: false,
+			wantKey: "url",
+			wantVal: "git@github.com:org/repo.git",
+		},
+		{
+			name:    "nil when empty",
+			repo:    RepositoryConfig{},
+			wantNil: true,
+		},
+		{
+			name: "nil when value is not a map",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": "not-a-map",
+				},
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.repo.ProviderConfig()
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("ProviderConfig() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("ProviderConfig() = nil, want non-nil")
+			}
+			if got[tt.wantKey] != tt.wantVal {
+				t.Errorf("ProviderConfig()[%q] = %v, want %q", tt.wantKey, got[tt.wantKey], tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigNilReceiver(t *testing.T) {
+	var repo *RepositoryConfig
+
+	if got := repo.ProviderName(); got != "" {
+		t.Errorf("nil.ProviderName() = %q, want empty string", got)
+	}
+	if got := repo.ProviderConfig(); got != nil {
+		t.Errorf("nil.ProviderConfig() = %v, want nil", got)
+	}
+}
+
 func TestClusterConfigValidate(t *testing.T) {
 	tests := []struct {
 		name        string
