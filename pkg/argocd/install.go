@@ -2,7 +2,10 @@ package argocd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -21,13 +24,52 @@ import (
 const (
 	argoCDServerDeployment = "argocd-server"
 	localGitopsVolumeName  = "local-gitops"
+
+	// orgCAConfigMapName is the install-time ConfigMap (in the argocd namespace)
+	// that holds the operator's org CA. The repo-server mounts it. It is created
+	// by NIC at install time rather than sourced from trust-manager's projected
+	// bundle on purpose: the repo-server is the component that pulls trust-manager
+	// (and every other chart) through the inspecting proxy, so it needs to trust
+	// the org CA *before* trust-manager exists. See #310.
+	orgCAConfigMapName = "argocd-org-ca"
+	orgCAConfigMapKey  = "ca.crt"
+
+	orgCAVolumeName      = "org-ca"
+	combinedCAVolumeName = "combined-ca"
+	orgCAMountDir        = "/etc/nebari/org-ca"
+	combinedCADir        = "/etc/ssl/certs-combined"
+	combinedCAPath       = "/etc/ssl/certs-combined/ca-bundle.crt"
+	systemCAPath         = "/etc/ssl/certs/ca-certificates.crt"
+	combineCAInitName    = "combine-ca-bundle"
+
+	// orgCAChecksumAnnotation stamps the SHA-256 of the org CA bundle onto the
+	// repo-server pod template. The combined bundle is built by an init container
+	// into an emptyDir, so it is only rebuilt on pod restart; without this, a
+	// rotated trust_bundle updates the argocd-org-ca ConfigMap but the running
+	// pod keeps serving the stale combined bundle. A changed annotation changes
+	// the pod template, so any applied Helm upgrade rolls the pod and the init
+	// container re-runs. See the #364 caveat on when upgrades actually apply.
+	orgCAChecksumAnnotation = "nebari.dev/org-ca-checksum"
+
+	// repoServerImageTpl resolves, via the chart's own tpl pass over
+	// repoServer.initContainers, to the same image the repo-server runs — so the
+	// init container's system CA bundle matches the runtime. This mirrors how the
+	// chart's built-in copyutil init container picks its image, and avoids pinning
+	// a tag that would drift from defaultChartVersion.
+	repoServerImageTpl = `{{ default .Values.global.image.repository .Values.repoServer.image.repository }}:{{ default (include "argo-cd.defaultTag" .) .Values.repoServer.image.tag }}`
+
+	// Keys reused when building unstructured Helm-value / pod-spec map fragments.
+	keyType      = "type"
+	keyMountPath = "mountPath"
 )
 
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
 // If src is a LocalSource, its directory is mounted into the repo-server pod.
 // If it is a RemoteSource, a repository-credentials Secret is created.
-func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repository.Source, argoCDCfg Config) error {
+// orgCABundlePEM, when non-empty, is the operator's org CA: it is written to the
+// argocd-org-ca ConfigMap and the repo-server is wired to trust it (see addOrgCAMount).
+func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repository.Source, orgCABundlePEM string, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -99,6 +141,19 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 			WithAction("create-failed").
 			WithMetadata("error", err.Error()))
 		return fmt.Errorf("failed to create namespace: %w", err)
+	}
+
+	// Wire the repo-server to trust the org CA (no-op when none is configured).
+	// Must run before InstallHelm so the Helm values carry the mount and the
+	// backing ConfigMap exists when the repo-server pod starts.
+	span.SetAttributes(attribute.Bool("org_ca_configured", orgCABundlePEM != ""))
+	if err := configureRepoServerCATrust(ctx, k8sClient, argoCDCfg.Namespace, orgCABundlePEM, argoCDCfg.Values); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to configure repo-server CA trust").
+			WithResource("argocd").
+			WithAction("ca-config-failed").
+			WithMetadata("error", err.Error()))
+		return fmt.Errorf("configure repo-server CA trust: %w", err)
 	}
 
 	// Install Argo CD using Helm
@@ -369,19 +424,138 @@ func addLocalGitopsMount(ctx context.Context, values map[string]any, localPath s
 	newVolume := map[string]any{
 		"name": localGitopsVolumeName,
 		"hostPath": map[string]any{
-			"path": localPath,
-			"type": "Directory",
+			"path":  localPath,
+			keyType: "Directory",
 		},
 	}
 	repoServer["volumes"] = appendToSlice(repoServer["volumes"], newVolume)
 
 	// Append to existing volumeMounts
 	newMount := map[string]any{
-		"name":      localGitopsVolumeName,
-		"mountPath": localPath,
-		"readOnly":  true,
+		"name":       localGitopsVolumeName,
+		keyMountPath: localPath,
+		"readOnly":   true,
 	}
 	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], newMount)
+}
+
+// configureRepoServerCATrust upserts the install-time argocd-org-ca ConfigMap
+// and injects the combined-bundle mount into the repo-server Helm values so it
+// trusts the org CA. It is a no-op when orgCABundlePEM is empty. Must be called
+// before InstallHelm so the values carry the mount and the ConfigMap exists when
+// the repo-server pod starts. This is the single seam for org-CA wiring — keep
+// the logic here rather than accreting inline blocks in Install.
+func configureRepoServerCATrust(ctx context.Context, client kubernetes.Interface, namespace, orgCABundlePEM string, values map[string]any) error {
+	if orgCABundlePEM == "" {
+		return nil
+	}
+	if err := createOrgCAConfigMap(ctx, client, namespace, orgCABundlePEM); err != nil {
+		return err
+	}
+	caFingerprint := sha256Fingerprint(orgCABundlePEM)
+	addOrgCAMount(ctx, values, caFingerprint)
+	// Log a fingerprint, never the PEM body, so rotation is observable.
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configured repo-server to trust org CA bundle").
+		WithResource("argocd").
+		WithAction("ca-configured").
+		WithMetadata("ca_fingerprint", caFingerprint).
+		WithMetadata("ca_bytes", strconv.Itoa(len(orgCABundlePEM))))
+	return nil
+}
+
+// addOrgCAMount wires the ArgoCD repo-server to trust an org CA so it can clone
+// git repos and pull Helm/OCI charts through a TLS-inspecting egress proxy.
+//
+// An init container concatenates the image's system CA bundle with the org CA
+// (mounted from the argocd-org-ca ConfigMap) into a shared emptyDir, and the
+// repo-server's SSL_CERT_FILE / GIT_SSL_CAINFO / CURL_CA_BUNDLE point at the
+// combined file. All three are needed: git ignores SSL_CERT_FILE alone.
+//
+// We deliberately do NOT populate argocd-tls-certs-cm: entries there make Argo
+// pass --ca-file to git/helm, which *replaces* (not augments) the system trust
+// pool and breaks cross-host redirects (e.g. a chart repo redirecting to GitHub).
+//
+// The override is additive (system ∪ org), so it does not affect the in-cluster
+// Kubernetes API connection, which client-go validates against the service
+// account's own ca.crt rather than the system store.
+func addOrgCAMount(ctx context.Context, values map[string]any, caFingerprint string) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "argocd.addOrgCAMount")
+	defer span.End()
+
+	repoServer, ok := values["repoServer"].(map[string]any)
+	if !ok {
+		repoServer = map[string]any{}
+		values["repoServer"] = repoServer
+	}
+
+	// Volumes: the org CA ConfigMap (read by the init container) and a shared
+	// emptyDir holding the combined bundle (written by init, read by repo-server).
+	repoServer["volumes"] = appendToSlice(repoServer["volumes"], map[string]any{
+		"name":      orgCAVolumeName,
+		"configMap": map[string]any{"name": orgCAConfigMapName},
+	})
+	repoServer["volumes"] = appendToSlice(repoServer["volumes"], map[string]any{
+		"name":     combinedCAVolumeName,
+		"emptyDir": map[string]any{},
+	})
+
+	// The repo-server container reads the combined bundle (read-only).
+	repoServer["volumeMounts"] = appendToSlice(repoServer["volumeMounts"], map[string]any{
+		"name":       combinedCAVolumeName,
+		keyMountPath: combinedCADir,
+		"readOnly":   true,
+	})
+
+	// Init container builds system-CA ∪ org-CA. The `cat` tolerates a missing
+	// system file (slim base image) rather than crash-looping the pod; the org CA
+	// is our own mounted ConfigMap, so its absence is a real error.
+	combineScript := fmt.Sprintf(
+		"set -eu; : > %[1]s; if [ -f %[2]s ]; then cat %[2]s >> %[1]s; fi; cat %[3]s/%[4]s >> %[1]s",
+		combinedCAPath, systemCAPath, orgCAMountDir, orgCAConfigMapKey)
+	repoServer["initContainers"] = appendToSlice(repoServer["initContainers"], map[string]any{
+		"name":    combineCAInitName,
+		"image":   repoServerImageTpl,
+		"command": []any{"sh", "-c", combineScript},
+		"volumeMounts": []any{
+			map[string]any{"name": orgCAVolumeName, keyMountPath: orgCAMountDir, "readOnly": true},
+			map[string]any{"name": combinedCAVolumeName, keyMountPath: combinedCADir},
+		},
+		"securityContext": map[string]any{
+			"runAsNonRoot":             true,
+			"allowPrivilegeEscalation": false,
+			"readOnlyRootFilesystem":   true,
+			"capabilities":             map[string]any{"drop": []any{"ALL"}},
+			"seccompProfile":           map[string]any{keyType: "RuntimeDefault"},
+		},
+	})
+
+	// Point the repo-server's TLS clients at the combined bundle. git uses
+	// GIT_SSL_CAINFO, curl/helm use CURL_CA_BUNDLE, Go uses SSL_CERT_FILE.
+	for _, name := range []string{"SSL_CERT_FILE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE"} {
+		repoServer["env"] = appendToSlice(repoServer["env"], map[string]any{
+			"name":  name,
+			"value": combinedCAPath,
+		})
+	}
+
+	// Stamp the bundle checksum on the pod template so a rotated trust_bundle
+	// rolls the repo-server (re-running the combine init container) whenever the
+	// values are actually applied. Merge into any existing podAnnotations rather
+	// than replacing them.
+	podAnnotations, ok := repoServer["podAnnotations"].(map[string]any)
+	if !ok {
+		podAnnotations = map[string]any{}
+		repoServer["podAnnotations"] = podAnnotations
+	}
+	podAnnotations[orgCAChecksumAnnotation] = caFingerprint
+}
+
+// sha256Fingerprint returns a hex SHA-256 of the bundle, for logging without
+// echoing the certificate body.
+func sha256Fingerprint(pem string) string {
+	sum := sha256.Sum256([]byte(pem))
+	return hex.EncodeToString(sum[:])
 }
 
 // appendToSlice appends a new item to an existing slice, handling both

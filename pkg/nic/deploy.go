@@ -123,8 +123,23 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Resolve the top-level trust bundle once, here at the orchestration layer.
+	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
+	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
+	// store. Resolving once avoids a second disk read and the TOCTOU window
+	// between two reads.
+	trustPEM, err := cfg.TrustBundle.ResolvePEM()
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+	var caBundle string
+	if trustPEM != "" {
+		caBundle = base64.StdEncoding.EncodeToString([]byte(trustPEM))
+	}
+
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -158,7 +173,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				WithMetadata("error", err.Error()))
 			return nil, err
 		}
-		if err := c.bootstrapGitOps(ctx, cfg, repoSource, opts.RegenApps, infraSettings); err != nil {
+		if err := c.bootstrapGitOps(ctx, cfg, repoSource, opts.RegenApps, infraSettings, trustPEM); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
 				WithMetadata("error", err.Error()))
@@ -188,7 +203,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
-		if err := argocd.Install(ctx, cfg, clusterProvider, repoSource, argoCDConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, clusterProvider, repoSource, trustPEM, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
 				WithMetadata("error", err.Error()))
@@ -363,8 +378,9 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 // bootstrapGitOps initializes the GitOps repository with ArgoCD application
 // manifests. It acquires the working copy according to the source kind — open a
 // local directory, or authenticate and clone a remote — writes the manifests,
-// commits, and (for a remote) pushes.
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, src repository.Source, regenApps bool, settings cluster.InfraSettings) error {
+// commits, and (for a remote) pushes. trustBundlePEM is the top-level trust
+// bundle already resolved by the orchestration layer (empty when unset).
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, src repository.Source, regenApps bool, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
@@ -426,14 +442,14 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		status.Progress(ctx, "Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(ctx, cfg, gitClient.WorkDir()); err != nil {
+	if err := c.writeConfigToRepo(ctx, cfg, gitClient.WorkDir(), trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	status.Progress(ctx, "Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient.WorkDir(), cfg, src, settings); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient.WorkDir(), cfg, src, settings, trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
@@ -467,10 +483,12 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 // writeConfigToRepo serializes cfg and writes it into the git working
 // directory. The config holds only env-var names for credentials, never the
 // secrets themselves (and the resolved Source is never serialized), so it is
-// safe to commit as-is. Sourcing from the parsed config keeps this available to
-// library consumers who don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, workDir string) error {
-	configBytes, err := yaml.Marshal(cfg)
+// safe to commit as-is — except the trust bundle, which committedConfig
+// rewrites to its resolved inline form (trustBundlePEM). Sourcing from the
+// parsed config keeps this available to library consumers who don't construct
+// cfg from a file.
+func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, workDir string, trustBundlePEM string) error {
+	configBytes, err := yaml.Marshal(committedConfig(cfg, trustBundlePEM))
 	if err != nil {
 		return fmt.Errorf("marshal config to YAML: %w", err)
 	}
@@ -485,6 +503,21 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository").
 		WithMetadata("path", configDest))
 	return nil
+}
+
+// committedConfig returns the config as it should be recorded in the GitOps
+// repo. A path:-based trust_bundle references a file on the operator's
+// machine, which is meaningless (and leaks a local path) in the committed
+// record, so any configured bundle is rewritten to its resolved inline form
+// (trustBundlePEM, already resolved by the caller; empty when unset). This
+// keeps the committed config self-contained and reflecting the deployed value.
+func committedConfig(cfg *config.NebariConfig, trustBundlePEM string) *config.NebariConfig {
+	out := *cfg
+	out.TrustBundle = nil
+	if cfg.TrustBundle != nil && trustBundlePEM != "" {
+		out.TrustBundle = &config.TrustBundleConfig{Inline: trustBundlePEM}
+	}
+	return &out
 }
 
 // generateSecurePassword generates a cryptographically secure random password.

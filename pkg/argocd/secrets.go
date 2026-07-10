@@ -34,9 +34,9 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, sr
 
 	// Create repository secret data
 	secretData := map[string]string{
-		"name": "gitops-repo",
-		"type": gitRepoType,
-		"url":  src.URL,
+		"name":  "gitops-repo",
+		keyType: gitRepoType,
+		"url":   src.URL,
 	}
 
 	// Use the ArgoCD read credentials (falling back to push credentials)
@@ -111,7 +111,7 @@ func ConfigureOCIAccess(ctx context.Context, client kubernetes.Interface, namesp
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
 			"name":      "docker-oci",
-			"type":      "helm",
+			keyType:     "helm",
 			"url":       "oci://docker.io",
 			"enableOCI": "true",
 		},

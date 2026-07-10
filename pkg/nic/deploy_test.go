@@ -2,7 +2,12 @@ package nic
 
 import (
 	"bytes"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 func TestGenerateSecurePassword(t *testing.T) {
@@ -78,6 +83,72 @@ func TestGenerateSecurePasswordError(t *testing.T) {
 		}
 		if result != "" {
 			t.Errorf("generateSecurePassword() on error should return empty string, got %q", result)
+		}
+	})
+}
+
+func TestCommittedConfig(t *testing.T) {
+	t.Run("rewrites path-based trust_bundle to resolved inline", func(t *testing.T) {
+		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+		cfg := &config.NebariConfig{
+			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
+		}
+
+		committed := committedConfig(cfg, pem)
+
+		if committed.TrustBundle == nil {
+			t.Fatal("TrustBundle should be preserved as inline, got nil")
+		}
+		if committed.TrustBundle.Path != "" {
+			t.Errorf("machine-local path should be dropped, got %q", committed.TrustBundle.Path)
+		}
+		if committed.TrustBundle.Inline != pem {
+			t.Errorf("Inline = %q, want resolved PEM", committed.TrustBundle.Inline)
+		}
+		// Input must not be mutated.
+		if cfg.TrustBundle.Path != "/home/operator/org-ca.pem" || cfg.TrustBundle.Inline != "" {
+			t.Errorf("input cfg.TrustBundle mutated: %+v", cfg.TrustBundle)
+		}
+	})
+
+	t.Run("strips trust_bundle that resolved to empty", func(t *testing.T) {
+		cfg := &config.NebariConfig{
+			TrustBundle: &config.TrustBundleConfig{Path: "   "},
+		}
+
+		committed := committedConfig(cfg, "")
+
+		if committed.TrustBundle != nil {
+			t.Errorf("TrustBundle should be stripped when resolved PEM is empty, got %+v", committed.TrustBundle)
+		}
+	})
+
+	t.Run("leaves unset trust_bundle nil", func(t *testing.T) {
+		committed := committedConfig(&config.NebariConfig{}, "")
+
+		if committed.TrustBundle != nil {
+			t.Errorf("TrustBundle should stay nil, got %+v", committed.TrustBundle)
+		}
+	})
+
+	t.Run("marshalled output excludes machine-local trust_bundle path", func(t *testing.T) {
+		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+		cfg := &config.NebariConfig{
+			ProjectName: "test",
+			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
+		}
+
+		out, err := yaml.Marshal(committedConfig(cfg, pem))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		s := string(out)
+
+		if strings.Contains(s, "/home/operator/org-ca.pem") {
+			t.Errorf("committed output should not contain the local path:\n%s", s)
+		}
+		if !strings.Contains(s, "-----BEGIN CERTIFICATE-----") {
+			t.Errorf("committed output should contain the resolved inline PEM:\n%s", s)
 		}
 	})
 }
