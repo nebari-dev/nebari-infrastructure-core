@@ -46,6 +46,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing the Homebrew cask pushes to nebari-dev/homebrew-tap, a
+          # different repo the default GITHUB_TOKEN cannot write to.
+          # HOMEBREW_TAP_TOKEN is an org-level secret with write access to the tap.
+          # The fallback keeps the variable defined so GoReleaser's config template
+          # always resolves even if the secret is unavailable to this repo.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
