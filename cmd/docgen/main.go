@@ -121,7 +121,8 @@ func discoverProviderConfigFiles(rootDir string) ([]configFile, error) {
 }
 
 func main() {
-	outputDir := flag.String("output", "docs/configuration", "Output directory for generated documentation")
+	outputDir := flag.String("output", "docs/configuration", "Output directory for generated configuration documentation")
+	cliOutputDir := flag.String("cli-output", "docs/reference/cli", "Output directory for generated CLI reference documentation")
 	rootDir := flag.String("root", "", "Root directory of the project (defaults to current directory)")
 	verbose := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
@@ -136,7 +137,8 @@ func main() {
 
 	if *verbose {
 		log.Printf("Project root: %s", *rootDir)
-		log.Printf("Output directory: %s", *outputDir)
+		log.Printf("Configuration output directory: %s", *outputDir)
+		log.Printf("CLI output directory: %s", *cliOutputDir)
 	}
 
 	outPath := filepath.Join(*rootDir, *outputDir)
@@ -164,7 +166,13 @@ func main() {
 		log.Fatalf("Failed to generate index: %v", err)
 	}
 
-	fmt.Printf("Documentation generated successfully in %s\n", outPath)
+	cliOutPath := filepath.Join(*rootDir, *cliOutputDir)
+	if err := generateCLIDocs(cliOutPath); err != nil {
+		log.Fatalf("Failed to generate CLI docs: %v", err)
+	}
+
+	fmt.Printf("Configuration documentation generated successfully in %s\n", outPath)
+	fmt.Printf("CLI documentation generated successfully in %s\n", cliOutPath)
 }
 
 func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (err error) {
