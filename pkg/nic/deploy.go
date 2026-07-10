@@ -385,6 +385,12 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
 
+	if src == nil {
+		err := fmt.Errorf("repository source is nil")
+		span.RecordError(err)
+		return err
+	}
+
 	span.SetAttributes(
 		attribute.String("repository.url", src.RepoURL()),
 		attribute.Bool("regen_apps", regenApps),
@@ -422,6 +428,10 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 			return fmt.Errorf("failed to clone git repository: %w", err)
 		}
 		remote = true
+	default:
+		err := fmt.Errorf("unsupported repository source type %T", src)
+		span.RecordError(err)
+		return err
 	}
 
 	// Check if already bootstrapped
