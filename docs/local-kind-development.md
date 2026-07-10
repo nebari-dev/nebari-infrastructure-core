@@ -25,10 +25,12 @@ The Makefile reads `examples/local-config.yaml` and automatically handles three 
 | Config | What happens |
 |--------|-------------|
 | No `git_repository` section | Auto-creates `~/.nic/gitops/{project_name}` and mounts it into the cluster |
-| `url: "file:///path/to/repo"` | Mounts that local path into the cluster |
+| `url: "file:///path/to/repo"` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
 | `url: "git@github.com:..."` | No mount — ArgoCD pulls from the remote repo directly |
 
 For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod so ArgoCD can read manifests directly from your filesystem.
+
+NIC normalizes local GitOps repositories to directory mode `0755` and file mode `0644` so the non-root ArgoCD repo-server can read them. Other `extra_mounts` are user-managed, and NIC does not recursively change their permissions.
 
 If an existing Kind cluster was created with a different local GitOps path, recreate it with `make localkind-down` followed by `make localkind-up`; Kind mounts are fixed at cluster creation time.
 

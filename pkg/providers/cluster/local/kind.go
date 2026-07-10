@@ -85,9 +85,9 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	})
 
 	for _, m := range kindCfg.ExtraMounts {
-		// Custom mounts are user-managed. NIC creates the host path if needed
-		// for kind, but does not recursively normalize existing permissions.
-		if err := os.MkdirAll(m.HostPath, git.LocalGitOpsDirMode); err != nil {
+		// Create custom mount roots for kind without changing existing contents.
+		// GitOps bootstrap separately normalizes a configured file:// repository.
+		if err := os.MkdirAll(m.HostPath, 0o750); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("create extra_mount host path %s: %w", m.HostPath, err)
 		}

@@ -519,16 +519,16 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.Chmod(filepath.Dir(configDest), git.LocalGitOpsDirMode); err != nil {
+	if err := os.Chmod(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
 		return fmt.Errorf("set config directory permissions: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, git.LocalGitOpsFileMode); err != nil {
+	if err := os.WriteFile(configDest, configBytes, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
-	if err := os.Chmod(configDest, git.LocalGitOpsFileMode); err != nil {
+	if err := os.Chmod(configDest, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("set config file permissions: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").

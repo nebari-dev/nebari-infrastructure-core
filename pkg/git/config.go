@@ -19,12 +19,11 @@ const (
 	// DefaultBranch is the default git branch name when none is specified.
 	DefaultBranch = "main"
 
-	// LocalGitOpsDirMode is the directory mode for local file:// GitOps repos
-	// that must be readable by non-root ArgoCD pods through a kind hostPath mount.
-	LocalGitOpsDirMode os.FileMode = 0o755
+	// GitOpsDirMode is the directory mode for generated GitOps repository content.
+	GitOpsDirMode os.FileMode = 0o755
 
-	// LocalGitOpsFileMode is the file mode for generated non-secret GitOps files.
-	LocalGitOpsFileMode os.FileMode = 0o644
+	// GitOpsFileMode is the file mode for generated non-secret GitOps files.
+	GitOpsFileMode os.FileMode = 0o644
 )
 
 var userHomeDir = os.UserHomeDir
@@ -47,13 +46,13 @@ func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
 	tracer := otel.Tracer(tracerName)
 	_, span := tracer.Start(ctx, "git.EnsureLocalGitOpsDir")
 	defer span.End()
-	span.SetAttributes(attribute.String("local_path", path))
+	span.SetAttributes(attribute.String("git.repo_path", path))
 
-	if err := os.MkdirAll(path, LocalGitOpsDirMode); err != nil {
+	if err := os.MkdirAll(path, GitOpsDirMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("create local gitops directory %s: %w", path, err)
 	}
-	if err := os.Chmod(path, LocalGitOpsDirMode); err != nil {
+	if err := os.Chmod(path, GitOpsDirMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("set local gitops directory permissions %s: %w", path, err)
 	}

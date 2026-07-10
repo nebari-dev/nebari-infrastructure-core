@@ -12,9 +12,61 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
-func TestWriteConfigToRepoUsesLocalGitOpsPermissions(t *testing.T) {
+func TestBootstrapGitOpsNormalizesExistingLocalRepository(t *testing.T) {
+	repoPath := t.TempDir()
+	gitConfig := &git.Config{
+		URL:    "file://" + repoPath,
+		Branch: git.DefaultBranch,
+	}
+
+	gitClient, err := git.NewClient(gitConfig)
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	if err := gitClient.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	markerPath := filepath.Join(repoPath, ".bootstrapped")
+	if err := os.WriteFile(markerPath, []byte("bootstrapped_at: test\n"), 0o600); err != nil {
+		t.Fatalf("write bootstrap marker: %v", err)
+	}
+	manifestPath := filepath.Join(repoPath, "application.yaml")
+	if err := os.WriteFile(manifestPath, []byte("kind: Application\n"), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.Chmod(repoPath, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+		t.Fatalf("chmod repository: %v", err)
+	}
+
+	cfg := &config.NebariConfig{
+		ProjectName:   "test",
+		GitRepository: gitConfig,
+	}
+	client := &Client{}
+	if err := client.bootstrapGitOps(context.Background(), cfg, gitConfig, false, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("bootstrapGitOps() error: %v", err)
+	}
+
+	assertMode := func(path string, want os.FileMode) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %v, want %v", path, got, want)
+		}
+	}
+	assertMode(repoPath, git.GitOpsDirMode)
+	assertMode(markerPath, git.GitOpsFileMode)
+	assertMode(manifestPath, git.GitOpsFileMode)
+}
+
+func TestWriteConfigToRepoUsesGitOpsPermissions(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "gitops")
 	cfg := &config.NebariConfig{ProjectName: "test"}
 	gitConfig := &git.Config{
@@ -31,16 +83,16 @@ func TestWriteConfigToRepoUsesLocalGitOpsPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat workDir: %v", err)
 	}
-	if got := dirInfo.Mode().Perm(); got != git.LocalGitOpsDirMode {
-		t.Errorf("workDir mode = %v, want %v", got, git.LocalGitOpsDirMode)
+	if got := dirInfo.Mode().Perm(); got != git.GitOpsDirMode {
+		t.Errorf("workDir mode = %v, want %v", got, git.GitOpsDirMode)
 	}
 
 	configInfo, err := os.Stat(filepath.Join(workDir, "nic-config.yaml"))
 	if err != nil {
 		t.Fatalf("stat nic-config.yaml: %v", err)
 	}
-	if got := configInfo.Mode().Perm(); got != git.LocalGitOpsFileMode {
-		t.Errorf("nic-config.yaml mode = %v, want %v", got, git.LocalGitOpsFileMode)
+	if got := configInfo.Mode().Perm(); got != git.GitOpsFileMode {
+		t.Errorf("nic-config.yaml mode = %v, want %v", got, git.GitOpsFileMode)
 	}
 }
 

@@ -730,16 +730,16 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
 	} else if err != nil {
 		t.Fatalf("stat redirect route: %v", err)
-	} else if got := redirectInfo.Mode().Perm(); got != git.LocalGitOpsFileMode {
-		t.Errorf("redirect route mode = %v, want %v", got, git.LocalGitOpsFileMode)
+	} else if got := redirectInfo.Mode().Perm(); got != git.GitOpsFileMode {
+		t.Errorf("redirect route mode = %v, want %v", got, git.GitOpsFileMode)
 	}
 
 	routesInfo, err := os.Stat(filepath.Dir(redirectPath))
 	if err != nil {
 		t.Fatalf("stat routes directory: %v", err)
 	}
-	if got := routesInfo.Mode().Perm(); got != git.LocalGitOpsDirMode {
-		t.Errorf("routes directory mode = %v, want %v", got, git.LocalGitOpsDirMode)
+	if got := routesInfo.Mode().Perm(); got != git.GitOpsDirMode {
+		t.Errorf("routes directory mode = %v, want %v", got, git.GitOpsDirMode)
 	}
 
 	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant

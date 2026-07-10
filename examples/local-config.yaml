@@ -49,7 +49,8 @@ cluster:
 # cluster.local.kind.extra_mounts entry for the same path (see the kind block
 # above). NIC only auto-mounts the OPTION 1 default, so a custom file:// path is
 # invisible to the in-cluster ArgoCD repo-server unless you mount it yourself.
-# The paths must match exactly.
+# The paths must match exactly. NIC normalizes the configured GitOps repository
+# so the non-root repo-server can read it; unrelated extra_mounts are unchanged.
 # git_repository:
 #   url: "file:///home/user/my-gitops-repo"   # must be an absolute path
 #   branch: main

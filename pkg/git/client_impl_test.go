@@ -306,8 +306,8 @@ func TestClientWriteBootstrapMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat marker file: %v", err)
 	}
-	if got := markerInfo.Mode().Perm(); got != LocalGitOpsFileMode {
-		t.Errorf("marker file mode = %v, want %v", got, LocalGitOpsFileMode)
+	if got := markerInfo.Mode().Perm(); got != GitOpsFileMode {
+		t.Errorf("marker file mode = %v, want %v", got, GitOpsFileMode)
 	}
 
 	// Verify IsBootstrapped returns true
@@ -849,7 +849,7 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, root, LocalGitOpsDirMode)
+				assertPathMode(t, root, GitOpsDirMode)
 			},
 		},
 		{
@@ -867,7 +867,7 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, "apps", "root"), LocalGitOpsDirMode)
+				assertPathMode(t, filepath.Join(root, "apps", "root"), GitOpsDirMode)
 			},
 		},
 		{
@@ -885,7 +885,7 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), LocalGitOpsFileMode)
+				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), GitOpsFileMode)
 			},
 		},
 		{
@@ -913,9 +913,9 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, ".git"), LocalGitOpsDirMode)
-				assertPathMode(t, filepath.Join(root, ".git", "objects"), LocalGitOpsDirMode)
-				assertPathMode(t, filepath.Join(root, ".git", "HEAD"), LocalGitOpsFileMode)
+				assertPathMode(t, filepath.Join(root, ".git"), GitOpsDirMode)
+				assertPathMode(t, filepath.Join(root, ".git", "objects"), GitOpsDirMode)
+				assertPathMode(t, filepath.Join(root, ".git", "HEAD"), GitOpsFileMode)
 			},
 		},
 		{

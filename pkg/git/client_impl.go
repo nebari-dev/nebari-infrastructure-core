@@ -271,11 +271,11 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 
 	// Ensure working directory exists
 	if c.cfg.Path != "" {
-		if err := os.MkdirAll(c.workDir, LocalGitOpsDirMode); err != nil {
+		if err := os.MkdirAll(c.workDir, GitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
 		}
-		if err := os.Chmod(c.workDir, LocalGitOpsDirMode); err != nil {
+		if err := os.Chmod(c.workDir, GitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to set subdirectory permissions %s: %w", c.cfg.Path, err)
 		}
@@ -435,9 +435,9 @@ func (c *ClientImpl) NormalizeLocalPermissions(ctx context.Context) error {
 			return nil
 		}
 
-		mode := LocalGitOpsFileMode
+		mode := GitOpsFileMode
 		if d.IsDir() {
-			mode = LocalGitOpsDirMode
+			mode = GitOpsDirMode
 		}
 		if err := rootDir.Chmod(path, mode); err != nil {
 			return fmt.Errorf("set permissions on %s: %w", path, err)
@@ -592,11 +592,11 @@ func (c *ClientImpl) WriteBootstrapMarker(ctx context.Context) error {
 
 	content := fmt.Sprintf("bootstrapped_at: %s\n", time.Now().UTC().Format(time.RFC3339))
 
-	if err := os.WriteFile(markerPath, []byte(content), LocalGitOpsFileMode); err != nil {
+	if err := os.WriteFile(markerPath, []byte(content), GitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
-	if err := os.Chmod(markerPath, LocalGitOpsFileMode); err != nil {
+	if err := os.Chmod(markerPath, GitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to set bootstrap marker permissions: %w", err)
 	}

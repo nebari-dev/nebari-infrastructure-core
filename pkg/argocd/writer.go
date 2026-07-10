@@ -338,10 +338,10 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
-			if err := os.MkdirAll(destPath, git.LocalGitOpsDirMode); err != nil {
+			if err := os.MkdirAll(destPath, git.GitOpsDirMode); err != nil {
 				return err
 			}
-			return os.Chmod(destPath, git.LocalGitOpsDirMode)
+			return os.Chmod(destPath, git.GitOpsDirMode)
 		}
 
 		// Read template content
@@ -357,15 +357,15 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), git.GitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, git.LocalGitOpsFileMode); err != nil {
+		if err := os.WriteFile(destPath, processed, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
-		if err := os.Chmod(destPath, git.LocalGitOpsFileMode); err != nil {
+		if err := os.Chmod(destPath, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to set file permissions for %s: %w", destPath, err)
 		}
 
