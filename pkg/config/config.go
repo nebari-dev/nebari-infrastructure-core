@@ -30,7 +30,7 @@ type NebariConfig struct {
 	// Only one provider can be configured at a time.
 	DNS *DNSConfig `yaml:"dns,omitempty"`
 
-	// Repository configures the GitOps repository provider (optional).
+	// Repository configures the GitOps repository provider.
 	// Only one provider can be configured at a time.
 	Repository *RepositoryConfig `yaml:"repository,omitempty"`
 
