@@ -830,6 +830,170 @@ func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 	}
 }
 
+func TestClientNormalizeLocalPermissions(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, root string) string
+		check       func(t *testing.T, root string)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "root directory",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				if err := os.Chmod(root, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+					t.Fatalf("chmod root: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, root, LocalGitOpsDirMode)
+			},
+		},
+		{
+			name: "nested directories",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				nested := filepath.Join(root, "apps", "root")
+				if err := os.MkdirAll(nested, 0o700); err != nil {
+					t.Fatalf("mkdir nested: %v", err)
+				}
+				if err := os.Chmod(nested, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+					t.Fatalf("chmod nested: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, filepath.Join(root, "apps", "root"), LocalGitOpsDirMode)
+			},
+		},
+		{
+			name: "regular files",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				path := filepath.Join(root, "nic-config.yaml")
+				if err := os.WriteFile(path, []byte("project_name: test\n"), 0o600); err != nil {
+					t.Fatalf("write file: %v", err)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatalf("chmod file: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), LocalGitOpsFileMode)
+			},
+		},
+		{
+			name: ".git contents",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				objects := filepath.Join(root, ".git", "objects")
+				if err := os.MkdirAll(objects, 0o700); err != nil {
+					t.Fatalf("mkdir .git objects: %v", err)
+				}
+				if err := os.Chmod(filepath.Join(root, ".git"), 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+					t.Fatalf("chmod .git: %v", err)
+				}
+				if err := os.Chmod(objects, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+					t.Fatalf("chmod objects: %v", err)
+				}
+				head := filepath.Join(root, ".git", "HEAD")
+				if err := os.WriteFile(head, []byte("ref: refs/heads/main\n"), 0o600); err != nil {
+					t.Fatalf("write HEAD: %v", err)
+				}
+				if err := os.Chmod(head, 0o600); err != nil {
+					t.Fatalf("chmod HEAD: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, filepath.Join(root, ".git"), LocalGitOpsDirMode)
+				assertPathMode(t, filepath.Join(root, ".git", "objects"), LocalGitOpsDirMode)
+				assertPathMode(t, filepath.Join(root, ".git", "HEAD"), LocalGitOpsFileMode)
+			},
+		},
+		{
+			name: "symlink skip",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				target := filepath.Join(t.TempDir(), "target")
+				if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+					t.Fatalf("write symlink target: %v", err)
+				}
+				if err := os.Chmod(target, 0o600); err != nil {
+					t.Fatalf("chmod symlink target: %v", err)
+				}
+				link := filepath.Join(root, "linked-target")
+				if err := os.Symlink(target, link); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				link := filepath.Join(root, "linked-target")
+				target, err := os.Readlink(link)
+				if err != nil {
+					t.Fatalf("readlink: %v", err)
+				}
+				assertPathMode(t, target, 0o600)
+			},
+		},
+		{
+			name: "missing root error",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				return filepath.Join(root, "missing")
+			},
+			wantErr:     true,
+			errContains: "open local gitops root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			repoPath := tt.setup(t, root)
+			client := &ClientImpl{
+				cfg:      &Config{URL: "file://" + repoPath},
+				repoPath: repoPath,
+			}
+
+			err := client.NormalizeLocalPermissions(context.Background())
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("NormalizeLocalPermissions() expected error")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("NormalizeLocalPermissions() error = %v, want containing %q", err, tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeLocalPermissions() error: %v", err)
+			}
+			tt.check(t, root)
+		})
+	}
+}
+
+func assertPathMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %v, want %v", path, got, want)
+	}
+}
+
 func TestClientCommitAndPushNotInitialized(t *testing.T) {
 	client := &ClientImpl{
 		cfg:     &Config{URL: "file:///test"},

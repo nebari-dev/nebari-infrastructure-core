@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,6 +264,11 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 	_, span := tracer.Start(ctx, "git.initLocalPath")
 	defer span.End()
 
+	if err := EnsureLocalGitOpsDir(ctx, c.repoPath); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Ensure working directory exists
 	if c.cfg.Path != "" {
 		if err := os.MkdirAll(c.workDir, LocalGitOpsDirMode); err != nil {
@@ -395,6 +401,54 @@ func (c *ClientImpl) pull(ctx context.Context) error {
 // WorkDir returns the local working directory path.
 func (c *ClientImpl) WorkDir() string {
 	return c.workDir
+}
+
+// NormalizeLocalPermissions normalizes a local file:// GitOps repository tree,
+// including .git, so ArgoCD's non-root repo-server can read refs and generated
+// manifests through a read-only kind hostPath mount. Symlinks are skipped.
+func (c *ClientImpl) NormalizeLocalPermissions(ctx context.Context) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.NormalizeLocalPermissions")
+	defer span.End()
+	span.SetAttributes(attribute.String("git.repo_path", c.repoPath))
+
+	if c.cfg == nil || !c.cfg.IsLocalPath() {
+		span.SetAttributes(attribute.Bool("git.local_path", false))
+		return nil
+	}
+	span.SetAttributes(attribute.Bool("git.local_path", true))
+
+	rootDir, err := os.OpenRoot(c.repoPath)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("open local gitops root %s: %w", c.repoPath, err)
+	}
+	defer func() {
+		_ = rootDir.Close()
+	}()
+
+	err = fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+
+		mode := LocalGitOpsFileMode
+		if d.IsDir() {
+			mode = LocalGitOpsDirMode
+		}
+		if err := rootDir.Chmod(path, mode); err != nil {
+			return fmt.Errorf("set permissions on %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set local gitops permissions under %s: %w", c.repoPath, err)
+	}
+	return nil
 }
 
 // CommitAndPush stages all changes, commits, and pushes to remote.

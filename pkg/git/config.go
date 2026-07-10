@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
@@ -24,16 +27,37 @@ const (
 	LocalGitOpsFileMode os.FileMode = 0o644
 )
 
+var userHomeDir = os.UserHomeDir
+
 // DefaultLocalPath returns the host directory NIC manages for a project's
 // local gitops repository when no git_repository is configured. It lives under
 // the user's home directory so the repo is durable and stays on host paths that
 // kind/Docker Desktop can mount reliably.
 func DefaultLocalPath(projectName string) string {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := userHomeDir()
 	if err != nil || homeDir == "" {
 		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
 	}
 	return filepath.Join(homeDir, ".nic", "gitops", projectName)
+}
+
+// EnsureLocalGitOpsDir creates a NIC-managed local GitOps root and sets its
+// permissions so non-root ArgoCD pods can read it through a kind hostPath mount.
+func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.EnsureLocalGitOpsDir")
+	defer span.End()
+	span.SetAttributes(attribute.String("local_path", path))
+
+	if err := os.MkdirAll(path, LocalGitOpsDirMode); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("create local gitops directory %s: %w", path, err)
+	}
+	if err := os.Chmod(path, LocalGitOpsDirMode); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("set local gitops directory permissions %s: %w", path, err)
+	}
+	return nil
 }
 
 // Config represents git repository configuration for GitOps bootstrap.

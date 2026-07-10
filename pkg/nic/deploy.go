@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -298,11 +297,8 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
 		WithMetadata("path", localPath))
 
-	if err := os.MkdirAll(localPath, git.LocalGitOpsDirMode); err != nil {
-		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
-	}
-	if err := os.Chmod(localPath, git.LocalGitOpsDirMode); err != nil {
-		return nil, fmt.Errorf("failed to set auto-generated directory permissions %s: %w", localPath, err)
+	if err := git.EnsureLocalGitOpsDir(ctx, localPath); err != nil {
+		return nil, err
 	}
 
 	return gitCfg, nil
@@ -438,6 +434,12 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		span.RecordError(err)
 		return fmt.Errorf("failed to initialize git repository: %w", err)
 	}
+	if isLocal {
+		if err := gitClient.NormalizeLocalPermissions(ctx); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
 
 	// Check if already bootstrapped
 	bootstrapped, err := gitClient.IsBootstrapped(ctx)
@@ -447,12 +449,6 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	if bootstrapped && !regenApps {
-		if isLocal && cfg.GitRepository == nil {
-			if err := ensureLocalGitOpsPermissions(ctx, localPath); err != nil {
-				span.RecordError(err)
-				return err
-			}
-		}
 		status.Info(ctx, "GitOps repository already bootstrapped, skipping manifest generation")
 		span.SetAttributes(attribute.Bool("skipped", true))
 		return nil
@@ -495,8 +491,8 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	if isLocal && cfg.GitRepository == nil {
-		if err := ensureLocalGitOpsPermissions(ctx, localPath); err != nil {
+	if isLocal {
+		if err := gitClient.NormalizeLocalPermissions(ctx); err != nil {
 			span.RecordError(err)
 			return err
 		}
@@ -537,48 +533,6 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
 		WithMetadata("path", configDest))
-	return nil
-}
-
-// ensureLocalGitOpsPermissions normalizes NIC-managed local GitOps repositories
-// so ArgoCD's non-root repo-server can read refs and generated manifests through
-// a read-only kind hostPath mount.
-func ensureLocalGitOpsPermissions(ctx context.Context, root string) error {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "nic.ensureLocalGitOpsPermissions")
-	defer span.End()
-	span.SetAttributes(attribute.String("local_path", root))
-
-	rootDir, err := os.OpenRoot(root)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("open local gitops root %s: %w", root, err)
-	}
-	defer func() {
-		_ = rootDir.Close()
-	}()
-
-	err = fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-
-		mode := git.LocalGitOpsFileMode
-		if d.IsDir() {
-			mode = git.LocalGitOpsDirMode
-		}
-		if err := rootDir.Chmod(path, mode); err != nil {
-			return fmt.Errorf("set permissions on %s: %w", path, err)
-		}
-		return nil
-	})
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("set local gitops permissions under %s: %w", root, err)
-	}
 	return nil
 }
 

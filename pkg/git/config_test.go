@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,15 +11,48 @@ import (
 )
 
 func TestDefaultLocalPath(t *testing.T) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil || homeDir == "" {
-		t.Skipf("user home directory unavailable: %v", err)
+	originalUserHomeDir := userHomeDir
+	defer func() {
+		userHomeDir = originalUserHomeDir
+	}()
+
+	tests := []struct {
+		name        string
+		userHomeDir func() (string, error)
+		want        string
+	}{
+		{
+			name: "uses home directory",
+			userHomeDir: func() (string, error) {
+				return filepath.Join("home", "test-user"), nil
+			},
+			want: filepath.Join("home", "test-user", ".nic", "gitops", "my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory errors",
+			userHomeDir: func() (string, error) {
+				return "", errors.New("home unavailable")
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory is empty",
+			userHomeDir: func() (string, error) {
+				return "", nil
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
 	}
 
-	got := DefaultLocalPath("my-nebari-local")
-	want := filepath.Join(homeDir, ".nic", "gitops", "my-nebari-local")
-	if got != want {
-		t.Fatalf("DefaultLocalPath() = %q, want %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userHomeDir = tt.userHomeDir
+
+			got := DefaultLocalPath("my-nebari-local")
+			if got != tt.want {
+				t.Fatalf("DefaultLocalPath() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

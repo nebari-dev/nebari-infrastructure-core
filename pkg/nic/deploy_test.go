@@ -23,7 +23,7 @@ func TestWriteConfigToRepoUsesLocalGitOpsPermissions(t *testing.T) {
 	}
 
 	client := &Client{}
-	if err := client.writeConfigToRepo(context.Background(), cfg, gitConfig, workDir); err != nil {
+	if err := client.writeConfigToRepo(context.Background(), cfg, gitConfig, workDir, ""); err != nil {
 		t.Fatalf("writeConfigToRepo() error: %v", err)
 	}
 

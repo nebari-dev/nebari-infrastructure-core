@@ -360,9 +360,6 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		if err := os.MkdirAll(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
-		if err := os.Chmod(filepath.Dir(destPath), git.LocalGitOpsDirMode); err != nil {
-			return fmt.Errorf("failed to set directory permissions for %s: %w", destPath, err)
-		}
 
 		// Write processed content
 		if err := os.WriteFile(destPath, processed, git.LocalGitOpsFileMode); err != nil {

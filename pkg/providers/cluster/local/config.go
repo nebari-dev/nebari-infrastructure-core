@@ -19,6 +19,8 @@ type KindConfig struct {
 	// ExtraMounts are additional host directories mounted into the cluster
 	// node container. The local file:// gitops repository (explicit or
 	// auto-created) is mounted automatically and does not need to be listed.
+	// Custom mounts are user-managed; NIC does not recursively normalize their
+	// permissions.
 	ExtraMounts []KindMount `yaml:"extra_mounts,omitempty"`
 }
 
