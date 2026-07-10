@@ -21,6 +21,20 @@ git_repository:
   # argocd_auth:
   #   ssh_key_env: ARGOCD_SSH_KEY
 
+# Optional: org CA trust bundle. Installs the PEM bundle into the OS trust
+# store of every EKS worker node before kubelet starts, and deploys
+# trust-manager to project it as a ConfigMap into every namespace for in-pod
+# trust. Required when nodes or workloads must reach the EKS control plane,
+# ECR, or external services through a TLS-inspecting egress proxy.
+# Exactly one of `path` or `inline` may be set.
+# trust_bundle:
+#   path: /etc/ssl/certs/my-org-ca.pem
+#   # OR
+#   # inline: |
+#   #   -----BEGIN CERTIFICATE-----
+#   #   ...
+#   #   -----END CERTIFICATE-----
+
 cluster:
   aws:
     region: us-west-2
@@ -131,6 +145,11 @@ cluster:
     # the deploy waiting for an LB endpoint.
     # load_balancer_scheme: internet-facing  # or: internal
 
+    # When a node group sets gpu: true, nic installs the NVIDIA GPU Operator on
+    # the cluster (device plugin only; the AL2023_x86_64_NVIDIA AMI already
+    # ships the driver and container toolkit) so nvidia.com/gpu becomes
+    # schedulable. No extra config is required. See ADR-0006 for the rationale.
+
     # EFS configuration for shared storage (optional)
     # Creates an EFS file system with mount targets in each private subnet
     efs:
@@ -141,18 +160,6 @@ cluster:
       # storage_class_name: efs-sc      # Optional, defaults to efs-sc
       # kms_key_id: ""                  # Optional: KMS key ARN for encryption
       # provisioned_mbps: 100           # Required if throughput_mode is provisioned
-
-    # Optional: install an org CA bundle into the OS trust store of every EKS
-    # worker node before kubelet starts. Required when nodes must reach the EKS
-    # control plane, ECR, or pull container images through a TLS-inspecting
-    # egress proxy. Exactly one of `path` or `inline` may be set.
-    # trust_bundle:
-    #   path: /etc/ssl/certs/my-org-ca.pem
-    #   # OR
-    #   # inline: |
-    #   #   -----BEGIN CERTIFICATE-----
-    #   #   ...
-    #   #   -----END CERTIFICATE-----
 
     tags:
       Environment: development
