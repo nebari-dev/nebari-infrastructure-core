@@ -102,20 +102,24 @@ OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
 ### Component Structure
 
 ```
-cmd/nic/                # CLI entry point - thin cobra commands over pkg/nic
-  ├── main.go           # CLI setup, telemetry init, .env loading via godotenv
-  ├── deploy.go         # Deploy command
-  ├── destroy.go        # Destroy command
-  ├── validate.go       # Validate command
-  ├── kubeconfig.go     # Kubeconfig command
-  ├── version.go        # Version command
-  ├── gendocs.go         # Hidden __gendocs command, generates docs/reference/cli/
-  └── config_discovery.go # Resolve config file path
+cmd/nic/                # CLI entry point - thin wrapper: .env loading, telemetry, signal handling
+  └── main.go           # Calls internal/cli.Execute(ctx)
 
-cmd/docgen/              # Standalone tool: generates docs/configuration/ from provider config structs
+cmd/docgen/              # Standalone tool: generates docs/reference/cli/ (from internal/cli.NewRootCmd())
+                          # and docs/configuration/ (from provider config structs)
+
+internal/
+  └── cli/              # Cobra command tree; imported by cmd/nic (to run) and cmd/docgen (to introspect for docs)
+      ├── root.go        # NewRootCmd() constructor, Execute(ctx), RunError
+      ├── deploy.go      # Deploy command
+      ├── destroy.go     # Destroy command
+      ├── validate.go    # Validate command
+      ├── kubeconfig.go  # Kubeconfig command
+      ├── version.go     # Version command
+      └── config_discovery.go # Resolve config file path
 
 pkg/
-  ├── nic/              # Orchestration + programmatic entrypoint; cmd/nic is a thin wrapper over this
+  ├── nic/              # Orchestration + programmatic entrypoint; internal/cli is a thin wrapper over this
   │   ├── client.go     # Client construction + default provider registry
   │   ├── deploy.go     # Deploy orchestration (provider -> argocd -> dns -> endpoint)
   │   ├── destroy.go    # Destroy orchestration
