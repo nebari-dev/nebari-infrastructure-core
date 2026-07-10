@@ -434,12 +434,6 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		span.RecordError(err)
 		return fmt.Errorf("failed to initialize git repository: %w", err)
 	}
-	if isLocal {
-		if err := gitClient.NormalizeLocalPermissions(ctx); err != nil {
-			span.RecordError(err)
-			return err
-		}
-	}
 
 	// Check if already bootstrapped
 	bootstrapped, err := gitClient.IsBootstrapped(ctx)
@@ -489,13 +483,6 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 			return fmt.Errorf("failed to commit: %w", err)
 		}
 		return fmt.Errorf("failed to commit and push: %w", err)
-	}
-
-	if isLocal {
-		if err := gitClient.NormalizeLocalPermissions(ctx); err != nil {
-			span.RecordError(err)
-			return err
-		}
 	}
 
 	if isLocal {

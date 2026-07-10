@@ -828,6 +828,7 @@ func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 	if commit.Message != "First commit on fresh repo" {
 		t.Errorf("commit message = %q, want %q", commit.Message, "First commit on fresh repo")
 	}
+	assertPathMode(t, filePath, GitOpsFileMode)
 }
 
 func TestClientNormalizeLocalPermissions(t *testing.T) {
@@ -965,18 +966,18 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 				repoPath: repoPath,
 			}
 
-			err := client.NormalizeLocalPermissions(context.Background())
+			err := client.normalizeLocalPermissions(context.Background())
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("NormalizeLocalPermissions() expected error")
+					t.Fatalf("normalizeLocalPermissions() expected error")
 				}
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Fatalf("NormalizeLocalPermissions() error = %v, want containing %q", err, tt.errContains)
+					t.Fatalf("normalizeLocalPermissions() error = %v, want containing %q", err, tt.errContains)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("NormalizeLocalPermissions() error: %v", err)
+				t.Fatalf("normalizeLocalPermissions() error: %v", err)
 			}
 			tt.check(t, root)
 		})

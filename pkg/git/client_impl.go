@@ -275,10 +275,6 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.cfg.Path, err)
 		}
-		if err := os.Chmod(c.workDir, GitOpsDirMode); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to set subdirectory permissions %s: %w", c.cfg.Path, err)
-		}
 	}
 
 	// Check if .git directory exists
@@ -403,12 +399,18 @@ func (c *ClientImpl) WorkDir() string {
 	return c.workDir
 }
 
-// NormalizeLocalPermissions normalizes a local file:// GitOps repository tree,
+// normalizeLocalPermissions normalizes a local file:// GitOps repository tree,
 // including .git, so ArgoCD's non-root repo-server can read refs and generated
 // manifests through a read-only kind hostPath mount. Symlinks are skipped.
-func (c *ClientImpl) NormalizeLocalPermissions(ctx context.Context) error {
+//
+// This is load-bearing, not defensive: git/go-git create .git contents under the
+// deploying user's umask, so a restrictive umask (e.g. 077) yields 0600/0700
+// objects the repo-server cannot read. It runs on the write path (after commit),
+// which is the only point new content is produced; we intentionally do not
+// re-walk an already-bootstrapped repo on the skip path.
+func (c *ClientImpl) normalizeLocalPermissions(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
-	_, span := tracer.Start(ctx, "git.NormalizeLocalPermissions")
+	_, span := tracer.Start(ctx, "git.normalizeLocalPermissions")
 	defer span.End()
 	span.SetAttributes(attribute.String("git.repo_path", c.repoPath))
 
@@ -470,7 +472,15 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	// For local paths, only commit (no push)
 	if c.cfg.IsLocalPath() {
 		span.SetAttributes(attribute.Bool("git.local_path", true))
-		return c.commitLocal(ctx, message)
+		if err := c.commitLocal(ctx, message); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if err := c.normalizeLocalPermissions(ctx); err != nil {
+			span.RecordError(err)
+			return err
+		}
+		return nil
 	}
 
 	// Stage and commit changes
