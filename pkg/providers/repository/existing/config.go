@@ -72,14 +72,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// GetArgoCDAuth returns the ArgoCD auth config, falling back to Auth.
-func (c *Config) GetArgoCDAuth() *AuthConfig {
-	if c.ArgoCDAuth != nil {
-		return c.ArgoCDAuth
-	}
-	return &c.Auth
-}
-
 // Validate checks that exactly one auth method is configured and complete.
 func (a *AuthConfig) Validate() error {
 	switch {

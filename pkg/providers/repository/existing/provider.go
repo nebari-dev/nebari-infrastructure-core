@@ -110,10 +110,15 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 		return nil, fmt.Errorf("resolve push credentials: %w", err)
 	}
 
-	readAuth, err := existingCfg.GetArgoCDAuth().resolve()
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("resolve argocd credentials: %w", err)
+	// ReadAuth stays nil when argocd_auth is not configured.
+	// RemoteSource.ArgoCDAuth() falls back to PushAuth.
+	var readAuth repository.Auth
+	if existingCfg.ArgoCDAuth != nil {
+		readAuth, err = existingCfg.ArgoCDAuth.resolve()
+		if err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("resolve argocd credentials: %w", err)
+		}
 	}
 
 	return repository.RemoteSource{
