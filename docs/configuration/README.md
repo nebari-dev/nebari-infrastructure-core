@@ -3,7 +3,7 @@
 This directory contains auto-generated documentation for Nebari Infrastructure Core configuration options.
 
 > This documentation is auto-generated from source code using `go generate`.
-> To regenerate, run: `make config-docs` or `go generate ./cmd/docgen`
+> To regenerate, run: `make docs` or `go generate ./cmd/docgen`
 
 ## Configuration Files
 
