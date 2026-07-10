@@ -421,8 +421,8 @@ References:
   - **ADR-0003** - Software pack codegen
   - **ADR-0004** - Out-of-tree provider plugin architecture (Proposed)
 - **`docs/design-doc/`** - Living design docs (architecture / implementation / operations / appendix)
-- **`docs/reference/cli/`** - Generated CLI command reference (from `cmd/nic`'s cobra tree; regenerate with `make docs`)
-- **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make config-docs`)
+- **`docs/reference/cli/`** - Generated CLI command reference (from `internal/cli`'s cobra tree; regenerate with `make docs`)
+- **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make docs`)
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
 
