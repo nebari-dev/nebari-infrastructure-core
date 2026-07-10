@@ -267,7 +267,8 @@ func (c *Client) Commit(ctx context.Context, message string) error {
 
 // Push pushes committed changes to the origin remote configured by Clone, using
 // the credentials captured then. Returns nil when the remote is already up to
-// date, and an error when no remote is configured (e.g. a local repository).
+// date. Pushing a repository acquired with Init (which configures no remote)
+// fails the same way real git does, with go-git's "remote not found" error.
 func (c *Client) Push(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "git.Push")
