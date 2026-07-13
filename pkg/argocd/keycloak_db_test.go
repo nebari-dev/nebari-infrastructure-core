@@ -51,6 +51,12 @@ func TestKeycloakDBClusterTemplate_PinsShape(t *testing.T) {
 	if !strings.Contains(string(content), "app.kubernetes.io/part-of: nebari-foundational") {
 		t.Error("keycloak-db-cluster missing nebari-foundational label")
 	}
+	resources, _ := spec["resources"].(map[string]any)
+	requests, _ := resources["requests"].(map[string]any)
+	limits, _ := resources["limits"].(map[string]any)
+	if requests["memory"] != "512Mi" || limits["memory"] != "1Gi" {
+		t.Errorf("resources requests/limits = %v/%v, want memory 512Mi/1Gi (carried over from the Bitnami sizing)", requests, limits)
+	}
 }
 
 // TestWriteAllToGit_KeycloakDBCluster verifies the manifest is rendered on
