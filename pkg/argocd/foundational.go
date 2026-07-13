@@ -62,15 +62,12 @@ type FoundationalConfig struct {
 
 // KeycloakConfig holds Keycloak-specific configuration
 type KeycloakConfig struct {
-	Enabled               bool
-	AdminPassword         string
-	AdminUsername         string
-	DBPassword            string // Password for keycloak DB user
-	PostgresAdminPassword string // Password for postgres superuser
-	PostgresUserPassword  string // Password for postgres regular user
-	Hostname              string
-	RealmAdminUsername    string // Username for the admin user in the nebari realm
-	RealmAdminPassword    string // Password for the admin user in the nebari realm
+	Enabled            bool
+	AdminPassword      string
+	AdminUsername      string
+	Hostname           string
+	RealmAdminUsername string // Username for the admin user in the nebari realm
+	RealmAdminPassword string // Password for the admin user in the nebari realm
 }
 
 // LandingPageConfig holds landing page-specific configuration
@@ -92,7 +89,7 @@ type ArgoCDSSOConfig struct {
 // InstallFoundationalServices installs foundational services via GitOps.
 // This function handles the bootstrap phase:
 // 1. Creates the ArgoCD Project for foundational services
-// 2. Creates required secrets (Keycloak, PostgreSQL credentials)
+// 2. Creates required secrets (Keycloak)
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
@@ -145,7 +142,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			return fmt.Errorf("failed to create Keycloak namespace: %w", err)
 		}
 
-		// Create secrets for Keycloak and PostgreSQL
+		// Create secrets for Keycloak
 		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak, foundationalCfg.ArgoCD); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
@@ -319,7 +316,9 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 	return nil
 }
 
-// createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
+// createKeycloakSecrets creates the required secrets for Keycloak. Database
+// credentials are not created here: CNPG generates them in-cluster (Secret
+// "keycloak-db-app").
 func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig, argocdSSO ArgoCDSSOConfig) error {
 	namespace := KeycloakDefaultNamespace
 
@@ -338,36 +337,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		return err
 	}
 
-	// 2. Create Keycloak PostgreSQL user credentials secret
-	if err := createSecret(ctx, client, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "keycloak-postgresql-credentials",
-			Namespace: namespace,
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"password": keycloakCfg.DBPassword,
-		},
-	}); err != nil {
-		return err
-	}
-
-	// 3. Create PostgreSQL main credentials secret (for PostgreSQL deployment)
-	if err := createSecret(ctx, client, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "postgresql-credentials",
-			Namespace: namespace,
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"postgres-password": keycloakCfg.PostgresAdminPassword,
-			"user-password":     keycloakCfg.PostgresUserPassword,
-		},
-	}); err != nil {
-		return err
-	}
-
-	// 4. Create Nebari realm admin credentials secret
+	// 2. Create Nebari realm admin credentials secret
 	if keycloakCfg.RealmAdminPassword != "" {
 		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -388,7 +358,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		}
 	}
 
-	// 5. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
+	// 3. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
 	if argocdSSO.ClientSecret != "" {
 		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
