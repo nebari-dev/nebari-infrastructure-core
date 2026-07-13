@@ -110,3 +110,18 @@ func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 		t.Error("rendered keycloak app still points at the retired Bitnami postgresql service")
 	}
 }
+
+// TestApplications_NoBitnamiPostgresql pins the retirement of the Bitnami
+// postgresql app: fresh bootstraps must not emit it. Existing gitops repos
+// keep their committed copy (the writer never deletes committed files).
+func TestApplications_NoBitnamiPostgresql(t *testing.T) {
+	apps, err := Applications()
+	if err != nil {
+		t.Fatalf("Applications() error: %v", err)
+	}
+	for _, app := range apps {
+		if app == "postgresql" {
+			t.Error("Applications() still lists the retired Bitnami postgresql app")
+		}
+	}
+}
