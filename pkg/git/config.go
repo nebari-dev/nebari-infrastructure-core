@@ -52,10 +52,6 @@ func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
 		span.RecordError(err)
 		return fmt.Errorf("create local gitops directory %s: %w", path, err)
 	}
-	if err := os.Chmod(path, GitOpsDirMode); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("set local gitops directory permissions %s: %w", path, err)
-	}
 	return nil
 }
 
@@ -79,6 +75,14 @@ type Config struct {
 	// ArgoCDAuth specifies optional separate credentials for ArgoCD (read-only access)
 	// If not specified, falls back to Auth
 	ArgoCDAuth *AuthConfig `yaml:"argocd_auth,omitempty" json:"argocd_auth,omitempty"`
+
+	// Managed marks a local file:// repository that NIC fully owns: the
+	// auto-generated directory created via DefaultLocalPath when no
+	// git_repository is configured. It is never set for a user-supplied
+	// git_repository, including a user-supplied file:// path. Only Managed
+	// repos get post-commit permission upgrades (see ClientImpl.CommitAndPush);
+	// NIC never mutates permissions in a repository it doesn't own.
+	Managed bool `yaml:"-" json:"-"`
 }
 
 // CredentialProvider abstracts credential retrieval for git authentication.

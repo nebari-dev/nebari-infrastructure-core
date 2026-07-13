@@ -173,6 +173,10 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 // repositories are the user's to manage. Nothing is logged when the directory
 // no longer exists on disk.
 func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")
+	defer span.End()
+
 	gitConfig := cfg.GitRepository
 	if gitConfig == nil {
 		// Fall back to the same auto-generated local config deploy uses, but
@@ -189,11 +193,17 @@ func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clus
 
 	localPath, err := gitConfig.GetLocalPath()
 	if err != nil {
+		span.RecordError(err)
 		return
 	}
 
 	if _, err := os.Stat(localPath); err != nil {
-		// Directory is gone (or unreadable); nothing to remind the user about.
+		if !os.IsNotExist(err) {
+			// Some other problem (e.g. a permission error on an ancestor
+			// directory) means we can't tell whether the directory is
+			// actually gone, so record it instead of silently assuming so.
+			span.RecordError(err)
+		}
 		return
 	}
 

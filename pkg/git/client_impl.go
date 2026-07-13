@@ -399,26 +399,30 @@ func (c *ClientImpl) WorkDir() string {
 	return c.workDir
 }
 
-// normalizeLocalPermissions normalizes a local file:// GitOps repository tree,
-// including .git, so ArgoCD's non-root repo-server can read refs and generated
-// manifests through a read-only kind hostPath mount. Symlinks are skipped.
+// upgradeLocalPermissions makes every file and directory under a local
+// file:// repo (including .git) group/other-readable, so ArgoCD's non-root
+// repo-server can read it through a read-only kind hostPath mount. This
+// specifically fixes .git/objects: go-git writes every object through a
+// temp-file-then-rename (storage/filesystem/dotgit/writers.go), and the temp
+// file is always created at 0600 regardless of the process umask.
 //
-// This is load-bearing, not defensive: git/go-git create .git contents under the
-// deploying user's umask, so a restrictive umask (e.g. 077) yields 0600/0700
-// objects the repo-server cannot read. It runs on the write path (after commit),
-// which is the only point new content is produced; we intentionally do not
-// re-walk an already-bootstrapped repo on the skip path.
-func (c *ClientImpl) normalizeLocalPermissions(ctx context.Context) error {
+// Only called for Config.Managed repos — the directory NIC auto-generates
+// when no git_repository is configured. A user-supplied file:// repository
+// (including one NIC pushes into) is never touched here; NIC doesn't mutate
+// permissions in a repository it doesn't own, even non-destructively.
+//
+// Permissions are only ever OR'd in, never replaced: a file that already has
+// the needed bits (or is stricter than we'd request, e.g. no group/other
+// access at all by design) is left untouched, so this can't strip an
+// existing mode like a tracked script's +x or a git hook's exec bit, and
+// can't produce a spurious mode-only diff on the next commit. It only runs
+// right after a commit (bootstrap or --regen-apps), never on every deploy.
+// Symlinks are skipped.
+func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
-	_, span := tracer.Start(ctx, "git.normalizeLocalPermissions")
+	_, span := tracer.Start(ctx, "git.upgradeLocalPermissions")
 	defer span.End()
 	span.SetAttributes(attribute.String("git.repo_path", c.repoPath))
-
-	if c.cfg == nil || !c.cfg.IsLocalPath() {
-		span.SetAttributes(attribute.Bool("git.local_path", false))
-		return nil
-	}
-	span.SetAttributes(attribute.Bool("git.local_path", true))
 
 	rootDir, err := os.OpenRoot(c.repoPath)
 	if err != nil {
@@ -436,25 +440,45 @@ func (c *ClientImpl) normalizeLocalPermissions(ctx context.Context) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-
-		mode := GitOpsFileMode
-		if d.IsDir() {
-			mode = GitOpsDirMode
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		if err := rootDir.Chmod(path, mode); err != nil {
-			return fmt.Errorf("set permissions on %s: %w", path, err)
+
+		// Bits to OR in, expressed as owner/group/other octal digits:
+		//   0o044 = ---r--r-- : files only need to be readable by group/other.
+		//   0o055 = ---r-xr-x : directories also need the execute bit for
+		//   group/other, since traversing a directory (opening a path inside
+		//   it) requires execute, not just read.
+		// Either way the owner digit is 0, so owner's existing bits (whatever
+		// they are) are never touched by the OR.
+		add := os.FileMode(0o044)
+		if d.IsDir() {
+			add = 0o055
+		}
+		// `perm | add` can only set bits, never clear them, so a mode that's
+		// already sufficient (or deliberately stricter for some other
+		// reason) is left exactly as-is — hence the equality check below to
+		// skip the chmod syscall entirely when there's nothing to add.
+		if mode := info.Mode().Perm() | add; mode != info.Mode().Perm() {
+			if err := rootDir.Chmod(path, mode); err != nil {
+				return fmt.Errorf("set permissions on %s: %w", path, err)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("set local gitops permissions under %s: %w", c.repoPath, err)
+		return fmt.Errorf("upgrade local gitops permissions under %s: %w", c.repoPath, err)
 	}
 	return nil
 }
 
 // CommitAndPush stages all changes, commits, and pushes to remote.
-// For local file:// paths, only commits without pushing.
+// For local file:// paths, only commits without pushing. If Config.Managed is
+// set (the NIC auto-generated local repo), also upgrades the repo's
+// permissions afterward (see upgradeLocalPermissions); a user-supplied
+// local repo is left untouched.
 // No-op if there are no changes.
 func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	tracer := otel.Tracer(tracerName)
@@ -476,9 +500,11 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 			span.RecordError(err)
 			return err
 		}
-		if err := c.normalizeLocalPermissions(ctx); err != nil {
-			span.RecordError(err)
-			return err
+		if c.cfg.Managed {
+			if err := c.upgradeLocalPermissions(ctx); err != nil {
+				span.RecordError(err)
+				return err
+			}
 		}
 		return nil
 	}
@@ -605,10 +631,6 @@ func (c *ClientImpl) WriteBootstrapMarker(ctx context.Context) error {
 	if err := os.WriteFile(markerPath, []byte(content), GitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
-	}
-	if err := os.Chmod(markerPath, GitOpsFileMode); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to set bootstrap marker permissions: %w", err)
 	}
 
 	return nil

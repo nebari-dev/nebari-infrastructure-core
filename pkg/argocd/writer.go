@@ -338,10 +338,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		destPath := filepath.Join(workDir, relPath)
 
 		if d.IsDir() {
-			if err := os.MkdirAll(destPath, git.GitOpsDirMode); err != nil {
-				return err
-			}
-			return os.Chmod(destPath, git.GitOpsDirMode)
+			return os.MkdirAll(destPath, git.GitOpsDirMode)
 		}
 
 		// Read template content
@@ -364,9 +361,6 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		// Write processed content
 		if err := os.WriteFile(destPath, processed, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
-		}
-		if err := os.Chmod(destPath, git.GitOpsFileMode); err != nil {
-			return fmt.Errorf("failed to set file permissions for %s: %w", destPath, err)
 		}
 
 		return nil

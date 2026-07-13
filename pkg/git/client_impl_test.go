@@ -828,10 +828,139 @@ func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 	if commit.Message != "First commit on fresh repo" {
 		t.Errorf("commit message = %q, want %q", commit.Message, "First commit on fresh repo")
 	}
-	assertPathMode(t, filePath, GitOpsFileMode)
 }
 
-func TestClientNormalizeLocalPermissions(t *testing.T) {
+// TestClientCommitAndPushUpgradesLocalPermissions verifies that CommitAndPush
+// on a local repo makes the whole tree (including .git/objects) group/other
+// readable. go-git writes loose objects via a temp-file-then-rename that is
+// always created at 0600 regardless of the process umask, so without this fix
+// a non-root reader (e.g. ArgoCD's repo-server) can't read a fresh commit.
+// It also verifies the upgrade is additive: a tracked script that's already
+// executable keeps exactly its original mode, with no diff staged as a
+// result, so a hand-picked +x bit (e.g. a git hook) can't be stripped.
+func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main", Managed: true})
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	if err := client.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	filePath := filepath.Join(client.WorkDir(), "test.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	scriptPath := filepath.Join(client.WorkDir(), "script.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove +x survives.
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	if err := client.CommitAndPush(context.Background(), "commit"); err != nil {
+		t.Fatalf("CommitAndPush() error: %v", err)
+	}
+
+	assertPathMode(t, scriptPath, 0o755)
+
+	objectsDir := filepath.Join(tmpDir, ".git", "objects")
+	sawObject := false
+	if err := filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		sawObject = true
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if mode := info.Mode().Perm(); mode&0o044 != 0o044 {
+			t.Errorf("object %s mode = %v, want group+other read set", path, mode)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk objects dir: %v", err)
+	}
+	if !sawObject {
+		t.Fatal("expected at least one loose object under .git/objects")
+	}
+
+	worktree, err := client.repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error: %v", err)
+	}
+	status, err := worktree.Status()
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if !status.IsClean() {
+		t.Errorf("worktree status after permission upgrade = %v, want clean (no mode-only diff)", status)
+	}
+}
+
+// TestClientCommitAndPushLeavesUnmanagedRepoAlone verifies that a
+// user-supplied local repo (Config.Managed left at its false default) never
+// gets its permissions touched by CommitAndPush, even though the same
+// umask-independent 0600 objects are created underneath it. NIC only takes
+// permission-repair responsibility for the directory it auto-generates and
+// owns; a repository the user pointed git_repository.url at is theirs.
+func TestClientCommitAndPushLeavesUnmanagedRepoAlone(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	if client.cfg.Managed {
+		t.Fatal("Managed should default to false for a directly-constructed Config")
+	}
+	if err := client.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	filePath := filepath.Join(client.WorkDir(), "test.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	if err := client.CommitAndPush(context.Background(), "commit"); err != nil {
+		t.Fatalf("CommitAndPush() error: %v", err)
+	}
+
+	objectsDir := filepath.Join(tmpDir, ".git", "objects")
+	sawObject := false
+	if err := filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		sawObject = true
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Errorf("object %s mode = %v, want untouched 0600 (unmanaged repo)", path, mode)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk objects dir: %v", err)
+	}
+	if !sawObject {
+		t.Fatal("expected at least one loose object under .git/objects")
+	}
+}
+
+// TestClientUpgradeLocalPermissions verifies the upgrade is additive: modes
+// are only ever OR'd with the needed read/traverse bits, never replaced, so
+// an already-correct or intentionally stricter file keeps its exact mode.
+func TestClientUpgradeLocalPermissions(t *testing.T) {
 	tests := []struct {
 		name        string
 		setup       func(t *testing.T, root string) string
@@ -843,80 +972,94 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 			name: "root directory",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
-				if err := os.Chmod(root, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+				if err := os.Chmod(root, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission upgrade.
 					t.Fatalf("chmod root: %v", err)
 				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, root, GitOpsDirMode)
+				// 0o700 (rwx------) | 0o055 (add group/other r-x) = 0o755.
+				assertPathMode(t, root, 0o755)
 			},
 		},
 		{
-			name: "nested directories",
+			name: "nested directory",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
 				nested := filepath.Join(root, "apps", "root")
 				if err := os.MkdirAll(nested, 0o700); err != nil {
 					t.Fatalf("mkdir nested: %v", err)
 				}
-				if err := os.Chmod(nested, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+				if err := os.Chmod(nested, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission upgrade.
 					t.Fatalf("chmod nested: %v", err)
 				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, "apps", "root"), GitOpsDirMode)
+				// Same OR as the root-directory case above: 0o700 | 0o055 = 0o755.
+				assertPathMode(t, filepath.Join(root, "apps", "root"), 0o755)
 			},
 		},
 		{
-			name: "regular files",
+			name: "regular file",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
 				path := filepath.Join(root, "nic-config.yaml")
 				if err := os.WriteFile(path, []byte("project_name: test\n"), 0o600); err != nil {
 					t.Fatalf("write file: %v", err)
 				}
-				if err := os.Chmod(path, 0o600); err != nil {
-					t.Fatalf("chmod file: %v", err)
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				// 0o600 (rw-------) | 0o044 (add group/other r--) = 0o644.
+				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), 0o644)
+			},
+		},
+		{
+			name: "already-executable file is unchanged",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				path := filepath.Join(root, "hook.sh")
+				if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove it survives untouched.
+					t.Fatalf("write file: %v", err)
 				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), GitOpsFileMode)
+				// 0o755 | 0o044 = 0o755 — group/other read was already set,
+				// so the OR is a no-op and +x is never at risk of removal.
+				assertPathMode(t, filepath.Join(root, "hook.sh"), 0o755)
 			},
 		},
 		{
-			name: ".git contents",
+			name: ".git objects",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
 				objects := filepath.Join(root, ".git", "objects")
 				if err := os.MkdirAll(objects, 0o700); err != nil {
 					t.Fatalf("mkdir .git objects: %v", err)
 				}
-				if err := os.Chmod(filepath.Join(root, ".git"), 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+				if err := os.Chmod(filepath.Join(root, ".git"), 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission upgrade.
 					t.Fatalf("chmod .git: %v", err)
 				}
-				if err := os.Chmod(objects, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission normalization.
+				if err := os.Chmod(objects, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission upgrade.
 					t.Fatalf("chmod objects: %v", err)
 				}
-				head := filepath.Join(root, ".git", "HEAD")
-				if err := os.WriteFile(head, []byte("ref: refs/heads/main\n"), 0o600); err != nil {
-					t.Fatalf("write HEAD: %v", err)
-				}
-				if err := os.Chmod(head, 0o600); err != nil {
-					t.Fatalf("chmod HEAD: %v", err)
+				obj := filepath.Join(objects, "deadbeef")
+				if err := os.WriteFile(obj, []byte("blob"), 0o600); err != nil {
+					t.Fatalf("write object: %v", err)
 				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				assertPathMode(t, filepath.Join(root, ".git"), GitOpsDirMode)
-				assertPathMode(t, filepath.Join(root, ".git", "objects"), GitOpsDirMode)
-				assertPathMode(t, filepath.Join(root, ".git", "HEAD"), GitOpsFileMode)
+				assertPathMode(t, filepath.Join(root, ".git"), 0o755)
+				assertPathMode(t, filepath.Join(root, ".git", "objects"), 0o755)
+				assertPathMode(t, filepath.Join(root, ".git", "objects", "deadbeef"), 0o644)
 			},
 		},
 		{
@@ -926,9 +1069,6 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 				target := filepath.Join(t.TempDir(), "target")
 				if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
 					t.Fatalf("write symlink target: %v", err)
-				}
-				if err := os.Chmod(target, 0o600); err != nil {
-					t.Fatalf("chmod symlink target: %v", err)
 				}
 				link := filepath.Join(root, "linked-target")
 				if err := os.Symlink(target, link); err != nil {
@@ -966,18 +1106,18 @@ func TestClientNormalizeLocalPermissions(t *testing.T) {
 				repoPath: repoPath,
 			}
 
-			err := client.normalizeLocalPermissions(context.Background())
+			err := client.upgradeLocalPermissions(context.Background())
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("normalizeLocalPermissions() expected error")
+					t.Fatalf("upgradeLocalPermissions() expected error")
 				}
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Fatalf("normalizeLocalPermissions() error = %v, want containing %q", err, tt.errContains)
+					t.Fatalf("upgradeLocalPermissions() error = %v, want containing %q", err, tt.errContains)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeLocalPermissions() error: %v", err)
+				t.Fatalf("upgradeLocalPermissions() error: %v", err)
 			}
 			tt.check(t, root)
 		})

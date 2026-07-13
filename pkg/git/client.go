@@ -24,6 +24,10 @@ type Client interface {
 
 	// CommitAndPush stages all changes, commits with the given message, and pushes to remote.
 	// Internally checks for changes first - returns nil without error if nothing changed.
+	// For a Config.Managed local file:// repo, also upgrades the whole repo tree (including
+	// .git) to be group/other-readable so ArgoCD's non-root repo-server can read it;
+	// permissions are only ever added, never replaced. A user-supplied repository (Managed
+	// == false) is never touched this way.
 	CommitAndPush(ctx context.Context, message string) error
 
 	// IsBootstrapped checks if the .bootstrapped marker file exists in the working directory.

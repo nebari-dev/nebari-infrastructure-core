@@ -264,10 +264,11 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // This is a pure function with no side effects — directory creation happens separately.
 func defaultGitConfig(projectName string) *git.Config {
 	return &git.Config{
-		URL:    fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
-		Branch: git.DefaultBranch,
-		Path:   "",
-		Auth:   git.AuthConfig{},
+		URL:     fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
+		Branch:  git.DefaultBranch,
+		Path:    "",
+		Auth:    git.AuthConfig{},
+		Managed: true,
 	}
 }
 
@@ -509,14 +510,8 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	if err := os.MkdirAll(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.Chmod(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
-		return fmt.Errorf("set config directory permissions: %w", err)
-	}
 	if err := os.WriteFile(configDest, configBytes, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
-	}
-	if err := os.Chmod(configDest, git.GitOpsFileMode); err != nil {
-		return fmt.Errorf("set config file permissions: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
 		WithMetadata("path", configDest))
