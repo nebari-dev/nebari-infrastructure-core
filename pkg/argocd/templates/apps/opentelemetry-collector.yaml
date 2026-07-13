@@ -52,12 +52,14 @@ spec:
             - apiGroups: [""]
               resources: ["nodes/proxy"]
               verbs: ["get"]
+        # The memory limit is load-bearing: the chart derives GOMEMLIMIT
+        # from it (useGOMEMLIMIT), so removing it drops OOM protection.
         resources:
           requests:
-            cpu: 100m
+            cpu: 50m
             memory: 128Mi
           limits:
-            cpu: 500m
+            cpu: 250m
             memory: 512Mi
         service:
           enabled: true

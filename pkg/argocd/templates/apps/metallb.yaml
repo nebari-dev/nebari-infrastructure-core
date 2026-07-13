@@ -24,20 +24,29 @@ spec:
           replicas: 1
           resources:
             requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
               cpu: 100m
               memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
         speaker:
           enabled: true
           resources:
             requests:
-              cpu: 100m
+              cpu: 50m
               memory: 128Mi
             limits:
               cpu: 200m
               memory: 256Mi
+          # The frr sidecars previously ran with no requests at all (#456).
+          frr:
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
 
   destination:
     server: https://kubernetes.default.svc

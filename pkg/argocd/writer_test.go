@@ -1202,3 +1202,87 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 		})
 	}
 }
+
+// TestFoundationalResourceDefaults pins the audited resource defaults from
+// issue #457 so regressions in the embedded templates fail loudly. Each
+// wanted block is matched verbatim, indentation included.
+func TestFoundationalResourceDefaults(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		want     []string
+	}{
+		{
+			name:     "cert-manager controller, webhook, cainjector",
+			template: "templates/apps/cert-manager.yaml",
+			want: []string{
+				"        resources:\n          requests:\n            cpu: 25m\n            memory: 64Mi\n          limits:\n            cpu: 200m\n            memory: 256Mi",
+				"        webhook:\n          resources:\n            requests:\n              cpu: 10m\n              memory: 32Mi\n            limits:\n              cpu: 100m\n              memory: 128Mi",
+				"        cainjector:\n          resources:\n            requests:\n              cpu: 10m\n              memory: 64Mi\n            limits:\n              cpu: 200m\n              memory: 256Mi",
+			},
+		},
+		{
+			name:     "postgresql primary",
+			template: "templates/apps/postgresql.yaml",
+			want: []string{
+				"          resources:\n            requests:\n              cpu: 100m\n              memory: 256Mi\n            limits:\n              cpu: 500m\n              memory: 512Mi",
+			},
+		},
+		{
+			name:     "keycloak has no CPU limit",
+			template: "templates/apps/keycloak.yaml",
+			want: []string{
+				"          resources:\n            requests:\n              cpu: 250m\n              memory: 1Gi\n            limits:\n              memory: 2Gi",
+			},
+		},
+		{
+			name:     "envoy gateway controller",
+			template: "templates/apps/envoy-gateway.yaml",
+			want: []string{
+				"            resources:\n              requests:\n                cpu: 50m\n                memory: 128Mi\n              limits:\n                cpu: 500m\n                memory: 512Mi",
+			},
+		},
+		{
+			name:     "metallb controller, speaker, and frr sidecar",
+			template: "templates/apps/metallb.yaml",
+			want: []string{
+				"        controller:\n          replicas: 1\n          resources:\n            requests:\n              cpu: 25m\n              memory: 64Mi\n            limits:\n              cpu: 100m\n              memory: 128Mi",
+				"        speaker:\n          enabled: true\n          resources:\n            requests:\n              cpu: 50m\n              memory: 128Mi\n            limits:\n              cpu: 200m\n              memory: 256Mi",
+				"          frr:\n            resources:\n              requests:\n                cpu: 25m\n                memory: 64Mi\n              limits:\n                cpu: 100m\n                memory: 128Mi",
+			},
+		},
+		{
+			name:     "opentelemetry collector",
+			template: "templates/apps/opentelemetry-collector.yaml",
+			want: []string{
+				"        resources:\n          requests:\n            cpu: 50m\n            memory: 128Mi\n          limits:\n            cpu: 250m\n            memory: 512Mi",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.template)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.template, err)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(string(content), w) {
+					t.Errorf("%s missing expected block:\n%s", tt.template, w)
+				}
+			}
+		})
+	}
+}
+
+// TestKeycloakNoCPULimit guards the deliberate absence of a Keycloak CPU
+// limit: logins are bursty and throttling hurts exactly when users pile in.
+func TestKeycloakNoCPULimit(t *testing.T) {
+	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	if err != nil {
+		t.Fatalf("read keycloak template: %v", err)
+	}
+	if strings.Contains(string(content), "cpu: 2000m") {
+		t.Error("keycloak still has a CPU limit; #457 removes it so login bursts are not throttled")
+	}
+}

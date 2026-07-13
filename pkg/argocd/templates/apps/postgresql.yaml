@@ -32,13 +32,15 @@ spec:
             enabled: true
             size: 10Gi
             storageClass: "{{ .StorageClass }}"
+          # Between the Bitnami nano and small presets; idle usage of the
+          # Keycloak/operator database is ~10m/50Mi (#456).
           resources:
             requests:
-              cpu: 250m
-              memory: 512Mi
+              cpu: 100m
+              memory: 256Mi
             limits:
-              cpu: 1000m
-              memory: 1Gi
+              cpu: 500m
+              memory: 512Mi
           initdb:
             scripts:
               init-keycloak-db.sh: |
