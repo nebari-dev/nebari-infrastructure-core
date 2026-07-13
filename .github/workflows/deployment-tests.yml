@@ -1,0 +1,135 @@
+name: Deployment Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider to deploy and test
+        type: choice
+        options:
+          - all
+          - local
+          - aws
+          - azure
+        default: local
+  release:
+    # published covers both stable and pre-releases
+    types: [published]
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: make build
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: nic
+          path: nic
+          retention-days: 1
+
+  local:
+    name: Deploy (local)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'local' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download binary
+        uses: actions/download-artifact@v8
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: local
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/local-config.yaml
+          nic-binary: nic
+
+  aws:
+    name: Deploy (AWS)
+    needs: build
+    if: github.event_name == 'release' || inputs.provider == 'aws' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    environment: deploy-aws
+    # Only one AWS deploy test should run at a time and triggering a new one should
+    # not cancel the previous one
+    concurrency:
+      group: deploy-test-aws
+      cancel-in-progress: false
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download binary
+        uses: actions/download-artifact@v8
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: aws
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+          # The default duration is 3600 seconds (one hour), so we bump it
+          # to 7200 seconds (two hours) to give it room to deploy and destroy.
+          role-duration-seconds: 7200
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/aws-config.yaml
+          nic-binary: nic
