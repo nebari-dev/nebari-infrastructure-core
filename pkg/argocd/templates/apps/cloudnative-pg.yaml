@@ -21,7 +21,8 @@ spec:
       releaseName: cloudnative-pg
       values: |
         # Operator-only install: per-database Cluster resources are created
-        # by consumers (nebari-operator / software packs), not by this chart.
+        # by consumers (NIC's own manifests, nebari-operator, software packs),
+        # not by this chart.
         resources:
           requests:
             cpu: 100m
