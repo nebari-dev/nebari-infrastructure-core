@@ -244,7 +244,12 @@ func TestDefaultConfigDisablesDex(t *testing.T) {
 	if !ok {
 		t.Fatal("Values[dex] missing or not a map")
 	}
-	if enabled, _ := dex["enabled"].(bool); enabled {
+	// The chart default is enabled=true, so a missing key means dex deploys.
+	enabled, ok := dex["enabled"].(bool)
+	if !ok {
+		t.Fatal("dex.enabled missing or not a bool; the chart would deploy dex by default")
+	}
+	if enabled {
 		t.Error("dex should be disabled: NIC wires OIDC directly to Keycloak (#457)")
 	}
 }
