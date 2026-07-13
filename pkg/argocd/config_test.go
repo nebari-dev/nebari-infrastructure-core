@@ -186,3 +186,65 @@ func TestConfigFields(t *testing.T) {
 		t.Errorf("Config.Values[\"key\"] = %v, want %q", cfg.Values["key"], "value")
 	}
 }
+
+// TestDefaultConfigResources pins the ArgoCD resource defaults from #457.
+// Upstream argo-cd ships resources: {} for every component, so without these
+// values every ArgoCD pod runs BestEffort and is first evicted under pressure.
+func TestDefaultConfigResources(t *testing.T) {
+	cfg := DefaultConfig()
+
+	tests := []struct {
+		component string
+		cpuReq    string
+		memReq    string
+		cpuLim    string
+		memLim    string
+	}{
+		{"controller", "100m", "256Mi", "500m", "512Mi"},
+		{"repoServer", "25m", "128Mi", "500m", "512Mi"},
+		{"server", "25m", "64Mi", "200m", "128Mi"},
+		{"applicationSet", "25m", "64Mi", "200m", "128Mi"},
+		{"redis", "25m", "64Mi", "200m", "128Mi"},
+		{"notifications", "25m", "64Mi", "200m", "128Mi"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.component, func(t *testing.T) {
+			comp, ok := cfg.Values[tt.component].(map[string]any)
+			if !ok {
+				t.Fatalf("Values[%q] missing or not a map", tt.component)
+			}
+			res, ok := comp["resources"].(map[string]any)
+			if !ok {
+				t.Fatalf("Values[%q][resources] missing or not a map", tt.component)
+			}
+			req, ok := res["requests"].(map[string]any)
+			if !ok {
+				t.Fatalf("Values[%q] requests missing", tt.component)
+			}
+			lim, ok := res["limits"].(map[string]any)
+			if !ok {
+				t.Fatalf("Values[%q] limits missing", tt.component)
+			}
+			if req["cpu"] != tt.cpuReq || req["memory"] != tt.memReq {
+				t.Errorf("requests = %v/%v, want %s/%s", req["cpu"], req["memory"], tt.cpuReq, tt.memReq)
+			}
+			if lim["cpu"] != tt.cpuLim || lim["memory"] != tt.memLim {
+				t.Errorf("limits = %v/%v, want %s/%s", lim["cpu"], lim["memory"], tt.cpuLim, tt.memLim)
+			}
+		})
+	}
+}
+
+// TestDefaultConfigDisablesDex: NIC wires ArgoCD OIDC directly to Keycloak,
+// so the dex pod the chart deploys by default is never referenced (#457).
+func TestDefaultConfigDisablesDex(t *testing.T) {
+	cfg := DefaultConfig()
+	dex, ok := cfg.Values["dex"].(map[string]any)
+	if !ok {
+		t.Fatal("Values[dex] missing or not a map")
+	}
+	if enabled, _ := dex["enabled"].(bool); enabled {
+		t.Error("dex should be disabled: NIC wires OIDC directly to Keycloak (#457)")
+	}
+}

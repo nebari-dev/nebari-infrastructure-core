@@ -110,6 +110,35 @@ func DefaultConfig() Config {
 					"server.insecure": true,
 				},
 			},
+			// Upstream argo-cd ships resources: {} for every component, which
+			// leaves all ArgoCD pods BestEffort. Defaults below come from the
+			// #456 audit (idle usage plus chart-suggested values with headroom).
+			// NOTE: Values changes only reach existing installs on the next
+			// chart Version bump (see the Version field's doc comment).
+			"controller":     helmResources("100m", "256Mi", "500m", "512Mi"),
+			"repoServer":     helmResources("25m", "128Mi", "500m", "512Mi"),
+			"server":         helmResources("25m", "64Mi", "200m", "128Mi"),
+			"applicationSet": helmResources("25m", "64Mi", "200m", "128Mi"),
+			"redis":          helmResources("25m", "64Mi", "200m", "128Mi"),
+			"notifications":  helmResources("25m", "64Mi", "200m", "128Mi"),
+			// NIC wires ArgoCD OIDC directly to Keycloak; the dex pod the
+			// chart deploys by default is never referenced (#457).
+			"dex": map[string]any{"enabled": false},
+		},
+	}
+}
+
+// helmResources builds a chart component's resources block. cpuLim may be
+// empty to omit the CPU limit for burst-friendly components.
+func helmResources(cpuReq, memReq, cpuLim, memLim string) map[string]any {
+	limits := map[string]any{"memory": memLim}
+	if cpuLim != "" {
+		limits["cpu"] = cpuLim
+	}
+	return map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{"cpu": cpuReq, "memory": memReq},
+			"limits":   limits,
 		},
 	}
 }
