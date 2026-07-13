@@ -920,14 +920,43 @@ func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 	}
 }
 
-// TestClientCommitAndPushUpgradesUserSuppliedLocalRepo verifies that a local
-// file:// repo which is NOT the auto-generated one still gets its .git/objects
-// made group/other-readable after a commit, so the non-root ArgoCD repo-server
-// can read the objects NIC wrote. The .git-only + OR-only design makes this
-// safe on a user's repo: .git isn't tracked so no mode-diff can result, and
-// the working tree is left exactly as-is (the 0600 file stays 0600).
+// TestClientCommitAndPushUpgradesUserSuppliedLocalRepo verifies that NIC can
+// open a pre-existing user repository and make the new Git objects from its
+// own commit group/other-readable without changing existing tracked files or
+// introducing a mode-only worktree diff.
 func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 	tmpDir := t.TempDir()
+
+	existingRepo, err := gogit.PlainInit(tmpDir, false)
+	if err != nil {
+		t.Fatalf("PlainInit() existing repository error: %v", err)
+	}
+	if err := existingRepo.Storer.SetReference(plumbing.NewSymbolicReference(
+		plumbing.HEAD,
+		plumbing.NewBranchReferenceName(DefaultBranch),
+	)); err != nil {
+		t.Fatalf("set existing repository HEAD: %v", err)
+	}
+	existingWorktree, err := existingRepo.Worktree()
+	if err != nil {
+		t.Fatalf("existing Worktree() error: %v", err)
+	}
+	existingScriptPath := filepath.Join(tmpDir, "existing-script.sh")
+	if err := os.WriteFile(existingScriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Executable mode is the behavior under test.
+		t.Fatalf("write existing script: %v", err)
+	}
+	if _, err := existingWorktree.Add("existing-script.sh"); err != nil {
+		t.Fatalf("stage existing script: %v", err)
+	}
+	if _, err := existingWorktree.Commit("existing user commit", &gogit.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Existing User",
+			Email: "existing@example.com",
+			When:  time.Now(),
+		},
+	}); err != nil {
+		t.Fatalf("commit existing repository: %v", err)
+	}
 
 	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main"})
 	if err != nil {
@@ -937,7 +966,7 @@ func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 		t.Fatalf("Init() error: %v", err)
 	}
 
-	filePath := filepath.Join(client.WorkDir(), "test.txt")
+	filePath := filepath.Join(client.WorkDir(), "nic-generated.txt")
 	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
@@ -946,7 +975,8 @@ func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 		t.Fatalf("CommitAndPush() error: %v", err)
 	}
 
-	// Working-tree files are never touched, even on a user-supplied repo.
+	// Existing and newly written working-tree files are never chmodded.
+	assertPathMode(t, existingScriptPath, 0o755)
 	assertPathMode(t, filePath, 0o600)
 
 	objectsDir := filepath.Join(tmpDir, ".git", "objects")
@@ -972,6 +1002,14 @@ func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 	}
 	if !sawObject {
 		t.Fatal("expected at least one loose object under .git/objects")
+	}
+
+	status, err := existingWorktree.Status()
+	if err != nil {
+		t.Fatalf("existing worktree Status() error: %v", err)
+	}
+	if !status.IsClean() {
+		t.Errorf("existing worktree status after NIC commit = %v, want clean", status)
 	}
 }
 
