@@ -1258,6 +1258,13 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 				"        resources:\n          requests:\n            cpu: 50m\n            memory: 128Mi\n          limits:\n            cpu: 250m\n            memory: 512Mi",
 			},
 		},
+		{
+			name:     "nebari-operator manager",
+			template: "templates/manifests/nebari-operator/deployment-patch.yaml",
+			want: []string{
+				"          resources:\n            requests:\n              cpu: 10m\n              memory: 64Mi\n            limits:\n              cpu: 200m\n              memory: 128Mi",
+			},
+		},
 	}
 
 	for _, tt := range tests {
