@@ -130,6 +130,9 @@ cluster:
       # node_selector:      # optional; defaults to {node.longhorn.io/storage: "true"}
       #   node.longhorn.io/storage: "true"
       # enabled: true       # default true on AWS; set false to opt out (falls back to gp2/EBS)
+      # instance_manager_cpu_percent: 12 # % of each node's CPU reserved per instance-manager
+      #                                  # pod (Longhorn default 12, range 0-40).
+      #                                  # See docs/resource-sizing.md.
 
     # AWS Load Balancer Controller (LBC) configuration (optional).
     # Enabled by default. The controller authenticates via an EKS Pod Identity
