@@ -1293,3 +1293,39 @@ func TestKeycloakNoCPULimit(t *testing.T) {
 		t.Error("keycloak still has a CPU limit; #457 removes it so login bursts are not throttled")
 	}
 }
+
+// TestEnvoyProxyDataPlaneResources pins the data-plane proxy sizing. Without
+// an EnvoyProxy resource, Envoy Gateway defaults every provisioned proxy pod
+// to a silent 512Mi memory request (#456 finding 4).
+func TestEnvoyProxyDataPlaneResources(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/networking/envoyproxy.yaml")
+	if err != nil {
+		t.Fatalf("read envoyproxy manifest: %v", err)
+	}
+	s := string(content)
+	for _, w := range []string{
+		"kind: EnvoyProxy",
+		"name: nebari-proxy-config",
+		"namespace: envoy-gateway-system",
+		"cpu: 100m",
+		"memory: 128Mi",
+		"memory: 512Mi",
+	} {
+		if !strings.Contains(s, w) {
+			t.Errorf("envoyproxy.yaml missing %q", w)
+		}
+	}
+	if strings.Contains(s, "limits:\n              cpu:") {
+		t.Error("data-plane proxy must not have a CPU limit (#457 policy)")
+	}
+
+	gc, err := templates.ReadFile("templates/manifests/networking/gatewayclass.yaml")
+	if err != nil {
+		t.Fatalf("read gatewayclass manifest: %v", err)
+	}
+	for _, w := range []string{"parametersRef:", "kind: EnvoyProxy", "name: nebari-proxy-config"} {
+		if !strings.Contains(string(gc), w) {
+			t.Errorf("gatewayclass.yaml missing %q", w)
+		}
+	}
+}
