@@ -37,7 +37,7 @@ spec:
             - name: KC_DB
               value: postgres
             - name: KC_DB_URL_HOST
-              value: postgresql.{{ .KeycloakNamespace }}.svc.cluster.local
+              value: keycloak-db-rw.{{ .KeycloakNamespace }}.svc.cluster.local
             - name: KC_DB_URL_DATABASE
               value: keycloak
             - name: KC_DB_USERNAME
@@ -45,7 +45,7 @@ spec:
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-postgresql-credentials
+                  name: keycloak-db-app
                   key: password
             - name: KC_HOSTNAME
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"

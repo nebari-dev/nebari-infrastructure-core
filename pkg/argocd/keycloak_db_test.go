@@ -76,3 +76,37 @@ func TestWriteAllToGit_KeycloakDBCluster(t *testing.T) {
 		t.Errorf("rendered manifest contains unprocessed template syntax:\n%s", got)
 	}
 }
+
+// TestWriteAllToGit_KeycloakUsesCNPG verifies the rendered keycloak app
+// connects to the CNPG cluster: host keycloak-db-rw, password from the
+// CNPG-generated keycloak-db-app Secret (a secretKeyRef, never a literal),
+// and no residue of the retired Bitnami wiring.
+func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
+	keycloakPath := func(dir string) string {
+		return filepath.Join(dir, "apps", "keycloak.yaml")
+	}
+
+	dir := t.TempDir()
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+		t.Fatalf("WriteAllToGit: %v", err)
+	}
+	raw, err := os.ReadFile(keycloakPath(dir))
+	if err != nil {
+		t.Fatalf("read rendered keycloak app: %v", err)
+	}
+	got := string(raw)
+
+	if !strings.Contains(got, "value: keycloak-db-rw.keycloak.svc.cluster.local") {
+		t.Error("KC_DB_URL_HOST does not point at the CNPG keycloak-db-rw service")
+	}
+	if !strings.Contains(got, "name: keycloak-db-app") {
+		t.Error("KC_DB_PASSWORD does not reference the CNPG-generated keycloak-db-app Secret")
+	}
+	if strings.Contains(got, "keycloak-postgresql-credentials") {
+		t.Error("rendered keycloak app still references the retired keycloak-postgresql-credentials Secret")
+	}
+	if strings.Contains(got, "postgresql.keycloak.svc") {
+		t.Error("rendered keycloak app still points at the retired Bitnami postgresql service")
+	}
+}
