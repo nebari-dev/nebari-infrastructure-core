@@ -15,7 +15,9 @@ type Client interface {
 	ValidateAuth(ctx context.Context) error
 
 	// Init clones the repository if not present locally, or pulls latest if it exists.
-	// The repository is cloned to a temporary directory managed by the client.
+	// The repository is cloned to a temporary directory managed by the client. For
+	// local file:// repositories, Init also repairs the additive permissions ArgoCD
+	// needs on the repository root and Git-serving metadata before returning.
 	Init(ctx context.Context) error
 
 	// WorkDir returns the local working directory path where files can be written.
@@ -24,10 +26,10 @@ type Client interface {
 
 	// CommitAndPush stages all changes, commits with the given message, and pushes to remote.
 	// Internally checks for changes first - returns nil without error if nothing changed.
-	// For a Config.Managed local file:// repo, also upgrades the whole repo tree (including
-	// .git) to be group/other-readable so ArgoCD's non-root repo-server can read it;
-	// permissions are only ever added, never replaced. A user-supplied repository (Managed
-	// == false) is never touched this way.
+	// For any local file:// repo (including a user-supplied one), also upgrades the repo
+	// root and Git-serving data under .git to be group/other-readable so ArgoCD's
+	// non-root repo-server can read the objects the commit wrote. Working-tree and
+	// private Git metadata are left untouched; permission bits are only ever added.
 	CommitAndPush(ctx context.Context, message string) error
 
 	// IsBootstrapped checks if the .bootstrapped marker file exists in the working directory.

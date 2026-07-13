@@ -40,8 +40,10 @@ func DefaultLocalPath(projectName string) string {
 	return filepath.Join(homeDir, ".nic", "gitops", projectName)
 }
 
-// EnsureLocalGitOpsDir creates a NIC-managed local GitOps root and sets its
-// permissions so non-root ArgoCD pods can read it through a kind hostPath mount.
+// EnsureLocalGitOpsDir creates a local GitOps root with the desired initial
+// mode. The process umask may restrict a newly created directory;
+// ClientImpl repairs the mounted repository root and Git-serving data after
+// initialization and local commits.
 func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
 	tracer := otel.Tracer(tracerName)
 	_, span := tracer.Start(ctx, "git.EnsureLocalGitOpsDir")
@@ -75,14 +77,6 @@ type Config struct {
 	// ArgoCDAuth specifies optional separate credentials for ArgoCD (read-only access)
 	// If not specified, falls back to Auth
 	ArgoCDAuth *AuthConfig `yaml:"argocd_auth,omitempty" json:"argocd_auth,omitempty"`
-
-	// Managed marks a local file:// repository that NIC fully owns: the
-	// auto-generated directory created via DefaultLocalPath when no
-	// git_repository is configured. It is never set for a user-supplied
-	// git_repository, including a user-supplied file:// path. Only Managed
-	// repos get post-commit permission upgrades (see ClientImpl.CommitAndPush);
-	// NIC never mutates permissions in a repository it doesn't own.
-	Managed bool `yaml:"-" json:"-"`
 }
 
 // CredentialProvider abstracts credential retrieval for git authentication.

@@ -299,6 +299,10 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 			return fmt.Errorf("failed to set HEAD to branch %s: %w", branchName, err)
 		}
 
+		if err := c.upgradeLocalPermissions(ctx); err != nil {
+			span.RecordError(err)
+			return err
+		}
 		return nil
 	}
 
@@ -321,6 +325,12 @@ func (c *ClientImpl) initLocalPath(ctx context.Context) error {
 	}
 	c.repo = repo
 
+	// Repair stale repositories before callers can take the already-bootstrapped
+	// skip path. CommitAndPush runs the same repair after creating new objects.
+	if err := c.upgradeLocalPermissions(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
 	return nil
 }
 
@@ -399,25 +409,38 @@ func (c *ClientImpl) WorkDir() string {
 	return c.workDir
 }
 
-// upgradeLocalPermissions makes every file and directory under a local
-// file:// repo (including .git) group/other-readable, so ArgoCD's non-root
-// repo-server can read it through a read-only kind hostPath mount. This
-// specifically fixes .git/objects: go-git writes every object through a
+// upgradeLocalPermissions makes ONLY the repo root directory and Git-serving
+// data under .git group/other-readable, so ArgoCD's non-root repo-server can read
+// the repo through a read-only kind hostPath mount. It deliberately does NOT
+// touch the working tree: argo's repo-server reads a local file:// repo by
+// running git against .git (objects + refs) and rebuilding its own checkout
+// in its own cache — it never reads the source working tree. So the only
+// things that need group/other read+traverse are (a) the repo root dir itself,
+// so argo can traverse into it to reach .git, and (b) data used to serve Git
+// objects and refs. Working-tree files and private local Git metadata such as
+// hooks, reflogs, and the index are irrelevant to argo and left exactly as-is.
+//
+// This specifically fixes .git/objects: go-git writes every object through a
 // temp-file-then-rename (storage/filesystem/dotgit/writers.go), and the temp
-// file is always created at 0600 regardless of the process umask.
+// file is always created at 0600 regardless of the process umask, so the
+// non-root repo-server otherwise can't read a fresh commit.
 //
-// Only called for Config.Managed repos — the directory NIC auto-generates
-// when no git_repository is configured. A user-supplied file:// repository
-// (including one NIC pushes into) is never touched here; NIC doesn't mutate
-// permissions in a repository it doesn't own, even non-destructively.
+// This runs for ANY local file:// repo NIC commits to, including a
+// user-supplied one, not just the directory NIC auto-generates. It's safe to
+// touch a user's repo here precisely because of the .git-only + OR-only
+// design: (1) .git is not tracked by git, so upgrading it can never produce a
+// tracked mode-only diff on the next commit; (2) the OR only adds bits, so an
+// existing +x on a git hook (or any other bit) survives untouched; and (3) the
+// working tree is never modified, so a user's hand-edited files are left
+// exactly as-is. The .git/objects NIC writes are NIC's own commit artifacts,
+// so making them readable is just finishing the job of the commit.
 //
-// Permissions are only ever OR'd in, never replaced: a file that already has
-// the needed bits (or is stricter than we'd request, e.g. no group/other
-// access at all by design) is left untouched, so this can't strip an
-// existing mode like a tracked script's +x or a git hook's exec bit, and
-// can't produce a spurious mode-only diff on the next commit. It only runs
-// right after a commit (bootstrap or --regen-apps), never on every deploy.
-// Symlinks are skipped.
+// Permissions are only ever OR'd in, never replaced: a path that already has
+// the needed bits is left untouched, and special bits such as setgid and sticky
+// are preserved. This cannot strip an existing executable bit or produce a
+// tracked mode-only diff. It runs when a local repository is initialized and
+// after every local commit so stale or partially repaired repositories recover
+// before the already-bootstrapped skip path. Symlinks are skipped.
 func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 	tracer := otel.Tracer(tracerName)
 	_, span := tracer.Start(ctx, "git.upgradeLocalPermissions")
@@ -433,10 +456,22 @@ func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 		_ = rootDir.Close()
 	}()
 
-	err = fs.WalkDir(rootDir.FS(), ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	// upgrade OR's the group/other read (and, for dirs, traverse) bits into a
+	// single path, never replacing existing bits. Symlinks are skipped.
+	//
+	// Bits to OR in, expressed as owner/group/other octal digits:
+	//   0o044 = ---r--r-- : files only need to be readable by group/other.
+	//   0o055 = ---r-xr-x : directories also need the execute bit for
+	//   group/other, since traversing a directory (opening a path inside it)
+	//   requires execute, not just read.
+	// Either way the owner digit is 0, so owner's existing bits (whatever they
+	// are) are never touched by the OR.
+	//
+	// `perm | add` can only set bits, never clear them, so a mode that's
+	// already sufficient (or deliberately stricter for some other reason) is
+	// left exactly as-is — hence the equality check to skip the chmod syscall
+	// entirely when there's nothing to add.
+	upgrade := func(path string, d fs.DirEntry) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
@@ -444,28 +479,53 @@ func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-
-		// Bits to OR in, expressed as owner/group/other octal digits:
-		//   0o044 = ---r--r-- : files only need to be readable by group/other.
-		//   0o055 = ---r-xr-x : directories also need the execute bit for
-		//   group/other, since traversing a directory (opening a path inside
-		//   it) requires execute, not just read.
-		// Either way the owner digit is 0, so owner's existing bits (whatever
-		// they are) are never touched by the OR.
 		add := os.FileMode(0o044)
 		if d.IsDir() {
 			add = 0o055
 		}
-		// `perm | add` can only set bits, never clear them, so a mode that's
-		// already sufficient (or deliberately stricter for some other
-		// reason) is left exactly as-is — hence the equality check below to
-		// skip the chmod syscall entirely when there's nothing to add.
-		if mode := info.Mode().Perm() | add; mode != info.Mode().Perm() {
+		const specialBits = os.ModeSetuid | os.ModeSetgid | os.ModeSticky
+		currentMode := info.Mode().Perm() | info.Mode()&specialBits
+		if mode := currentMode | add; mode != currentMode {
 			if err := rootDir.Chmod(path, mode); err != nil {
 				return fmt.Errorf("set permissions on %s: %w", path, err)
 			}
 		}
 		return nil
+	}
+
+	// (a) Make the repo root itself group/other-traversable so argo can
+	// descend into it to reach .git. We only touch the root dir, not the
+	// working-tree files it contains.
+	rootInfo, err := rootDir.Stat(".")
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("stat local gitops root %s: %w", c.repoPath, err)
+	}
+	if err := upgrade(".", fs.FileInfoToDirEntry(rootInfo)); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("upgrade local gitops root %s: %w", c.repoPath, err)
+	}
+
+	// (b) Walk the .git subtree, excluding metadata that is private to the
+	// source checkout and is not used to serve commits to ArgoCD.
+	err = fs.WalkDir(rootDir.FS(), ".git", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Match by entry name so nested repositories under .git/modules keep
+		// their private checkout metadata private too.
+		switch d.Name() {
+		case "hooks", "logs", "worktrees":
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		case "index", "COMMIT_EDITMSG", "MERGE_MSG", "ORIG_HEAD", "FETCH_HEAD":
+			if !d.IsDir() {
+				return nil
+			}
+		}
+		return upgrade(path, d)
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -475,10 +535,12 @@ func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 }
 
 // CommitAndPush stages all changes, commits, and pushes to remote.
-// For local file:// paths, only commits without pushing. If Config.Managed is
-// set (the NIC auto-generated local repo), also upgrades the repo's
-// permissions afterward (see upgradeLocalPermissions); a user-supplied
-// local repo is left untouched.
+// For local file:// paths, only commits without pushing, then upgrades the
+// permissions of the repo root and Git-serving data under .git so ArgoCD's
+// non-root repo-server can read the objects the commit just wrote (see
+// upgradeLocalPermissions). This runs for any local repo, including a
+// user-supplied one — it only ever adds read/traverse bits to serving data and
+// never touches the working tree or private Git metadata.
 // No-op if there are no changes.
 func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 	tracer := otel.Tracer(tracerName)
@@ -500,11 +562,9 @@ func (c *ClientImpl) CommitAndPush(ctx context.Context, message string) error {
 			span.RecordError(err)
 			return err
 		}
-		if c.cfg.Managed {
-			if err := c.upgradeLocalPermissions(ctx); err != nil {
-				span.RecordError(err)
-				return err
-			}
+		if err := c.upgradeLocalPermissions(ctx); err != nil {
+			span.RecordError(err)
+			return err
 		}
 		return nil
 	}

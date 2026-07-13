@@ -169,9 +169,9 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 // left in place after a destroy so the user knows it exists and where to find
 // it. Cluster teardown does not remove this directory: it may hold local
 // commits or edits the user still wants, and it is cheap to delete manually.
-// Only the NIC-managed local (file://) directory is reported; remote git
-// repositories are the user's to manage. Nothing is logged when the directory
-// no longer exists on disk.
+// Only local file:// directories are reported; remote git repositories have no
+// retained host directory to report. Nothing is logged when the directory no
+// longer exists on disk.
 func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")

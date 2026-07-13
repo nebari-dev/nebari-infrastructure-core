@@ -831,17 +831,20 @@ func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 }
 
 // TestClientCommitAndPushUpgradesLocalPermissions verifies that CommitAndPush
-// on a local repo makes the whole tree (including .git/objects) group/other
-// readable. go-git writes loose objects via a temp-file-then-rename that is
-// always created at 0600 regardless of the process umask, so without this fix
-// a non-root reader (e.g. ArgoCD's repo-server) can't read a fresh commit.
-// It also verifies the upgrade is additive: a tracked script that's already
-// executable keeps exactly its original mode, with no diff staged as a
-// result, so a hand-picked +x bit (e.g. a git hook) can't be stripped.
+// on a local repo makes the repo root and .git (including
+// .git/objects) group/other readable. go-git writes loose objects via a
+// temp-file-then-rename that is always created at 0600 regardless of the
+// process umask, so without this fix a non-root reader (e.g. ArgoCD's
+// repo-server) can't read a fresh commit. It also verifies the upgrade leaves
+// the working tree untouched — argo reads .git and rebuilds its own checkout,
+// so a 0600 working-tree file keeps its mode — and that the upgrade is
+// additive: a tracked script that's already executable keeps exactly its
+// original mode, with no diff staged, so a hand-picked +x bit (e.g. a git
+// hook) can't be stripped.
 func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main", Managed: true})
+	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main"})
 	if err != nil {
 		t.Fatalf("NewClient() error: %v", err)
 	}
@@ -863,6 +866,21 @@ func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 	}
 
 	assertPathMode(t, scriptPath, 0o755)
+
+	// Working-tree files are never touched: the upgrade only repairs the repo
+	// root dir and .git (argo reads .git and rebuilds its own checkout). The
+	// 0600 file must be left exactly as-is.
+	assertPathMode(t, filePath, 0o600)
+
+	// The repo root itself must be group/other-traversable so argo can descend
+	// into it to reach .git.
+	rootInfo, err := os.Stat(tmpDir)
+	if err != nil {
+		t.Fatalf("stat repo root: %v", err)
+	}
+	if mode := rootInfo.Mode().Perm(); mode&0o055 != 0o055 {
+		t.Errorf("repo root mode = %v, want group+other read+execute set", mode)
+	}
 
 	objectsDir := filepath.Join(tmpDir, ".git", "objects")
 	sawObject := false
@@ -902,21 +920,18 @@ func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 	}
 }
 
-// TestClientCommitAndPushLeavesUnmanagedRepoAlone verifies that a
-// user-supplied local repo (Config.Managed left at its false default) never
-// gets its permissions touched by CommitAndPush, even though the same
-// umask-independent 0600 objects are created underneath it. NIC only takes
-// permission-repair responsibility for the directory it auto-generates and
-// owns; a repository the user pointed git_repository.url at is theirs.
-func TestClientCommitAndPushLeavesUnmanagedRepoAlone(t *testing.T) {
+// TestClientCommitAndPushUpgradesUserSuppliedLocalRepo verifies that a local
+// file:// repo which is NOT the auto-generated one still gets its .git/objects
+// made group/other-readable after a commit, so the non-root ArgoCD repo-server
+// can read the objects NIC wrote. The .git-only + OR-only design makes this
+// safe on a user's repo: .git isn't tracked so no mode-diff can result, and
+// the working tree is left exactly as-is (the 0600 file stays 0600).
+func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	client, err := NewClient(&Config{URL: "file://" + tmpDir, Branch: "main"})
 	if err != nil {
 		t.Fatalf("NewClient() error: %v", err)
-	}
-	if client.cfg.Managed {
-		t.Fatal("Managed should default to false for a directly-constructed Config")
 	}
 	if err := client.Init(context.Background()); err != nil {
 		t.Fatalf("Init() error: %v", err)
@@ -930,6 +945,9 @@ func TestClientCommitAndPushLeavesUnmanagedRepoAlone(t *testing.T) {
 	if err := client.CommitAndPush(context.Background(), "commit"); err != nil {
 		t.Fatalf("CommitAndPush() error: %v", err)
 	}
+
+	// Working-tree files are never touched, even on a user-supplied repo.
+	assertPathMode(t, filePath, 0o600)
 
 	objectsDir := filepath.Join(tmpDir, ".git", "objects")
 	sawObject := false
@@ -945,8 +963,8 @@ func TestClientCommitAndPushLeavesUnmanagedRepoAlone(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if mode := info.Mode().Perm(); mode != 0o600 {
-			t.Errorf("object %s mode = %v, want untouched 0600 (unmanaged repo)", path, mode)
+		if mode := info.Mode().Perm(); mode&0o044 != 0o044 {
+			t.Errorf("object %s mode = %v, want group+other read set", path, mode)
 		}
 		return nil
 	}); err != nil {
@@ -957,10 +975,123 @@ func TestClientCommitAndPushLeavesUnmanagedRepoAlone(t *testing.T) {
 	}
 }
 
-// TestClientUpgradeLocalPermissions verifies the upgrade is additive: modes
-// are only ever OR'd with the needed read/traverse bits, never replaced, so
-// an already-correct or intentionally stricter file keeps its exact mode.
+// TestClientInitRepairsExistingLocalRepository verifies that Init repairs
+// stale Git-serving permissions before bootstrapGitOps can take its
+// already-bootstrapped skip path. Working-tree and private Git metadata remain
+// untouched.
+func TestClientInitRepairsExistingLocalRepository(t *testing.T) {
+	repoPath := t.TempDir()
+	cfg := &Config{URL: "file://" + repoPath, Branch: DefaultBranch}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	if err := client.Init(context.Background()); err != nil {
+		t.Fatalf("initial Init() error: %v", err)
+	}
+
+	manifestPath := filepath.Join(repoPath, "application.yaml")
+	if err := os.WriteFile(manifestPath, []byte("kind: Application\n"), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := client.WriteBootstrapMarker(context.Background()); err != nil {
+		t.Fatalf("WriteBootstrapMarker() error: %v", err)
+	}
+	if err := client.CommitAndPush(context.Background(), "bootstrap"); err != nil {
+		t.Fatalf("CommitAndPush() error: %v", err)
+	}
+
+	hookPath := filepath.Join(repoPath, ".git", "hooks", "private-hook")
+	if err := os.MkdirAll(filepath.Dir(hookPath), 0o700); err != nil {
+		t.Fatalf("create hooks directory: %v", err)
+	}
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // Deliberately private metadata.
+		t.Fatalf("write private hook: %v", err)
+	}
+
+	objectsDir := filepath.Join(repoPath, ".git", "objects")
+	if err := filepath.WalkDir(filepath.Join(repoPath, ".git"), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == filepath.Join(repoPath, ".git", "hooks") {
+			return filepath.SkipDir
+		}
+		mode := os.FileMode(0o600)
+		if d.IsDir() {
+			mode = 0o700
+		}
+		return os.Chmod(path, mode) //nolint:gosec // Test setup walks a private TempDir with no concurrent writers.
+	}); err != nil {
+		t.Fatalf("make .git restrictive: %v", err)
+	}
+	if err := os.Chmod(repoPath, 0o700); err != nil { //nolint:gosec // Deliberately restrictive stale repository.
+		t.Fatalf("chmod repository root: %v", err)
+	}
+
+	reopened, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient() for existing repo error: %v", err)
+	}
+	if err := reopened.Init(context.Background()); err != nil {
+		t.Fatalf("Init() for existing repo error: %v", err)
+	}
+	bootstrapped, err := reopened.IsBootstrapped(context.Background())
+	if err != nil {
+		t.Fatalf("IsBootstrapped() error: %v", err)
+	}
+	if !bootstrapped {
+		t.Fatal("IsBootstrapped() = false, want true")
+	}
+
+	assertPathMode(t, repoPath, 0o755)
+	assertPathMode(t, manifestPath, 0o600)
+	assertPathMode(t, hookPath, 0o700)
+
+	sawObject := false
+	if err := filepath.WalkDir(objectsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if info.Mode().Perm()&0o055 != 0o055 {
+				t.Errorf("object directory %s mode = %v, want read/traverse bits", path, info.Mode().Perm())
+			}
+			return nil
+		}
+		sawObject = true
+		if info.Mode().Perm()&0o044 != 0o044 {
+			t.Errorf("object %s mode = %v, want read bits", path, info.Mode().Perm())
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk repaired objects: %v", err)
+	}
+	if !sawObject {
+		t.Fatal("expected at least one Git object")
+	}
+}
+
+// TestClientUpgradeLocalPermissions verifies the scoped, additive upgrade:
+// only the repo root directory and Git-serving data under .git are touched
+// (argo reads Git data and rebuilds its own checkout), modes are only ever OR'd
+// with the needed read/traverse bits, and special bits are preserved.
 func TestClientUpgradeLocalPermissions(t *testing.T) {
+	// mkGit creates a minimal .git/objects tree under root so the walk always
+	// has something to descend into, mirroring a real post-commit repo.
+	mkGit := func(t *testing.T, root string) {
+		t.Helper()
+		objects := filepath.Join(root, ".git", "objects")
+		if err := os.MkdirAll(objects, 0o700); err != nil {
+			t.Fatalf("mkdir .git objects: %v", err)
+		}
+	}
+
 	tests := []struct {
 		name        string
 		setup       func(t *testing.T, root string) string
@@ -969,24 +1100,50 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "root directory",
+			name: "root directory preserves special bits",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
-				if err := os.Chmod(root, 0o700); err != nil { //nolint:gosec // Deliberately restrictive setup for permission upgrade.
+				mkGit(t, root)
+				if err := os.Chmod(root, 0o700|os.ModeSticky); err != nil {
 					t.Fatalf("chmod root: %v", err)
 				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				// 0o700 (rwx------) | 0o055 (add group/other r-x) = 0o755.
 				assertPathMode(t, root, 0o755)
+				info, err := os.Stat(root)
+				if err != nil {
+					t.Fatalf("stat root: %v", err)
+				}
+				if info.Mode()&os.ModeSticky == 0 {
+					t.Errorf("root mode = %v, want sticky bit preserved", info.Mode())
+				}
 			},
 		},
 		{
-			name: "nested directory",
+			name: "working-tree file left untouched",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
+				mkGit(t, root)
+				path := filepath.Join(root, "nic-config.yaml")
+				if err := os.WriteFile(path, []byte("project_name: test\n"), 0o600); err != nil {
+					t.Fatalf("write file: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				// Working-tree files are never walked: argo reads .git only, so
+				// this 0600 file must be left exactly as-is.
+				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), 0o600)
+			},
+		},
+		{
+			name: "working-tree directory left untouched",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				mkGit(t, root)
 				nested := filepath.Join(root, "apps", "root")
 				if err := os.MkdirAll(nested, 0o700); err != nil {
 					t.Fatalf("mkdir nested: %v", err)
@@ -998,41 +1155,9 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				// Same OR as the root-directory case above: 0o700 | 0o055 = 0o755.
-				assertPathMode(t, filepath.Join(root, "apps", "root"), 0o755)
-			},
-		},
-		{
-			name: "regular file",
-			setup: func(t *testing.T, root string) string {
-				t.Helper()
-				path := filepath.Join(root, "nic-config.yaml")
-				if err := os.WriteFile(path, []byte("project_name: test\n"), 0o600); err != nil {
-					t.Fatalf("write file: %v", err)
-				}
-				return root
-			},
-			check: func(t *testing.T, root string) {
-				t.Helper()
-				// 0o600 (rw-------) | 0o044 (add group/other r--) = 0o644.
-				assertPathMode(t, filepath.Join(root, "nic-config.yaml"), 0o644)
-			},
-		},
-		{
-			name: "already-executable file is unchanged",
-			setup: func(t *testing.T, root string) string {
-				t.Helper()
-				path := filepath.Join(root, "hook.sh")
-				if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove it survives untouched.
-					t.Fatalf("write file: %v", err)
-				}
-				return root
-			},
-			check: func(t *testing.T, root string) {
-				t.Helper()
-				// 0o755 | 0o044 = 0o755 — group/other read was already set,
-				// so the OR is a no-op and +x is never at risk of removal.
-				assertPathMode(t, filepath.Join(root, "hook.sh"), 0o755)
+				// A working-tree subdirectory is outside .git, so it is never
+				// touched — its restrictive 0o700 mode is preserved.
+				assertPathMode(t, filepath.Join(root, "apps", "root"), 0o700)
 			},
 		},
 		{
@@ -1063,14 +1188,73 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 			},
 		},
 		{
+			name: "already-executable .git file is unchanged",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				mkGit(t, root)
+				path := filepath.Join(root, ".git", "hooks-sample.sh")
+				if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove it survives untouched.
+					t.Fatalf("write file: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				// 0o755 | 0o044 = 0o755 — group/other read was already set,
+				// so the OR is a no-op and +x is never at risk of removal.
+				assertPathMode(t, filepath.Join(root, ".git", "hooks-sample.sh"), 0o755)
+			},
+		},
+		{
+			name: "private git metadata left untouched",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				mkGit(t, root)
+				for _, dir := range []string{
+					"hooks",
+					"logs",
+					"worktrees",
+					filepath.Join("modules", "example", "hooks"),
+					filepath.Join("modules", "example", "logs"),
+				} {
+					path := filepath.Join(root, ".git", dir)
+					if err := os.MkdirAll(path, 0o700); err != nil {
+						t.Fatalf("mkdir %s: %v", path, err)
+					}
+					if err := os.Chmod(path, 0o700); err != nil { //nolint:gosec // Deliberately private metadata.
+						t.Fatalf("chmod %s: %v", path, err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(root, ".git", "index"), []byte("private"), 0o600); err != nil {
+					t.Fatalf("write index: %v", err)
+				}
+				nestedIndex := filepath.Join(root, ".git", "modules", "example", "index")
+				if err := os.WriteFile(nestedIndex, []byte("private"), 0o600); err != nil {
+					t.Fatalf("write nested index: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, filepath.Join(root, ".git", "hooks"), 0o700)
+				assertPathMode(t, filepath.Join(root, ".git", "logs"), 0o700)
+				assertPathMode(t, filepath.Join(root, ".git", "worktrees"), 0o700)
+				assertPathMode(t, filepath.Join(root, ".git", "index"), 0o600)
+				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "hooks"), 0o700)
+				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "logs"), 0o700)
+				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "index"), 0o600)
+			},
+		},
+		{
 			name: "symlink skip",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
+				mkGit(t, root)
 				target := filepath.Join(t.TempDir(), "target")
 				if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
 					t.Fatalf("write symlink target: %v", err)
 				}
-				link := filepath.Join(root, "linked-target")
+				link := filepath.Join(root, ".git", "linked-target")
 				if err := os.Symlink(target, link); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
 				}
@@ -1078,7 +1262,7 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 			},
 			check: func(t *testing.T, root string) {
 				t.Helper()
-				link := filepath.Join(root, "linked-target")
+				link := filepath.Join(root, ".git", "linked-target")
 				target, err := os.Readlink(link)
 				if err != nil {
 					t.Fatalf("readlink: %v", err)

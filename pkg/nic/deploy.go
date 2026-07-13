@@ -264,11 +264,10 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // This is a pure function with no side effects — directory creation happens separately.
 func defaultGitConfig(projectName string) *git.Config {
 	return &git.Config{
-		URL:     fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
-		Branch:  git.DefaultBranch,
-		Path:    "",
-		Auth:    git.AuthConfig{},
-		Managed: true,
+		URL:    fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
+		Branch: git.DefaultBranch,
+		Path:   "",
+		Auth:   git.AuthConfig{},
 	}
 }
 
