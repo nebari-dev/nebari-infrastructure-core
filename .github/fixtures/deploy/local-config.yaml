@@ -1,0 +1,15 @@
+project_name: local-ci
+domain: nebari.local
+
+certificate:
+  type: selfsigned
+
+git_repository:
+  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+  branch: local
+  path: "clusters/local-ci"
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  local: {}
