@@ -15,6 +15,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0004](0004-out-of-tree-provider-plugins.md) | Out-of-Tree Provider Plugin Architecture | Proposed | 2026-04-15 |
 | [ADR-0005](0005-nic-config-cli-surface.md) | nic config CLI surface | Proposed | 2026-06-03 |
 | [ADR-0006](0006-conditional-foundational-software-helm.md) | Conditional Foundational Software via Provider-Driven Helm Installs | Proposed | 2026-06-03 |
+| [ADR-0007](0007-cloudnativepg-managed-databases.md) | CloudNativePG as Foundational Database Infrastructure | Proposed | 2026-05-12 |
 
 ## ADR Statuses
 
