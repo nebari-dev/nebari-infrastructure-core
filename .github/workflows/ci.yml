@@ -64,3 +64,20 @@ jobs:
 
       - name: Test binary
         run: ./nic --help || true
+
+  workflow-pins:
+    name: Workflow pins & release config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check action pins
+        run: ./scripts/check-action-pins.sh
+
+      - name: Validate GoReleaser config
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check
