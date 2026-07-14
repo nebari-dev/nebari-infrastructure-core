@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-integration-local test-coverage test-race clean fmt vet lint install pre-commit release-snapshot localstack-up localstack-down localstack-logs localkind-up localkind-down
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot
 
 # Variables
 BINARY_NAME=nic
@@ -70,14 +70,7 @@ test-unit: ## Run unit tests only
 test-integration: ## Run integration tests (uses testcontainers, requires Docker)
 	@echo "Running integration tests with testcontainers..."
 	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
-	go test -v -tags=integration ./pkg/provider/aws -timeout 30m
-	@echo "Integration tests passed successfully"
-
-test-integration-local: localstack-up ## Run integration tests against local docker-compose LocalStack
-	@echo "Running integration tests against LocalStack..."
-	@echo "Waiting for LocalStack to be ready..."
-	@sleep 5
-	AWS_ENDPOINT_URL=http://localhost:4566 go test -v -tags=integration ./pkg/provider/aws -timeout 30m
+	go test -v -tags=integration ./pkg/providers/cluster/aws -timeout 30m
 	@echo "Integration tests passed successfully"
 
 test-all: ## Run all tests (unit + integration)
@@ -86,84 +79,8 @@ test-all: ## Run all tests (unit + integration)
 	$(MAKE) test-integration
 	@echo "All tests passed successfully"
 
-localstack-up: ## Start LocalStack using docker-compose
-	@echo "Starting LocalStack..."
-	@which docker-compose > /dev/null || which docker > /dev/null || (echo "Error: docker-compose or docker is not installed" && exit 1)
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml up -d; \
-	else \
-		docker compose -f docker-compose.test.yml up -d; \
-	fi
-	@echo "Waiting for LocalStack to be healthy..."
-	@timeout 30 sh -c 'until curl -sf http://localhost:4566/_localstack/health > /dev/null 2>&1; do sleep 1; done' || (echo "LocalStack failed to start" && exit 1)
-	@echo "LocalStack is ready!"
-
-localstack-down: ## Stop LocalStack
-	@echo "Stopping LocalStack..."
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml down; \
-	else \
-		docker compose -f docker-compose.test.yml down; \
-	fi
-	@echo "LocalStack stopped"
-
-localstack-logs: ## Show LocalStack logs
-	@if command -v docker-compose > /dev/null 2>&1; then \
-		docker-compose -f docker-compose.test.yml logs -f localstack; \
-	else \
-		docker compose -f docker-compose.test.yml logs -f localstack; \
-	fi
-
 LOCAL_CONFIG?=./examples/local-config.yaml
 REGEN_APPS?=
-
-localkind-up: build ## Create local kind cluster and deploy Nebari (mounts file:// gitops repos automatically)
-	@echo "Setting up local kind cluster..."
-	@which kind > /dev/null || (echo "Error: kind is not installed" && exit 1)
-	@which yq > /dev/null || (echo "Error: yq is not installed. Please install and try again" && exit 1)
-	@which docker > /dev/null || (echo "Error: Docker is not installed or not running" && exit 1)
-	-docker network create --subnet=192.168.1.0/24 --gateway=192.168.1.1 kind
-	@GITOPS_URL=$$(yq '.git_repository.url // ""' $(LOCAL_CONFIG)); \
-	PROJECT_NAME=$$(yq '.project_name // ""' $(LOCAL_CONFIG)); \
-	if echo "$$GITOPS_URL" | grep -q '^file:///'; then \
-		LOCAL_PATH=$$(echo "$$GITOPS_URL" | sed 's|^file://||'); \
-		echo "Mounting explicit gitops repo: $$LOCAL_PATH"; \
-	elif [ -z "$$GITOPS_URL" ]; then \
-		LOCAL_PATH="/tmp/nebari-gitops-$$PROJECT_NAME"; \
-		echo "No git_repository configured, mounting auto-generated dir: $$LOCAL_PATH"; \
-	else \
-		LOCAL_PATH=""; \
-		echo "Remote git repo detected ($$GITOPS_URL), no mount needed"; \
-	fi; \
-	if [ -n "$$LOCAL_PATH" ]; then \
-		mkdir -p "$$LOCAL_PATH"; \
-		KIND_CONFIG=$$(mktemp); \
-		printf '%s\n' \
-			'kind: Cluster' \
-			'apiVersion: kind.x-k8s.io/v1alpha4' \
-			'name: nebari-local' \
-			'nodes:' \
-			'- role: control-plane' \
-			'  extraMounts:' \
-			"  - hostPath: \"$$LOCAL_PATH\"" \
-			"    containerPath: \"$$LOCAL_PATH\"" \
-			'    readOnly: true' \
-			> "$$KIND_CONFIG"; \
-		kind create cluster --config "$$KIND_CONFIG" || true; \
-		rm -f "$$KIND_CONFIG"; \
-	else \
-		kind create cluster --name nebari-local || true; \
-	fi
-	@echo "Deploying Nebari to local cluster..."
-	time ./$(BINARY_NAME) deploy -f $(LOCAL_CONFIG) $(REGEN_APPS)
-	@echo "Local kind cluster is ready!"
-
-localkind-rebuild: build localkind-down localkind-up ## Rebuild local kind cluster
-
-localkind-down: ## Delete local kind cluster
-	-kind delete cluster -n nebari-local
-	-docker network rm kind 2>/dev/null
-	@echo "Local kind cluster deleted"
 
 test-coverage: ## Run unit tests with coverage
 	@echo "Running unit tests with coverage..."

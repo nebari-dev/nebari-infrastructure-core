@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -31,6 +32,27 @@ type TerraformExecutor struct {
 // Cleanup removes the temporary working directory.
 func (te *TerraformExecutor) Cleanup() error {
 	return te.appFs.RemoveAll(te.workingDir)
+}
+
+// SetExtraEnv scopes additional environment variables to the child tofu
+// process without mutating the parent process env via os.Setenv. The current
+// os.Environ() is used as the base, prohibited tfexec-managed vars (e.g.
+// TF_LOG, TF_INPUT) are stripped, and the provided overrides are merged on
+// top. Returns an error if any override key is one that tfexec manages.
+func (te *TerraformExecutor) SetExtraEnv(overrides map[string]string) error {
+	env := make(map[string]string)
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		env[k] = v
+	}
+	env = tfexec.CleanEnv(env)
+	for k, v := range overrides {
+		env[k] = v
+	}
+	return te.SetEnv(env)
 }
 
 // streamThroughStatus wires stdout/stderr to the status channel attached to

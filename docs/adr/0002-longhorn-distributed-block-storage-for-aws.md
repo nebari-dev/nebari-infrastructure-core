@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed (2026-02-13) · Amended (2026-05) — scope expanded beyond AWS; see [Update](#update-2026-05-longhorn-as-shared-package).
 
 ## Date
 
@@ -172,32 +172,47 @@ When Longhorn is disabled (`longhorn.enabled: false`), falls back to `gp2`.
 
 Default (no longhorn section needed):
 ```yaml
-amazon_web_services:
-  region: us-west-2
-  kubernetes_version: "1.34"
-  node_groups:
-    user:
-      instance: m7i.xlarge
-      min_nodes: 0
-      max_nodes: 5
+cluster:
+  aws:
+    region: us-west-2
+    kubernetes_version: "1.34"
+    node_groups:
+      user:
+        instance: m7i.xlarge
+        min_nodes: 0
+        max_nodes: 5
 ```
 
-Explicit configuration:
+Explicit configuration with dedicated, tainted storage nodes:
 ```yaml
-amazon_web_services:
-  region: us-west-2
-  longhorn:
-    replica_count: 3
-    dedicated_nodes: true
-    node_selector:
-      node.longhorn.io/storage: "true"
+cluster:
+  aws:
+    region: us-west-2
+    node_groups:
+      storage:
+        instance: m7g.large
+        min_nodes: 2
+        max_nodes: 2
+        disk_size: 500
+        labels:
+          node.longhorn.io/storage: "true"
+        taints:
+          - key: node.longhorn.io/storage
+            value: "true"
+            effect: NO_SCHEDULE
+    longhorn:
+      replica_count: 3
+      dedicated_nodes: true
+      node_selector:
+        node.longhorn.io/storage: "true"
 ```
 
 Opt out:
 ```yaml
-amazon_web_services:
-  longhorn:
-    enabled: false
+cluster:
+  aws:
+    longhorn:
+      enabled: false
 ```
 
 ### Helm Values
@@ -214,27 +229,34 @@ defaultSettings:
   replicaAutoBalance: best-effort
 ```
 
-Dedicated nodes deployment adds:
+Dedicated nodes deployment adds (current behavior — see "Update (2026-06)" below
+for the topology change away from component pinning):
 ```yaml
 defaultSettings:
   createDefaultDiskLabeledNodes: true
+  # Lets the replica-role system-managed components (instance-manager,
+  # engine-image, share-manager) tolerate the storage-node taint so they can run
+  # on the dedicated storage nodes. NOTE: the csi-plugin DaemonSet is also
+  # system-managed and inherits ONLY this toleration, so a tainted workload pool
+  # (e.g. GPU) would need its taint added here for mounts to work there.
+  taintToleration: node.longhorn.io/storage=true:NoSchedule
 
+# longhorn-manager (DaemonSet) and the driver run on EVERY node so volumes can be
+# served to workloads anywhere — tolerate-all, NO nodeSelector. Replica DATA is
+# confined to storage nodes by createDefaultDiskLabeledNodes (only labeled
+# storage nodes get a disk), not by pinning these components.
 longhornManager:
-  nodeSelector:
-    node.longhorn.io/storage: "true"
   tolerations:
-    - key: node.longhorn.io/storage
-      operator: Exists
-      effect: NoSchedule
-
+    - operator: Exists
 longhornDriver:
-  nodeSelector:
-    node.longhorn.io/storage: "true"
   tolerations:
-    - key: node.longhorn.io/storage
-      operator: Exists
-      effect: NoSchedule
+    - operator: Exists
 ```
+
+The storage node group must carry `node.longhorn.io/create-default-disk=true`
+(the AWS provider injects it automatically; other providers must label their
+storage pool). Without it, `createDefaultDiskLabeledNodes` provisions no disks
+and every volume faults with `ReplicaSchedulingFailure`.
 
 ### Testing Strategy
 
@@ -257,3 +279,50 @@ longhornDriver:
 - [Longhorn: restrict storage to specific nodes](https://longhorn.io/kb/tip-only-use-storage-on-a-set-of-nodes/)
 - [CNCF Longhorn project page](https://www.cncf.io/projects/longhorn/)
 - [MADR Format](https://adr.github.io/madr/)
+
+## Update (2026-05): shared package, extra providers
+
+PR #270 moved install/uninstall from `pkg/provider/aws/` to
+`pkg/storage/longhorn/`. Providers now call `longhorn.Install` / `Uninstall`.
+
+| Provider | Default    | Why                                                       |
+|----------|------------|-----------------------------------------------------------|
+| AWS      | opt-out    | cross-AZ resilience (EBS is single-AZ).                   |
+| Hetzner  | opt-out    | `hcloud-volumes` is RWO-only; Longhorn provides RWX.      |
+| existing | opt-in     | user's cluster may already have a StorageClass.           |
+
+Behavioural changes: `Uninstall` runs before infra teardown (ADR's "Destroy
+Flow" is now implemented); installer demotes any pre-existing default
+StorageClass; `ensureISCSI` runs on the upgrade path too; chart pinned to
+`1.11.2` (fixes longhorn/longhorn#12081).
+
+Original AWS-only decision and tuning (replica count, anti-affinity, ext4,
+dedicated-nodes topology) unchanged.
+
+## Update (2026-06): dedicated-nodes topology (#366/#369)
+
+The original dedicated-nodes Helm values pinned the system components to the
+storage nodes (`systemManagedComponentsNodeSelector` + `nodeSelector` on
+`longhornManager`/`longhornDriver`). On a live cluster this broke PVC mounts on
+non-storage workload nodes (the csi-plugin and manager were absent there — #366),
+and the storage nodes never got disks (#369). The topology is now:
+
+- **No component pinning.** `systemManagedComponentsNodeSelector` and the
+  manager/driver `nodeSelector` are removed; manager + driver are tolerate-all so
+  they (and the csi-plugin) run on every node and can serve volumes anywhere.
+- **Replica DATA confined by disks, not pinning.** `createDefaultDiskLabeledNodes`
+  + the `node.longhorn.io/create-default-disk=true` label (provider-applied; AWS
+  injects it on storage node groups) means only storage nodes get a disk, so
+  replicas can only land there. This is autoscaler-safe (kubelet applies the label
+  at registration) and replaces the `allowScheduling`-based guard #366 originally
+  proposed.
+
+Known limitations (tracked separately): csi-plugin tolerations come from the
+`taintToleration` setting (storage taint only), so tainted workload pools (GPU)
+need their taint added there before mounts work on them (relates to #363/#368);
+and the disk-label injection is AWS-only — Hetzner/existing must label their
+storage pool themselves (the installer now warns when no node carries the label).
+
+Switching an existing cluster between `dedicated_nodes` modes is a manual
+replica migration (Longhorn does not move existing replicas on a flag change).
+See [Migrating Longhorn dedicated_nodes modes](../operations/longhorn-dedicated-nodes-migration.md).

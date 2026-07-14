@@ -3,16 +3,19 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -29,8 +32,17 @@ const (
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
 
+	// PartOfLabel is the app.kubernetes.io/part-of label key.
+	PartOfLabel = "app.kubernetes.io/part-of"
+
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
+
+	// ManagedByLabel is the app.kubernetes.io/managed-by label key.
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+
+	// NebariManagedByValue is the value of the app.kubernetes.io/managed-by label for Nebari-managed resources.
+	NebariManagedByValue = "nebari-infrastructure-core"
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -84,14 +96,15 @@ type ArgoCDSSOConfig struct {
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
-// via ArgoCD from the git repository. cfg.GitRepository may be either remote or local file:// path.
-func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, prov provider.Provider, foundationalCfg FoundationalConfig) error {
+// via ArgoCD from the git repository. gitConfig may be either remote or local
+// file:// path; when nil, the root App-of-Apps step is skipped.
+func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, gitConfig *git.Config, foundationalCfg FoundationalConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.InstallFoundationalServices")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", prov.Name()),
+		attribute.String("provider", clusterProvider.Name()),
 		attribute.String("project_name", cfg.ProjectName),
 		attribute.Bool("keycloak_enabled", foundationalCfg.Keycloak.Enabled),
 	)
@@ -101,7 +114,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		WithAction("installing"))
 
 	// Get kubeconfig from provider
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
@@ -152,8 +165,8 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 	}
 
 	// 3. Apply root App-of-Apps if git configuration is available
-	if cfg.GitRepository != nil {
-		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, cfg); err != nil {
+	if gitConfig != nil {
+		if err := ApplyRootAppOfApps(ctx, kubeconfigBytes, gitConfig); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to apply root App-of-Apps: %w", err)
 		}
@@ -212,7 +225,83 @@ func createNamespace(ctx context.Context, client kubernetes.Interface, namespace
 	return nil
 }
 
-// createSecret creates a Kubernetes secret if it doesn't already exist
+// createOrUpdateConfigMap creates the ConfigMap, or reconciles its data and
+// labels when it already exists with different contents. Unlike createSecret
+// (create-only by design, for generated one-time credentials), an org CA bundle
+// is operator-supplied and rotates, so this upserts to make a changed
+// trust_bundle actually propagate.
+func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, cm *corev1.ConfigMap) error {
+	namespace := cm.Namespace
+	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, cm.Name, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			// A transient/permission error must not be mistaken for "absent" —
+			// otherwise we'd blindly Create and mask the real failure.
+			return fmt.Errorf("failed to get configmap %s: %w", cm.Name, err)
+		}
+		if _, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("failed to create configmap %s: %w", cm.Name, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created ConfigMap %s", cm.Name)).
+			WithResource("configmap").
+			WithAction("created").
+			WithMetadata("configmap_name", cm.Name))
+		return nil
+	}
+
+	// Reconcile both data and our managed labels; no-op when already in sync.
+	if reflect.DeepEqual(existing.Data, cm.Data) && labelsContain(existing.Labels, cm.Labels) {
+		return nil
+	}
+	existing.Data = cm.Data
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	for k, v := range cm.Labels {
+		existing.Labels[k] = v
+	}
+	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w", cm.Name, err)
+	}
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Updated ConfigMap %s", cm.Name)).
+		WithResource("configmap").
+		WithAction("updated").
+		WithMetadata("configmap_name", cm.Name))
+	return nil
+}
+
+// labelsContain reports whether have already includes every key/value in want.
+func labelsContain(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// createOrgCAConfigMap upserts the install-time argocd-org-ca ConfigMap holding
+// the operator's org CA, labeled as a foundational resource. It is the org-CA
+// analogue of createKeycloakSecrets — keeping the resource construction beside
+// the other foundational create helpers rather than inline in Install.
+func createOrgCAConfigMap(ctx context.Context, client kubernetes.Interface, namespace, orgCABundlePEM string) error {
+	return createOrUpdateConfigMap(ctx, client, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      orgCAConfigMapName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
+			},
+		},
+		Data: map[string]string{orgCAConfigMapKey: orgCABundlePEM},
+	})
+}
+
+// createSecret creates a Kubernetes secret if it doesn't already exist.
+// Create-only by design: these are generated one-time credentials that must
+// never be overwritten on re-deploy. For operator-supplied data that can rotate
+// (e.g. a CA bundle), use createOrUpdateConfigMap / createOrgCAConfigMap instead.
 func createSecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret) error {
 	namespace := secret.Namespace
 	_, err := client.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
@@ -285,8 +374,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -306,8 +395,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-					"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -333,8 +422,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of":    NebariFoundationalPartOf,
-				"app.kubernetes.io/managed-by": "nebari-infrastructure-core",
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,

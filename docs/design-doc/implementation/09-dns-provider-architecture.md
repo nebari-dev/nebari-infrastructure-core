@@ -46,8 +46,8 @@ DNS errors are treated as warnings and never block deploy or destroy operations.
 ### DNS Provider Interface
 
 ```go
-// pkg/dnsprovider/provider.go
-type DNSProvider interface {
+// pkg/providers/dns/provider.go
+type Provider interface {
     // Name returns the DNS provider name (cloudflare, route53, azure-dns, etc.)
     Name() string
 
@@ -69,7 +69,7 @@ type DNSProvider interface {
 The Cloudflare provider uses an internal client interface for testability:
 
 ```go
-// pkg/dnsprovider/cloudflare/client.go
+// pkg/providers/dns/cloudflare/client.go
 type CloudflareClient interface {
     ResolveZoneID(ctx context.Context, zoneName string) (string, error)
     ListDNSRecords(ctx context.Context, zoneID string, name string, recordType string) ([]DNSRecordResult, error)
@@ -276,10 +276,10 @@ The SDK adapter layer (`sdkClient`) is also instrumented, providing fine-grained
 
 ```bash
 # Test DNS provider registry
-go test ./pkg/dnsprovider -v -cover
+go test ./pkg/providers/dns -v -cover
 
 # Test Cloudflare provider
-go test ./pkg/dnsprovider/cloudflare -v -cover
+go test ./pkg/providers/dns/cloudflare -v -cover
 ```
 
 Test cases cover:

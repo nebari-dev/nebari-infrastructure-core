@@ -3,7 +3,7 @@ name: OpenTofu lockfile drift check
 on:
   pull_request:
     paths:
-      - "pkg/provider/**/templates/**/*.tf"
+      - "pkg/providers/cluster/**/templates/**/*.tf"
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t dirs < <(find pkg/provider -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
+          mapfile -t dirs < <(find pkg/providers/cluster -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
 
           platforms=(
             "linux_amd64"
@@ -60,10 +60,10 @@ jobs:
           done
 
           # Check only lockfiles under templates/ (avoid brittle ** globs)
-          mapfile -t lockfiles < <(find pkg/provider -type f -path "*/templates/.terraform.lock.hcl")
+          mapfile -t lockfiles < <(find pkg/providers/cluster -type f -path "*/templates/.terraform.lock.hcl")
 
           if [ "${#lockfiles[@]}" -eq 0 ]; then
-            echo "No lockfiles found under pkg/provider/**/templates/.terraform.lock.hcl"
+            echo "No lockfiles found under pkg/providers/cluster/**/templates/.terraform.lock.hcl"
             exit 0
           fi
 

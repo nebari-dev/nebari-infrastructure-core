@@ -9,7 +9,7 @@ A Go CLI for declarative cloud infrastructure management using native cloud SDKs
 - **No state files** — queries cloud APIs on every run for actual state
 - **Tag-based discovery** — all resources tagged `nic.nebari.dev/cluster-name` and `nic.nebari.dev/managed-by=nic`
 - **Reconciliation loop** — discover → diff → create/update/delete
-- **Native SDKs** — aws-sdk-go-v2 (GCP, Azure pending)
+- **Native SDKs + OpenTofu** — both providers combine cloud SDKs with OpenTofu/Terraform: AWS uses aws-sdk-go-v2 alongside OpenTofu; Azure wraps the `nebari-dev/terraform-azurerm-aks-cluster` module via OpenTofu plus the Azure SDK (`armcontainerservice`) for kubeconfig retrieval. GCP pending.
 - **Explicit registration** — no blank imports or `init()` magic; providers registered in `main.go`
 
 ---
@@ -148,7 +148,7 @@ type NebariConfig struct {
 }
 // Access provider config: cfg.ProviderConfig["amazon_web_services"]
 
-// pkg/provider/aws/config.go
+// pkg/providers/cluster/aws/config.go
 type Config struct {
     Region            string      `yaml:"region"`
     KubernetesVersion string      `yaml:"kubernetes_version"`
@@ -219,12 +219,14 @@ Focus tests on:
 
 ## Adding a Provider
 
-1. `pkg/provider/<name>/config.go` — provider-specific config types
-2. `pkg/provider/<name>/provider.go` — implement `Provider` interface
+1. `pkg/providers/cluster/<name>/config.go` — provider-specific config types
+2. `pkg/providers/cluster/<name>/provider.go` — implement `Provider` interface
 3. Add `interface{}` field to `NebariConfig`
 4. Register in `main.go`: `registry.Register(ctx, "name", newprovider.NewProvider())`
 5. Example config in `examples/`
 6. Tests
+
+See `pkg/providers/cluster/aws/` and `pkg/providers/cluster/azure/` for reference implementations. Both combine cloud SDKs with OpenTofu; Azure additionally wraps the external `nebari-dev/terraform-azurerm-aks-cluster` module, using the Azure SDK only for kubeconfig retrieval and tag-based cleanup.
 
 ---
 
