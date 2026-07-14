@@ -47,9 +47,11 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
 
 ## Maintainer prerequisites (one-time repo-admin setup)
 
-These are required for the signing/provenance/token controls to be fully active:
-
 1. **Create the `release` environment** (Settings -> Environments) with required
    reviewers. This activates the approval gate on the release job.
-2. **Regenerate `ADD_TO_PROJECT_PAT`** as a fine-grained token scoped to
-   **Projects: read/write** only (no repo contents scope).
+
+`ADD_TO_PROJECT_PAT` is already a fine-grained token with least-privilege scope
+(organization Projects: read and write; repository Issues, Pull requests, and
+Metadata: read-only), verified 2026-07-14, so it needs no change. The only
+token-side hardening in this change is pinning the reusable workflow that
+consumes it.
