@@ -70,7 +70,6 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		timeout, err = time.ParseDuration(destroyTimeout)
 		if err != nil {
 			span.RecordError(err)
-			slog.Error("Invalid timeout duration", "error", err, "timeout", destroyTimeout)
 			return fmt.Errorf("invalid timeout duration %q: %w", destroyTimeout, err)
 		}
 		span.SetAttributes(attribute.String("timeout", destroyTimeout))
@@ -79,14 +78,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", configFile)
 		return err
 	}
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
 

@@ -2,14 +2,16 @@ package nic
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -92,20 +94,20 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		WithMetadata("provider", cfg.Cluster.ProviderName()).
 		WithMetadata("project_name", cfg.ProjectName))
 
-	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	clusterProvider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("get cluster provider: %w", err)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
-		WithMetadata("provider", prov.Name()))
+		WithMetadata("provider", clusterProvider.Name()))
 
 	if opts.Confirm != nil && !opts.DryRun {
 		summary := DestroySummary{
 			Provider:    cfg.Cluster.ProviderName(),
 			ProjectName: cfg.ProjectName,
-			Details:     prov.Summary(cfg.Cluster),
+			Details:     clusterProvider.Summary(cfg.Cluster),
 		}
 		if err := opts.Confirm(ctx, summary); err != nil {
 			span.RecordError(err)
@@ -121,10 +123,27 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
-	if err := prov.Destroy(ctx, cfg.ProjectName, cfg.Cluster, provider.DestroyOptions{
-		DryRun:  opts.DryRun,
-		Force:   opts.Force,
-		Timeout: opts.Timeout,
+	// Re-resolve the bundle so the destroy plan matches what was deployed. The
+	// applied value already lives in TF state, so a source PEM that was deleted
+	// or moved after deploy must not block teardown: downgrade a missing file to
+	// an empty bundle and warn rather than fail.
+	caBundle, err := cfg.TrustBundle.ResolveBase64()
+	if errors.Is(err, fs.ErrNotExist) {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			"trust_bundle PEM file is no longer present; continuing destroy with the value already in Terraform state").
+			WithResource("trust_bundle"))
+		caBundle, err = "", nil
+	}
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+
+	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
+		DryRun:      opts.DryRun,
+		Force:       opts.Force,
+		Timeout:     opts.Timeout,
+		TrustBundle: caBundle,
 	}); err != nil {
 		span.RecordError(err)
 		if opts.Force {
@@ -136,7 +155,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
-		WithMetadata("provider", prov.Name()))
+		WithMetadata("provider", clusterProvider.Name()))
 	return nil
 }
 

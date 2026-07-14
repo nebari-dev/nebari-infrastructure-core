@@ -148,7 +148,7 @@ type NebariConfig struct {
 }
 // Access provider config: cfg.ProviderConfig["amazon_web_services"]
 
-// pkg/provider/aws/config.go
+// pkg/providers/cluster/aws/config.go
 type Config struct {
     Region            string      `yaml:"region"`
     KubernetesVersion string      `yaml:"kubernetes_version"`
@@ -219,14 +219,14 @@ Focus tests on:
 
 ## Adding a Provider
 
-1. `pkg/provider/<name>/config.go` — provider-specific config types
-2. `pkg/provider/<name>/provider.go` — implement `Provider` interface
+1. `pkg/providers/cluster/<name>/config.go` — provider-specific config types
+2. `pkg/providers/cluster/<name>/provider.go` — implement `Provider` interface
 3. Add `interface{}` field to `NebariConfig`
 4. Register in `main.go`: `registry.Register(ctx, "name", newprovider.NewProvider())`
 5. Example config in `examples/`
 6. Tests
 
-See `pkg/provider/aws/` and `pkg/provider/azure/` for reference implementations. Both combine cloud SDKs with OpenTofu; Azure additionally wraps the external `nebari-dev/terraform-azurerm-aks-cluster` module, using the Azure SDK only for kubeconfig retrieval and tag-based cleanup.
+See `pkg/providers/cluster/aws/` and `pkg/providers/cluster/azure/` for reference implementations. Both combine cloud SDKs with OpenTofu; Azure additionally wraps the external `nebari-dev/terraform-azurerm-aks-cluster` module, using the Azure SDK only for kubeconfig retrieval and tag-based cleanup.
 
 ---
 

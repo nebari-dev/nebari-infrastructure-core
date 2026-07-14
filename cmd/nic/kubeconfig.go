@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -49,14 +50,12 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", configFile)
 		return err
 	}
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
 
@@ -72,8 +71,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 	if kubeconfigOutputFile != "" {
 		if err := os.WriteFile(kubeconfigOutputFile, kubeconfigBytes, 0600); err != nil {
 			span.RecordError(err)
-			slog.Error("Failed to write kubeconfig file", "error", err, "file", kubeconfigOutputFile)
-			return err
+			return fmt.Errorf("write kubeconfig file %q: %w", kubeconfigOutputFile, err)
 		}
 		slog.Info("Kubeconfig written successfully", "file", kubeconfigOutputFile)
 		return nil
@@ -81,8 +79,7 @@ func runKubeconfig(cmd *cobra.Command, args []string) error {
 
 	if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to write kubeconfig to stdout", "error", err)
-		return err
+		return fmt.Errorf("write kubeconfig to stdout: %w", err)
 	}
 	return nil
 }

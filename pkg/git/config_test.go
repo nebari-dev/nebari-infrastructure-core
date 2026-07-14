@@ -586,7 +586,9 @@ func TestConfigValidateLocalPath(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "non-existent local path",
+			// A missing directory is valid: the deploy flow creates it,
+			// and destroy must work after the directory is cleaned up.
+			name: "non-existent local path is allowed",
 			config: Config{
 				URL:    "file:///tmp/nonexistent-path-12345",
 				Branch: "main",
@@ -594,8 +596,7 @@ func TestConfigValidateLocalPath(t *testing.T) {
 			setup: func(t *testing.T) (string, func()) {
 				return "", func() {}
 			},
-			wantErr:     true,
-			errContains: "does not exist",
+			wantErr: false,
 		},
 		{
 			name: "local path is a file not directory",

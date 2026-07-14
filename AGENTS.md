@@ -12,8 +12,8 @@ NIC is organized around pluggable **providers**. A provider is a small Go interf
 
 The codebase currently has two provider categories in tree:
 
-- **Cluster providers** (`pkg/provider/`) - bring up the Kubernetes cluster
-- **DNS providers** (`pkg/dnsprovider/`) - manage DNS records pointing at the cluster's load balancer
+- **Cluster providers** (`pkg/providers/cluster/`) - bring up the Kubernetes cluster
+- **DNS providers** (`pkg/providers/dns/`) - manage DNS records pointing at the cluster's load balancer
 
 More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
@@ -21,18 +21,18 @@ More categories (certificate issuers, git hosting, software installers) are plan
 
 | Provider | Backing tool | Status |
 | --- | --- | --- |
-| `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/provider/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
+| `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
 | `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
 | `local` | Validates an existing kubeconfig context for a Kind cluster. **The Kind cluster itself is brought up by `make localkind-up`**, not by `nic deploy` (the provider's `Deploy` is currently a stub) | Working for the Makefile-driven flow |
-| `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/provider/azure/templates/` | Implemented end-to-end |
+| `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
 | `gcp` | Stub implementation only | Not implemented |
 
 ### DNS Providers
 
 | Provider | Backing tool | Status |
 | --- | --- | --- |
-| `cloudflare` | Cloudflare API (`pkg/dnsprovider/cloudflare/`) | Working |
+| `cloudflare` | Cloudflare API (`pkg/providers/dns/cloudflare/`) | Working |
 
 ### Core Architecture Principles
 
@@ -61,7 +61,7 @@ make test-integration         # testcontainers-based, requires Docker
 make test-all                 # unit + integration
 make test-coverage            # coverage report
 make test-race                # race detector
-go test ./pkg/provider/aws -v # single package
+go test ./pkg/providers/cluster/aws -v # single package
 ```
 
 ### Code Quality
@@ -146,7 +146,7 @@ pkg/
 
 ### The Cluster `Provider` Interface
 
-`pkg/provider/provider.go` is the single seam between `cmd/nic` and any cluster-specific code:
+`pkg/providers/cluster/provider.go` is the single seam between `cmd/nic` and any cluster-specific code:
 
 ```go
 type Provider interface {
@@ -166,7 +166,7 @@ Cluster-shaped branching anywhere outside the cluster provider package itself **
 
 ### The `DNSProvider` Interface
 
-`pkg/dnsprovider/provider.go`:
+`pkg/providers/dns/provider.go`:
 
 ```go
 type DNSProvider interface {
@@ -248,7 +248,7 @@ dns:
     zone_name: example.com
 ```
 
-The `config` package does **not** know about provider-specific fields. Each provider unmarshals its own slice of `ProviderConfig` into a typed struct (e.g., `pkg/provider/aws/config.go`, `pkg/provider/hetzner/config.go`).
+The `config` package does **not** know about provider-specific fields. Each provider unmarshals its own slice of `ProviderConfig` into a typed struct (e.g., `pkg/providers/cluster/aws/config.go`, `pkg/providers/cluster/hetzner/config.go`).
 
 See `examples/` for full configs: `aws-config.yaml`, `aws-config-with-dns.yaml`, `azure-config.yaml`, `hetzner-config.yaml`, `local-config.yaml`, `existing-config.yaml`.
 
@@ -256,8 +256,8 @@ See `examples/` for full configs: `aws-config.yaml`, `aws-config-with-dns.yaml`,
 
 State backends are provider-defined.
 
-- **AWS:** standard Terraform remote state. The AWS provider's templates set up the backend; see `pkg/provider/aws/state.go` and `templates/backend.tf`.
-- **Azure:** Terraform remote state in an Azure Storage Account backend; see `pkg/provider/azure/state.go`, `state_backend.go`, and `templates/backend.tf`.
+- **AWS:** standard Terraform remote state. The AWS provider's templates set up the backend; see `pkg/providers/cluster/aws/state.go` and `templates/backend.tf`.
+- **Azure:** Terraform remote state in an Azure Storage Account backend; see `pkg/providers/cluster/azure/state.go`, `state_backend.go`, and `templates/backend.tf`.
 - **Hetzner:** `hetzner-k3s` writes its own state file plus a kubeconfig.
 - **Existing / local:** no state of their own - they consume an external kubeconfig.
 
@@ -312,15 +312,17 @@ func SomeFunction(ctx context.Context, ...) error {
 - Use `slog.Info()` / `slog.Error()` in `cmd/nic/` commands.
 - Do **not** log in `pkg/` library code; emit spans and status updates instead.
 
+**Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
+
 **The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler` and remains the only layer that emits logs. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
 
 ## Key Development Patterns
 
 ### Adding a New Cluster Provider
 
-1. Create `pkg/provider/<name>/`.
+1. Create `pkg/providers/cluster/<name>/`.
 2. Implement the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`).
-3. Choose the right backing tool. Embed templates with `//go:embed` if you need files (see `pkg/provider/aws/templates/`).
+3. Choose the right backing tool. Embed templates with `//go:embed` if you need files (see `pkg/providers/cluster/aws/templates/`).
 4. Register the provider with the `registry.Registry` built in `pkg/nic/registry.go`.
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
 6. Add an `examples/<name>-config.yaml`.
@@ -328,7 +330,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 ### Adding a New DNS Provider
 
-1. Create `pkg/dnsprovider/<name>/`.
+1. Create `pkg/providers/dns/<name>/`.
 2. Implement the `DNSProvider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`).
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
@@ -374,7 +376,7 @@ if err != nil {
 - **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`provider.Provider`, `dnsprovider.DNSProvider`), never on specific implementations.
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
-- Provider-specific types belong in their respective packages (e.g., `pkg/provider/aws/config.go`).
+- Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
 - **Cluster-shaped capabilities flow through `InfraSettings`.** When the CLI or `pkg/argocd` needs to branch on a cluster-provider-specific capability (MetalLB requirement, Keycloak context path, HTTPS port, local GitOps support, etc.), add a field to `InfraSettings` and set it in each provider's `InfraSettings()` method. Do not introduce `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code - those become architectural debt that make adding a new provider require changes across the codebase. Existing examples: `NeedsMetalLB`, `StorageClass`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LoadBalancerAnnotations`, `SupportsLocalGitOps`.
 
 **Why this matters:**
@@ -442,6 +444,6 @@ Run before every commit:
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
 6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
-7. **Abstraction boundary:** no provider-name switches outside `pkg/provider/` or `pkg/dnsprovider/`
+7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.
