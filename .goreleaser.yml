@@ -114,3 +114,16 @@ snapshot:
 source:
   enabled: true
   name_template: '{{ .ProjectName }}-{{ .Version }}-source'
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
+sboms:
+  - artifacts: archive
