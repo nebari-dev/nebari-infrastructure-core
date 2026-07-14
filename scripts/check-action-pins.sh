@@ -14,18 +14,28 @@ workflows=(
 status=0
 
 for wf in "${workflows[@]}"; do
-  # Every `uses:` value must be owner/repo(/path)?@<40-hex>. Local (./) refs are allowed.
-  while IFS= read -r line; do
-    ref="${line#*@}"
-    if [[ ! "$ref" =~ ^[0-9a-f]{40}([[:space:]].*)?$ ]]; then
-      echo "UNPINNED: $wf -> $line"
+  if [[ ! -f "$wf" ]]; then
+    echo "MISSING: $wf (expected workflow file not found)"
+    status=1
+    continue
+  fi
+  # Match only remote refs shaped owner/repo(/subpath)?@ref. The leading alnum
+  # class means local refs (./.github/actions/...) never match: they carry no
+  # @ref, and GitHub does not support @-pinning local actions anyway.
+  while IFS= read -r ref; do
+    ref="${ref%[\"\']}"   # strip an optional trailing quote
+    sha="${ref#*@}"
+    if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "UNPINNED: $wf -> $ref"
       status=1
     fi
-  done < <(grep -oE 'uses:[[:space:]]*[^./][^@[:space:]]+@[^[:space:]]+' "$wf" | sed 's/uses:[[:space:]]*//' || true)
+  done < <(grep -oE "uses:[[:space:]]*['\"]?[A-Za-z0-9][A-Za-z0-9._-]*/[^@'\"[:space:]]+@[^'\"[:space:]]+" "$wf" | sed -E "s/uses:[[:space:]]*['\"]?//")
 done
 
-# GoReleaser binary version must not float.
-if grep -qE "version:[[:space:]]*['\"]?(latest|nightly)" .github/workflows/release.yml; then
+# GoReleaser binary version must not float. Scoped to release.yml (the release
+# path); a blanket scan of ci.yml would false-flag other actions' legitimate
+# `version: latest` inputs (e.g. golangci-lint).
+if grep -qE "version:[[:space:]]*['\"]?(latest|nightly)\b" .github/workflows/release.yml; then
   echo "UNPINNED: GoReleaser version is latest/nightly in release.yml"
   status=1
 fi
