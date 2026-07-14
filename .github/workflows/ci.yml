@@ -9,19 +9,41 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
   test:
     name: Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.25.1'
+          go-version-file: go.mod
 
       - name: Download dependencies
         run: go mod download
@@ -29,38 +51,38 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
         continue-on-error: true
 
-  build:
-    name: Build
+  deploy:
+    name: Deploy
     runs-on: ubuntu-latest
-    needs: test
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.25.1'
+          go-version-file: go.mod
 
-      - name: Build
-        run: make build
+      - name: Deploy platform on k3d
+        id: sandbox
+        uses: nebari-dev/action-nebari-sandbox@v2
+        with:
+          profile: platform
+          nic-version: '.'
 
-      - name: Test binary
-        run: ./nic --help || true
+      - name: Cleanup
+        if: always()
+        run: k3d cluster delete ${{ steps.sandbox.outputs.cluster-name }}
