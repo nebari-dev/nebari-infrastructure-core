@@ -13,7 +13,9 @@ on:
 
 jobs:
   sync:
-    uses: nebari-dev/.github/.github/workflows/sync-project-priority.yaml@main
+    # Reusable workflow pinned to an immutable SHA (was @main). The token is a
+    # fine-grained PAT scoped to Projects: read/write only (see repo secrets).
+    uses: nebari-dev/.github/.github/workflows/sync-project-priority.yaml@6b25f52372a97dd194f4963eaab16e18c32ca3cd # main 2026-07-14
     with:
       project-id: PVT_kwDOBd3CI84BKoKt
     secrets:
