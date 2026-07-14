@@ -28,7 +28,7 @@ builds:
 
 archives:
   - id: nic-archive
-    format: tar.gz
+    formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -39,7 +39,7 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
       - LICENSE*
@@ -109,7 +109,7 @@ release:
     **Full Changelog**: https://github.com/nebari-dev/nebari-infrastructure-core/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 source:
   enabled: true
