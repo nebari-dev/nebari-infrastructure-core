@@ -1,0 +1,34 @@
+# PostgreSQL for Keycloak, managed by the CloudNativePG operator (installed
+# as foundational infrastructure at sync-wave 3; this manifest is applied by
+# the keycloak Application at wave 4, so the CRDs exist by then).
+# CNPG's initdb bootstrap creates the "keycloak" database and owner and
+# publishes the generated credentials in the Secret "keycloak-db-app"
+# (keys: username, password, dbname, host, port, uri). The keycloak app
+# consumes host keycloak-db-rw and that Secret; no password ever appears
+# in this repo or in NIC config.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  instances: 1
+  # Sizing carried over from the retired Bitnami postgresql app so the
+  # database pod keeps Burstable QoS instead of BestEffort.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  storage:
+    size: 10Gi
+    storageClass: "{{ .StorageClass }}"
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak

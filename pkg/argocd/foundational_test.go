@@ -71,12 +71,9 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 		cfg := KeycloakConfig{
-			Enabled:               true,
-			AdminUsername:         "keycloak-admin",
-			AdminPassword:         "admin-pass-123",
-			DBPassword:            "db-pass-456",
-			PostgresAdminPassword: "db-pass-456-admin",
-			PostgresUserPassword:  "db-pass-456-user",
+			Enabled:       true,
+			AdminUsername: "keycloak-admin",
+			AdminPassword: "admin-pass-123",
 		}
 
 		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
@@ -96,22 +93,12 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 			t.Errorf("admin password = %q, want %q", got, "admin-pass-123")
 		}
 
-		// Verify keycloak PostgreSQL credentials secret
-		keycloakDBSecret, err := client.CoreV1().Secrets("keycloak").Get(ctx, "keycloak-postgresql-credentials", metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("failed to get keycloak DB secret: %v", err)
-		}
-		if got := getSecretValue(keycloakDBSecret, "password"); got != "db-pass-456" {
-			t.Errorf("keycloak DB password = %q, want %q", got, "db-pass-456")
-		}
-
-		// Verify PostgreSQL main credentials secret
-		postgresSecret, err := client.CoreV1().Secrets("keycloak").Get(ctx, "postgresql-credentials", metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("failed to get PostgreSQL secret: %v", err)
-		}
-		if got := getSecretValue(postgresSecret, "postgres-password"); got != "db-pass-456-admin" {
-			t.Errorf("postgres password = %q, want %q", got, "db-pass-456-admin")
+		// The Postgres credentials are CNPG-generated in-cluster now; NIC
+		// must not create the retired Bitnami-era Secrets.
+		for _, retired := range []string{"keycloak-postgresql-credentials", "postgresql-credentials"} {
+			if _, err := client.CoreV1().Secrets("keycloak").Get(ctx, retired, metav1.GetOptions{}); err == nil {
+				t.Errorf("retired Secret %q must not be created", retired)
+			}
 		}
 	})
 
@@ -126,7 +113,6 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		cfg := KeycloakConfig{
 			Enabled:            true,
 			AdminPassword:      "admin-pass",
-			DBPassword:         "db-pass",
 			RealmAdminUsername: "nebari-admin",
 			RealmAdminPassword: "realm-admin-pass",
 		}
@@ -164,7 +150,6 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		cfg := KeycloakConfig{
 			Enabled:            true,
 			AdminPassword:      "admin-pass",
-			DBPassword:         "db-pass",
 			RealmAdminPassword: "", // Empty - should not create secret
 		}
 
@@ -201,7 +186,6 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 		cfg := KeycloakConfig{
 			Enabled:       true,
 			AdminPassword: "new-password",
-			DBPassword:    "db-pass",
 		}
 
 		err := createKeycloakSecrets(ctx, client, cfg, ArgoCDSSOConfig{})
@@ -249,7 +233,6 @@ func TestFoundationalConfig(t *testing.T) {
 			Keycloak: KeycloakConfig{
 				Enabled:            true,
 				AdminPassword:      "admin123",
-				DBPassword:         "db123",
 				Hostname:           "keycloak.example.com",
 				RealmAdminPassword: "realm-admin123",
 			},
@@ -298,14 +281,11 @@ func TestCreateKeycloakSecrets_CreatesArgoCDOIDCSecret(t *testing.T) {
 	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
 
 	keycloakCfg := KeycloakConfig{
-		Enabled:               true,
-		AdminUsername:         "admin",
-		AdminPassword:         "admin-pass",
-		DBPassword:            "db-pass",
-		PostgresAdminPassword: "pg-admin-pass",
-		PostgresUserPassword:  "pg-user-pass",
-		RealmAdminUsername:    "admin",
-		RealmAdminPassword:    "realm-admin-pass",
+		Enabled:            true,
+		AdminUsername:      "admin",
+		AdminPassword:      "admin-pass",
+		RealmAdminUsername: "admin",
+		RealmAdminPassword: "realm-admin-pass",
 	}
 	argocdSSO := ArgoCDSSOConfig{
 		ClientSecret: "argocd-oidc-secret-value",
@@ -344,7 +324,6 @@ func TestCreateKeycloakSecrets_SkipsArgoCDSecretWhenEmpty(t *testing.T) {
 		Enabled:       true,
 		AdminUsername: "admin",
 		AdminPassword: "admin-pass",
-		DBPassword:    "db-pass",
 	}
 	argocdSSO := ArgoCDSSOConfig{
 		ClientSecret: "", // Empty - should not create secret

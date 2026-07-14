@@ -56,8 +56,7 @@ func TestCloudNativePGTemplate_PinsChartAndTarget(t *testing.T) {
 
 // TestWriteAllToGit_CloudNativePGAlwaysWritten pins that the CNPG operator is
 // unconditional foundational infrastructure: the app file is emitted for every
-// GitOps bootstrap, with no config gating, like postgresql.yaml and
-// keycloak.yaml.
+// GitOps bootstrap, with no config gating, like keycloak.yaml.
 func TestWriteAllToGit_CloudNativePGAlwaysWritten(t *testing.T) {
 	appPath := func(dir string) string {
 		return filepath.Join(dir, "apps", "cloudnative-pg.yaml")

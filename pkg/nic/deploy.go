@@ -216,15 +216,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
-					Enabled:               true,
-					AdminUsername:         "admin",
-					AdminPassword:         secrets.KeycloakAdmin,
-					DBPassword:            secrets.KeycloakDB,
-					PostgresAdminPassword: secrets.PostgresAdmin,
-					PostgresUserPassword:  secrets.PostgresUser,
-					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    secrets.RealmAdmin,
-					Hostname:              "", // Will be auto-generated from domain
+					Enabled:            true,
+					AdminUsername:      "admin",
+					AdminPassword:      secrets.KeycloakAdmin,
+					RealmAdminUsername: "admin",
+					RealmAdminPassword: secrets.RealmAdmin,
+					Hostname:           "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
@@ -550,7 +547,7 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundle
 // generateSecurePassword generates a cryptographically secure random password.
 // It accepts an io.Reader to allow for deterministic testing with known bytes.
 // Callers must propagate the error rather than substituting a weaker fallback:
-// these strings end up as Keycloak admin / Postgres / Redis credentials on the
+// these strings end up as Keycloak admin / Redis credentials on the
 // installed cluster.
 func generateSecurePassword(r io.Reader) (string, error) {
 	b := make([]byte, 32)
@@ -562,12 +559,10 @@ func generateSecurePassword(r io.Reader) (string, error) {
 }
 
 // foundationalSecrets bundles the random secrets required to install the
-// foundational services (Keycloak, Postgres, Redis).
+// foundational services (Keycloak, Redis). Postgres credentials are not
+// generated here: CNPG creates them in-cluster.
 type foundationalSecrets struct {
 	KeycloakAdmin string
-	KeycloakDB    string
-	PostgresAdmin string
-	PostgresUser  string
 	RealmAdmin    string
 	Redis         string
 }
@@ -578,9 +573,6 @@ func generateFoundationalSecrets(r io.Reader) (foundationalSecrets, error) {
 	var s foundationalSecrets
 	for _, dst := range []*string{
 		&s.KeycloakAdmin,
-		&s.KeycloakDB,
-		&s.PostgresAdmin,
-		&s.PostgresUser,
 		&s.RealmAdmin,
 		&s.Redis,
 	} {
