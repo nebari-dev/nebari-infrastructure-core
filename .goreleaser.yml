@@ -93,7 +93,7 @@ release:
     #### Linux/macOS
     ```bash
     # Download and extract
-    tar -xzf nic_{{ .Tag }}_linux_x86_64.tar.gz
+    tar -xzf nebari-infrastructure-core_{{ .Version }}_linux_x86_64.tar.gz
 
     # Move to PATH
     sudo mv nic /usr/local/bin/
