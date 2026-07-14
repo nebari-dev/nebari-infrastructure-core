@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot docs
 
 # Variables
 BINARY_NAME=nic
@@ -20,6 +20,11 @@ build: ## Build the binary
 	@echo "Building $(BINARY_NAME)..."
 	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BINARY_NAME) successfully"
+
+docs: ## Generate CLI and configuration reference documentation
+	@mkdir -p docs/reference/cli docs/configuration
+	@rm -f docs/reference/cli/*.md docs/configuration/*.md
+	go run ./cmd/docgen
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
