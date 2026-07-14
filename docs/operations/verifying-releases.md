@@ -33,7 +33,7 @@ Expected: `Verified OK`.
 Requires the GitHub CLI:
 
 ```bash
-gh attestation verify nic_<version>_linux_x86_64.tar.gz \
+gh attestation verify nebari-infrastructure-core_<version>_linux_x86_64.tar.gz \
   --repo nebari-dev/nebari-infrastructure-core
 ```
 
@@ -42,7 +42,7 @@ Expected: a line confirming the attestation was issued by the release workflow.
 ## 4. Inspect the SBOM
 
 ```bash
-jq '.spdxVersion, (.packages | length)' nic_<version>_linux_x86_64.tar.gz.sbom.json
+jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_linux_x86_64.tar.gz.sbom.json
 ```
 
 ## Maintainer prerequisites (one-time repo-admin setup)
