@@ -110,14 +110,18 @@ func collectFromTemplate(path string, data TemplateData, repoSet, nsSet map[stri
 	return nil
 }
 
-// splitYAMLDocs splits rendered YAML into documents on lines that are exactly
-// "---" (a YAML document separator), avoiding false splits on "---" that appears
-// inside a value.
+// splitYAMLDocs splits rendered YAML into documents on lines that are a YAML
+// document separator, "---" at column 0, avoiding false splits on an indented
+// "---" that appears inside a value (e.g. a Helm values block scalar).
 func splitYAMLDocs(s string) []string {
 	var docs []string
 	var cur []string
 	for _, line := range strings.Split(s, "\n") {
-		if strings.TrimSpace(line) == "---" {
+		// A YAML document separator is "---" at column 0 (no leading
+		// whitespace). Trailing whitespace/CR is allowed. This deliberately
+		// does NOT treat an indented "---" (e.g. inside a block scalar value)
+		// as a separator.
+		if strings.TrimRight(line, " \t\r") == "---" {
 			docs = append(docs, strings.Join(cur, "\n"))
 			cur = nil
 			continue
