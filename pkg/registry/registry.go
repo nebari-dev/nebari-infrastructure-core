@@ -4,8 +4,8 @@
 package registry
 
 import (
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
 )
 
 // Registry holds all registered providers as ProviderList instances
@@ -13,14 +13,14 @@ import (
 // to get the valid provider names for config validation. The registry is thread-safe, allowing
 // concurrent registration and retrieval of providers.
 type Registry struct {
-	ClusterProviders *ProviderList[provider.Provider]
-	DNSProviders     *ProviderList[dnsprovider.DNSProvider]
+	ClusterProviders *ProviderList[cluster.Provider]
+	DNSProviders     *ProviderList[dns.Provider]
 }
 
 // NewRegistry creates and returns a new empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		ClusterProviders: newProviderList[provider.Provider]("ClusterProviders"),
-		DNSProviders:     newProviderList[dnsprovider.DNSProvider]("DNSProviders"),
+		ClusterProviders: newProviderList[cluster.Provider]("ClusterProviders"),
+		DNSProviders:     newProviderList[dns.Provider]("DNSProviders"),
 	}
 }

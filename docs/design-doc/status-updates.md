@@ -15,7 +15,7 @@ The status package (`pkg/status/status.go`) provides a **context-based, non-bloc
                               │ Updates via channel
                               │
 ┌─────────────────────────────────────────────────────────────────┐
-│  Library Code (pkg/provider/*, pkg/dnsprovider/*)               │
+│  Library Code (pkg/providers/cluster/*, pkg/providers/dns/*)    │
 │                                                                 │
 │  status.Send(ctx, update) → sends to channel in context         │
 │  status.Info(ctx, "message")                                    │
@@ -74,7 +74,7 @@ status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating VPC").
 
 ## Real Examples from Codebase
 
-### From `pkg/provider/aws/eks_delete.go:23-76`
+### From `pkg/providers/cluster/aws/eks_delete.go:23-76`
 
 ```go
 status.Send(ctx, status.NewUpdate(status.LevelProgress, "Checking EKS cluster"))
@@ -86,7 +86,7 @@ status.Send(ctx, status.NewUpdate(status.LevelProgress, "Deleting EKS cluster"))
 status.Send(ctx, status.NewUpdate(status.LevelSuccess, "EKS cluster deleted"))
 ```
 
-### From `pkg/provider/aws/nodegroups_reconcile.go:67-117`
+### From `pkg/providers/cluster/aws/nodegroups_reconcile.go:67-117`
 
 ```go
 status.Send(ctx, status.NewUpdate(status.LevelProgress,
@@ -101,7 +101,7 @@ status.Send(ctx, status.NewUpdate(status.LevelSuccess,
     fmt.Sprintf("Node group '%s' created and active", nodeGroupName)))
 ```
 
-### From `pkg/provider/aws/vpc_reconcile.go:101-291`
+### From `pkg/providers/cluster/aws/vpc_reconcile.go:101-291`
 
 ```go
 status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating missing internet gateway"))

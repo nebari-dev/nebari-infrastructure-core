@@ -7,13 +7,13 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/dnsprovider/cloudflare"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/aws"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/azure"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/existing"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/gcp"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/hetzner"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/provider/local"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/aws"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/azure"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/existing"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/gcp"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/hetzner"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/local"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns/cloudflare"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 

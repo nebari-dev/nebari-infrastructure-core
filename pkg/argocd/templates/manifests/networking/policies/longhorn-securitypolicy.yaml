@@ -1,0 +1,52 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: longhorn-oidc
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/name: longhorn
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: longhorn
+  oidc:
+    provider:
+      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+    clientID: longhorn
+    clientSecret:
+      name: {{ .LonghornOIDCSecretName }}
+    redirectURL: "https://longhorn.{{ .Domain }}/oauth2/callback"
+    logoutPath: "/oauth2/logout"
+    scopes:
+      - openid
+      - profile
+      - email
+      - groups
+    forwardAccessToken: true
+  jwt:
+    providers:
+      - name: keycloak
+        issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+        remoteJWKS:
+          uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+  authorization:
+    defaultAction: Deny
+    rules:
+      - name: allow-longhorn-admins
+        action: Allow
+        principal:
+          jwt:
+            provider: keycloak
+            claims:
+              # The data-science-pack chart's RBAC bootstrap job
+              # (files/keycloak_rbac_bootstrap.py) reconciles the realm-shared
+              # groups mapper to full.path=true on every sync, so JWTs always
+              # carry group names with a leading slash (e.g. "/longhorn-admins")
+              # regardless of what we set in realm-setup-job. Match against the
+              # path form rather than fighting that job.
+              - name: groups
+                valueType: StringArray
+                values:
+                  - /longhorn-admins

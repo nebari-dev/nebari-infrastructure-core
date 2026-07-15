@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -46,19 +45,16 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", configFile)
 		return err
 	}
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to create NIC client", "error", err)
 		return err
 	}
 	if err := client.Validate(ctx, cfg); err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", configFile)
 		return err
 	}
 

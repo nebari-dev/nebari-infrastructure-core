@@ -25,7 +25,7 @@ func TestCreateNamespace(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("creates new namespace", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 
 		err := createNamespace(ctx, client, "test-namespace")
 		if err != nil {
@@ -49,7 +49,7 @@ func TestCreateNamespace(t *testing.T) {
 				Name: "existing-namespace",
 			},
 		}
-		client := fake.NewSimpleClientset(existingNS) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(existingNS)
 
 		err := createNamespace(ctx, client, "existing-namespace")
 		if err != nil {
@@ -68,7 +68,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:               true,
@@ -121,7 +121,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:            true,
@@ -159,7 +159,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				Name: "keycloak",
 			},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		cfg := KeycloakConfig{
 			Enabled:            true,
@@ -196,7 +196,7 @@ func TestCreateKeycloakSecrets(t *testing.T) {
 				"admin-password": []byte("existing-password"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		cfg := KeycloakConfig{
 			Enabled:       true,
@@ -295,7 +295,7 @@ func TestCreateKeycloakSecrets_CreatesArgoCDOIDCSecret(t *testing.T) {
 			Name: "keycloak",
 		},
 	}
-	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(ns)
 
 	keycloakCfg := KeycloakConfig{
 		Enabled:               true,
@@ -338,7 +338,7 @@ func TestCreateKeycloakSecrets_SkipsArgoCDSecretWhenEmpty(t *testing.T) {
 			Name: "keycloak",
 		},
 	}
-	client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(ns)
 
 	keycloakCfg := KeycloakConfig{
 		Enabled:       true,
@@ -359,6 +359,150 @@ func TestCreateKeycloakSecrets_SkipsArgoCDSecretWhenEmpty(t *testing.T) {
 	_, err = client.CoreV1().Secrets("keycloak").Get(ctx, "argocd-oidc-client-secret", metav1.GetOptions{})
 	if err == nil {
 		t.Error("argocd-oidc-client-secret should not be created when ClientSecret is empty")
+	}
+}
+
+func TestCreateLonghornSecrets(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("creates client-secret in both keycloak and longhorn-system when enabled", func(t *testing.T) {
+		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+		client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "longhorn-secret-xyz"})
+		if err != nil {
+			t.Fatalf("createLonghornSecrets() error = %v", err)
+		}
+
+		for _, ns := range []string{"keycloak", "longhorn-system"} {
+			sec, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to get longhorn-oidc-client-secret in %s: %v", ns, err)
+			}
+			if got := getSecretValue(sec, "client-secret"); got != "longhorn-secret-xyz" {
+				t.Errorf("client-secret in %s = %q, want %q", ns, got, "longhorn-secret-xyz")
+			}
+		}
+	})
+
+	t.Run("adopts existing keycloak value when longhorn-system is missing", func(t *testing.T) {
+		// Partial-failure retry: a prior deploy wrote the keycloak copy (value A)
+		// but failed before longhorn-system. The re-run generates a fresh value B;
+		// the surviving value A must win in both namespaces, since the Keycloak
+		// client is already registered with it.
+		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+		existingSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "longhorn-oidc-client-secret", Namespace: "keycloak"},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{"client-secret": []byte("value-A")},
+		}
+		client := fake.NewSimpleClientset(nsKC, nsLH, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-B"})
+		if err != nil {
+			t.Fatalf("createLonghornSecrets() error = %v", err)
+		}
+
+		for _, ns := range []string{"keycloak", "longhorn-system"} {
+			sec, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to get longhorn-oidc-client-secret in %s: %v", ns, err)
+			}
+			if got := getSecretValue(sec, "client-secret"); got != "value-A" {
+				t.Errorf("client-secret in %s = %q, want existing canonical %q", ns, got, "value-A")
+			}
+		}
+	})
+
+	t.Run("reconciles diverged longhorn-system value to the keycloak value", func(t *testing.T) {
+		// Both copies exist but disagree (e.g. longhorn-system was recreated by a
+		// deploy that could not see the keycloak copy). The keycloak copy wins
+		// because realm-setup-job registered the Keycloak client from it.
+		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+		kcSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "longhorn-oidc-client-secret", Namespace: "keycloak"},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{"client-secret": []byte("value-A")},
+		}
+		lhSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "longhorn-oidc-client-secret", Namespace: "longhorn-system"},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{"client-secret": []byte("value-B")},
+		}
+		client := fake.NewSimpleClientset(nsKC, nsLH, kcSecret, lhSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-C"})
+		if err != nil {
+			t.Fatalf("createLonghornSecrets() error = %v", err)
+		}
+
+		for _, ns := range []string{"keycloak", "longhorn-system"} {
+			sec, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to get longhorn-oidc-client-secret in %s: %v", ns, err)
+			}
+			if got := getSecretValue(sec, "client-secret"); got != "value-A" {
+				t.Errorf("client-secret in %s = %q, want keycloak canonical %q", ns, got, "value-A")
+			}
+		}
+	})
+
+	t.Run("creates no secret when ClientSecret is empty", func(t *testing.T) {
+		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+		client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: ""})
+		if err != nil {
+			t.Fatalf("createLonghornSecrets() error = %v", err)
+		}
+
+		for _, ns := range []string{"keycloak", "longhorn-system"} {
+			_, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{})
+			if err == nil {
+				t.Errorf("expected longhorn-oidc-client-secret to not exist in %s, but it does", ns)
+			}
+		}
+	})
+}
+
+func TestCreateKeycloakAndLonghornSecrets_Together(t *testing.T) {
+	ctx := context.Background()
+
+	nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+	nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
+	client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+
+	kcCfg := KeycloakConfig{
+		Enabled:               true,
+		AdminUsername:         "admin",
+		AdminPassword:         "kcpw",
+		DBPassword:            "dbpw",
+		PostgresAdminPassword: "pgadmin",
+		PostgresUserPassword:  "pguser",
+	}
+	argoSSO := ArgoCDSSOConfig{ClientSecret: "argocd-secret-abc"}
+	longhornSSO := LonghornSSOConfig{ClientSecret: "longhorn-secret-xyz"}
+
+	if err := createKeycloakSecrets(ctx, client, kcCfg, argoSSO); err != nil {
+		t.Fatalf("createKeycloakSecrets() error = %v", err)
+	}
+	if err := createLonghornSecrets(ctx, client, longhornSSO); err != nil {
+		t.Fatalf("createLonghornSecrets() error = %v", err)
+	}
+
+	// ArgoCD client secret only lives in keycloak
+	if _, err := client.CoreV1().Secrets("keycloak").Get(ctx, "argocd-oidc-client-secret", metav1.GetOptions{}); err != nil {
+		t.Errorf("argocd-oidc-client-secret missing from keycloak ns: %v", err)
+	}
+	// Longhorn client secret lives in both
+	for _, ns := range []string{"keycloak", "longhorn-system"} {
+		if _, err := client.CoreV1().Secrets(ns).Get(ctx, "longhorn-oidc-client-secret", metav1.GetOptions{}); err != nil {
+			t.Errorf("longhorn-oidc-client-secret missing from %s ns: %v", ns, err)
+		}
 	}
 }
 

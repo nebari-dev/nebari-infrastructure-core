@@ -31,13 +31,13 @@ func (c *Client) Kubeconfig(ctx context.Context, cfg *config.NebariConfig) ([]by
 		WithMetadata("provider", cfg.Cluster.ProviderName()).
 		WithMetadata("project_name", cfg.ProjectName))
 
-	prov, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	clusterProvider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("get cluster provider: %w", err)
 	}
 
-	kubeconfigBytes, err := prov.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("get kubeconfig: %w", err)

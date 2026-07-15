@@ -181,17 +181,19 @@ amazon_web_services:
       max_nodes: 10
       taints: []
 
-    # GPU node group example
+    # GPU node group example.
+    # With gpu: true, NIC selects the AL2023_x86_64_NVIDIA AMI and automatically
+    # applies the taint nvidia.com/gpu=true:NO_SCHEDULE so only pods that
+    # tolerate it land on GPU nodes. The NVIDIA GPU Operator does not taint
+    # nodes itself; it only tolerates this taint on its own operands. To use a
+    # different value or effect, set an explicit nvidia.com/gpu taint below and
+    # NIC leaves it untouched.
     gpu:
       instance: g5.2xlarge
       min_nodes: 0
       max_nodes: 5
       gpu: true
       spot: false
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
 
     # Spot instance node group example
     spot-workers:
@@ -591,7 +593,7 @@ AZURE_SUBSCRIPTION_ID=11111111-1111-1111-1111-111111111111
 
 ## Hetzner Provider Configuration
 
-Hetzner Cloud provider configuration defined in `Config` (pkg/provider/hetzner/config.go). Provisions k3s clusters on
+Hetzner Cloud provider configuration defined in `Config` (pkg/providers/cluster/hetzner/config.go). Provisions k3s clusters on
 Hetzner Cloud using the hetzner-k3s CLI tool.
 
 ```yaml
@@ -785,7 +787,7 @@ DNS provider configuration for managing DNS records and Let's Encrypt integratio
 
 ### Cloudflare DNS Provider
 
-Cloudflare DNS provider defined in `cloudflare.Config` (pkg/dnsprovider/cloudflare/config.go:5-8).
+Cloudflare DNS provider defined in `cloudflare.Config` (pkg/providers/dns/cloudflare/config.go:5-8).
 
 ```yaml
 dns:
@@ -1384,4 +1386,4 @@ KUBECONFIG=<path-to-kubeconfig>            # Optional, default: ~/.kube/config
 
 **Last Updated**: 2026-03-27
 **NIC Version**: v0.1.0
-**Source**: Generated from pkg/config/config.go and pkg/dnsprovider/*/config.go
+**Source**: Generated from pkg/config/config.go and pkg/providers/dns/*/config.go
