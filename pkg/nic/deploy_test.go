@@ -2,9 +2,6 @@ package nic
 
 import (
 	"bytes"
-	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,36 +10,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
-
-func TestWriteConfigToRepoUsesGitOpsPermissions(t *testing.T) {
-	workDir := filepath.Join(t.TempDir(), "gitops")
-	cfg := &config.NebariConfig{ProjectName: "test"}
-	gitConfig := &git.Config{
-		URL:    "file:///tmp/test-gitops",
-		Branch: git.DefaultBranch,
-	}
-
-	client := &Client{}
-	if err := client.writeConfigToRepo(context.Background(), cfg, gitConfig, workDir, ""); err != nil {
-		t.Fatalf("writeConfigToRepo() error: %v", err)
-	}
-
-	dirInfo, err := os.Stat(workDir)
-	if err != nil {
-		t.Fatalf("stat workDir: %v", err)
-	}
-	if got := dirInfo.Mode().Perm(); got != git.GitOpsDirMode {
-		t.Errorf("workDir mode = %v, want %v", got, git.GitOpsDirMode)
-	}
-
-	configInfo, err := os.Stat(filepath.Join(workDir, "nic-config.yaml"))
-	if err != nil {
-		t.Fatalf("stat nic-config.yaml: %v", err)
-	}
-	if got := configInfo.Mode().Perm(); got != git.GitOpsFileMode {
-		t.Errorf("nic-config.yaml mode = %v, want %v", got, git.GitOpsFileMode)
-	}
-}
 
 func TestGenerateSecurePassword(t *testing.T) {
 	tests := []struct {

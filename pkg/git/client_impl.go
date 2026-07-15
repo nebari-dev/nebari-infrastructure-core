@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -409,6 +410,26 @@ func (c *ClientImpl) WorkDir() string {
 	return c.workDir
 }
 
+// privateGitDirNames and privateGitFileNames are the entries, directly inside
+// a Git directory (.git or a submodule's .git/modules/<name>), that hold data
+// private to the source checkout and never read to serve commits to ArgoCD, so
+// the permission upgrade skips them. They are matched only at that exact path
+// position so a branch, tag, or ref whose name happens to collide with one of
+// these is still repaired.
+var privateGitDirNames = map[string]bool{
+	"hooks":     true,
+	"logs":      true,
+	"worktrees": true,
+}
+
+var privateGitFileNames = map[string]bool{
+	"index":          true,
+	"COMMIT_EDITMSG": true,
+	"MERGE_MSG":      true,
+	"ORIG_HEAD":      true,
+	"FETCH_HEAD":     true,
+}
+
 // upgradeLocalPermissions makes ONLY the repo root directory and Git-serving
 // data under .git group/other-readable, so ArgoCD's non-root repo-server can read
 // the repo through a read-only kind hostPath mount. It deliberately does NOT
@@ -425,9 +446,10 @@ func (c *ClientImpl) WorkDir() string {
 // file is always created at 0600 regardless of the process umask, so the
 // non-root repo-server otherwise can't read a fresh commit.
 //
-// This runs for ANY local file:// repo NIC commits to, including a
-// user-supplied one, not just the directory NIC auto-generates. It's safe to
-// touch a user's repo here precisely because of the .git-only + OR-only
+// Callers must invoke this method only after establishing that the configured
+// repository is a local file:// path. It runs for ANY such repo NIC commits
+// to, including a user-supplied one, not just the directory NIC auto-generates.
+// It's safe to touch a user's repo here precisely because of the .git-only + OR-only
 // design: (1) .git is not tracked by git, so upgrading it can never produce a
 // tracked mode-only diff on the next commit; (2) the OR only adds bits, so an
 // existing +x on a git hook (or any other bit) survives untouched; and (3) the
@@ -455,6 +477,21 @@ func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 	defer func() {
 		_ = rootDir.Close()
 	}()
+
+	// isGitDir reports whether p (a slash-separated path relative to the repo
+	// root) is a Git directory whose direct children may carry private
+	// metadata: the top-level .git or a submodule's .git/modules/<name>.
+	// Keep this as a closure inside the traced operation rather than a separate
+	// uninstrumented package function.
+	isGitDir := func(p string) bool {
+		if p == ".git" {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(p, ".git/modules/"); ok {
+			return rest != "" && !strings.Contains(rest, "/")
+		}
+		return false
+	}
 
 	// upgrade OR's the group/other read (and, for dirs, traverse) bits into a
 	// single path, never replacing existing bits. Symlinks are skipped.
@@ -507,25 +544,28 @@ func (c *ClientImpl) upgradeLocalPermissions(ctx context.Context) error {
 	}
 
 	// (b) Walk the .git subtree, excluding metadata that is private to the
-	// source checkout and is not used to serve commits to ArgoCD.
-	err = fs.WalkDir(rootDir.FS(), ".git", func(path string, d fs.DirEntry, err error) error {
+	// source checkout and is not used to serve commits to ArgoCD. These names
+	// are only private when they sit directly inside a Git directory — .git
+	// itself or a submodule's .git/modules/<name> — so we match by path
+	// position, not by basename. Matching the basename anywhere in the tree
+	// over-matches into the refs namespace: a branch or tag named e.g.
+	// "hooks/..." creates .git/refs/heads/hooks, and a ref named exactly
+	// "index"/"ORIG_HEAD"/etc. collides too, leaving those refs unreadable to
+	// the non-root repo-server.
+	err = fs.WalkDir(rootDir.FS(), ".git", func(entryPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		// Match by entry name so nested repositories under .git/modules keep
-		// their private checkout metadata private too.
-		switch d.Name() {
-		case "hooks", "logs", "worktrees":
+		if isGitDir(path.Dir(entryPath)) {
 			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		case "index", "COMMIT_EDITMSG", "MERGE_MSG", "ORIG_HEAD", "FETCH_HEAD":
-			if !d.IsDir() {
+				if privateGitDirNames[d.Name()] {
+					return fs.SkipDir
+				}
+			} else if privateGitFileNames[d.Name()] {
 				return nil
 			}
 		}
-		return upgrade(path, d)
+		return upgrade(entryPath, d)
 	})
 	if err != nil {
 		span.RecordError(err)

@@ -14,7 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
@@ -734,22 +733,15 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
+	// Working-tree modes are not asserted here: WriteFile requests
+	// git.GitOpsFileMode but the on-disk mode is masked by the ambient umask,
+	// and working-tree modes are no longer an invariant the code guarantees
+	// (ArgoCD reads via .git, repaired by the git client, not the working tree).
 	redirectPath := filepath.Join(tmpDir, "manifests", "networking", "routes", "http-to-https-redirect.yaml")
-	redirectInfo, err := os.Stat(redirectPath)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
 		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
 	} else if err != nil {
 		t.Fatalf("stat redirect route: %v", err)
-	} else if got := redirectInfo.Mode().Perm(); got != git.GitOpsFileMode {
-		t.Errorf("redirect route mode = %v, want %v", got, git.GitOpsFileMode)
-	}
-
-	routesInfo, err := os.Stat(filepath.Dir(redirectPath))
-	if err != nil {
-		t.Fatalf("stat routes directory: %v", err)
-	}
-	if got := routesInfo.Mode().Perm(); got != git.GitOpsDirMode {
-		t.Errorf("routes directory mode = %v, want %v", got, git.GitOpsDirMode)
 	}
 
 	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant

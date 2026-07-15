@@ -368,7 +368,7 @@ func TestCreateLonghornSecrets(t *testing.T) {
 	t.Run("creates client-secret in both keycloak and longhorn-system when enabled", func(t *testing.T) {
 		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
-		client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(nsKC, nsLH)
 
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "longhorn-secret-xyz"})
 		if err != nil {
@@ -398,7 +398,7 @@ func TestCreateLonghornSecrets(t *testing.T) {
 			Type:       corev1.SecretTypeOpaque,
 			Data:       map[string][]byte{"client-secret": []byte("value-A")},
 		}
-		client := fake.NewSimpleClientset(nsKC, nsLH, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(nsKC, nsLH, existingSecret)
 
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-B"})
 		if err != nil {
@@ -432,7 +432,7 @@ func TestCreateLonghornSecrets(t *testing.T) {
 			Type:       corev1.SecretTypeOpaque,
 			Data:       map[string][]byte{"client-secret": []byte("value-B")},
 		}
-		client := fake.NewSimpleClientset(nsKC, nsLH, kcSecret, lhSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(nsKC, nsLH, kcSecret, lhSecret)
 
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-C"})
 		if err != nil {
@@ -453,7 +453,7 @@ func TestCreateLonghornSecrets(t *testing.T) {
 	t.Run("creates no secret when ClientSecret is empty", func(t *testing.T) {
 		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
-		client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(nsKC, nsLH)
 
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: ""})
 		if err != nil {
@@ -474,7 +474,7 @@ func TestCreateKeycloakAndLonghornSecrets_Together(t *testing.T) {
 
 	nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 	nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
-	client := fake.NewSimpleClientset(nsKC, nsLH) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(nsKC, nsLH)
 
 	kcCfg := KeycloakConfig{
 		Enabled:               true,

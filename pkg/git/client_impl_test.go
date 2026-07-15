@@ -302,13 +302,10 @@ func TestClientWriteBootstrapMarker(t *testing.T) {
 		t.Errorf("marker file content = %q, want to contain 'bootstrapped_at'", content)
 	}
 
-	markerInfo, err := os.Stat(markerPath)
-	if err != nil {
-		t.Fatalf("failed to stat marker file: %v", err)
-	}
-	if got := markerInfo.Mode().Perm(); got != GitOpsFileMode {
-		t.Errorf("marker file mode = %v, want %v", got, GitOpsFileMode)
-	}
+	// The marker is a working-tree file, so its on-disk mode is masked by the
+	// ambient umask and is not an invariant the code guarantees (ArgoCD reads
+	// via .git, not the working tree); asserting an exact mode here would only
+	// pass under the default umask. Existence and content are what matter.
 
 	// Verify IsBootstrapped returns true
 	bootstrapped, err := client.IsBootstrapped(context.Background())
@@ -838,9 +835,9 @@ func TestClientCommitLocalOnFreshRepo(t *testing.T) {
 // repo-server) can't read a fresh commit. It also verifies the upgrade leaves
 // the working tree untouched — argo reads .git and rebuilds its own checkout,
 // so a 0600 working-tree file keeps its mode — and that the upgrade is
-// additive: a tracked script that's already executable keeps exactly its
-// original mode, with no diff staged, so a hand-picked +x bit (e.g. a git
-// hook) can't be stripped.
+// additive: an executable file under .git (which the walk does touch) gains
+// group/other read while keeping its +x, so a hand-picked executable bit can't
+// be stripped, and no mode-only diff is staged.
 func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -857,15 +854,31 @@ func TestClientCommitAndPushUpgradesLocalPermissions(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	scriptPath := filepath.Join(client.WorkDir(), "script.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove +x survives.
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove the working tree is left untouched.
 		t.Fatalf("failed to write script: %v", err)
+	}
+	// Chmod explicitly so the 0o755 assertion below is umask-independent.
+	if err := os.Chmod(scriptPath, 0o755); err != nil { //nolint:gosec // Deliberately executable to prove the working tree is left untouched.
+		t.Fatalf("failed to chmod script: %v", err)
+	}
+	// An executable file directly under .git IS walked (unlike the working-tree
+	// script above), so it proves the OR adds the missing group/other read bits
+	// without stripping the executable bit: 0o700 | 0o044 = 0o744.
+	gitExecPath := filepath.Join(client.WorkDir(), ".git", "executable-serving-file")
+	if err := os.WriteFile(gitExecPath, []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // Deliberately executable to prove +x survives the additive OR.
+		t.Fatalf("failed to write .git executable: %v", err)
 	}
 
 	if err := client.CommitAndPush(context.Background(), "commit"); err != nil {
 		t.Fatalf("CommitAndPush() error: %v", err)
 	}
 
+	// The tracked working-tree script is never walked, so this only shows the
+	// working tree is left untouched — not that +x survives the OR.
 	assertPathMode(t, scriptPath, 0o755)
+	// This is the real proof that the additive OR preserves +x: a walked .git
+	// file gains group/other read while keeping its executable bit.
+	assertPathMode(t, gitExecPath, 0o744)
 
 	// Working-tree files are never touched: the upgrade only repairs the repo
 	// root dir and .git (argo reads .git and rebuilds its own checkout). The
@@ -944,6 +957,10 @@ func TestClientCommitAndPushUpgradesUserSuppliedLocalRepo(t *testing.T) {
 	existingScriptPath := filepath.Join(tmpDir, "existing-script.sh")
 	if err := os.WriteFile(existingScriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Executable mode is the behavior under test.
 		t.Fatalf("write existing script: %v", err)
+	}
+	// Chmod explicitly so the 0o755 assertion below is umask-independent.
+	if err := os.Chmod(existingScriptPath, 0o755); err != nil { //nolint:gosec // Executable mode is the behavior under test.
+		t.Fatalf("chmod existing script: %v", err)
 	}
 	if _, err := existingWorktree.Add("existing-script.sh"); err != nil {
 		t.Fatalf("stage existing script: %v", err)
@@ -1234,6 +1251,11 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 				if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // Deliberately executable to prove it survives untouched.
 					t.Fatalf("write file: %v", err)
 				}
+				// Chmod explicitly so the "already 0o755" precondition holds
+				// regardless of the ambient umask (WriteFile's mode is masked).
+				if err := os.Chmod(path, 0o755); err != nil { //nolint:gosec // Deliberately executable to prove it survives untouched.
+					t.Fatalf("chmod file: %v", err)
+				}
 				return root
 			},
 			check: func(t *testing.T, root string) {
@@ -1263,8 +1285,10 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 						t.Fatalf("chmod %s: %v", path, err)
 					}
 				}
-				if err := os.WriteFile(filepath.Join(root, ".git", "index"), []byte("private"), 0o600); err != nil {
-					t.Fatalf("write index: %v", err)
+				for _, name := range []string{"index", "COMMIT_EDITMSG", "MERGE_MSG", "ORIG_HEAD", "FETCH_HEAD"} {
+					if err := os.WriteFile(filepath.Join(root, ".git", name), []byte("private"), 0o600); err != nil {
+						t.Fatalf("write %s: %v", name, err)
+					}
 				}
 				nestedIndex := filepath.Join(root, ".git", "modules", "example", "index")
 				if err := os.WriteFile(nestedIndex, []byte("private"), 0o600); err != nil {
@@ -1277,10 +1301,44 @@ func TestClientUpgradeLocalPermissions(t *testing.T) {
 				assertPathMode(t, filepath.Join(root, ".git", "hooks"), 0o700)
 				assertPathMode(t, filepath.Join(root, ".git", "logs"), 0o700)
 				assertPathMode(t, filepath.Join(root, ".git", "worktrees"), 0o700)
-				assertPathMode(t, filepath.Join(root, ".git", "index"), 0o600)
+				for _, name := range []string{"index", "COMMIT_EDITMSG", "MERGE_MSG", "ORIG_HEAD", "FETCH_HEAD"} {
+					assertPathMode(t, filepath.Join(root, ".git", name), 0o600)
+				}
 				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "hooks"), 0o700)
 				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "logs"), 0o700)
 				assertPathMode(t, filepath.Join(root, ".git", "modules", "example", "index"), 0o600)
+			},
+		},
+		{
+			name: "ref names colliding with private metadata are still upgraded",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				mkGit(t, root)
+				// A branch named "hooks/pre-commit-fix" and a tag named "index"
+				// live in the refs namespace, not directly under .git, so the
+				// walk must not mistake them for private metadata by basename
+				// and leave them unreadable to the non-root repo-server.
+				heads := filepath.Join(root, ".git", "refs", "heads", "hooks")
+				if err := os.MkdirAll(heads, 0o700); err != nil {
+					t.Fatalf("mkdir refs/heads/hooks: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(heads, "pre-commit-fix"), []byte("ref\n"), 0o600); err != nil {
+					t.Fatalf("write branch ref: %v", err)
+				}
+				tags := filepath.Join(root, ".git", "refs", "tags")
+				if err := os.MkdirAll(tags, 0o700); err != nil {
+					t.Fatalf("mkdir refs/tags: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(tags, "index"), []byte("ref\n"), 0o600); err != nil {
+					t.Fatalf("write tag ref: %v", err)
+				}
+				return root
+			},
+			check: func(t *testing.T, root string) {
+				t.Helper()
+				assertPathMode(t, filepath.Join(root, ".git", "refs", "heads", "hooks"), 0o755)
+				assertPathMode(t, filepath.Join(root, ".git", "refs", "heads", "hooks", "pre-commit-fix"), 0o644)
+				assertPathMode(t, filepath.Join(root, ".git", "refs", "tags", "index"), 0o644)
 			},
 		},
 		{
