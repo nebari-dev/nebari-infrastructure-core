@@ -658,6 +658,16 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 			output := string(processed)
 
+			// This skips ANY route that renders empty with the zero-value test
+			// data, not just longhorn-httproute.yaml — so a conditionally
+			// rendered route silently drops out of this generic https check.
+			// Each such route needs its own test pinning the https-listener
+			// property with its gate enabled (see
+			// TestWriteAllToGit_LonghornHTTPRoute for the Longhorn one).
+			if strings.TrimSpace(output) == "" {
+				t.Skipf("skipping %s: empty render with default test data", name)
+			}
+
 			if !strings.Contains(output, "sectionName: https") {
 				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
 			}
@@ -758,6 +768,69 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("includes longhorn-httproute when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:    "longhorn",
+			LonghornEnabled: true,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		routePath := filepath.Join(tmpDir, "manifests", "networking", "routes", "longhorn-httproute.yaml")
+		content, err := os.ReadFile(routePath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn route: %v", err)
+		}
+		out := string(content)
+
+		for _, want := range []string{
+			"kind: HTTPRoute",
+			"name: longhorn",
+			"namespace: longhorn-system",
+			"name: nebari-gateway",
+			"namespace: envoy-gateway-system",
+			"sectionName: https",
+			"longhorn.test.example.com",
+			"name: longhorn-frontend",
+			"port: 80",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("longhorn-httproute.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("omits longhorn-httproute body when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:    "gp2",
+			LonghornEnabled: false,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		routePath := filepath.Join(tmpDir, "manifests", "networking", "routes", "longhorn-httproute.yaml")
+		content, err := os.ReadFile(routePath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn route file: %v", err)
+		}
+		out := strings.TrimSpace(string(content))
+		if out != "" {
+			t.Errorf("longhorn-httproute.yaml should render empty when LonghornEnabled=false, got:\n%s", out)
+		}
+	})
+}
+
 // mockGitClient satisfies git.Client for tests that only need WorkDir().
 type mockGitClient struct {
 	workDir string
@@ -808,6 +881,111 @@ func TestSyncWaveOrdering(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("includes SecurityPolicy when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:    "longhorn",
+			LonghornEnabled: true,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
+		}
+		out := string(content)
+
+		for _, want := range []string{
+			"kind: SecurityPolicy",
+			"apiVersion: gateway.envoyproxy.io/v1alpha1",
+			"name: longhorn-oidc",
+			"namespace: longhorn-system",
+			"kind: HTTPRoute",
+			"name: longhorn",
+			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
+			"clientID: longhorn",
+			"name: longhorn-oidc-client-secret",
+			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
+			`logoutPath: "/oauth2/logout"`,
+			"forwardAccessToken: true",
+			"jwt:",
+			"name: keycloak",
+			"/realms/nebari/protocol/openid-connect/certs",
+			"authorization:",
+			"defaultAction: Deny",
+			"name: allow-longhorn-admins",
+			"action: Allow",
+			"valueType: StringArray",
+			"- /longhorn-admins",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+
+		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
+		if _, err := os.Stat(appPath); err != nil {
+			t.Errorf("apps/securitypolicies.yaml should be written when LonghornEnabled=true: %v", err)
+		}
+	})
+
+	t.Run("removes previously written SecurityPolicy templates on an enable-to-disable toggle", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		mock := &mockGitClient{workDir: tmpDir}
+
+		enabled := cluster.InfraSettings{StorageClass: "longhorn", LonghornEnabled: true}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() enabled error: %v", err)
+		}
+
+		disabled := cluster.InfraSettings{StorageClass: "gp2", LonghornEnabled: false}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, disabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() disabled error: %v", err)
+		}
+
+		for _, stale := range []string{
+			filepath.Join(tmpDir, "apps", "securitypolicies.yaml"),
+			filepath.Join(tmpDir, "manifests", "networking", "policies"),
+		} {
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Errorf("%s should be removed when Longhorn is toggled off, stat err: %v", stale, err)
+			}
+		}
+	})
+
+	t.Run("skips SecurityPolicy templates when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:    "gp2",
+			LonghornEnabled: false,
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		if _, err := os.Stat(policyPath); !os.IsNotExist(err) {
+			t.Errorf("longhorn-securitypolicy.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
+		}
+
+		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
+		if _, err := os.Stat(appPath); !os.IsNotExist(err) {
+			t.Errorf("apps/securitypolicies.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
+		}
+	})
+}
+
 func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	ctx := context.Background()
 
@@ -848,6 +1026,108 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	if envoyWaveNum >= certWaveNum {
 		t.Errorf("envoy-gateway (%d) must have a lower sync-wave than cert-manager (%d)", envoyWaveNum, certWaveNum)
 	}
+}
+
+func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("realm-setup includes Longhorn client creation when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{LonghornEnabled: true}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		jobPath := filepath.Join(tmpDir, "manifests", "keycloak", "realm-setup-job.yaml")
+		content, err := os.ReadFile(jobPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read realm-setup-job: %v", err)
+		}
+		out := string(content)
+		for _, want := range []string{
+			"LONGHORN_CLIENT_SECRET",
+			"longhorn-oidc-client-secret",
+			"clientId=longhorn",
+			`https://longhorn.$DOMAIN/oauth2/callback\"]`,
+			"name=longhorn-admins",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("realm-setup-job missing %q\nfull contents:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "longhorn-viewers") {
+			t.Errorf("realm-setup-job unexpectedly references longhorn-viewers (group removed); content:\n%s", out)
+		}
+	})
+
+	t.Run("realm-setup does NOT mention Longhorn when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{LonghornEnabled: false}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		jobPath := filepath.Join(tmpDir, "manifests", "keycloak", "realm-setup-job.yaml")
+		content, err := os.ReadFile(jobPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read realm-setup-job: %v", err)
+		}
+		for _, dontWant := range []string{
+			"LONGHORN_CLIENT_SECRET",
+			"longhorn-oidc-client-secret",
+			"clientId=longhorn",
+		} {
+			if strings.Contains(string(content), dontWant) {
+				t.Errorf("realm-setup-job unexpectedly contains %q when LonghornEnabled=false", dontWant)
+			}
+		}
+	})
+}
+
+func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cert includes longhorn dnsName when LonghornEnabled is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{LonghornEnabled: true}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		certPath := filepath.Join(tmpDir, "manifests", "security", "certificates", "gateway-certificate.yaml")
+		content, err := os.ReadFile(certPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read gateway-certificate: %v", err)
+		}
+		if !strings.Contains(string(content), "longhorn.test.example.com") {
+			t.Errorf("expected longhorn.test.example.com in dnsNames, got:\n%s", string(content))
+		}
+	})
+
+	t.Run("cert does NOT include longhorn dnsName when LonghornEnabled is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{LonghornEnabled: false}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		certPath := filepath.Join(tmpDir, "manifests", "security", "certificates", "gateway-certificate.yaml")
+		content, err := os.ReadFile(certPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read gateway-certificate: %v", err)
+		}
+		if strings.Contains(string(content), "longhorn.test.example.com") {
+			t.Errorf("expected NO longhorn.test.example.com in dnsNames, got:\n%s", string(content))
+		}
+	})
 }
 
 func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {

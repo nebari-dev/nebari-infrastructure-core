@@ -132,11 +132,19 @@ func TestConfigWithOIDC(t *testing.T) {
 			if !ok {
 				t.Fatal("rbac.policy.csv should be a string")
 			}
-			if !strings.Contains(policyCSV, "g, argocd-admins, role:admin") {
-				t.Error("policy.csv should map argocd-admins to role:admin")
-			}
-			if !strings.Contains(policyCSV, "g, argocd-viewers, role:readonly") {
-				t.Error("policy.csv should map argocd-viewers to role:readonly")
+			// Both bare and full-path group names must be mapped: the Keycloak
+			// group-membership mapper's full.path setting differs depending on
+			// whether the realm-setup job (false) or the data-science-pack
+			// rbac-bootstrap job (true) ran last.
+			for _, mapping := range []string{
+				"g, argocd-admins, role:admin",
+				"g, /argocd-admins, role:admin",
+				"g, argocd-viewers, role:readonly",
+				"g, /argocd-viewers, role:readonly",
+			} {
+				if !strings.Contains(policyCSV, mapping) {
+					t.Errorf("policy.csv should contain %q", mapping)
+				}
 			}
 
 			// Check secret injection
