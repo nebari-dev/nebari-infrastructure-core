@@ -103,6 +103,28 @@ func TestRenderProjects(t *testing.T) {
 	if len(toStringSlice(d["sourceRepos"])) != 0 {
 		t.Errorf("default sourceRepos must be empty, got %v", d["sourceRepos"])
 	}
+
+	// foundational destinations: no wildcard namespace
+	for _, dest := range specList(f, "destinations") {
+		m, _ := dest.(map[string]interface{})
+		if ns, _ := m["namespace"].(string); ns == "*" {
+			t.Errorf("foundational destinations must not contain namespace '*'")
+		}
+	}
+	// nebari-apps: exactly one destination, namespace '*'
+	nDests := specList(n, "destinations")
+	if len(nDests) != 1 {
+		t.Fatalf("nebari-apps must have exactly one destination, got %d", len(nDests))
+	}
+	if m, _ := nDests[0].(map[string]interface{}); m["namespace"] != "*" {
+		t.Errorf("nebari-apps destination namespace must be '*', got %v", m["namespace"])
+	}
+	// default: deny-all (destinations + both whitelists empty)
+	if len(specList(d, "destinations")) != 0 ||
+		len(specList(d, "clusterResourceWhitelist")) != 0 ||
+		len(specList(d, "namespaceResourceWhitelist")) != 0 {
+		t.Errorf("default project must be deny-all (empty destinations and whitelists)")
+	}
 }
 
 func unstructuredNestedMap(o *unstructured.Unstructured, key string) (map[string]interface{}, bool, error) {
@@ -121,4 +143,9 @@ func toStringSlice(v interface{}) []string {
 		}
 	}
 	return out
+}
+
+func specList(spec map[string]interface{}, key string) []interface{} {
+	items, _ := spec[key].([]interface{})
+	return items
 }

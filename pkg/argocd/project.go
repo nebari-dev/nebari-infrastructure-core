@@ -234,7 +234,7 @@ func RenderProjects(ctx context.Context, data TemplateData) ([]*unstructured.Uns
 	repos, namespaces, err := deriveProjectScopes(ctx, data)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("failed to derive project scopes: %w", err)
 	}
 
 	tmplData := struct {
@@ -257,7 +257,7 @@ func RenderProjects(ctx context.Context, data TemplateData) ([]*unstructured.Uns
 
 	decoder := yamlserializer.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
 	var objs []*unstructured.Unstructured
-	for _, doc := range strings.Split(buf.String(), "\n---") {
+	for _, doc := range splitYAMLDocs(buf.String()) {
 		if strings.TrimSpace(doc) == "" {
 			continue
 		}
