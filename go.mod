@@ -23,6 +23,7 @@ require (
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/joho/godotenv v1.5.1
 	github.com/opentofu/tofudl v0.0.1
+	github.com/skeema/knownhosts v1.3.2
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.44.0
@@ -160,7 +161,6 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
