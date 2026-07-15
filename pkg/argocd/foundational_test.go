@@ -369,7 +369,6 @@ func TestCreateLonghornSecrets(t *testing.T) {
 		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
 		client := fake.NewSimpleClientset(nsKC, nsLH)
-
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "longhorn-secret-xyz"})
 		if err != nil {
 			t.Fatalf("createLonghornSecrets() error = %v", err)
@@ -399,7 +398,6 @@ func TestCreateLonghornSecrets(t *testing.T) {
 			Data:       map[string][]byte{"client-secret": []byte("value-A")},
 		}
 		client := fake.NewSimpleClientset(nsKC, nsLH, existingSecret)
-
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-B"})
 		if err != nil {
 			t.Fatalf("createLonghornSecrets() error = %v", err)
@@ -433,7 +431,6 @@ func TestCreateLonghornSecrets(t *testing.T) {
 			Data:       map[string][]byte{"client-secret": []byte("value-B")},
 		}
 		client := fake.NewSimpleClientset(nsKC, nsLH, kcSecret, lhSecret)
-
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: "value-C"})
 		if err != nil {
 			t.Fatalf("createLonghornSecrets() error = %v", err)
@@ -454,7 +451,6 @@ func TestCreateLonghornSecrets(t *testing.T) {
 		nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 		nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
 		client := fake.NewSimpleClientset(nsKC, nsLH)
-
 		err := createLonghornSecrets(ctx, client, LonghornSSOConfig{ClientSecret: ""})
 		if err != nil {
 			t.Fatalf("createLonghornSecrets() error = %v", err)
@@ -475,7 +471,6 @@ func TestCreateKeycloakAndLonghornSecrets_Together(t *testing.T) {
 	nsKC := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
 	nsLH := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "longhorn-system"}}
 	client := fake.NewSimpleClientset(nsKC, nsLH)
-
 	kcCfg := KeycloakConfig{
 		Enabled:               true,
 		AdminUsername:         "admin",
