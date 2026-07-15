@@ -80,13 +80,13 @@ func collectFromTemplate(path string, data TemplateData, repoSet, nsSet map[stri
 	if err != nil {
 		return fmt.Errorf("render %s: %w", path, err)
 	}
-	for _, doc := range strings.Split(string(rendered), "\n---") {
+	for _, doc := range splitYAMLDocs(string(rendered)) {
 		if strings.TrimSpace(doc) == "" {
 			continue
 		}
 		var obj projectScopeDoc
 		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
-			continue // non-object docs (comments, blank) are skipped
+			return fmt.Errorf("parse rendered doc in %s: %w", path, err)
 		}
 		if obj.Metadata.Namespace != "" {
 			nsSet[obj.Metadata.Namespace] = struct{}{}
@@ -106,8 +106,30 @@ func collectFromTemplate(path string, data TemplateData, repoSet, nsSet map[stri
 	return nil
 }
 
-// projectScopeDoc is the minimal shape needed to read sources and namespaces
-// from both Application manifests and plain resource manifests.
+// splitYAMLDocs splits rendered YAML into documents on lines that are exactly
+// "---" (a YAML document separator), avoiding false splits on "---" that appears
+// inside a value.
+func splitYAMLDocs(s string) []string {
+	var docs []string
+	var cur []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == "---" {
+			docs = append(docs, strings.Join(cur, "\n"))
+			cur = nil
+			continue
+		}
+		cur = append(cur, line)
+	}
+	return append(docs, strings.Join(cur, "\n"))
+}
+
+// projectScopeDoc is the minimal shape read from each rendered YAML document.
+// Recognized shapes: namespaces come from metadata.namespace and
+// spec.destination.namespace; source repos from spec.source.repoURL and
+// spec.sources[].repoURL. A template that declares a namespace or repo ONLY via
+// a different shape (a deeply-nested field, or a Kustomize top-level namespace:)
+// is not seen here and must also be declared via a recognized shape, or the live
+// foundational deploy (journey 3) will surface the gap.
 type projectScopeDoc struct {
 	Metadata struct {
 		Namespace string `json:"namespace"`

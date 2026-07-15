@@ -14,6 +14,13 @@ func TestDeriveProjectScopes(t *testing.T) {
 		t.Fatalf("deriveProjectScopes() error = %v", err)
 	}
 
+	if !slices.IsSorted(repos) {
+		t.Errorf("repos not sorted: %v", repos)
+	}
+	if !slices.IsSorted(namespaces) {
+		t.Errorf("namespaces not sorted: %v", namespaces)
+	}
+
 	wantRepos := []string{
 		"https://git.example.com/org/repo",
 		"https://charts.bitnami.com/bitnami",
