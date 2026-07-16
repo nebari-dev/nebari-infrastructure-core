@@ -21,6 +21,7 @@ spec:
   destination:
     server: https://kubernetes.default.svc
 
+  # Short-term fix, see https://github.com/nebari-dev/nebari-infrastructure-core/issues/484
   # NebariApp reconciliation extends the shared Gateway with one TLS listener
   # per application. Those listeners are intentionally operator-owned and are
   # not part of NIC's base Gateway desired state.
