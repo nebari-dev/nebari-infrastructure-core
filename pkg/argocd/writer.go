@@ -31,6 +31,9 @@ const (
 	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
 	// not configured a real ACME provider.
 	certificateIssuerSelfSigned = "selfsigned-issuer"
+	// certificateIssuerLetsEncrypt is the cert-manager ACME Issuer used when the
+	// user explicitly selects Let's Encrypt.
+	certificateIssuerLetsEncrypt = "letsencrypt-issuer"
 )
 
 // TemplateData holds the dynamic values for template processing
@@ -144,7 +147,7 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 
 	// Set certificate configuration
 	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
-		data.CertificateIssuer = "letsencrypt-issuer"
+		data.CertificateIssuer = certificateIssuerLetsEncrypt
 		if cfg.Certificate.ACME != nil {
 			data.ACMEEmail = cfg.Certificate.ACME.Email
 			data.ACMEServer = cfg.Certificate.ACME.Server
@@ -329,6 +332,31 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
+		// Skip MetalLB templates for providers that don't need it
+		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Skip trust-manager templates unless a trust bundle is configured
+		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Skip certificate templates that don't apply to the configured cert source.
+		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
+			destPath := filepath.Join(workDir, relPath)
+			if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove unused certificate template %s: %w", destPath, err)
+			}
+			return nil
+		}
+
 		destPath := filepath.Join(workDir, relPath)
 
 		// Gated templates are removed (not just skipped) when their gate is
@@ -442,6 +470,8 @@ const (
 	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
 	certificatesAppPath       = "apps/certificates.yaml"
 	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
+	letsencryptIssuerPath     = "manifests/security/issuers/letsencrypt-clusterissuer.yaml"
+	selfSignedIssuerPath      = "manifests/security/issuers/selfsigned-clusterissuer.yaml"
 )
 
 // skipCertificateTemplate reports whether a cert-related template should be
@@ -460,6 +490,10 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 		return data.UseExistingCertificate
 	case gatewayReferenceGrantPath:
 		return !data.GatewayTLSCrossNamespace
+	case letsencryptIssuerPath:
+		return data.CertificateIssuer != certificateIssuerLetsEncrypt
+	case selfSignedIssuerPath:
+		return data.CertificateIssuer != certificateIssuerSelfSigned
 	default:
 		return false
 	}

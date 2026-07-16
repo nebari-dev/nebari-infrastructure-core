@@ -16,11 +16,17 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   parentRefs:
-    - name: nebari-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: nebari-gateway
       namespace: envoy-gateway-system
       sectionName: http
   rules:
-    - filters:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
         - type: RequestRedirect
           requestRedirect:
             scheme: https

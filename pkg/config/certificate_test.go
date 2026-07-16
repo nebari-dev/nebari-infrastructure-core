@@ -29,6 +29,24 @@ func TestCertificateConfigValidate(t *testing.T) {
 			cfg:  &CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "a@b.com"}},
 		},
 		{
+			name:        "letsencrypt without acme is rejected",
+			cfg:         &CertificateConfig{Type: "letsencrypt"},
+			wantErr:     true,
+			errContains: "requires acme.email",
+		},
+		{
+			name:        "letsencrypt without email is rejected",
+			cfg:         &CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{}},
+			wantErr:     true,
+			errContains: "requires acme.email",
+		},
+		{
+			name:        "letsencrypt with blank email is rejected",
+			cfg:         &CertificateConfig{Type: "letsencrypt", ACME: &ACMEConfig{Email: "  "}},
+			wantErr:     true,
+			errContains: "requires acme.email",
+		},
+		{
 			name:        "unknown type rejected",
 			cfg:         &CertificateConfig{Type: "bogus"},
 			wantErr:     true,

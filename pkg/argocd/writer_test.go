@@ -263,6 +263,37 @@ func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	}
 }
 
+func TestGatewayConfig_IgnoresOperatorTLSListeners(t *testing.T) {
+	content, err := templates.ReadFile("templates/apps/gateway-config.yaml")
+	if err != nil {
+		t.Fatalf("failed to read gateway-config template: %v", err)
+	}
+
+	processed, err := processTemplate("apps/gateway-config.yaml", content, TemplateData{
+		GitRepoURL: "https://github.com/example/repo",
+		GitBranch:  "main",
+	})
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+	checks := []string{
+		"ignoreDifferences:",
+		"group: gateway.networking.k8s.io",
+		"kind: Gateway",
+		"name: nebari-gateway",
+		"namespace: envoy-gateway-system",
+		"jqPathExpressions:",
+		`.spec.listeners[] | select(.name | startswith("tls-"))`,
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("gateway-config template missing %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -523,7 +554,9 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 				contains string
 			}{
 				{"kind", "kind: HTTPRoute"},
+				{"explicit Gateway reference defaults", "group: gateway.networking.k8s.io\n      kind: Gateway"},
 				{"targets http listener", "sectionName: http"},
+				{"explicit default path match", "type: PathPrefix\n            value: /"},
 				{"redirect filter type", "type: RequestRedirect"},
 				{"redirect to https", "scheme: https"},
 				{"301 status code", "statusCode: 301"},
@@ -669,6 +702,15 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 			if !strings.Contains(output, "sectionName: https") {
 				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "group: gateway.networking.k8s.io\n      kind: Gateway") {
+				t.Errorf("%s should declare explicit Gateway reference defaults, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "group: \"\"\n          kind: Service") {
+				t.Errorf("%s should declare explicit Service reference defaults, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "weight: 1") {
+				t.Errorf("%s should declare the default backend weight, got:\n%s", name, output)
 			}
 			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
 			if strings.Contains(output, "sectionName: http\n") {

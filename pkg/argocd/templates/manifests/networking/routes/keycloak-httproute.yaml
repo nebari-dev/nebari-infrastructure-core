@@ -8,7 +8,9 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   parentRefs:
-    - name: nebari-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: nebari-gateway
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
@@ -19,5 +21,8 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: {{ .KeycloakServiceName }}
+        - group: ""
+          kind: Service
+          name: {{ .KeycloakServiceName }}
           port: 8080
+          weight: 1
