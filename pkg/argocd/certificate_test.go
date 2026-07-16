@@ -316,6 +316,29 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 	}
 }
 
+func TestLetsEncryptIssuer_UsesExplicitGatewayParentRefDefaults(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/security/issuers/letsencrypt-clusterissuer.yaml")
+	if err != nil {
+		t.Fatalf("read letsencrypt issuer template: %v", err)
+	}
+
+	processed, err := processTemplate(
+		"manifests/security/issuers/letsencrypt-clusterissuer.yaml",
+		content,
+		TemplateData{
+			ACMEEmail:  "admin@example.com",
+			ACMEServer: "https://acme-v02.api.letsencrypt.org/directory",
+		},
+	)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	if !strings.Contains(string(processed), "group: gateway.networking.k8s.io\n                name: nebari-gateway") {
+		t.Errorf("expected explicit Gateway API group on ACME solver parentRef, got:\n%s", processed)
+	}
+}
+
 func TestWriteAllToGit_RendersReferenceGrantCrossNamespace(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

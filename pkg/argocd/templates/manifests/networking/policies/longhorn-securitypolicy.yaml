@@ -16,6 +16,8 @@ spec:
       issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
     clientID: longhorn
     clientSecret:
+      group: ""
+      kind: Secret
       name: {{ .LonghornOIDCSecretName }}
     redirectURL: "https://longhorn.{{ .Domain }}/oauth2/callback"
     logoutPath: "/oauth2/logout"
@@ -24,6 +26,7 @@ spec:
       - profile
       - email
       - groups
+    refreshToken: true
     forwardAccessToken: true
   jwt:
     providers:
@@ -31,6 +34,7 @@ spec:
         issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
         remoteJWKS:
           uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+          cacheDuration: 300s
   authorization:
     defaultAction: Deny
     rules:

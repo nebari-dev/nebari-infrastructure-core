@@ -9,3 +9,5 @@ metadata:
 spec:
   addresses:
     - {{ .MetalLBAddressRange }}
+  autoAssign: true
+  avoidBuggyIPs: false

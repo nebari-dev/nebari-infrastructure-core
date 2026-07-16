@@ -9,7 +9,9 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   parentRefs:
-    - name: nebari-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: nebari-gateway
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
@@ -20,6 +22,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: longhorn-frontend
+        - group: ""
+          kind: Service
+          name: longhorn-frontend
           port: 80
+          weight: 1
 {{- end }}

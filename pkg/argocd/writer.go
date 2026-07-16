@@ -332,31 +332,6 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for providers that don't need it
-		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		// Skip trust-manager templates unless a trust bundle is configured
-		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		// Skip certificate templates that don't apply to the configured cert source.
-		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
-			destPath := filepath.Join(workDir, relPath)
-			if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove unused certificate template %s: %w", destPath, err)
-			}
-			return nil
-		}
-
 		destPath := filepath.Join(workDir, relPath)
 
 		// Gated templates are removed (not just skipped) when their gate is
@@ -483,7 +458,10 @@ const (
 // The certificates Application is skipped alongside the Certificate because the
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
-// it would report as failed.
+// it would report as failed. Issuer manifests are selected independently:
+// letsencrypt uses the ACME issuer, while selfsigned and existing use the
+// self-signed issuer (the latter remains available for operator-managed
+// per-application certificates).
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
