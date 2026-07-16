@@ -3,6 +3,7 @@ package git
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,52 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	cryptossh "golang.org/x/crypto/ssh"
 )
+
+func TestDefaultLocalPath(t *testing.T) {
+	originalUserHomeDir := userHomeDir
+	defer func() {
+		userHomeDir = originalUserHomeDir
+	}()
+
+	tests := []struct {
+		name        string
+		userHomeDir func() (string, error)
+		want        string
+	}{
+		{
+			name: "uses home directory",
+			userHomeDir: func() (string, error) {
+				return filepath.Join("home", "test-user"), nil
+			},
+			want: filepath.Join("home", "test-user", ".nic", "gitops", "my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory errors",
+			userHomeDir: func() (string, error) {
+				return "", errors.New("home unavailable")
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory is empty",
+			userHomeDir: func() (string, error) {
+				return "", nil
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userHomeDir = tt.userHomeDir
+
+			got := DefaultLocalPath("my-nebari-local")
+			if got != tt.want {
+				t.Fatalf("DefaultLocalPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {

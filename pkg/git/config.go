@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -11,21 +12,51 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"github.com/skeema/knownhosts"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
 const (
 	// DefaultBranch is the default git branch name when none is specified.
 	DefaultBranch = "main"
+
+	// GitOpsDirMode is the directory mode for generated GitOps repository content.
+	GitOpsDirMode os.FileMode = 0o755
+
+	// GitOpsFileMode is the file mode for generated non-secret GitOps files.
+	GitOpsFileMode os.FileMode = 0o644
 )
 
+var userHomeDir = os.UserHomeDir
+
 // DefaultLocalPath returns the host directory NIC manages for a project's
-// local gitops repository when no git_repository is configured. It is a pure
-// function so the deploy orchestrator and providers that mount the directory
-// (e.g. the local kind provider) can derive the same path independently
-// without threading it between them.
+// local gitops repository when no git_repository is configured. It lives under
+// the user's home directory so the repo is durable and stays on host paths that
+// kind/Docker Desktop can mount reliably.
 func DefaultLocalPath(projectName string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	homeDir, err := userHomeDir()
+	if err != nil || homeDir == "" {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	}
+	return filepath.Join(homeDir, ".nic", "gitops", projectName)
+}
+
+// EnsureLocalGitOpsDir creates a local GitOps root with the desired initial
+// mode. The process umask may restrict a newly created directory;
+// ClientImpl repairs the mounted repository root and Git-serving data after
+// initialization and local commits.
+func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.EnsureLocalGitOpsDir")
+	defer span.End()
+	span.SetAttributes(attribute.String("git.repo_path", path))
+
+	if err := os.MkdirAll(path, GitOpsDirMode); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("create local gitops directory %s: %w", path, err)
+	}
+	return nil
 }
 
 // Config represents git repository configuration for GitOps bootstrap.

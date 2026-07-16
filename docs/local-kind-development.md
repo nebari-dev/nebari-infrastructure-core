@@ -24,11 +24,15 @@ The Makefile reads `examples/local-config.yaml` and automatically handles three 
 
 | Config | What happens |
 |--------|-------------|
-| No `git_repository` section | Auto-creates `/tmp/nebari-gitops-{project_name}` and mounts it into the cluster |
-| `url: "file:///path/to/repo"` | Mounts that local path into the cluster |
+| No `git_repository` section | Auto-creates `~/.nic/gitops/{project_name}` and mounts it into the cluster |
+| `url: "file:///path/to/repo"` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
 | `url: "git@github.com:..."` | No mount — ArgoCD pulls from the remote repo directly |
 
-For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod so ArgoCD can read manifests directly from your filesystem.
+For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
+
+When initializing or committing to any local `file://` repo, NIC makes the repository root and Git-serving data under `.git` group/other-readable and traversable so the non-root ArgoCD repo-server can read committed content. This applies whether the repo is auto-generated or user-supplied. NIC preserves existing and special permission bits, and does not touch working-tree files, hooks, reflogs, the Git index, or unrelated `extra_mounts`.
+
+If an existing Kind cluster was created with a different local GitOps path, recreate it with `make localkind-down` followed by `make localkind-up`; Kind mounts are fixed at cluster creation time.
 
 > **Note:** `file://` repos only work when the cluster nodes can access the local path (Kind, k3s, bare metal). For cloud providers (AWS, GCP, Azure), use a remote git repository since Kubernetes nodes don't have access to your local filesystem.
 

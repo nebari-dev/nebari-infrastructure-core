@@ -361,8 +361,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		if d.IsDir() {
-			// Create directory
-			return os.MkdirAll(destPath, 0750)
+			return os.MkdirAll(destPath, git.GitOpsDirMode)
 		}
 
 		// Read template content
@@ -378,12 +377,12 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), git.GitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, 0600); err != nil {
+		if err := os.WriteFile(destPath, processed, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
 
