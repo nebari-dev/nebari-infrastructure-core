@@ -2,10 +2,14 @@ package argocd
 
 import (
 	"context"
+	"io/fs"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 func TestDeriveProjectScopes(t *testing.T) {
@@ -124,6 +128,71 @@ func TestRenderProjects(t *testing.T) {
 		len(specList(d, "clusterResourceWhitelist")) != 0 ||
 		len(specList(d, "namespaceResourceWhitelist")) != 0 {
 		t.Errorf("default project must be deny-all (empty destinations and whitelists)")
+	}
+}
+
+// TestFoundationalAppsHaveAllowedDestinationNamespace guards the regression the
+// live journey-3 verification caught: a foundational Application with an empty
+// spec.destination.namespace is rejected at admission by the scoped
+// foundational AppProject with InvalidSpecError (destination namespace does not
+// match any
+// destinations"), even though its resources carry their own
+// namespaces. Every foundational app must declare a destination.namespace that
+// is one of the project's allowed destinations.
+func TestFoundationalAppsHaveAllowedDestinationNamespace(t *testing.T) {
+	data := TemplateData{GitRepoURL: "https://git.example.com/org/repo", GitBranch: "main"}
+
+	_, namespaces, err := deriveProjectScopes(context.Background(), data)
+	if err != nil {
+		t.Fatalf("deriveProjectScopes() error = %v", err)
+	}
+
+	appsDir := filepath.Join(templateDir, "apps")
+	entries, err := fs.ReadDir(templates, appsDir)
+	if err != nil {
+		t.Fatalf("read apps dir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".yaml") || strings.HasPrefix(name, "_") || name == "root.yaml" {
+			continue
+		}
+		content, err := fs.ReadFile(templates, filepath.Join(appsDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		rendered, err := processTemplate(name, content, data)
+		if err != nil {
+			t.Fatalf("render %s: %v", name, err)
+		}
+		for _, doc := range splitYAMLDocs(string(rendered)) {
+			if strings.TrimSpace(doc) == "" {
+				continue
+			}
+			var app struct {
+				Kind string `json:"kind"`
+				Spec struct {
+					Project     string `json:"project"`
+					Destination struct {
+						Namespace string `json:"namespace"`
+					} `json:"destination"`
+				} `json:"spec"`
+			}
+			if err := yaml.Unmarshal([]byte(doc), &app); err != nil {
+				t.Fatalf("parse %s: %v", name, err)
+			}
+			if app.Kind != "Application" || app.Spec.Project != "foundational" {
+				continue
+			}
+			ns := app.Spec.Destination.Namespace
+			if ns == "" {
+				t.Errorf("%s: foundational Application has empty destination.namespace; the scoped foundational project rejects it with InvalidSpecError", name)
+				continue
+			}
+			if !slices.Contains(namespaces, ns) {
+				t.Errorf("%s: destination.namespace %q is not an allowed foundational destination %v", name, ns, namespaces)
+			}
+		}
 	}
 }
 
