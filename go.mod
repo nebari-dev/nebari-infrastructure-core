@@ -1,6 +1,6 @@
 module github.com/nebari-dev/nebari-infrastructure-core
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
