@@ -21,7 +21,7 @@
   src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a> <a
   href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img
   src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a> <a href="https://golang.org"><img
-  src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
+  src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white" alt="Go 1.26+"></a>
 </p>
 
 <p align="center">
@@ -93,7 +93,7 @@ flowchart TD
 
   subgraph CP["Cloud Provider"]
     direction LR
-    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ hz["Hetzner K3s"] ~~~ k3s["Local K3s"]
+    aws["AWS EKS"] ~~~ gcp["GCP GKE"] ~~~ az["Azure AKS"] ~~~ hz["Hetzner k3s"] ~~~ knd["Local kind"]
   end
 
   SP --> NO --> FS --> K8 --> CP
@@ -135,7 +135,7 @@ Every NIC deployment includes a landing page where users discover and access all
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | **Opinionated Defaults**      | Production-ready configuration out of the box — multi-AZ, autoscaling, security best practices               |
 | **Composable Software Packs** | Install only what you need. Each pack auto-integrates with SSO, telemetry, and routing                       |
-| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), Hetzner (K3s), and local (K3s) from the same config format                |
+| **Multi-Cloud**               | AWS (EKS), GCP (GKE), Azure (AKS), Hetzner (k3s), and local (kind) from the same config format               |
 | **GitOps Native**             | ArgoCD manages all foundational software with dependency ordering and health checks                          |
 | **OpenTelemetry Native**      | Built-in OTel Collector exports metrics, logs, and traces — plugs into whatever observability system you run |
 | **SSO Everywhere**            | Keycloak provides centralized auth. The Nebari Operator creates OAuth clients automatically                  |
@@ -146,7 +146,7 @@ Every NIC deployment includes a landing page where users discover and access all
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
 
 NIC automatically downloads and manages its own OpenTofu binary — no manual installation required.
@@ -269,7 +269,7 @@ NIC uses a YAML configuration file. See the `examples/` directory for sample con
 - `examples/gcp-config.yaml` - GCP/GKE configuration
 - `examples/azure-config.yaml` - Azure/AKS configuration
 - `examples/hetzner-config.yaml` - Hetzner Cloud/K3s configuration
-- `examples/local-config.yaml` - Local Kind/K3s configuration
+- `examples/local-config.yaml` - Local kind configuration
 
 ### Environment Variables
 
@@ -299,15 +299,23 @@ OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
 
 ### Local Cluster Testing with Kind
 
-For local development, you can deploy a Kind cluster with foundational services:
+For local development, you can deploy a kind cluster with foundational services via:
 
 ```bash
-make localkind-up    # Create Kind cluster and deploy
-make localkind-down  # Tear down
+./nic deploy  -f examples/local-config.yaml
 ```
 
-A GitHub repo URL must be set in your `local-config.yaml`, and a valid private SSH key must be set as the
-`GIT_SSH_PRIVATE_KEY` environment variable.
+The cluster is named after `project_name` (kube context `kind-<project_name>`) and requires Docker.
+
+**GitOps repository:**
+
+- Omit `git_repository` and NIC auto-creates and mounts a local repo at `~/.nic/gitops/<project_name>` — zero configuration.
+- For a remote repo, set `git_repository.url` to an SSH/HTTPS URL and supply credentials via the `GIT_SSH_PRIVATE_KEY` environment variable (or a token).
+- For a custom local `file://` path, you must also declare a matching `cluster.local.kind.extra_mounts` entry so the kind node can read it — see `examples/local-config.yaml`.
+
+### Using a pre-existing Cluster (k3d / k3s / minikube / cloud)
+
+The `local` provider always creates its own kind cluster. To deploy onto a cluster you provisioned yourself (e.g., k3d, k3s, minikube, or a managed cloud cluster) use the `existing` provider instead. It connects to a context in your kubeconfig and installs the platform without provisioning any infrastructure. Note that it assumes the cluster already provides its own LoadBalancer. See `examples/existing-config.yaml`.
 
 ### Running Tests
 
@@ -350,15 +358,17 @@ cmd/nic/              CLI entry point and commands
 pkg/
   ├── argocd/         ArgoCD installation, Helm charts, app manifests
   ├── config/         Configuration parsing and validation
-  ├── dnsprovider/    DNS provider interface (Cloudflare)
   ├── git/            Git client for GitOps repository management
   ├── kubeconfig/     Kubeconfig generation
-  ├── provider/       Cloud provider interface
-  │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
-  │   ├── gcp/        GCP provider
-  │   ├── azure/      Azure provider
-  │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
-  │   └── local/      Local Kind/K3s provider
+  ├── providers/      Provider implementations
+  │   ├── cluster/    Cluster/cloud provider interface
+  │   │   ├── aws/        AWS provider (EKS, VPC, EFS, IAM)
+  │   │   ├── gcp/        GCP provider
+  │   │   ├── azure/      Azure provider
+  │   │   ├── hetzner/    Hetzner Cloud provider (K3s via hetzner-k3s)
+  │   │   └── local/      Local kind provider
+  │   └── dns/        DNS provider interface
+  │       └── cloudflare/ Cloudflare DNS provider
   ├── telemetry/      OpenTelemetry setup
   └── tofu/           OpenTofu binary management and execution
 terraform/            OpenTofu/Terraform modules per provider
@@ -411,7 +421,7 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
 ## OpenTofu lockfile updates
 
-If you change provider templates under `pkg/provider/**/templates/`, regenerate the provider lockfile(s) locally:
+If you change provider templates under `pkg/providers/cluster/**/templates/`, regenerate the provider lockfile(s) locally:
 
 ```bash
 ./scripts/pre-commit-tofu-lock.sh

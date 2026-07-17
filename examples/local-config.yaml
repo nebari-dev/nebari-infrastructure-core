@@ -5,7 +5,20 @@ certificate:
 
 cluster:
   local:
-    kube_context: "kind-nebari-local"
+    # Optional kind config. Can be omitted entirely to use defaults.
+    # kind:
+    #   node_image: kindest/node:v1.35.0    # default: bundled kind's default image
+    #   extra_mounts:
+    #     # Any additional host directory you want available inside the node
+    #     - host_path: /absolute/host/path
+    #       container_path: /absolute/node/path
+    #       read_only: true
+    #     # GitOps repo mount: only needed for a CUSTOM git_repository file://
+    #     # path (OPTION 2 below). The default gitops repo is auto-mounted, so
+    #     # omit this unless you set git_repository. host_path must match it exactly.
+    #     - host_path: /home/user/my-gitops-repo
+    #       container_path: /home/user/my-gitops-repo
+    #       read_only: true
     node_selectors:
       general:
         kubernetes.io/os: linux
@@ -14,33 +27,35 @@ cluster:
       worker:
         kubernetes.io/os: linux
 
-  # Storage class for persistent volumes (default: "standard")
-  # Use "local-path" for k3s clusters
-  # storage_class: local-path
-
   # HTTPS port for Gateway listener (default: 443)
   # Override if 443 is already in use or requires root
   # https_port: 8443
 
-  # MetalLB configuration (default: enabled with 192.168.1.100-192.168.1.110 pool)
-  # Disable for k3s which ships with ServiceLB
+  # MetalLB provides the gateway's LoadBalancer IP. NIC derives the address pool
+  # from the kind Docker network automatically so the gateway IP is routable. Override
+  # address_pool only to pin a specific range.
   # metallb:
-  #   enabled: false
   #   address_pool: 172.18.255.100-172.18.255.110
 
 # GitOps repository configuration (optional)
 # Configures the repository that ArgoCD will use to manage cluster resources
 #
 # OPTION 1: Auto-generated local directory (zero configuration for development)
-# Simply omit the git_repository section and NIC will auto-create /tmp/nebari-gitops-{project_name}
+# Simply omit the git_repository section and NIC will auto-create ~/.nic/gitops/{project_name}
+# and mount it on the kind cluster
 #
-# OPTION 2: Explicit local directory (full control over location)
+# OPTION 2: Explicit local directory (custom location)
+# With the local (kind) provider you must also declare a matching
+# cluster.local.kind.extra_mounts entry for the same path (see the kind block
+# above). NIC only auto-mounts the OPTION 1 default, so a custom file:// path is
+# invisible to the in-cluster ArgoCD repo-server unless you mount it yourself.
+# The paths must match exactly. During initialization and after commits, NIC
+# adds the read/traverse bits needed on the repo root and Git-serving data under
+# .git. Working-tree files and private metadata such as hooks remain untouched.
 # git_repository:
-#   # Local path to git repository (must be an absolute path)
-#   url: "file:///home/user/my-gitops-repo"
+#   url: "file:///home/user/my-gitops-repo"   # must be an absolute path
 #   branch: main
-#   path: "clusters/local"  # Optional subdirectory within the repo
-#   # No auth configuration needed for local paths
+#   path: "clusters/local"                    # optional subdirectory within the repo
 
 # OPTION 3: Remote git repository (production setup)
 # git_repository:

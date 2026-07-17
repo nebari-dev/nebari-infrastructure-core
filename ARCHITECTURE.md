@@ -6,8 +6,8 @@ This document provides a comprehensive map of the nebari-infrastructure-core cod
 
 - [High-Level Structure](#high-level-structure)
 - [Command Line Interface (cmd/nic/)](#command-line-interface-cmdnic)
-- [Provider System (pkg/provider/)](#provider-system-pkgprovider)
-- [DNS Provider System (pkg/dnsprovider/)](#dns-provider-system-pkgdnsprovider)
+- [Cluster Provider System (pkg/providers/cluster/)](#cluster-provider-system-pkgproviderscluster)
+- [DNS Provider System (pkg/providers/dns/)](#dns-provider-system-pkgprovidersdns)
 - [Configuration System (pkg/config/)](#configuration-system-pkgconfig)
 - [Observability (pkg/telemetry/, pkg/status/)](#observability-pkgtelemetry-pkgstatus)
 - [Supporting Files](#supporting-files)
@@ -18,8 +18,9 @@ This document provides a comprehensive map of the nebari-infrastructure-core cod
 nebari-infrastructure-core/
 ├── cmd/nic/              # CLI application entry point
 ├── pkg/                  # Reusable library packages
-│   ├── provider/         # Cloud provider implementations
-│   ├── dnsprovider/      # DNS provider implementations
+│   ├── providers/        # Provider implementations
+│   │   ├── cluster/      # Cloud/cluster provider implementations
+│   │   └── dns/          # DNS provider implementations
 │   ├── config/           # Configuration parsing and types
 │   ├── telemetry/        # OpenTelemetry setup
 │   └── status/           # Status reporting system
@@ -54,9 +55,9 @@ nebari-infrastructure-core/
 - **Signal Handling:** Context cancellation for graceful shutdown on SIGINT/SIGTERM
 - **Status Display:** Uses `status.StartHandler()` to display progress updates to user
 
-## Provider System (pkg/provider/)
+## Cluster Provider System (pkg/providers/cluster/)
 
-**Location:** `pkg/provider/`
+**Location:** `pkg/providers/cluster/`
 
 **Purpose:** Cloud provider abstraction and implementations. Each provider manages full lifecycle of cloud infrastructure.
 
@@ -67,9 +68,9 @@ nebari-infrastructure-core/
 | `provider.go` | Defines `Provider` interface with Name(), Validate(), Deploy(), Reconcile(), Destroy(), GetKubeconfig(), Summary() |
 | `registry.go` | Thread-safe provider registry with registration and lookup |
 
-### AWS Provider (pkg/provider/aws/) - **Fully Implemented**
+### AWS Provider (pkg/providers/cluster/aws/) - **Fully Implemented**
 
-**Location:** `pkg/provider/aws/`
+**Location:** `pkg/providers/cluster/aws/`
 
 **Status:** Complete native AWS SDK implementation with full reconciliation logic
 
@@ -162,9 +163,9 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 }
 ```
 
-### GCP Provider (pkg/provider/gcp/) - **Stub**
+### GCP Provider (pkg/providers/cluster/gcp/) - **Stub**
 
-**Location:** `pkg/provider/gcp/`
+**Location:** `pkg/providers/cluster/gcp/`
 
 **Status:** Stub implementation - prints config as JSON
 
@@ -173,31 +174,50 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 | `provider.go` | Stub provider that prints operations |
 | `config.go` | GCP-specific config types: `Config`, `NodeGroup`, `Taint`, `GuestAccelerator` |
 
-### Azure Provider (pkg/provider/azure/) - **Stub**
+### Azure Provider (pkg/providers/cluster/azure/) - **Fully Implemented**
 
-**Location:** `pkg/provider/azure/`
+**Location:** `pkg/providers/cluster/azure/`
 
-**Status:** Stub implementation - prints config as JSON
+**Status:** Complete implementation that drives the `nebari-dev/terraform-azurerm-aks-cluster` Terraform module via OpenTofu. Implements all `Provider` methods: `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, and `InfraSettings`.
+
+**Module sourcing:** Consumes the published `nebari-dev/aks-cluster/azurerm` module from the OpenTofu Registry, pinned by version in `templates/main.tf`.
+
+**State backend:** Uses the `azurerm` backend with a bootstrapped storage account/container for Terraform state (see `state_backend.go`).
+
+**Discovery:** Tag-based cleanup driven by `state.go` (`nic.nebari.dev/cluster-name`, `nic.nebari.dev/managed-by`), mirroring the AWS provider's stateless model.
+
+**Kubeconfig:** Fetched via the Azure SDK (`armcontainerservice`) rather than read from Terraform state, so it works even when the local tfstate is absent.
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Stub provider that prints operations |
+| `provider.go` | Provider implementation: orchestrates Validate/Deploy/Destroy/Summary/InfraSettings over OpenTofu |
 | `config.go` | Azure-specific config types: `Config`, `NodeGroup`, `Taint` |
+| `state.go` | Tag-based discovery and orphan cleanup helpers |
+| `state_backend.go` | Bootstraps the `azurerm` Terraform backend (resource group, storage account, container) |
+| `tofu.go` | OpenTofu invocation: init/plan/apply/destroy against the external module |
+| `kubeconfig.go` | Retrieves cluster admin kubeconfig via `armcontainerservice` |
+| `cleanup.go` | Post-destroy resource sweep (tag-based) |
+| `interfaces.go` | Azure SDK client interfaces for mocking |
+| `templates/` | Rendered Terraform root module that wraps the external module |
+| `examples/azure-config.yaml` | Working config (at repo root `examples/`) |
 
-### Local Provider (pkg/provider/local/) - **Stub**
+### Local Provider (pkg/providers/cluster/local/)
 
-**Location:** `pkg/provider/local/`
+**Location:** `pkg/providers/cluster/local/`
 
-**Status:** Stub implementation for K3s local development
+**Status:** NIC-managed kind (Kubernetes-in-Docker) cluster for local development
+
+**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Installs MetalLB so the gateway gets a LoadBalancer IP, deriving the address pool from the kind Docker network so it is routable. To deploy onto a pre-existing cluster instead, use the `existing` provider.
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Stub provider that prints operations |
-| `config.go` | Local-specific config types: `Config` |
+| `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig, derive the MetalLB pool for `InfraSettings` |
+| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, gitops mount, address-pool derivation) |
+| `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount`, `MetalLBConfig` |
 
-## DNS Provider System (pkg/dnsprovider/)
+## DNS Provider System (pkg/providers/dns/)
 
-**Location:** `pkg/dnsprovider/`
+**Location:** `pkg/providers/dns/`
 
 **Purpose:** DNS provider abstraction for managing DNS records. Separate from cloud providers to allow mixing (e.g., AWS infrastructure + Cloudflare DNS).
 
@@ -205,12 +225,12 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Defines stateless `DNSProvider` interface: `ProvisionRecords()`, `DestroyRecords()` |
+| `provider.go` | Defines stateless `Provider` interface: `ProvisionRecords()`, `DestroyRecords()` |
 | `registry.go` | Thread-safe DNS provider registry |
 
-### Cloudflare Provider (pkg/dnsprovider/cloudflare/)
+### Cloudflare Provider (pkg/providers/dns/cloudflare/)
 
-**Location:** `pkg/dnsprovider/cloudflare/`
+**Location:** `pkg/providers/dns/cloudflare/`
 
 **Status:** Implemented using `cloudflare-go/v4` SDK
 
@@ -262,10 +282,10 @@ type ClusterConfig struct {
 ```
 
 **Provider-Specific Configs:**
-- AWS: `pkg/provider/aws/config.go` - `Config`, `NodeGroup`, `Taint`, `EFSConfig`
-- GCP: `pkg/provider/gcp/config.go` - `Config`, `NodeGroup`, `Taint`, `GuestAccelerator`
-- Azure: `pkg/provider/azure/config.go` - `Config`, `NodeGroup`, `Taint`
-- Local: `pkg/provider/local/config.go` - `Config`
+- AWS: `pkg/providers/cluster/aws/config.go` - `Config`, `NodeGroup`, `Taint`, `EFSConfig`
+- GCP: `pkg/providers/cluster/gcp/config.go` - `Config`, `NodeGroup`, `Taint`, `GuestAccelerator`
+- Azure: `pkg/providers/cluster/azure/config.go` - `Config`, `NodeGroup`, `Taint`
+- Local: `pkg/providers/cluster/local/config.go` - `Config`
 
 **Type Conversion:**
 ```go
@@ -349,7 +369,7 @@ defer cleanup()
 | `examples/aws-config-with-dns.yaml` | AWS config with Cloudflare DNS |
 | `examples/gcp-config.yaml` | Sample GCP configuration |
 | `examples/azure-config.yaml` | Sample Azure configuration |
-| `examples/local-config.yaml` | Sample local K3s configuration |
+| `examples/local-config.yaml` | Sample local kind configuration |
 
 ### Development Tools
 
@@ -385,7 +405,7 @@ defer cleanup()
 
 ### 2. Separation of Concerns
 - **cmd/nic/** - Application layer (logging, user interaction, signal handling)
-- **pkg/provider/** - Provider implementations (no logging, only telemetry spans)
+- **pkg/providers/cluster/** - Provider implementations (no logging, only telemetry spans)
 - **pkg/config/** - Configuration parsing (provider-agnostic)
 - **pkg/telemetry/** - Observability (OpenTelemetry)
 - **pkg/status/** - Progress reporting (channel-based)
@@ -397,7 +417,7 @@ defer cleanup()
 - Makes dependencies testable and visible
 
 ### 4. Provider Configuration Isolation
-- Each provider owns its configuration types in `pkg/provider/<provider>/config.go`
+- Each provider owns its configuration types in `pkg/providers/cluster/<provider>/config.go`
 - Central config uses nested `cluster: <provider>:` format (same pattern as `dns: <provider>:`)
 - Provider name via `cfg.Cluster.ProviderName()`, raw config via `cfg.Cluster.ProviderConfig()`
 - Type conversion via `config.UnmarshalProviderConfig()` helper
@@ -422,7 +442,7 @@ defer cleanup()
 
 ### Provider Package Structure
 ```
-pkg/provider/<provider>/
+pkg/providers/cluster/<provider>/
 ├── provider.go               # Provider interface implementation
 ├── config.go                 # Provider-specific configuration types
 ├── <resource>.go             # Resource creation logic
@@ -452,15 +472,15 @@ cmd/nic/
 ### Finding Code by Functionality
 
 **"Where is VPC creation?"**
-- Creation: `pkg/provider/aws/vpc.go`
-- Discovery: `pkg/provider/aws/vpc_discovery.go`
-- Reconciliation: `pkg/provider/aws/vpc_reconcile.go`
-- Deletion: `pkg/provider/aws/vpc_delete.go`
+- Creation: `pkg/providers/cluster/aws/vpc.go`
+- Discovery: `pkg/providers/cluster/aws/vpc_discovery.go`
+- Reconciliation: `pkg/providers/cluster/aws/vpc_reconcile.go`
+- Deletion: `pkg/providers/cluster/aws/vpc_delete.go`
 
 **"Where is configuration parsed?"**
 - Parsing: `pkg/config/parser.go`
 - Config types (global): `pkg/config/config.go`
-- Config types (AWS): `pkg/provider/aws/config.go`
+- Config types (AWS): `pkg/providers/cluster/aws/config.go`
 
 **"Where are commands defined?"**
 - CLI framework: `cmd/nic/main.go`
@@ -473,7 +493,7 @@ cmd/nic/
 
 **"Where are providers registered?"**
 - Registration: `cmd/nic/main.go`
-- Registry implementation: `pkg/provider/registry.go`
+- Registry implementation: `pkg/registry/registry.go`
 
 ### Finding Documentation
 
@@ -488,7 +508,7 @@ cmd/nic/
 
 ## Version Information
 
-- **Go Version**: 1.21+
+- **Go Version**: 1.26+
 - **AWS SDK**: github.com/aws/aws-sdk-go-v2
 - **CLI Framework**: github.com/spf13/cobra
 - **Telemetry**: go.opentelemetry.io/otel

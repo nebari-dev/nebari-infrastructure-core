@@ -3,7 +3,7 @@ name: OpenTofu lockfile drift check
 on:
   pull_request:
     paths:
-      - "pkg/provider/**/templates/**/*.tf"
+      - "pkg/providers/cluster/**/templates/**/*.tf"
 
 permissions:
   contents: read
@@ -18,10 +18,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1.0.8
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
           tofu_version: "1.9.0"
 
@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t dirs < <(find pkg/provider -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
+          mapfile -t dirs < <(find pkg/providers/cluster -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
 
           platforms=(
             "linux_amd64"
@@ -60,10 +60,10 @@ jobs:
           done
 
           # Check only lockfiles under templates/ (avoid brittle ** globs)
-          mapfile -t lockfiles < <(find pkg/provider -type f -path "*/templates/.terraform.lock.hcl")
+          mapfile -t lockfiles < <(find pkg/providers/cluster -type f -path "*/templates/.terraform.lock.hcl")
 
           if [ "${#lockfiles[@]}" -eq 0 ]; then
-            echo "No lockfiles found under pkg/provider/**/templates/.terraform.lock.hcl"
+            echo "No lockfiles found under pkg/providers/cluster/**/templates/.terraform.lock.hcl"
             exit 0
           fi
 

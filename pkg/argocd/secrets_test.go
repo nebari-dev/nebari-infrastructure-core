@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
@@ -34,7 +33,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -79,7 +78,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -104,12 +103,9 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	namespace := "argocd"
 
 	t.Run("returns nil when no git repository configured", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
-		cfg := &config.NebariConfig{
-			GitRepository: nil,
-		}
+		client := fake.NewSimpleClientset()
 
-		err := ConfigureGitRepoAccess(ctx, client, cfg, namespace)
+		err := ConfigureGitRepoAccess(ctx, client, nil, namespace)
 		if err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() should return nil when no git repo configured, got error = %v", err)
 		}
@@ -125,18 +121,16 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{
-				URL: "https://github.com/example/repo.git",
-				Auth: git.AuthConfig{
-					TokenEnv: "TEST_GIT_TOKEN",
-				},
+		gitConfig := &git.Config{
+			URL: "https://github.com/example/repo.git",
+			Auth: git.AuthConfig{
+				TokenEnv: "TEST_GIT_TOKEN",
 			},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, cfg, namespace)
+		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
 		if err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}
@@ -172,16 +166,14 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{
-				URL:  "https://github.com/example/repo.git",
-				Auth: git.AuthConfig{}, // Empty auth - no env vars set
-			},
+		gitConfig := &git.Config{
+			URL:  "https://github.com/example/repo.git",
+			Auth: git.AuthConfig{}, // Empty auth - no env vars set
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, cfg, namespace)
+		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
 		if err == nil {
 			t.Error("ConfigureGitRepoAccess() should return error when no credentials provided")
 		}
@@ -206,18 +198,16 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{
-				URL: "https://github.com/example/new-repo.git",
-				Auth: git.AuthConfig{
-					TokenEnv: "TEST_GIT_TOKEN_UPDATE",
-				},
+		gitConfig := &git.Config{
+			URL: "https://github.com/example/new-repo.git",
+			Auth: git.AuthConfig{
+				TokenEnv: "TEST_GIT_TOKEN_UPDATE",
 			},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, cfg, namespace)
+		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
 		if err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}
@@ -246,18 +236,16 @@ test-ssh-key-content
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{
-				URL: "git@github.com:example/repo.git",
-				Auth: git.AuthConfig{
-					SSHKeyEnv: "TEST_SSH_KEY",
-				},
+		gitConfig := &git.Config{
+			URL: "git@github.com:example/repo.git",
+			Auth: git.AuthConfig{
+				SSHKeyEnv: "TEST_SSH_KEY",
 			},
 		}
 
-		err := ConfigureGitRepoAccess(ctx, client, cfg, namespace)
+		err := ConfigureGitRepoAccess(ctx, client, gitConfig, namespace)
 		if err != nil {
 			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
 		}

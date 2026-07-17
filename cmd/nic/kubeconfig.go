@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -9,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 var (
@@ -32,70 +34,52 @@ func init() {
 }
 
 func runKubeconfig(cmd *cobra.Command, args []string) error {
-	// Get cancellable context from cobra (for signal handling)
 	ctx := cmd.Context()
 
-	// Resolve config file path via auto-discovery if not explicitly provided.
-	resolved, err := resolveConfigFile(kubeconfigConfigFile)
+	configFile, err := resolveConfigFile(kubeconfigConfigFile)
 	if err != nil {
 		return err
 	}
-	kubeconfigConfigFile = resolved
 
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
 	defer span.End()
 
-	span.SetAttributes(attribute.String("config.file", kubeconfigConfigFile))
+	span.SetAttributes(attribute.String("config.file", configFile))
 
-	// Parse configuration
-	cfg, err := config.ParseConfig(ctx, kubeconfigConfigFile)
+	cfg, err := config.ParseConfig(ctx, configFile)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to parse configuration", "error", err, "file", kubeconfigConfigFile)
 		return err
 	}
 
-	// Validate configuration with registered providers
-	if err := cfg.Validate(getValidNames(ctx, reg)); err != nil {
+	client, err := nic.NewClient(ctx)
+	if err != nil {
 		span.RecordError(err)
-		slog.Error("Configuration validation failed", "error", err, "file", kubeconfigConfigFile)
 		return err
 	}
 
-	slog.Info("Configuration parsed successfully",
-		"provider", cfg.Cluster.ProviderName(),
-		"project_name", cfg.ProjectName,
-	)
+	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+	defer cleanup()
 
-	provider, err := reg.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	kubeconfigBytes, err := client.Kubeconfig(ctx, cfg)
 	if err != nil {
 		span.RecordError(err)
-		slog.Error("Failed to get provider", "error", err, "provider", cfg.Cluster.ProviderName())
-		return err
-	}
-
-	kubeconfigBytes, err := provider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
-	if err != nil {
-		span.RecordError(err)
-		slog.Error("Failed to generate kubeconfig", "error", err)
 		return err
 	}
 
 	if kubeconfigOutputFile != "" {
 		if err := os.WriteFile(kubeconfigOutputFile, kubeconfigBytes, 0600); err != nil {
 			span.RecordError(err)
-			slog.Error("Failed to write kubeconfig file", "error", err, "file", kubeconfigOutputFile)
-			return err
+			return fmt.Errorf("write kubeconfig file %q: %w", kubeconfigOutputFile, err)
 		}
 		slog.Info("Kubeconfig written successfully", "file", kubeconfigOutputFile)
-	} else {
-		if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
-			span.RecordError(err)
-			slog.Error("Failed to write kubeconfig to stdout", "error", err)
-			return err
-		}
+		return nil
 	}
 
+	if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("write kubeconfig to stdout: %w", err)
+	}
 	return nil
 }
