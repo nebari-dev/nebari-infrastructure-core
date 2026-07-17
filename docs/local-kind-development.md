@@ -4,7 +4,7 @@
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
-- Go 1.21+
+- Go 1.26+
 
 ## Quick Start
 

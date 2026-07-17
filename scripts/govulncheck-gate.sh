@@ -36,7 +36,7 @@ group='
     })
 '
 
-echo "govulncheck reachable findings (grouped by advisory):"
+echo "govulncheck findings (grouped by advisory):"
 jq -s -r "$group | .[] | \"  \(.osv)  called=\(.called)  fixed=\(.fixed // \"N/A\")\"" "$tmp" || true
 
 fixable="$(jq -s "$group | map(select(.called and .fixed))" "$tmp")"
