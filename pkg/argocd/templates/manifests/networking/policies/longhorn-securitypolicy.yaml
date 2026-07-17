@@ -17,6 +17,12 @@ spec:
     clientID: longhorn
     clientSecret:
       name: {{ .LonghornOIDCSecretName }}
+      # Pin the fields the Envoy Gateway SecurityPolicy CRD server-defaults, so the
+      # rendered manifest matches the stored object and the securitypolicies app
+      # stays Synced. ServerSideApply does not suppress this diff (argoproj/argo-cd#7478),
+      # and we deliberately no longer use ignoreDifferences.
+      kind: Secret
+      group: ""
     redirectURL: "https://longhorn.{{ .Domain }}/oauth2/callback"
     logoutPath: "/oauth2/logout"
     scopes:
@@ -25,12 +31,14 @@ spec:
       - email
       - groups
     forwardAccessToken: true
+    refreshToken: true # CRD default; pin to avoid ArgoCD drift (see clientSecret note)
   jwt:
     providers:
       - name: keycloak
         issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
         remoteJWKS:
           uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+          cacheDuration: "300s" # CRD default; pin to avoid ArgoCD drift (see clientSecret note)
   authorization:
     defaultAction: Deny
     rules:
