@@ -31,8 +31,8 @@
 │               lockfile-based locking.                       │
 │    - Hetzner: shells out to the hetzner-k3s binary against  │
 │               the Hetzner Cloud API. No tofu involved.      │
-│    - Local:   stub - user runs `make localkind-up`, which   │
-│               creates a Kind cluster and then invokes nic.  │
+│    - Local:   `nic deploy` creates a Kind cluster via the   │
+│               kind API, then bootstraps it.                 │
 │    - Existing: no-op; uses kubeconfig + context from config.│
 └─────────────────────────────────────────────────────────────┘
                            ↓

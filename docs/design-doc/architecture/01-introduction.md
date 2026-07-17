@@ -48,7 +48,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 │ Cluster Provider (per-provider backing tool)                │
 │ - AWS: OpenTofu (EKS via nebari-dev/eks-cluster module)     │
 │ - Hetzner: hetzner-k3s binary                               │
-│ - Local: Kind (driven by `make localkind-up`)               │
+│ - Local: Kind (`nic deploy` provisions the cluster)         │
 │ - Existing: no-op adapter for pre-provisioned clusters      │
 │ - Azure: OpenTofu (AKS via nebari-dev/aks-cluster)          │
 │ - GCP: stub, not yet implemented                            │

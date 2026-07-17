@@ -43,7 +43,7 @@ Coverage hygiene is enforced through review:
 | Kubernetes object mocking | `k8s.io/client-go/kubernetes/fake` |
 | Helm SDK mocking | The `Helm` interface in `pkg/helm` with fake implementations |
 | Filesystem mocking | `github.com/spf13/afero` (used in `pkg/tofu` and elsewhere) |
-| Local cluster for manual testing | Kind via `make localkind-up` |
+| Local cluster for manual testing | Kind via `nic deploy -f examples/local-config.yaml` |
 
 GCS mocking is not in scope while the GCP provider remains a stub. Azure is implemented (AKS via OpenTofu), but Azure integration-test coverage is not yet wired up; today the only integration suite is the AWS provider's (`pkg/providers/cluster/aws/integration_test.go`).
 
@@ -107,10 +107,10 @@ Other workflows in `.github/workflows/`:
 - `make test-integration` - integration tests against testcontainers-managed LocalStack (requires Docker)
 - `make lint` - `golangci-lint run`
 - `make check` - `fmt`, `vet`, `lint`, `test`
-- `make localkind-up` - end-to-end deploy onto a local Kind cluster (uses `examples/local-config.yaml` by default; pass `LOCAL_CONFIG=...` to override)
-- `make localkind-rebuild` - tear down and rebuild the local cluster
+- `nic deploy -f examples/local-config.yaml` - end-to-end deploy onto a local Kind cluster. The local provider creates the Kind cluster (reusing it if present), then bootstraps ArgoCD and the foundational apps.
+- `nic destroy -f examples/local-config.yaml` - delete the local Kind cluster
 
-The Kind workflow mounts the `file://` GitOps directory into the cluster so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/providers/cluster/local` and the relevant Makefile target.
+The local provider mounts the `file://` GitOps directory into the Kind node so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/providers/cluster/local`.
 
 ## 12.6 What "Test Cases" Look Like
 
@@ -124,8 +124,8 @@ A few representative cases:
 
 **Local Kind deploy (manual):**
 
-- `make localkind-up`
-- Expect: Kind cluster `nebari-local` up, MetalLB syncing, gateway with an IP from the configured pool, foundational apps green.
+- `nic deploy -f examples/local-config.yaml`
+- Expect: Kind cluster `my-nebari-local` (named after `project_name`) up, MetalLB syncing, gateway with an IP from the configured pool, foundational apps green.
 
 **Dry-run (any provider):**
 

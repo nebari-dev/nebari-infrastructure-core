@@ -18,7 +18,7 @@ The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/ar
 | Unified provider registry (`pkg/registry.Registry` with `ClusterProviders` + `DNSProviders`) | ✅ |
 | AWS cluster provider (EKS via upstream `nebari-dev/eks-cluster` module, EFS, node groups) | ✅ |
 | Hetzner cluster provider (via `hetzner-k3s` binary) | ✅ |
-| Local cluster provider (Kind stub, driven by `make localkind-up`) | ✅ |
+| Local cluster provider (creates a Kind cluster via `nic deploy`) | ✅ |
 | `existing` cluster provider (adopt a kubeconfig) | ✅ |
 | Azure cluster provider (AKS via OpenTofu) | ✅ |
 | GCP cluster provider | ⏳ (registered as stub) |

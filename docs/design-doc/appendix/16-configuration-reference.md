@@ -183,7 +183,7 @@ The Hetzner provider requires the `HCLOUD_TOKEN` environment variable.
 
 ### 2.3 `cluster.local` (Kind for development)
 
-The local provider does not create the cluster itself; `make localkind-up` does. It is a thin adapter that runs the bootstrap (ArgoCD + foundational apps) against the Kind cluster.
+The local provider's `Deploy` creates the Kind cluster (reusing it if one already exists), then runs the bootstrap (ArgoCD + foundational apps) against it; `Destroy` deletes the cluster. Deploy with `nic deploy -f examples/local-config.yaml`.
 
 ```yaml
 cluster:

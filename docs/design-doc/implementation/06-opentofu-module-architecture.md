@@ -36,7 +36,7 @@ Azure is also OpenTofu-based and embeds its own `templates/` directory (the upst
 ```
 pkg/providers/cluster/azure/        # AKS via OpenTofu; own templates/ (nebari-dev/aks-cluster/azurerm)
 pkg/providers/cluster/hetzner/      # Wraps the hetzner-k3s binary (no OpenTofu)
-pkg/providers/cluster/local/        # Kind stub (Makefile creates the cluster)
+pkg/providers/cluster/local/        # Creates a Kind cluster via the kind API, then bootstraps
 pkg/providers/cluster/existing/     # Adopts an existing kubeconfig
 pkg/providers/cluster/gcp/          # Stub: emits a "(stub)" status message and returns nil
 ```
@@ -89,7 +89,7 @@ For completeness, the other providers do not have any `.tf` files:
 | Provider | What it actually does |
 |----------|----------------------|
 | Hetzner | Generates a `hetzner-k3s` config file, invokes the binary, parses its output |
-| Local | The provider itself is a thin adapter; the cluster is created by `make localkind-up` (Kind), and NIC's job is the bootstrap that follows |
+| Local | `Deploy` creates the Kind cluster via the kind API (reusing it if present) and then runs the bootstrap; `Destroy` deletes the cluster |
 | Existing | Reads `kubeconfig` and `context` from config; performs no provisioning |
 | Azure | Provisions AKS via OpenTofu (upstream `nebari-dev/aks-cluster/azurerm` module), analogous to the AWS provider |
 | GCP | Registered stub: `Deploy`/`Destroy` emit a "(stub)" status message and return `nil`; `GetKubeconfig` returns "not yet implemented" |

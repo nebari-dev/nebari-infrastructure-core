@@ -22,7 +22,7 @@
 
 - **AWS:** OpenTofu, via the `terraform-exec` Go library, running the upstream `nebari-dev/eks-cluster` registry module
 - **Hetzner:** the `hetzner-k3s` binary, talking directly to the Hetzner Cloud API
-- **Local:** Kind, driven by `make localkind-up`. The local provider itself is a thin adapter; the CLI is responsible for cluster creation.
+- **Local:** Kind. The local provider's `Deploy` creates the Kind cluster (reusing it if one already exists) and then bootstraps it; `Destroy` deletes it. Run it with `nic deploy -f examples/local-config.yaml`.
 - **Existing:** no IaC at all - the provider reads `kubeconfig` and `context` from config and adopts the cluster
 
 This direction is documented in [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md), which proposes formalizing the abstraction as out-of-tree gRPC plugins so that private and org-specific providers (e.g., OpenTeams' internal ASCOT DNS provider) have a supported integration path that isn't "fork NIC."
