@@ -21,7 +21,7 @@
   src="https://github.com/nebari-dev/nebari-infrastructure-core/actions/workflows/ci.yml/badge.svg" alt="CI"></a> <a
   href="https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/LICENSE"><img
   src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a> <a href="https://golang.org"><img
-  src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go 1.25+"></a>
+  src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white" alt="Go 1.26+"></a>
 </p>
 
 <p align="center">
@@ -146,7 +146,7 @@ Every NIC deployment includes a landing page where users discover and access all
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
 
 NIC automatically downloads and manages its own OpenTofu binary — no manual installation required.
