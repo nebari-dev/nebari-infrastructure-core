@@ -83,7 +83,7 @@ func TestResolveCredentialsS3Keyless(t *testing.T) {
 	cfg := &config.LonghornBackupConfig{
 		S3: &config.S3BackupTarget{Bucket: "b", Region: "us-east-1"},
 	}
-	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg) //nolint:staticcheck
+	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg)
 	if err != nil {
 		t.Fatalf("keyless ResolveCredentials should not error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestResolveCredentialsS3FromEnv(t *testing.T) {
 			AccessKeyIDEnv: "TEST_AK", SecretAccessKeyEnv: "TEST_SK",
 		},
 	}
-	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg) //nolint:staticcheck
+	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg)
 	if err != nil {
 		t.Fatalf("ResolveCredentials: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestResolveCredentialsMissingEnv(t *testing.T) {
 			AccessKeyIDEnv: "DEFINITELY_UNSET_AK", SecretAccessKeyEnv: "DEFINITELY_UNSET_SK",
 		},
 	}
-	_, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg) //nolint:staticcheck
+	_, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg)
 	if err == nil || !strings.Contains(err.Error(), "DEFINITELY_UNSET_AK") {
 		t.Fatalf("expected error mentioning DEFINITELY_UNSET_AK, got: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestResolveCredentialsMissingEnv(t *testing.T) {
 func TestResolveCredentialsCAFromSecret(t *testing.T) {
 	t.Setenv("TEST_AK", "AKIA")
 	t.Setenv("TEST_SK", "secret")
-	client := fake.NewSimpleClientset(&corev1.Secret{ //nolint:staticcheck
+	client := fake.NewSimpleClientset(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "ca", Namespace: "longhorn-system"},
 		Data:       map[string][]byte{"ca.crt": []byte("PEMDATA")},
 	})
@@ -169,7 +169,7 @@ func TestResolveCredentialsCAFromSecret(t *testing.T) {
 func TestResolveCredentialsCAFromConfigMap(t *testing.T) {
 	t.Setenv("TEST_AK", "AKIA")
 	t.Setenv("TEST_SK", "secret")
-	client := fake.NewSimpleClientset(&corev1.ConfigMap{ //nolint:staticcheck
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "ca", Namespace: "longhorn-system"},
 		Data:       map[string]string{"ca.crt": "PEMDATA"},
 	})
@@ -198,7 +198,7 @@ func TestResolveCredentialsAzureFromEnv(t *testing.T) {
 			AccountNameEnv: "TEST_AN", AccountKeyEnv: "TEST_AKEY",
 		},
 	}
-	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg) //nolint:staticcheck
+	creds, err := ResolveCredentials(context.Background(), fake.NewSimpleClientset(), cfg)
 	if err != nil {
 		t.Fatalf("ResolveCredentials: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestBuildCredentialSecret(t *testing.T) {
 			AccessKeyIDEnv: "TEST_AK", SecretAccessKeyEnv: "TEST_SK",
 		},
 	}
-	secret, err := BuildCredentialSecret(context.Background(), fake.NewSimpleClientset(), cfg, "") //nolint:staticcheck
+	secret, err := BuildCredentialSecret(context.Background(), fake.NewSimpleClientset(), cfg, "")
 	if err != nil {
 		t.Fatalf("BuildCredentialSecret: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestBuildCredentialSecretKeylessRoleARN(t *testing.T) {
 		S3: &config.S3BackupTarget{Bucket: "b", Region: "us-east-1"},
 	}
 	arn := "arn:aws:iam::123456789012:role/proj-longhorn-backup"
-	secret, err := BuildCredentialSecret(context.Background(), fake.NewSimpleClientset(), cfg, arn) //nolint:staticcheck
+	secret, err := BuildCredentialSecret(context.Background(), fake.NewSimpleClientset(), cfg, arn)
 	if err != nil {
 		t.Fatalf("BuildCredentialSecret: %v", err)
 	}

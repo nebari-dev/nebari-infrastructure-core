@@ -89,6 +89,36 @@ func TestProvider_InfraSettings(t *testing.T) {
 	}
 }
 
+func TestProvider_InfraSettings_LonghornEnabled(t *testing.T) {
+	p := NewProvider()
+
+	t.Run("default config reports Longhorn enabled", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{"hetzner": map[string]any{}},
+		}
+		s := p.InfraSettings(cfg)
+		if !s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = false, want true (Hetzner default)")
+		}
+	})
+
+	t.Run("explicit Longhorn disabled reports false", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{
+				"hetzner": map[string]any{
+					"longhorn": map[string]any{
+						"enabled": false,
+					},
+				},
+			},
+		}
+		s := p.InfraSettings(cfg)
+		if s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = true, want false")
+		}
+	})
+}
+
 // Compile-time check that Provider implements the interface
 var _ cluster.Provider = (*Provider)(nil)
 

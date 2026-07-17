@@ -300,7 +300,7 @@ func TestEnsureNamespace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.existing...) //nolint:staticcheck
+			client := fake.NewSimpleClientset(tt.existing...)
 			if err := ensureNamespace(context.Background(), client, tt.namespace); err != nil {
 				t.Fatalf("ensureNamespace() error = %v", err)
 			}
@@ -372,7 +372,7 @@ func TestEnsureISCSIWithClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.existing...) //nolint:staticcheck
+			client := fake.NewSimpleClientset(tt.existing...)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
@@ -445,7 +445,7 @@ func TestWaitForDaemonSetReady(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: Namespace}}
-			client := fake.NewSimpleClientset(ns, tt.ds) //nolint:staticcheck
+			client := fake.NewSimpleClientset(ns, tt.ds)
 			err := waitForDaemonSetReady(context.Background(), kubernetes.Interface(client), Namespace, tt.ds.Name, 1*time.Second)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected timeout error, got nil")
@@ -525,7 +525,7 @@ func TestEnsureSoleDefaultStorageClassWithClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.existing...) //nolint:staticcheck
+			client := fake.NewSimpleClientset(tt.existing...)
 			if err := ensureSoleDefaultStorageClassWithClient(context.Background(), client, tt.keep); err != nil {
 				t.Fatalf("ensureSoleDefaultStorageClassWithClient() error = %v", err)
 			}

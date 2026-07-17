@@ -1,7 +1,9 @@
 package git
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,21 +11,52 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/skeema/knownhosts"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
 const (
 	// DefaultBranch is the default git branch name when none is specified.
 	DefaultBranch = "main"
+
+	// GitOpsDirMode is the directory mode for generated GitOps repository content.
+	GitOpsDirMode os.FileMode = 0o755
+
+	// GitOpsFileMode is the file mode for generated non-secret GitOps files.
+	GitOpsFileMode os.FileMode = 0o644
 )
 
+var userHomeDir = os.UserHomeDir
+
 // DefaultLocalPath returns the host directory NIC manages for a project's
-// local gitops repository when no git_repository is configured. It is a pure
-// function so the deploy orchestrator and providers that mount the directory
-// (e.g. the local kind provider) can derive the same path independently
-// without threading it between them.
+// local gitops repository when no git_repository is configured. It lives under
+// the user's home directory so the repo is durable and stays on host paths that
+// kind/Docker Desktop can mount reliably.
 func DefaultLocalPath(projectName string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	homeDir, err := userHomeDir()
+	if err != nil || homeDir == "" {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	}
+	return filepath.Join(homeDir, ".nic", "gitops", projectName)
+}
+
+// EnsureLocalGitOpsDir creates a local GitOps root with the desired initial
+// mode. The process umask may restrict a newly created directory;
+// ClientImpl repairs the mounted repository root and Git-serving data after
+// initialization and local commits.
+func EnsureLocalGitOpsDir(ctx context.Context, path string) error {
+	tracer := otel.Tracer(tracerName)
+	_, span := tracer.Start(ctx, "git.EnsureLocalGitOpsDir")
+	defer span.End()
+	span.SetAttributes(attribute.String("git.repo_path", path))
+
+	if err := os.MkdirAll(path, GitOpsDirMode); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("create local gitops directory %s: %w", path, err)
+	}
+	return nil
 }
 
 // Config represents git repository configuration for GitOps bootstrap.
@@ -67,6 +100,12 @@ type AuthConfig struct {
 	// TokenEnv is the name of the environment variable containing the personal access token
 	// Used for HTTPS authentication
 	TokenEnv string `yaml:"token_env" json:"token_env"`
+
+	// InsecureSkipHostKeyVerification disables SSH host key verification,
+	// removing protection against man-in-the-middle attacks. Only intended
+	// for ephemeral environments (e.g. CI) where maintaining a known_hosts
+	// file is impractical. Has no effect on token (HTTPS) authentication.
+	InsecureSkipHostKeyVerification bool `yaml:"insecure_skip_host_key_verification,omitempty" json:"insecure_skip_host_key_verification,omitempty"`
 }
 
 // Validate checks that the configuration is valid.
@@ -222,15 +261,26 @@ func (a *AuthConfig) GetAuth() (transport.AuthMethod, error) {
 			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
 		}
 
+		if a.InsecureSkipHostKeyVerification {
+			return &ssh.PublicKeys{
+				User:   "git",
+				Signer: signer,
+				HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
+					HostKeyCallback: cryptossh.InsecureIgnoreHostKey(), //nolint:gosec // G106: explicit opt-in via insecure_skip_host_key_verification
+				},
+			}, nil
+		}
+
+		callback, err := newHostKeyCallback()
+		if err != nil {
+			return nil, err
+		}
+
 		return &ssh.PublicKeys{
 			User:   "git",
 			Signer: signer,
-			// Accept any host key - appropriate for automated systems
-			// where we trust the configured repository URL.
-			// This is intentional for CI/CD environments where known_hosts
-			// may not be available or maintained.
 			HostKeyCallbackHelper: ssh.HostKeyCallbackHelper{
-				HostKeyCallback: cryptossh.InsecureIgnoreHostKey(), //nolint:gosec // G106: Intentional for automated CI/CD systems
+				HostKeyCallback: callback,
 			},
 		}, nil
 
@@ -248,4 +298,35 @@ func (a *AuthConfig) GetAuth() (transport.AuthMethod, error) {
 	default:
 		return nil, fmt.Errorf("no authentication configured")
 	}
+}
+
+// newHostKeyCallback returns a host key callback backed by the standard
+// known_hosts files (SSH_KNOWN_HOSTS, ~/.ssh/known_hosts, /etc/ssh/ssh_known_hosts),
+// wrapping verification failures with actionable guidance.
+func newHostKeyCallback() (cryptossh.HostKeyCallback, error) {
+	callback, err := ssh.NewKnownHostsCallback()
+	if err != nil {
+		return nil, fmt.Errorf("ssh host key verification requires a known_hosts file: %w\n"+
+			"connect to the git host once with your SSH client (e.g. `ssh git@github.com`) to record its key, "+
+			"or set insecure_skip_host_key_verification: true under git_repository auth to disable verification (not recommended)", err)
+	}
+
+	return func(hostname string, remote net.Addr, key cryptossh.PublicKey) error {
+		err := callback(hostname, remote, key)
+		host := strings.TrimSuffix(hostname, ":22")
+		switch {
+		case err == nil:
+			return nil
+		case knownhosts.IsHostUnknown(err):
+			return fmt.Errorf("ssh host key verification failed: %s is not in known_hosts\n"+
+				"to trust this host, connect to it once with your SSH client (e.g. `ssh git@%s`) and accept its key, "+
+				"or set insecure_skip_host_key_verification: true under git_repository auth to disable verification (not recommended)", host, host)
+		case knownhosts.IsHostKeyChanged(err):
+			return fmt.Errorf("ssh host key verification failed: the key presented by %s does not match known_hosts\n"+
+				"this could indicate a man-in-the-middle attack; if the host key legitimately changed, "+
+				"remove the old entry (`ssh-keygen -R %s`) and connect once to record the new one: %w", host, host, err)
+		default:
+			return err
+		}
+	}, nil
 }

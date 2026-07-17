@@ -37,6 +37,18 @@ spec:
                   key: client-secret
             - name: DOMAIN
               value: {{ .Domain }}
+{{- if .LonghornEnabled }}
+            # optional: a regenerated manifest can reference this before a full
+            # deploy has (re)created the secret; a hard reference would leave the
+            # PostSync pod in CreateContainerConfigError and fail the keycloak
+            # app's hook. The script skips Longhorn client setup when unset.
+            - name: LONGHORN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .LonghornOIDCSecretName }}
+                  key: client-secret
+                  optional: true
+{{- end }}
           command:
             - /bin/bash
             - -c
@@ -103,12 +115,24 @@ spec:
               fi
 
               if [ -n "$GROUPS_SCOPE_ID" ]; then
-                echo "Adding group-membership mapper to groups scope (id=$GROUPS_SCOPE_ID)..."
-                $KCADM create client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models -r nebari \
+                # We do NOT manage the group-membership mapper's config here.
+                # The data-science-pack chart's RBAC bootstrap job
+                # (files/keycloak_rbac_bootstrap.py) reconciles the mapper to
+                # full.path=true on every sync (it needs the path form for its
+                # own group-lookup-by-path logic). Anything we set here gets
+                # overwritten. Consumers of the groups claim (e.g. Envoy
+                # SecurityPolicy on the longhorn UI) must match against the
+                # path form ("/group-name") rather than the bare name.
+                #
+                # Best-effort: create the mapper with sensible defaults if no
+                # mapper exists yet (e.g. brand-new groups scope we created
+                # ourselves), but don't fight existing config.
+                $KCADM create "client-scopes/$GROUPS_SCOPE_ID/protocol-mappers/models" -r nebari \
                   -s name=group-membership \
                   -s protocol=openid-connect \
                   -s protocolMapper=oidc-group-membership-mapper \
-                  -s 'config={"full.path":"false","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups"}' || echo "Mapper may already exist"
+                  -s 'config={"full.path":"true","introspection.token.claim":"true","userinfo.token.claim":"true","id.token.claim":"true","access.token.claim":"true","claim.name":"groups","multivalued":"true"}' \
+                  2>/dev/null || true
 
                 echo "Ensuring groups is a realm default client scope..."
                 $KCADM update realms/nebari/default-default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
@@ -148,5 +172,49 @@ spec:
                 $KCADM update users/$ADMIN_USER_ID/groups/$ADMINS_GROUP_ID -r nebari \
                   -s realm=nebari -s userId=$ADMIN_USER_ID -s groupId=$ADMINS_GROUP_ID -n || true
               fi
+
+{{- if .LonghornEnabled }}
+
+              # LONGHORN_CLIENT_SECRET comes from an optional secretKeyRef: it is
+              # unset when the manifest was regenerated without a deploy having
+              # (re)created the secret. Registering the client with an empty
+              # secret would break Longhorn UI logins, so skip and let the next
+              # full deploy's PostSync run configure it.
+              if [ -z "$LONGHORN_CLIENT_SECRET" ]; then
+                echo "LONGHORN_CLIENT_SECRET not set (secret missing); skipping Longhorn OIDC client setup"
+              else
+                echo "Creating Longhorn OIDC client..."
+                $KCADM create clients -r nebari \
+                  -s clientId=longhorn \
+                  -s enabled=true \
+                  -s protocol=openid-connect \
+                  -s publicClient=false \
+                  -s "secret=$LONGHORN_CLIENT_SECRET" \
+                  -s "redirectUris=[\"https://longhorn.$DOMAIN/oauth2/callback\"]" \
+                  -s directAccessGrantsEnabled=false \
+                  -s standardFlowEnabled=true || echo "Client may already exist"
+
+                # Attach groups scope to longhorn client so id_token carries group claims
+                LONGHORN_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
+                  grep -B1 '"clientId" *: *"longhorn"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+
+                if [ -n "$LONGHORN_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
+                  echo "Adding groups scope to longhorn client..."
+                  $KCADM update clients/$LONGHORN_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
+                fi
+
+                echo "Creating Longhorn admins group..."
+                $KCADM create groups -r nebari -s name=longhorn-admins || echo "Group may already exist"
+
+                echo "Adding admin user to longhorn-admins group..."
+                LONGHORN_ADMINS_GROUP_ID=$($KCADM get groups -r nebari --fields id,name | \
+                  grep -B1 '"name" *: *"longhorn-admins"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+
+                if [ -n "$ADMIN_USER_ID" ] && [ -n "$LONGHORN_ADMINS_GROUP_ID" ]; then
+                  $KCADM update users/$ADMIN_USER_ID/groups/$LONGHORN_ADMINS_GROUP_ID -r nebari \
+                    -s realm=nebari -s userId=$ADMIN_USER_ID -s groupId=$LONGHORN_ADMINS_GROUP_ID -n || true
+                fi
+              fi
+{{- end }}
 
               echo "Realm setup complete!"

@@ -212,7 +212,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
-		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, argoCDConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, trustPEM, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
 				WithMetadata("error", err.Error()))
@@ -232,6 +232,20 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				return nil, fmt.Errorf("generate foundational secrets: %w", err)
 			}
 
+			// Generate a Longhorn OIDC client secret only when the provider installs
+			// Longhorn. When Longhorn is disabled, longhornClientSecret stays "" and
+			// InstallFoundationalServices no-ops on the empty string.
+			var longhornClientSecret string
+			if infraSettings.LonghornEnabled {
+				longhornClientSecret, err = generateSecurePassword(rand.Reader)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate Longhorn client secret").
+						WithMetadata("error", err.Error()))
+					return nil, fmt.Errorf("generate Longhorn client secret: %w", err)
+				}
+			}
+
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
 					Enabled:               true,
@@ -246,6 +260,9 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
+				},
+				Longhorn: argocd.LonghornSSOConfig{
+					ClientSecret: longhornClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
@@ -293,7 +310,7 @@ func defaultGitConfig(projectName string) *git.Config {
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For providers that support local gitops without explicit git_repository config, this auto-creates
-// /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
+// ~/.nic/gitops/{project_name}. For other providers, explicit git_repository config is required.
 // The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
 func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
@@ -317,8 +334,8 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
 		WithMetadata("path", localPath))
 
-	if err := os.MkdirAll(localPath, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
+	if err := git.EnsureLocalGitOpsDir(ctx, localPath); err != nil {
+		return nil, err
 	}
 
 	return gitCfg, nil
@@ -526,10 +543,10 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+	if err := os.WriteFile(configDest, configBytes, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").

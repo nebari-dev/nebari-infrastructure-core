@@ -102,6 +102,12 @@ type InfraSettings struct {
 	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).
 	// Cloud providers (AWS, GCP, Azure) return false - their nodes can't see the dev machine's FS.
 	SupportsLocalGitOps bool
+
+	// LonghornEnabled indicates whether the Longhorn distributed block storage
+	// (and therefore the Longhorn UI) is deployed by this provider for the given
+	// cluster config. Used by the foundational deploy flow to decide whether to
+	// expose longhorn.<domain> through the gateway and provision an OIDC client.
+	LonghornEnabled bool
 }
 
 // Provider defines the interface that all cloud providers must implement.
