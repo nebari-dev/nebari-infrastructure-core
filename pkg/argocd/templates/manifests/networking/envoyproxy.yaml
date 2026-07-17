@@ -1,0 +1,15 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: nebari-envoyproxy
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/name: nebari-envoyproxy
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  # Merge every Gateway on the envoy-gateway GatewayClass onto a single Envoy
+  # dataplane. This lets the nebari-operator create one Gateway per NebariApp
+  # (each owning its own HTTPS/TLS listener) without contending for the shared
+  # platform Gateway's listener list. All merged Gateways share this proxy's
+  # LoadBalancer, and per-host TLS is selected via SNI.
+  mergeGateways: true

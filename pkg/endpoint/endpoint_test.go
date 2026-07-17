@@ -29,7 +29,7 @@ func TestGetLoadBalancerEndpoint(t *testing.T) {
 						Name:      "envoy-gateway-svc",
 						Namespace: DefaultNamespace,
 						Labels: map[string]string{
-							"gateway.envoyproxy.io/owning-gateway-name": "nebari-gateway",
+							"gateway.envoyproxy.io/owning-gatewayclass": "envoy-gateway",
 						},
 					},
 					Status: corev1.ServiceStatus{
@@ -51,7 +51,7 @@ func TestGetLoadBalancerEndpoint(t *testing.T) {
 						Name:      "envoy-gateway-svc",
 						Namespace: DefaultNamespace,
 						Labels: map[string]string{
-							"gateway.envoyproxy.io/owning-gateway-name": "nebari-gateway",
+							"gateway.envoyproxy.io/owning-gatewayclass": "envoy-gateway",
 						},
 					},
 					Status: corev1.ServiceStatus{
@@ -82,7 +82,7 @@ func TestGetLoadBalancerEndpoint(t *testing.T) {
 						Name:      "envoy-gateway-svc",
 						Namespace: DefaultNamespace,
 						Labels: map[string]string{
-							"gateway.envoyproxy.io/owning-gateway-name": "nebari-gateway",
+							"gateway.envoyproxy.io/owning-gatewayclass": "envoy-gateway",
 						},
 					},
 					Status: corev1.ServiceStatus{},
@@ -130,7 +130,7 @@ func TestGetLoadBalancerEndpoint_ContextCancelled(t *testing.T) {
 			Name:      "envoy-gateway-svc",
 			Namespace: DefaultNamespace,
 			Labels: map[string]string{
-				"gateway.envoyproxy.io/owning-gateway-name": "nebari-gateway",
+				"gateway.envoyproxy.io/owning-gatewayclass": "envoy-gateway",
 			},
 		},
 		Status: corev1.ServiceStatus{},

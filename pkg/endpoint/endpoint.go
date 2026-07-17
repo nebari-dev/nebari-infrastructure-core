@@ -13,7 +13,11 @@ import (
 
 const (
 	DefaultNamespace     = "envoy-gateway-system"
-	DefaultLabelSelector = "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway"
+	// With mergeGateways enabled on the GatewayClass, Envoy Gateway names the
+	// single merged dataplane (and its LoadBalancer Service) after the
+	// GatewayClass, not any individual Gateway. Select by owning-gatewayclass so
+	// discovery still resolves the LB once per-app Gateways are merged in.
+	DefaultLabelSelector = "gateway.envoyproxy.io/owning-gatewayclass=envoy-gateway"
 	DefaultTimeout       = 5 * time.Minute
 	DefaultPollInterval  = 5 * time.Second
 )

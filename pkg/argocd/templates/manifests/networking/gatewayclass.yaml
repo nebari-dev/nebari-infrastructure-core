@@ -7,3 +7,8 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: nebari-envoyproxy
+    namespace: envoy-gateway-system

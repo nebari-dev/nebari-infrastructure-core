@@ -26,6 +26,15 @@ spec:
               value: "{{ .KeycloakBasePath }}"
             - name: KEYCLOAK_EXTERNAL_URL
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+            # Create one Gateway per NebariApp (each owning its own HTTPS/TLS
+            # listener) instead of patching the shared platform Gateway. Requires
+            # Envoy Gateway mergeGateways (enabled via the EnvoyProxy on the
+            # GatewayClass) so per-app Gateways merge onto one dataplane.
+            # TODO: inert until the operator pin in
+            # manifests/nebari-operator/kustomization.yaml is bumped to a release
+            # that supports per-app Gateways (v0.1.0-alpha.20 does not).
+            - name: TLS_PER_APP_GATEWAY
+              value: "true"
           resources:
             requests:
               cpu: 100m
