@@ -33,7 +33,8 @@ unapproved repos, confines foundational apps to known namespaces, and closes the
 approved repo, because the resource-kind whitelists remain open: a
 ClusterRoleBinding or privileged pod committed to an approved source still
 applies. Blocking dangerous resource kinds is the admission-controller work
-(#480). Treat write access to the GitOps repo as cluster-admin-equivalent.
+([#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480)).
+Treat write access to the GitOps repo as cluster-admin-equivalent.
 
 ## Known limitation
 
