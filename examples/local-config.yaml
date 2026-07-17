@@ -41,7 +41,7 @@ cluster:
 # Configures the repository that ArgoCD will use to manage cluster resources
 #
 # OPTION 1: Auto-generated local directory (zero configuration for development)
-# Simply omit the git_repository section and NIC will auto-create /tmp/nebari-gitops-{project_name}
+# Simply omit the git_repository section and NIC will auto-create ~/.nic/gitops/{project_name}
 # and mount it on the kind cluster
 #
 # OPTION 2: Explicit local directory (custom location)
@@ -49,7 +49,9 @@ cluster:
 # cluster.local.kind.extra_mounts entry for the same path (see the kind block
 # above). NIC only auto-mounts the OPTION 1 default, so a custom file:// path is
 # invisible to the in-cluster ArgoCD repo-server unless you mount it yourself.
-# The paths must match exactly.
+# The paths must match exactly. During initialization and after commits, NIC
+# adds the read/traverse bits needed on the repo root and Git-serving data under
+# .git. Working-tree files and private metadata such as hooks remain untouched.
 # git_repository:
 #   url: "file:///home/user/my-gitops-repo"   # must be an absolute path
 #   branch: main
