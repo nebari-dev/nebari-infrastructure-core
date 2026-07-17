@@ -16,7 +16,7 @@ The DNS Provider subsystem manages DNS records for Nebari deployments. It automa
 ### 1. Pluggable Architecture
 DNS providers follow the same explicit registration pattern as cloud providers:
 - No blank imports or `init()` magic
-- Explicit registration in `cmd/nic/main.go`
+- Explicit registration in `pkg/nic/registry.go`'s `defaultRegistry`
 - Thread-safe registry with read/write locking
 - Providers registered independently of cloud providers
 
@@ -83,28 +83,29 @@ The real implementation (`sdkClient`) wraps the `cloudflare-go/v4` SDK. Tests in
 
 ### Registry Pattern
 
-Cluster and DNS providers share a single `registry.Registry`, which holds two `ProviderList` instances (one per provider category). Registration is explicit in `cmd/nic/main.go`:
+Cluster and DNS providers share a single `registry.Registry`, which holds two `ProviderList` instances (one per provider category). Registration is explicit in `pkg/nic/registry.go`'s `defaultRegistry`, which `pkg/nic.NewClient` builds:
 
 ```go
-// cmd/nic/main.go
-var reg *registry.Registry
-
-func init() {
-    reg = registry.NewRegistry()
+// pkg/nic/registry.go
+func defaultRegistry(ctx context.Context) (*registry.Registry, error) {
+    r := registry.NewRegistry()
 
     // Cluster providers
-    _ = reg.ClusterProviders.Register(ctx, "aws", aws.NewProvider())
-    _ = reg.ClusterProviders.Register(ctx, "hetzner", hetzner.NewProvider())
-    // ...
+    if err := r.ClusterProviders.Register(ctx, "aws", aws.NewProvider()); err != nil {
+        return nil, fmt.Errorf("register aws cluster provider: %w", err)
+    }
+    // ... gcp, azure, local, hetzner, existing ...
 
     // DNS providers
-    if err := reg.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
-        log.Fatalf("Failed to register Cloudflare DNS provider: %v", err)
+    if err := r.DNSProviders.Register(ctx, "cloudflare", cloudflare.NewProvider()); err != nil {
+        return nil, fmt.Errorf("register cloudflare dns provider: %w", err)
     }
+
+    return r, nil
 }
 ```
 
-`registry.Registry`, defined in `pkg/registry/registry.go`, is the single point of registration for all provider categories. The two `ProviderList` fields are typed (`ProviderList[provider.Provider]` and `ProviderList[dnsprovider.DNSProvider]`) so misuse is caught at compile time.
+`registry.Registry`, defined in `pkg/registry/registry.go`, is the single registration type for all provider categories; `pkg/nic` is the only package that imports the concrete provider packages to wire them in. The two `ProviderList` fields are typed (`ProviderList[cluster.Provider]` and `ProviderList[dns.Provider]`) so misuse is caught at compile time.
 
 ## Configuration
 

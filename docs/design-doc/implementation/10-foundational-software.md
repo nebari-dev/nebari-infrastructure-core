@@ -17,12 +17,16 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | Component | App manifest | Purpose |
 |-----------|--------------|---------|
 | **cert-manager** | `cert-manager.yaml` | TLS certificate automation |
+| **trust-manager** | `trust-manager.yaml` | Distributes CA trust bundles across namespaces (cert-manager's trust-manager) |
+| **trust-bundle** | `trust-bundle.yaml` | `Bundle` resource defining the cluster CA trust bundle |
 | **cluster-issuers** | `cluster-issuers.yaml` | `ClusterIssuer` resources (selfsigned and/or Let's Encrypt) |
 | **certificates** | `certificates.yaml` | Initial `Certificate` resources for foundational hostnames |
 | **Envoy Gateway** | `envoy-gateway.yaml` | Kubernetes Gateway API implementation |
 | **gateway-config** | `gateway-config.yaml` | `Gateway` and listener configuration |
 | **httproutes** | `httproutes.yaml` | Initial `HTTPRoute` resources for foundational services |
-| **postgresql** | `postgresql.yaml` | Backing database for Keycloak |
+| **securitypolicies** | `securitypolicies.yaml` | Envoy Gateway `SecurityPolicy` resources (OIDC enforcement at the gateway) |
+| **postgresql** | `postgresql.yaml` | Bitnami PostgreSQL; backs Keycloak today |
+| **CloudNativePG** | `cloudnative-pg.yaml` | CloudNativePG operator (operator-only install per [ADR-0007](../../adr/0007-cloudnativepg-managed-databases.md); per-database `Cluster` resources are created separately). Installed foundationally as Keycloak's DB backend migrates to CNPG |
 | **Keycloak** | `keycloak.yaml` | OIDC identity provider (Codecentric keycloakx chart - context path `/auth`) |
 | **MetalLB** | `metallb.yaml` | Bare-metal `LoadBalancer` implementation (only when `InfraSettings.NeedsMetalLB` is true) |
 | **metallb-config** | `metallb-config.yaml` | `IPAddressPool` and `L2Advertisement` for MetalLB |
@@ -74,7 +78,7 @@ After ArgoCD comes up, `pkg/argocd/bootstrap.go:ApplyRootAppOfApps` applies the 
 
 ## 10.5 InfraSettings Drives Conditional Deployment
 
-The Provider interface returns `InfraSettings` (see `pkg/provider/provider.go`), and the foundational layer reads from it instead of branching on provider name:
+The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provider.go`), and the foundational layer reads from it instead of branching on provider name:
 
 - **`NeedsMetalLB`** - if false, the MetalLB apps are skipped entirely
 - **`MetalLBAddressPool`** - feeds `metallb-config`'s `IPAddressPool`

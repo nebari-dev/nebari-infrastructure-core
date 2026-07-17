@@ -8,7 +8,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 
 1. **Opinionated by Default**: Best practices from seven years of production Nebari deployments
 2. **Complete Platform**: Kubernetes plus foundational software (auth, routing, GitOps, certs)
-3. **Provider Abstraction**: Each cluster provider chooses the right backing tool for its environment - OpenTofu for AWS, native CLI/SDK for Hetzner, Kind for local dev. The `provider.Provider` interface is the contract, not a single IaC tool.
+3. **Provider Abstraction**: Each cluster provider chooses the right backing tool for its environment - OpenTofu for AWS, native CLI/SDK for Hetzner, Kind for local dev. The `cluster.Provider` interface is the contract, not a single IaC tool.
 4. **Declarative Infrastructure**: Declare desired state in `nebari-config.yaml`; the configured provider reconciles to match
 5. **GitOps Native**: ArgoCD is the deployment mechanism for all foundational software
 6. **Standard State Management (where applicable)**: AWS uses Terraform state in S3 with native lockfile-based locking; non-tofu providers manage state in tool-specific ways
@@ -50,7 +50,8 @@ This document describes the architectural design for Nebari Infrastructure Core 
 │ - Hetzner: hetzner-k3s binary                               │
 │ - Local: Kind (driven by `make localkind-up`)               │
 │ - Existing: no-op adapter for pre-provisioned clusters      │
-│ - GCP, Azure: stubs, not yet implemented                    │
+│ - Azure: OpenTofu (AKS via nebari-dev/aks-cluster)          │
+│ - GCP: stub, not yet implemented                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,7 +83,7 @@ A full LGTM (Loki / Grafana / Tempo / Mimir) observability backend is **not** cu
 **What We're Keeping:**
 
 - Opinionated platform approach (reduces decision fatigue)
-- Multi-cluster-provider support (AWS, Hetzner, local Kind today; GCP and Azure planned)
+- Multi-cluster-provider support (AWS, Azure, Hetzner, local Kind today; GCP planned)
 - Declarative configuration (infrastructure as code)
 - Authentication-first design (Keycloak integration)
 - Observability focus (telemetry instrumentation from day one)

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-This is the authoritative reference for `nebari-config.yaml`. Field-level source of truth is the Go code; this document is updated as code changes. Ground-truth file references are inline.
+This is the authoritative reference for `nebari-config.yaml`.
 
 ## Table of Contents
 
@@ -10,7 +10,7 @@ This is the authoritative reference for `nebari-config.yaml`. Field-level source
    2. [`cluster.hetzner`](#22-clusterhetzner-hetzner-cloud-k3s)
    3. [`cluster.local`](#23-clusterlocal-kind-for-development)
    4. [`cluster.existing`](#24-clusterexisting-adopt-a-pre-provisioned-cluster)
-   5. [`cluster.gcp` / `cluster.azure`](#25-clustergcp--clusterazure-stubs)
+   5. [`cluster.azure` (AKS) and `cluster.gcp` (stub)](#25-clusterazure-aks-and-clustergcp-stub)
 3. [DNS Providers](#3-dns-providers)
 4. [Certificate](#4-certificate)
 5. [Git Repository](#5-git-repository)
@@ -59,11 +59,9 @@ Anti-pattern: there is no top-level `provider:`, `version:`, `name:`, `kubernete
 
 `cluster:` takes exactly one key, the provider name. The shape of the nested object is provider-specific.
 
-Valid provider names (registered in `cmd/nic/main.go`): `aws`, `hetzner`, `local`, `existing`, `gcp`, `azure`.
+Valid provider names (registered in `pkg/nic/registry.go`'s `defaultRegistry`): `aws`, `hetzner`, `local`, `existing`, `gcp`, `azure`.
 
 ### 2.1 `cluster.aws` (Amazon EKS)
-
-Source: `pkg/provider/aws/config.go`. Status: **implemented**.
 
 ```yaml
 cluster:
@@ -97,7 +95,7 @@ cluster:
         min_nodes: 1
         max_nodes: 5
         # ami_type: AL2023_x86_64_STANDARD     # defaults to AL2023 STANDARD
-        # gpu: true                            # uses AL2023_x86_64_NVIDIA AMI
+        # gpu: true                            # AL2023_x86_64_NVIDIA AMI + auto nvidia.com/gpu taint
         # spot: true
         # disk_size: 100
         # labels:
@@ -134,11 +132,13 @@ cluster:
     #   node_selector: { workload: storage }
 ```
 
+**GPU node groups:** setting `gpu: true` selects the `AL2023_x86_64_NVIDIA` AMI and makes NIC automatically apply the taint `nvidia.com/gpu=true:NO_SCHEDULE`, so only pods that tolerate it schedule onto GPU nodes. The NVIDIA GPU Operator does not taint nodes itself; it only tolerates this taint on its own operands. To use a different value or effect, set an explicit `nvidia.com/gpu` taint in the node group's `taints` and NIC leaves it untouched.
+
 State backend: S3 with `use_lockfile = true`, bucket auto-created per [§5.2 of State Management](../architecture/05-state-management.md). No DynamoDB.
 
 ### 2.2 `cluster.hetzner` (Hetzner Cloud k3s)
 
-Source: `pkg/provider/hetzner/config.go`. Status: **implemented**. Backed by the `hetzner-k3s` binary - **not** OpenTofu.
+Backed by the `hetzner-k3s` binary - **not** OpenTofu.
 
 ```yaml
 cluster:
@@ -183,7 +183,7 @@ The Hetzner provider requires the `HCLOUD_TOKEN` environment variable.
 
 ### 2.3 `cluster.local` (Kind for development)
 
-Source: `pkg/provider/local/config.go`. Status: **implemented as a stub**. The local provider does not create the cluster itself; `make localkind-up` does. The provider is a thin adapter that runs the bootstrap (ArgoCD + foundational apps) against the Kind cluster.
+The local provider does not create the cluster itself; `make localkind-up` does. It is a thin adapter that runs the bootstrap (ArgoCD + foundational apps) against the Kind cluster.
 
 ```yaml
 cluster:
@@ -209,7 +209,7 @@ The local provider sets `InfraSettings.SupportsLocalGitOps = true`, which lets N
 
 ### 2.4 `cluster.existing` (adopt a pre-provisioned cluster)
 
-Source: `pkg/provider/existing/config.go`. Status: **implemented**. No provisioning happens; NIC just runs the bootstrap against whatever cluster the kubeconfig points at.
+No provisioning happens; NIC just runs the bootstrap against whatever cluster the kubeconfig points at.
 
 ```yaml
 cluster:
@@ -229,15 +229,15 @@ cluster:
     #   load-balancer.hetzner.cloud/location: ash
 ```
 
-### 2.5 `cluster.gcp` / `cluster.azure` (stubs)
+### 2.5 `cluster.azure` (AKS) and `cluster.gcp` (stub)
 
-Sources: `pkg/provider/gcp/config.go`, `pkg/provider/azure/config.go`. Status: **registered but not implemented**. The struct fields exist for forward compatibility; calling `Validate`, `Deploy`, `Destroy`, or `GetKubeconfig` on these providers returns "not yet implemented" today.
+**Azure is implemented**: it provisions AKS via OpenTofu (upstream `nebari-dev/aks-cluster/azurerm` module), analogous to the AWS provider, and requires `AZURE_SUBSCRIPTION_ID` (plus Azure credentials). **GCP is a registered stub**: its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil`, and `GetKubeconfig` returns "not yet implemented". The GCP struct fields exist for forward compatibility.
 
 The GCP struct accepts: `project`, `region`, `kubernetes_version`, `availability_zones`, `release_channel`, `node_groups` (map), `tags`, `networking_mode`, `network`, `subnetwork`, `ip_allocation_policy`, `master_authorized_networks_config`, `private_cluster_config`.
 
 The Azure struct accepts: `region`, `kubernetes_version`, `storage_account_postfix`, `authorized_ip_ranges`, `resource_group_name`, `node_resource_group_name`, `node_groups` (map), `vnet_subnet_id`, `private_cluster_enabled`, `tags`, `network_profile`, `max_pods`, `workload_identity_enabled`, `azure_policy_enabled`.
 
-See [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) and [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) for schemas. Don't try to deploy with them.
+See [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) (deployable) and [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) (schema only; the GCP stub is not deployable today) for the full field layouts.
 
 ---
 
@@ -248,8 +248,6 @@ See [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) and [`exampl
 Valid provider names: `cloudflare` (the only DNS provider implemented today).
 
 ### 3.1 `dns.cloudflare`
-
-Source: `pkg/dnsprovider/cloudflare/config.go`.
 
 ```yaml
 dns:
@@ -265,13 +263,11 @@ Behavior:
 
 Credential: `CLOUDFLARE_API_TOKEN` env var, with Zone:Read and DNS:Edit permissions on the zone. Domain must be a suffix of `zone_name` (suffix check with a dot separator).
 
-Future DNS providers (Route53, Azure DNS, Google Cloud DNS) will follow the same shape and the same `DNSProvider` interface defined in `pkg/dnsprovider/provider.go`.
+Future DNS providers (Route53, Azure DNS, Google Cloud DNS) will follow the same shape and the same `Provider` interface defined in `pkg/providers/dns/provider.go`.
 
 ---
 
 ## 4. Certificate
-
-Source: `pkg/config/config.go` (`CertificateConfig`, `ACMEConfig`).
 
 ```yaml
 certificate:
@@ -286,8 +282,6 @@ When omitted, NIC behaves as if `type: selfsigned` was set. `selfsigned` is appr
 ---
 
 ## 5. Git Repository
-
-Source: `pkg/git/config.go` (`Config`, `AuthConfig`).
 
 ```yaml
 git_repository:

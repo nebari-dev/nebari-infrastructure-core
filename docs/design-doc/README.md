@@ -1,21 +1,21 @@
 # Nebari Infrastructure Core (NIC) Documentation
 
 **Version:** 2.0.0
-**Status:** Design Phase
+**Status:** Alpha (AWS, Azure, Hetzner, local Kind, and `existing` providers implemented; see [Milestones](operations/13-milestones.md))
 
 ## Overview
 
-Nebari Infrastructure Core (NIC) is a next-generation, opinionated Kubernetes deployment tool that provides a complete, production-ready platform across AWS, GCP, Azure, and On-Premises environments. NIC provisions cloud infrastructure and deploys a comprehensive foundational software stack including authentication, observability, certificate management, ingress, and GitOps continuous deployment.
+Nebari Infrastructure Core (NIC) is an opinionated Kubernetes deployment tool that provisions cloud infrastructure and deploys a foundational software stack including authentication, telemetry collection, certificate management, ingress, and GitOps continuous deployment. Cluster providers implemented today are AWS (EKS), Azure (AKS), Hetzner (k3s), local Kind, and an `existing`-cluster adapter; GCP is a registered stub.
 
 **Key Highlights:**
 
 - **OpenTofu/Terraform Modules**: Infrastructure provisioning via proven Terraform modules orchestrated by terraform-exec
 - **Standard State Management**: Terraform state files with remote backends (S3, GCS, Azure Blob)
 - **Go CLI Orchestration**: Go CLI wraps OpenTofu execution with OpenTelemetry instrumentation
-- **Complete Observability**: LGTM stack (Loki, Grafana, Tempo, Mimir) with OpenTelemetry
+- **Observability**: an OpenTelemetry Collector ships today; a full metrics/logs/traces backend (e.g. an LGTM stack) is future work, not yet deployed by NIC
 - **Integrated Authentication**: Keycloak with OIDC/SAML support
 - **GitOps Ready**: ArgoCD for continuous deployment of applications
-- **Kubernetes Operator**: Custom nebari-application CRD for seamless app registration
+- **Kubernetes Operator**: the out-of-tree Nebari Operator watches the `NebariApp` CRD for seamless app registration
 
 ## Documentation Structure
 
@@ -57,10 +57,10 @@ Detailed implementation specifications and technical designs.
    DNS provider abstraction and implementation patterns
 
 10. **[Foundational Software Stack](implementation/10-foundational-software.md)**
-    Keycloak, LGTM observability, cert-manager, Envoy Gateway, ArgoCD deployment
+    Keycloak, OpenTelemetry Collector, cert-manager, Envoy Gateway, ArgoCD deployment
 
-11. **[Nebari Kubernetes Operator](implementation/11-nebari-operator.md)**
-    Custom controller for nebari-application CRD and app lifecycle management
+11. **[Nebari Operator](implementation/11-nebari-operator.md)**
+    How NIC deploys the out-of-tree operator that reconciles the `NebariApp` CRD
 
 ### Operations
 
@@ -141,16 +141,19 @@ Testing and validation:
 
 ### Foundational Software Stack
 
-- **Keycloak**: Authentication and authorization (OIDC/SAML)
-- **Loki**: Log aggregation
-- **Grafana**: Visualization and dashboards
-- **Tempo**: Distributed tracing
-- **Mimir**: Long-term metrics storage
-- **OpenTelemetry**: Unified telemetry collection
-- **cert-manager**: Automated TLS certificate management
+Deployed by NIC today via ArgoCD:
+
+- **Keycloak**: Authentication and authorization (OIDC/SAML), backed by CloudNativePG/PostgreSQL
+- **OpenTelemetry Collector**: Telemetry collection
+- **cert-manager** (+ trust-manager): Automated TLS certificate management
 - **Envoy Gateway**: Kubernetes Gateway API implementation
+- **MetalLB**: Load balancing (on providers that need it)
 - **ArgoCD**: GitOps continuous deployment
-- **Helm**: Package management
+- **Nebari Operator**: reconciles the `NebariApp` CRD
+- **Nebari landing page**: single entry point to deployed services
+- **Helm**: used by NIC to bootstrap the ArgoCD install itself
+
+A full metrics/logs/traces backend (e.g. an LGTM stack of Loki, Grafana, Tempo, Mimir) is future work and is **not** deployed by NIC today.
 
 ### Kubernetes Infrastructure
 
@@ -190,7 +193,7 @@ git clone https://github.com/nebari-dev/nebari-infrastructure-core.git
 cd nebari-infrastructure-core
 
 # Build NIC
-go build -o nic cmd/nic/main.go
+go build -o nic ./cmd/nic        # or: make build
 
 # Verify installation
 ./nic version
@@ -205,12 +208,14 @@ go build -o nic cmd/nic/main.go
 # Deploy infrastructure and foundational software
 ./nic deploy -f config.yaml
 
-# Check status (runs terraform plan)
-./nic status -f config.yaml
+# Fetch the cluster kubeconfig
+./nic kubeconfig -f config.yaml
 
 # Destroy infrastructure
 ./nic destroy -f config.yaml
 ```
+
+NIC has no `status` or `plan` subcommand; the available verbs are `deploy`, `destroy`, `validate`, `kubeconfig`, and `version`.
 
 ## Development
 
@@ -248,10 +253,9 @@ See [Testing Strategy](operations/12-testing-strategy.md) for comprehensive test
 
 ## Project Status
 
-**Current Phase**: Design and Architecture
-**Target Release**: Q2 2025
+**Current Phase**: Alpha - AWS, Azure, Hetzner, local Kind, and `existing` cluster providers are implemented and the foundational stack deploys via ArgoCD; GCP remains a registered stub.
 
-See [Milestones](operations/13-milestones.md) for detailed roadmap.
+See [Milestones](operations/13-milestones.md) for the detailed roadmap.
 
 ## Contributing
 

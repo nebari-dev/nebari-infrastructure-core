@@ -14,7 +14,7 @@ NIC has three testing levels today, plus one (health) that is planned but not ye
 ### Integration tests (LocalStack)
 
 - **Scope**: AWS provider's state-bucket lifecycle and tofu invocation, against [LocalStack](https://localstack.cloud/).
-- **Runner**: `make test-integration` (testcontainers-managed LocalStack) or `make test-integration-local` (uses `docker-compose.test.yml`).
+- **Runner**: `make test-integration` (testcontainers-managed LocalStack; requires Docker).
 - **Build tag**: `integration`. Unit-only runs (the default and what CI runs) exclude these via the absence of `-tags=integration`.
 - **Where they run**: Locally, on demand. Not currently wired into CI.
 
@@ -39,13 +39,13 @@ Coverage hygiene is enforced through review:
 
 | Need | Tool |
 |------|------|
-| AWS API mocking | LocalStack via `docker-compose.test.yml` |
+| AWS API mocking | LocalStack, managed by testcontainers (`make test-integration`) |
 | Kubernetes object mocking | `k8s.io/client-go/kubernetes/fake` |
 | Helm SDK mocking | The `Helm` interface in `pkg/helm` with fake implementations |
 | Filesystem mocking | `github.com/spf13/afero` (used in `pkg/tofu` and elsewhere) |
 | Local cluster for manual testing | Kind via `make localkind-up` |
 
-GCS and Azure Blob mocking are not in scope while the GCP and Azure providers remain stubs.
+GCS mocking is not in scope while the GCP provider remains a stub. Azure is implemented (AKS via OpenTofu), but Azure integration-test coverage is not yet wired up; today the only integration suite is the AWS provider's (`pkg/providers/cluster/aws/integration_test.go`).
 
 ## 12.4 CI Pipeline
 
@@ -56,30 +56,40 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.0        # actions are pinned by SHA
+      - uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.25.1'
+          go-version-file: go.mod            # tracks the version in go.mod
       - run: go mod download
       - run: go mod verify
       - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
       - run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
-      - uses: codecov/codecov-action@v4    # continue-on-error: true
+      - uses: codecov/codecov-action@v7.0.0  # continue-on-error: true
 
   build:
-    needs: test
     steps:
       - run: make build
       - run: ./nic --help || true
+
+  lint-config:   # "Workflow pins & release config"
+    steps:
+      - run: ./scripts/check-action-pins.sh  # every action must be SHA-pinned
+      - uses: goreleaser/goreleaser-action@v7.2.3  # validates .goreleaser config
+
+  vulnerabilities:
+    steps:
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+      - run: ./scripts/govulncheck-gate.sh
 ```
 
 Highlights:
 
-- Go 1.25.1.
+- Go version tracks `go.mod` (currently `1.26.5`) via `go-version-file`.
 - Unit tests run with `-race` and coverage.
-- Lint via the latest `golangci-lint`.
+- Lint via the latest `golangci-lint`; all GitHub Actions are SHA-pinned and enforced by `check-action-pins.sh`.
+- A `govulncheck` gate fails the build on known vulnerabilities.
 - No integration-test job, no nightly schedule, no kind-based cluster spin-up.
 
 Other workflows in `.github/workflows/`:
@@ -94,13 +104,13 @@ Other workflows in `.github/workflows/`:
 - `make test` - run unit tests
 - `make test-race` - unit tests with `-race`
 - `make test-coverage` - unit tests with coverage report
-- `make test-integration` / `make test-integration-local` - integration tests against LocalStack
+- `make test-integration` - integration tests against testcontainers-managed LocalStack (requires Docker)
 - `make lint` - `golangci-lint run`
 - `make check` - `fmt`, `vet`, `lint`, `test`
 - `make localkind-up` - end-to-end deploy onto a local Kind cluster (uses `examples/local-config.yaml` by default; pass `LOCAL_CONFIG=...` to override)
 - `make localkind-rebuild` - tear down and rebuild the local cluster
 
-The Kind workflow mounts the `file://` GitOps directory into the cluster so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/provider/local` and the relevant Makefile target.
+The Kind workflow mounts the `file://` GitOps directory into the cluster so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/providers/cluster/local` and the relevant Makefile target.
 
 ## 12.6 What "Test Cases" Look Like
 

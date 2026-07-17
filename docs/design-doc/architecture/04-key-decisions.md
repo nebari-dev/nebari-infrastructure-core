@@ -18,7 +18,7 @@
 
 **Context:** Different cluster providers have different idiomatic tooling. EKS has excellent Terraform support. Hetzner Cloud has a purpose-built tool (`hetzner-k3s`) that handles bootstrap better than tofu would. Kind is configured via a CLI flag and a YAML file.
 
-**Decision:** The `provider.Provider` interface is the abstraction. Each provider implementation chooses the right backing tool for its environment:
+**Decision:** The `cluster.Provider` interface is the abstraction. Each provider implementation chooses the right backing tool for its environment:
 
 - **AWS:** OpenTofu, via the `terraform-exec` Go library, running the upstream `nebari-dev/eks-cluster` registry module
 - **Hetzner:** the `hetzner-k3s` binary, talking directly to the Hetzner Cloud API
@@ -59,7 +59,7 @@ func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOpti
 
 Two things to note:
 
-1. The wrapper calls `ApplyJSON`/`PlanJSON`/`InitJSON`/`DestroyJSON` and streams output through the **status channel** attached to `ctx` (see [System Overview §2.4](02-system-overview.md#24-the-status-channel-pkg--cmd-seam)). Library code does not call `slog` - that translation happens in `cmd/nic/status_handler.go`.
+1. The wrapper calls `ApplyJSON`/`PlanJSON`/`InitJSON`/`DestroyJSON` and streams output through the **status channel** attached to `ctx` (see [System Overview §2.4](02-system-overview.md#24-the-status-channel-pkg--cmd-seam)). Library code does not call `slog` - that translation happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
 2. `Setup(ctx, templates fs.FS, tfvars any)` (also in `pkg/tofu/tofu.go`) handles binary acquisition via `tofudl` with caching at `~/.cache/nic/tofu/`, extraction of embedded templates, and `terraform.tfvars.json` writing. Callers do not look up tofu in `PATH`.
 
 See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md).
@@ -70,7 +70,7 @@ See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration
 
 **Decision:** Standard Terraform S3 backend with `use_lockfile = true`. No DynamoDB table is involved.
 
-**State Backend Configuration (real `pkg/provider/aws/templates/backend.tf`):**
+**State Backend Configuration (real `pkg/providers/cluster/aws/templates/backend.tf`):**
 
 ```hcl
 terraform {
@@ -81,7 +81,7 @@ terraform {
 }
 ```
 
-Bucket and key are populated dynamically at `tofu init` time. The bucket name is deterministic: `nic-tfstate-<project>-<region>-<8-hex-of-account-id-hash>`. NIC auto-creates the bucket (`pkg/provider/aws/state.go:ensureStateBucket`) with versioning and public-access-block enabled.
+Bucket and key are populated dynamically at `tofu init` time. The bucket name is deterministic: `nic-tfstate-<project>-<region>-<8-hex-of-account-id-hash>`. NIC auto-creates the bucket (`pkg/providers/cluster/aws/state.go:ensureStateBucket`) with versioning and public-access-block enabled.
 
 **Non-AWS providers manage state in tool-specific ways:**
 
@@ -141,7 +141,7 @@ NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer cont
 **Decision:**
 
 - All new functions in `pkg/` are wrapped in OpenTelemetry trace spans, with the documented exemptions in [`CLAUDE.md`](../../../CLAUDE.md) (e.g., per-line writers in `pkg/status` and byte/line helpers in `pkg/tofu`).
-- Library code never calls `slog`. User-visible progress goes through the status channel; `cmd/nic/status_handler.go` is the only translator into structured logs.
+- Library code never calls `slog`. User-visible progress goes through the status channel; `cmd/nic` is the only layer that translates it into structured logs, via `pkg/nic`'s `SlogHandler`.
 - Exporters are configurable via `OTEL_EXPORTER` (`none` default, `console`, `otlp`, `both`) and `OTEL_ENDPOINT`.
 
 **Pattern:**
@@ -166,7 +166,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Context:** How to package and distribute NIC.
 
-**Decision (today):** Single Go binary. AWS templates are embedded via `go:embed` from `pkg/provider/aws/templates/`. OpenTofu itself is downloaded on first use into `~/.cache/nic/tofu/` and reused thereafter.
+**Decision (today):** Single Go binary. AWS templates are embedded via `go:embed` from `pkg/providers/cluster/aws/templates/`. OpenTofu itself is downloaded on first use into `~/.cache/nic/tofu/` and reused thereafter.
 
 **Decision (planned, [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md)):** Move providers (cluster, DNS, cert, git, software) to out-of-tree gRPC plugins discovered at runtime. The current in-tree layout is the bootstrap target; the plugin architecture is the long-term direction.
 

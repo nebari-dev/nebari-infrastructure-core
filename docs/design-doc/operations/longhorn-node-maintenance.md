@@ -1,6 +1,6 @@
 # Longhorn Node Maintenance
 
-This document describes how to gracefully drain an EKS node when Longhorn is the storage backend, and what to expect during abrupt node failures. Longhorn is currently only wired into the AWS provider (see `pkg/provider/aws/longhorn.go`, chart version 1.8.1); these procedures apply to NIC-managed EKS clusters.
+This document describes how to gracefully drain an EKS node when Longhorn is the storage backend, and what to expect during abrupt node failures. Longhorn is currently only wired into the AWS provider (see `pkg/providers/cluster/aws/longhorn.go`, which delegates to the shared `pkg/storage/longhorn` package; chart version `1.11.2` is pinned in `pkg/storage/longhorn/config.go`); these procedures apply to NIC-managed EKS clusters.
 
 ## Background
 

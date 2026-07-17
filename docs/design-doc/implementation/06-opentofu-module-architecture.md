@@ -4,22 +4,22 @@
 
 This document describes how OpenTofu is used inside NIC. **OpenTofu is not used by every provider.** Only the AWS cluster provider uses tofu today; Hetzner shells out to the `hetzner-k3s` binary, the local provider relies on Kind (driven from the Makefile), and the `existing` provider does not provision any infrastructure at all.
 
-For the contract between CLI and provider implementations - which is what actually defines NIC's architecture - see the `Provider` interface in `pkg/provider/provider.go` and [System Overview](../architecture/02-system-overview.md).
+For the contract between CLI and provider implementations - which is what actually defines NIC's architecture - see the `Provider` interface in `pkg/providers/cluster/provider.go` and [System Overview](../architecture/02-system-overview.md).
 
 ## 6.2 Repository Layout (Real)
 
 There is **no root-level `terraform/` directory**. AWS-specific templates live inside the AWS provider package:
 
 ```
-pkg/provider/aws/
+pkg/providers/cluster/aws/
 ├── config.go                          # aws.Config struct (yaml/json tags)
-├── provider.go                        # Implements provider.Provider
+├── provider.go                        # Implements cluster.Provider
 ├── state.go                           # S3 state-bucket lifecycle (ensure / destroy)
 ├── tofu.go                            # Builds tfvars and invokes pkg/tofu.Setup
 ├── k8s.go                             # Shared kube-client construction
 ├── kubeconfig.go                      # GetKubeconfig implementation
 ├── efs.go                             # EFS storage-class wiring
-├── longhorn.go                        # Longhorn storage installation
+├── longhorn.go                        # Wires in the shared pkg/storage/longhorn installer
 ├── aws_load_balancer_controller.go    # AWS Load Balancer Controller install
 ├── cleanup.go / cleanup_k8s.go        # Pre-destroy resource cleanup
 ├── version.go                         # Provider-version probe
@@ -31,14 +31,14 @@ pkg/provider/aws/
     └── backend.tf                     # S3 backend with use_lockfile = true
 ```
 
-Other cluster providers do not use OpenTofu and therefore have no `templates/` directory:
+Azure is also OpenTofu-based and embeds its own `templates/` directory (the upstream `nebari-dev/aks-cluster/azurerm` module). The remaining providers do not use OpenTofu and have no `templates/` directory:
 
 ```
-pkg/provider/hetzner/      # Wraps the hetzner-k3s binary
-pkg/provider/local/        # Kind stub (Makefile creates the cluster)
-pkg/provider/existing/     # Adopts an existing kubeconfig
-pkg/provider/gcp/          # Stub: emits a "(stub)" status message and returns nil
-pkg/provider/azure/        # Stub: emits a "(stub)" status message and returns nil
+pkg/providers/cluster/azure/        # AKS via OpenTofu; own templates/ (nebari-dev/aks-cluster/azurerm)
+pkg/providers/cluster/hetzner/      # Wraps the hetzner-k3s binary (no OpenTofu)
+pkg/providers/cluster/local/        # Kind stub (Makefile creates the cluster)
+pkg/providers/cluster/existing/     # Adopts an existing kubeconfig
+pkg/providers/cluster/gcp/          # Stub: emits a "(stub)" status message and returns nil
 ```
 
 ## 6.3 AWS Root Module
@@ -46,10 +46,10 @@ pkg/provider/azure/        # Stub: emits a "(stub)" status message and returns n
 The AWS root module is intentionally thin. It is a single Terraform file that calls the upstream community module `nebari-dev/eks-cluster/aws`:
 
 ```hcl
-# pkg/provider/aws/templates/main.tf
+# pkg/providers/cluster/aws/templates/main.tf
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.4.0"
+  version = "0.6.0"
 
   project_name                  = var.project_name
   tags                          = var.tags
@@ -74,7 +74,7 @@ The backend is configured for S3 with native lockfile-based locking (`use_lockfi
 
 ## 6.4 Embedding and Extraction
 
-Templates are embedded into the NIC binary via Go's `embed.FS` declared inside `pkg/provider/aws/`. At deploy time, the AWS provider:
+Templates are embedded into the NIC binary via Go's `embed.FS` declared inside `pkg/providers/cluster/aws/`. At deploy time, the AWS provider:
 
 1. Constructs a `map[string]any` of tfvars from the parsed AWS config (region, project name, node groups, EFS settings, etc.).
 2. Calls `pkg/tofu.Setup(ctx, templatesFS, tfvars)`, which extracts the embedded files into a fresh temp directory, downloads the OpenTofu binary if not cached, writes `terraform.tfvars.json`, and returns a `TerraformExecutor`.
@@ -91,19 +91,20 @@ For completeness, the other providers do not have any `.tf` files:
 | Hetzner | Generates a `hetzner-k3s` config file, invokes the binary, parses its output |
 | Local | The provider itself is a thin adapter; the cluster is created by `make localkind-up` (Kind), and NIC's job is the bootstrap that follows |
 | Existing | Reads `kubeconfig` and `context` from config; performs no provisioning |
-| GCP, Azure | Registered, but every method currently returns "not yet implemented" |
+| Azure | Provisions AKS via OpenTofu (upstream `nebari-dev/aks-cluster/azurerm` module), analogous to the AWS provider |
+| GCP | Registered stub: `Deploy`/`Destroy` emit a "(stub)" status message and return `nil`; `GetKubeconfig` returns "not yet implemented" |
 
-If and when GCP/Azure are implemented, each provider package will decide independently whether to use OpenTofu (e.g., with the upstream `terraform-google-modules/kubernetes-engine` module for GKE) or another mechanism. The `Provider` interface is the boundary, not Terraform.
+If and when GCP is implemented, the provider package will decide independently whether to use OpenTofu (e.g., with the upstream `terraform-google-modules/kubernetes-engine` module for GKE) or another mechanism. The `Provider` interface is the boundary, not Terraform.
 
 ## 6.6 Adding a New Terraform-Backed Provider
 
 The pattern, if you choose tofu for a new provider:
 
-1. Create `pkg/provider/<name>/` with `config.go`, `provider.go`, and `tofu.go`.
+1. Create `pkg/providers/cluster/<name>/` with `config.go`, `provider.go`, and `tofu.go`.
 2. Add a `templates/` directory inside the package with `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`, and (optionally) `backend.tf`. Embed it via `go:embed`.
-3. Implement the `provider.Provider` interface. `Deploy` should build a tfvars map, call `pkg/tofu.Setup`, and invoke `Init`/`Plan`/`Apply` (or `Plan` only when `DeployOptions.DryRun` is true).
+3. Implement the `cluster.Provider` interface. `Deploy` should build a tfvars map, call `pkg/tofu.Setup`, and invoke `Init`/`Plan`/`Apply` (or `Plan` only when `DeployOptions.DryRun` is true).
 4. Implement `InfraSettings(cfg)` to return provider-shaped capabilities (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, etc.). Do not add `switch` statements on provider name elsewhere in the codebase.
-5. Register the provider in `cmd/nic/main.go` via `reg.ClusterProviders.Register(ctx, "<name>", New())`.
+5. Register the provider in `pkg/nic/registry.go`'s `defaultRegistry` via `r.ClusterProviders.Register(ctx, "<name>", <name>.NewProvider())`.
 6. Add an example config under `examples/` and validate against `pkg/config`.
 
 ## 6.7 Anti-Patterns to Avoid

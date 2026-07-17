@@ -4,7 +4,7 @@
 
 NIC uses HashiCorp's `terraform-exec` library to orchestrate OpenTofu execution **from the AWS provider**. Other cluster providers (Hetzner, local, existing) do not use terraform-exec. The wrapper for this integration lives in `pkg/tofu/`.
 
-This document describes the wrapper, the Setup helper, and how AWS-provider code uses it. The AWS-side code that calls into `pkg/tofu` is in `pkg/provider/aws/tofu.go`.
+This document describes the wrapper, the Setup helper, and how AWS-provider code uses it. The AWS-side code that calls into `pkg/tofu` is in `pkg/providers/cluster/aws/tofu.go`.
 
 ## 8.2 Package Layout
 
@@ -57,7 +57,7 @@ OpenTofu's `-json` mode emits one structured event per line, with `@level`, `@me
 
 ### Logging policy
 
-`pkg/tofu` does not call `slog`. That's intentional and required: per [`CLAUDE.md`](../../../CLAUDE.md), library code never logs. Translation into log records happens in `cmd/nic/status_handler.go`.
+`pkg/tofu` does not call `slog`. That's intentional and required: per [`CLAUDE.md`](../../../CLAUDE.md), library code never logs. Translation into log records happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
 
 ## 8.4 Setup
 
@@ -83,10 +83,10 @@ There is **no** `findOpenTofuBinary()` in `PATH`. The binary is always the versi
 
 ## 8.5 AWS Provider Usage
 
-The AWS provider's `Deploy` and `Destroy` methods are the primary callers. The shape (simplified, with telemetry, dry-run/backend-override handling, and bucket-existence branching omitted - see `pkg/provider/aws/provider.go` for the authoritative version):
+The AWS provider's `Deploy` and `Destroy` methods are the primary callers. The shape (simplified, with telemetry, dry-run/backend-override handling, and bucket-existence branching omitted - see `pkg/providers/cluster/aws/provider.go` for the authoritative version):
 
 ```go
-// pkg/provider/aws/provider.go (illustrative)
+// pkg/providers/cluster/aws/provider.go (illustrative)
 func (p *Provider) Deploy(ctx context.Context, projectName string, cluster *config.ClusterConfig, opts provider.DeployOptions) error {
     awsCfg, err := decodeConfig(cluster)
     if err != nil { return err }

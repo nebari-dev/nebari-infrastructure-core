@@ -51,9 +51,9 @@ type ClusterConfig struct {
 }
 ```
 
-Exactly one key under `cluster:`. Valid provider names (from `cmd/nic/main.go` registration): `aws`, `gcp`, `azure`, `local`, `hetzner`, `existing`. GCP and Azure are registered but their methods return "not yet implemented".
+Exactly one key under `cluster:`. Valid provider names (from `pkg/nic/registry.go`'s `defaultRegistry`): `aws`, `gcp`, `azure`, `local`, `hetzner`, `existing`. All are implemented except `gcp`, which is a registered stub (its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil`, and `GetKubeconfig` returns "not yet implemented").
 
-The inline map captures the provider name as the key and an opaque `any` as the value. The provider implementation is responsible for decoding the `any` into its own typed config (e.g., `pkg/provider/aws/config.go:Config` for AWS).
+The inline map captures the provider name as the key and an opaque `any` as the value. The provider implementation is responsible for decoding the `any` into its own typed config (e.g., `pkg/providers/cluster/aws/config.go:Config` for AWS).
 
 ## 7.4 DNS Provider Block
 
@@ -115,7 +115,8 @@ Authoritative examples live under [`examples/`](../../../examples/) in the repo.
 - [`examples/hetzner-config.yaml`](../../../examples/hetzner-config.yaml) - Hetzner k3s with `node_groups.master` and `node_groups.workers`
 - [`examples/local-config.yaml`](../../../examples/local-config.yaml) - Kind cluster with optional MetalLB and `file://` GitOps repo
 - [`examples/existing-config.yaml`](../../../examples/existing-config.yaml) - Adopt an existing kubeconfig
-- [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml), [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) - schema for the stub providers (not deployable today)
+- [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) - AKS (deployable; Azure is implemented)
+- [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) - schema for the GCP stub provider (not deployable today)
 
 The full per-provider field reference lives in [`16-configuration-reference.md`](../appendix/16-configuration-reference.md).
 

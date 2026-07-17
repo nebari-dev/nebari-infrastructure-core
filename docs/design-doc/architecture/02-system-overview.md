@@ -95,27 +95,27 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 - Cobra-based commands: `deploy`, `destroy`, `validate`, `kubeconfig`, `version`. There is no `status` or `plan` subcommand today.
 - Reads `.env` via `godotenv` and initializes OpenTelemetry via `pkg/telemetry`.
 - Owns the `slog` JSON logger. Library code (under `pkg/`) does not log.
-- Owns the status-channel handler (`cmd/nic/status_handler.go`); see Section 2.4.
+- Wires the status channel to `slog` via `pkg/nic`'s `StartSlogHandler` (which builds the `SlogHandler` defined in `pkg/nic/status.go`); see Section 2.4.
 
-**`pkg/provider/` (Cluster providers)**
+**`pkg/providers/cluster/` (Cluster providers)**
 
-- `pkg/provider/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`).
-- One sub-package per cluster provider: `aws/`, `hetzner/`, `local/`, `existing/`, plus `gcp/` and `azure/` stubs (registered, but their `Validate`/`Deploy`/`Destroy` methods emit a "(stub)" status message and return `nil` rather than provisioning anything).
-- AWS-specific Terraform templates live under `pkg/provider/aws/templates/` and are embedded into the binary via `go:embed`.
+- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`).
+- One sub-package per cluster provider. `aws/`, `azure/`, `hetzner/`, `local/`, and `existing/` are implemented; `gcp/` is a registered stub (its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil` rather than provisioning anything, and `GetKubeconfig` returns "not yet implemented").
+- AWS-specific Terraform templates live under `pkg/providers/cluster/aws/templates/` and are embedded into the binary via `go:embed`.
 
-**`pkg/dnsprovider/` (DNS providers)**
+**`pkg/providers/dns/` (DNS providers)**
 
-- `pkg/dnsprovider/provider.go` defines the `DNSProvider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`).
-- `pkg/dnsprovider/cloudflare/` is the only implementation today.
+- `pkg/providers/dns/provider.go` defines the `Provider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`).
+- `pkg/providers/dns/cloudflare/` is the only implementation today.
 
 **`pkg/registry/` (Unified provider registry)**
 
-- `registry.Registry` holds two `ProviderList` instances: `ClusterProviders` (a `ProviderList[provider.Provider]`) and `DNSProviders` (a `ProviderList[dnsprovider.DNSProvider]`).
-- All providers are registered explicitly in `cmd/nic/main.go` `init()`. No blank imports or `init()` magic.
+- `registry.Registry` holds two `ProviderList` instances: `ClusterProviders` (a `ProviderList[cluster.Provider]`) and `DNSProviders` (a `ProviderList[dns.Provider]`).
+- All providers are registered explicitly in `pkg/nic/registry.go`'s `defaultRegistry` (each via `<pkg>.NewProvider()`), which `pkg/nic.NewClient` builds. No blank imports or `init()` magic.
 
 **`pkg/tofu/` (terraform-exec wrapper)**
 
-- Single file `pkg/tofu/tofu.go` defines `TerraformExecutor`, which embeds `*tfexec.Terraform` plus a temp working dir and an `afero.Fs`.
+- `pkg/tofu/tofu.go` defines `TerraformExecutor`, which embeds `*tfexec.Terraform` plus a temp working dir and an `afero.Fs`. The rest of the package is the JSON log mapper (`log.go`), the pinned OpenTofu version (`version.go`), and OS-specific signal handling (`context_*.go`).
 - `Setup(ctx, templates fs.FS, tfvars any)` extracts embedded templates, downloads the OpenTofu binary via `tofudl` with caching at `~/.cache/nic/tofu/`, sets `TF_PLUGIN_CACHE_DIR`, writes `terraform.tfvars.json`, and returns the executor.
 - `Init`, `Plan`, `Apply`, `Destroy` call the `*JSON` variants of `tfexec` and stream output through the status channel (Section 2.4). `Output` uses the standard tfexec entry point.
 
@@ -127,7 +127,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 **`pkg/argocd/` (ArgoCD orchestration)**
 
 - Installs ArgoCD via the embedded Helm Go SDK (`pkg/helm`), not via a Terraform `helm_release`.
-- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Apps include cert-manager, cluster-issuers, certificates, envoy-gateway, gateway-config, httproutes, keycloak, postgresql, metallb, metallb-config, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
+- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Every YAML under `apps/` ships (they are enumerated at render time via `fs.ReadDir`): cert-manager, cluster-issuers, certificates, trust-manager, trust-bundle, envoy-gateway, gateway-config, httproutes, securitypolicies, keycloak, postgresql, cloudnative-pg, metallb, metallb-config, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
 - The nebari-operator app references the upstream repository (`github.com/nebari-dev/nebari-operator`) via Kustomize; the operator's source code does not live in this repo.
 
 **`pkg/dns`/`pkg/endpoint`/`pkg/git`/`pkg/helm`/`pkg/kubeconfig`/`pkg/status`/`pkg/telemetry`**
@@ -163,7 +163,7 @@ pkg/* (e.g., pkg/tofu, pkg/argocd)
 ctx-attached chan status.Update
    │
    ▼
-cmd/nic/status_handler.go
+pkg/nic SlogHandler (wired by cmd/nic via nic.StartSlogHandler)
    │  translates each Update into slog records
    ▼
 JSON logs on stderr

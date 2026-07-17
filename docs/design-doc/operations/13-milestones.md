@@ -14,19 +14,19 @@ The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/ar
 
 | Deliverable | Status |
 |-------------|--------|
-| `Provider` interface and `InfraSettings` capability struct (`pkg/provider/provider.go`) | ✅ |
+| `Provider` interface and `InfraSettings` capability struct (`pkg/providers/cluster/provider.go`) | ✅ |
 | Unified provider registry (`pkg/registry.Registry` with `ClusterProviders` + `DNSProviders`) | ✅ |
 | AWS cluster provider (EKS via upstream `nebari-dev/eks-cluster` module, EFS, node groups) | ✅ |
 | Hetzner cluster provider (via `hetzner-k3s` binary) | ✅ |
 | Local cluster provider (Kind stub, driven by `make localkind-up`) | ✅ |
 | `existing` cluster provider (adopt a kubeconfig) | ✅ |
+| Azure cluster provider (AKS via OpenTofu) | ✅ |
 | GCP cluster provider | ⏳ (registered as stub) |
-| Azure cluster provider | ⏳ (registered as stub) |
 | `pkg/tofu` wrapper with streaming JSON output through the status channel | ✅ |
 | AWS S3 state backend with `use_lockfile = true` and auto-managed bucket lifecycle | ✅ |
 | NIC CLI (`deploy`, `destroy`, `validate`, `kubeconfig`, `version`) | ✅ |
 | `status` / `plan` / `state` / `unlock` subcommands | ⏳ |
-| Integration tests against LocalStack via `make test-integration-local` | ✅ |
+| Integration tests against testcontainers-managed LocalStack via `make test-integration` | ✅ |
 | CI: unit tests + lint + race + coverage upload | ✅ |
 
 ## 13.2 Phase 2: Foundational Software
@@ -82,7 +82,7 @@ Note: [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md) (Proposed, 2026
 | Deliverable | Status |
 |-------------|--------|
 | OpenTelemetry instrumentation in library code | 🟡 (per `CLAUDE.md` exemptions for `pkg/status` and byte/line helpers in `pkg/tofu`; operation-granularity `TerraformExecutor` wrappers tracked as outstanding work) |
-| Status-channel seam between `pkg/` and `cmd/` (`pkg/status`, `cmd/nic/status_handler.go`) | ✅ |
+| Status-channel seam between `pkg/` and `cmd/` (`pkg/status`, `pkg/nic` `SlogHandler`) | ✅ |
 | OTLP exporter wiring (`OTEL_EXPORTER=otlp`, `OTEL_ENDPOINT=...`) | ✅ |
 | LGTM backend deployed on cluster | ⏳ |
 | Grafana dashboards for NIC operations | ⏳ |

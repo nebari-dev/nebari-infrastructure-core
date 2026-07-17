@@ -18,7 +18,7 @@ This document focuses on the **AWS provider**, which is the only provider that u
 The AWS provider uses the standard Terraform S3 backend with native lockfile-based locking (introduced in OpenTofu/Terraform 1.10):
 
 ```hcl
-# pkg/provider/aws/templates/backend.tf
+# pkg/providers/cluster/aws/templates/backend.tf
 terraform {
   backend "s3" {
     encrypt      = true
@@ -27,7 +27,7 @@ terraform {
 }
 ```
 
-Bucket and key are not hard-coded; they are populated via `-backend-config` flags at `tofu init` time from values computed in `pkg/provider/aws/state.go`.
+Bucket and key are not hard-coded; they are populated via `-backend-config` flags at `tofu init` time from values computed in `pkg/providers/cluster/aws/state.go`.
 
 ### Bucket Naming
 
@@ -43,7 +43,7 @@ The state object key is `<project_name>/terraform.tfstate`.
 
 ### Bucket Lifecycle
 
-NIC creates the bucket automatically on first deploy (`ensureStateBucket` in `pkg/provider/aws/state.go`) with:
+NIC creates the bucket automatically on first deploy (`ensureStateBucket` in `pkg/providers/cluster/aws/state.go`) with:
 
 - Versioning enabled
 - Public access fully blocked (`PutPublicAccessBlock`)

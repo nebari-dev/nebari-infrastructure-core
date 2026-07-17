@@ -10,7 +10,7 @@ Status icons reflect current state, not original ambition:
 
 **Phase 1 (MVP):**
 
-1. ✅ Deploy production Kubernetes on **AWS (EKS)** and **Hetzner (k3s)**; ✅ local Kind clusters for development; ✅ `existing` provider to adopt a pre-provisioned cluster; ⏳ GCP and Azure providers (currently registered stubs)
+1. ✅ Deploy production Kubernetes on **AWS (EKS)**, **Azure (AKS)**, and **Hetzner (k3s)**; ✅ local Kind clusters for development; ✅ `existing` provider to adopt a pre-provisioned cluster; ⏳ GCP provider (currently a registered stub)
 2. ✅ Deploy foundational software via ArgoCD: cert-manager, cluster-issuers, certificates, Envoy Gateway, gateway-config, httproutes, postgresql, Keycloak, MetalLB (where needed), OpenTelemetry Collector, nebari-operator, nebari-landingpage
 3. ✅ Nebari Operator deployed as a foundational app (operator source lives in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator))
 4. ✅ Working **auth** (Keycloak with OIDC SSO into ArgoCD) and **routing** (Envoy Gateway with Kubernetes Gateway API). 🟡 **Observability**: the OpenTelemetry Collector ships, but a full LGTM backend (Loki / Grafana / Tempo / Mimir) does not - that work is deferred.
