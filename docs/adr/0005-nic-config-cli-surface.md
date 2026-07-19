@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed (2026-06-03) · Amended (2026-07-15): config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434).
 
 ## Date
 
@@ -120,6 +120,52 @@ Drop `examples/` entirely. The committed `schemas/<provider>.yaml` (a fully-comm
 3. **Composite-block-via-presence.** Is `--dns cloudflare --dns-zone-name example.com` → `dns:` block included a clear-enough rule, or do users want explicit `--with-dns cloudflare` toggles?
 4. **`nic config schema` value-add.** With `schemas/` committed and fetchable, what's the user need for a runtime `nic config schema`? Air-gapped envs? Editor LSP integration? Just nice-to-have?
 5. **Validation on init.** Run `client.Validate(...)` before emitting YAML, or trust the user to run `nic validate` after editing? The former catches errors earlier; the latter keeps init mechanical.
+
+## Update (2026-07): config-reference pipeline resolved (#434)
+
+PR #434 shipped `cmd/docgen`, which auto-generates both reference surfaces from
+the source of truth in this repo, drift-gated in CI (satisfying #440 and its
+upstream driver nebari-docs#665):
+
+- **CLI reference** - one markdown page per command in `docs/reference/cli/`,
+  produced by walking the real `internal/cli.NewRootCmd()` tree with `cobra/doc`.
+- **Config schema reference** - per-provider and core markdown pages in
+  `docs/configuration/`, produced by parsing the Go config structs with `go/ast`
+  (so field doc comments become descriptions, which reflection cannot see) and
+  discovering provider config files by glob.
+
+This resolves the config-reference pipeline that the Context above assumed would
+be a separate `cmd/schemagen` binary emitting JSON Schema + YAML under `schemas/`:
+
+- **docgen is the authoritative config-reference generator.** The
+  `cmd/schemagen` / `schemas/` pipeline described in the Context did not ship and
+  is superseded for the reference-docs concern. NIC emits finished markdown and
+  `nebari-docs` consumes it at build time (per nebari-docs#665), rather than NIC
+  emitting JSON Schema for `nebari-docs` to render into markdown downstream.
+- **If JSON Schema output is ever needed, it is a docgen output format, not a
+  second binary.** Editor/LSP validation of `config.yaml`, offline schema
+  inspection, or the `nic config schema` subcommand in Option 2 would each be
+  served by adding a format flag to docgen, reusing its existing `go/ast` parse
+  and provider discovery. A separate generator reading the same Go structs would
+  create exactly the two-sources-of-truth drift this generation effort exists to
+  prevent.
+
+**Scope of this update.** This resolves only the *generation pipeline* (how
+config and CLI reference material is produced and where it lives). It does **not**
+decide the user-facing `nic config` surface that is the main subject of this ADR:
+`nic config init` and `nic config schema` (Options 1 and 2) remain **Deferred /
+Proposed**. What changes is their substrate: those options would extend
+`cmd/docgen`, and Option 2's "`cmd/schemagen` may stay as the CI mechanism or be
+retired" is now moot, since the CI mechanism is docgen.
+
+**Data point for open question #1 (required-from-omitempty).** docgen relies on
+exactly that signal (`yaml:"name"` without `omitempty` implies required). The
+#434 review confirmed it is imperfect: `kubernetes_version` was tagged without
+`omitempty` yet is optional at validation time. docgen's mitigation is to treat
+pointer fields as optional and to add `omitempty` to genuinely-optional tags, but
+structurally-required-yet-semantically-optional cases still have to live in
+`Validate()`. Any `nic config init` flag-generation would inherit this same
+limitation.
 
 ## Links
 
