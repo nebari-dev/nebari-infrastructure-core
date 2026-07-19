@@ -174,6 +174,13 @@ amazon_web_services:
       # Not recommended for critical workloads
       spot: false
 
+      # OPTIONAL: Max nodes to roll at once during an update
+      # Default: unset (the EKS managed node group default of 33% unavailable)
+      # Sets update_config.max_unavailable on the node group. Set to 1 on a
+      # Longhorn storage pool so replicas rebuild onto the replacement node
+      # before the next old node is drained, avoiding faulted volumes.
+      max_unavailable: 1
+
     # User workload node group example
     user:
       instance: m5.xlarge

@@ -1,7 +1,7 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.6.0"
-  
+  version = "0.7.0"
+
   project_name                             = var.project_name
   tags                                     = var.tags
   availability_zones                       = var.availability_zones
