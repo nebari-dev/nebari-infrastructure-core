@@ -289,37 +289,6 @@ func TestMetalLBIPAddressPool_ExplicitDefaults(t *testing.T) {
 	}
 }
 
-func TestGatewayConfig_IgnoresOperatorTLSListeners(t *testing.T) {
-	content, err := templates.ReadFile("templates/apps/gateway-config.yaml")
-	if err != nil {
-		t.Fatalf("failed to read gateway-config template: %v", err)
-	}
-
-	processed, err := processTemplate("apps/gateway-config.yaml", content, TemplateData{
-		GitRepoURL: "https://github.com/example/repo",
-		GitBranch:  "main",
-	})
-	if err != nil {
-		t.Fatalf("processTemplate() error: %v", err)
-	}
-
-	output := string(processed)
-	checks := []string{
-		"ignoreDifferences:",
-		"group: gateway.networking.k8s.io",
-		"kind: Gateway",
-		"name: nebari-gateway",
-		"namespace: envoy-gateway-system",
-		"jqPathExpressions:",
-		`.spec.listeners[] | select(.name | startswith("tls-"))`,
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Errorf("gateway-config template missing %q, got:\n%s", check, output)
-		}
-	}
-}
-
 func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	tests := []struct {
 		name             string

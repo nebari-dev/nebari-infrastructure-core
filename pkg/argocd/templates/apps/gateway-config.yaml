@@ -25,22 +25,6 @@ spec:
     # this app-level namespace, so it must be an allowed destination.
     namespace: envoy-gateway-system
 
-  # Short-term fix, see https://github.com/nebari-dev/nebari-infrastructure-core/issues/484
-  # NebariApp reconciliation extends the shared Gateway with one TLS listener
-  # per application. Those listeners are intentionally operator-owned and are
-  # not part of NIC's base Gateway desired state.
-  #
-  # This rule only suppresses false drift; ServerSideApply=true (below) is what
-  # actually preserves the operator's tls-* listeners across sync. Without SSA an
-  # unrelated Gateway sync would strip them (argoproj/argo-cd#7478).
-  ignoreDifferences:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: nebari-gateway
-      namespace: envoy-gateway-system
-      jqPathExpressions:
-        - '.spec.listeners[] | select(.name | startswith("tls-"))'
-
   syncPolicy:
     automated:
       prune: true
