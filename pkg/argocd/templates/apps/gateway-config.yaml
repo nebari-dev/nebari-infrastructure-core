@@ -20,6 +20,10 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
+    # GatewayClass is cluster-scoped and the Gateway/ReferenceGrant carry their
+    # own metadata.namespace, but the scoped foundational AppProject validates
+    # this app-level namespace, so it must be an allowed destination.
+    namespace: envoy-gateway-system
 
   # Short-term fix, see https://github.com/nebari-dev/nebari-infrastructure-core/issues/484
   # NebariApp reconciliation extends the shared Gateway with one TLS listener
