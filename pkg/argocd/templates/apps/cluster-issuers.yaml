@@ -20,6 +20,10 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
+    # ClusterIssuers are cluster-scoped, but the scoped foundational AppProject
+    # still validates the app-level namespace, so it must be an allowed
+    # destination. cert-manager owns the issuers, so it is the natural default.
+    namespace: cert-manager
 
   syncPolicy:
     automated:

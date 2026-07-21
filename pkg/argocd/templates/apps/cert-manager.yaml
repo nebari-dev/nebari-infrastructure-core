@@ -21,6 +21,15 @@ spec:
       releaseName: cert-manager
       values: |
         installCRDs: true
+        # The leader-election lease and its Role/RoleBinding default to
+        # kube-system, which the scoped foundational ArgoCD project does not
+        # allow (its destinations are derived from NIC's own templates and do
+        # not include kube-system). Keep leader election in the cert-manager
+        # namespace, which is an allowed destination and avoids granting
+        # cert-manager RBAC in kube-system.
+        global:
+          leaderElection:
+            namespace: cert-manager
         config:
           enableGatewayAPI: true
         # Serialize ACME HTTP-01 challenges to avoid a race when two Certificates
