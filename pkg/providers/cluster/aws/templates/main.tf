@@ -42,5 +42,5 @@ module "eks_cluster" {
   longhorn_backup_bucket_create        = var.backup_bucket_create
   longhorn_backup_bucket_name          = var.backup_bucket_name
   longhorn_backup_bucket_force_destroy = var.backup_bucket_force_destroy
-  longhorn_backup_pod_identity_enable  = var.backup_pod_identity_enable
+  enable_longhorn_backup_pod_identity  = var.backup_pod_identity_enable
 }

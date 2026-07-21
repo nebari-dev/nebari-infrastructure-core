@@ -110,6 +110,29 @@ account+container (Azure) from Terraform state before running destroy, orphaning
 them so their contents survive. Set `retain_on_destroy: false` to have them
 deleted with the cluster (data loss — use with care).
 
+## Enabling backups on an existing cluster
+
+The backup resources (BackupTarget, RecurringJobs, credentials Secret) are
+rendered during the configuration phase of `nic deploy`, which only runs after
+the infrastructure phase completes. On an existing cluster, the infrastructure
+phase may roll node groups (for example when a newer AMI is available — see
+[#410](https://github.com/nebari-dev/nebari-infrastructure-core/issues/410)),
+and if that roll fails — commonly with `PodEvictionFailure` on node groups
+hosting pods with restrictive PodDisruptionBudgets — the deploy aborts before
+the backup configuration is applied. There is no partial apply: backups
+silently remain unconfigured until a deploy runs to completion.
+
+If you are enabling backups as part of an upgrade and the deploy fails during
+the node roll, resolve the eviction failure (or let the roll finish) and re-run
+`nic deploy`. Verify the config actually landed:
+
+```bash
+kubectl -n longhorn-system get backuptargets,recurringjobs
+```
+
+`BackupTarget/default` with `available=true` plus the two RecurringJobs means
+the configuration phase completed.
+
 ## Third-party / non-AWS S3
 
 Longhorn uses the same AWS S3 client for all S3-compatible targets. Three env
