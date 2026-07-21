@@ -1,12 +1,6 @@
 module "eks_cluster" {
-  # TEMPORARY: the Longhorn backup bucket support
-  # (nebari-dev/terraform-aws-eks-cluster#39) is merged to main but not yet in
-  # a tagged release (latest is v0.6.0).
-  # TODO(#431): revert to the registry source + pinned version once a release
-  # containing the longhorn_backup_bucket_* variables is cut:
-  #   source  = "nebari-dev/eks-cluster/aws"
-  #   version = "0.7.0"  # or whatever release includes the backup bucket
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=main"
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.7.0"
 
 
   project_name                             = var.project_name
