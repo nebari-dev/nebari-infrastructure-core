@@ -21,6 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 //go:embed templates
@@ -105,10 +106,9 @@ type TemplateData struct {
 	LonghornOIDCSecretName string
 }
 
-// NewTemplateData creates TemplateData from NebariConfig, the effective git
-// configuration, and provider InfraSettings. gitConfig may be nil when no
-// GitOps repository is configured; in that case Git* fields are left empty.
-func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings) TemplateData {
+// NewTemplateData creates TemplateData from NebariConfig, the resolved GitOps
+// repository source, and provider InfraSettings.
+func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings) TemplateData {
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -136,10 +136,10 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 	}
 
 	// Set git repository info
-	if gitConfig != nil {
-		data.GitRepoURL = gitConfig.URL
-		data.GitBranch = gitConfig.GetBranch()
-		data.GitPath = gitConfig.Path
+	if src != nil {
+		data.GitRepoURL = src.RepoURL()
+		data.GitBranch = src.GetBranch()
+		data.GitPath = src.RepoPath()
 	}
 
 	// Set certificate configuration
@@ -284,17 +284,16 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 	return nil
 }
 
-// WriteAllToGit writes all templates (apps and manifests) to the git repository.
+// WriteAllToGit writes all templates (apps and manifests) into workDir.
 // Templates are processed with Go template syntax for dynamic values.
 // trustBundlePEM is the top-level CA bundle already resolved by the orchestration
 // layer (empty when no bundle is configured); it is not re-read from disk here.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings, trustBundlePEM string) error {
+func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
-	workDir := gitClient.WorkDir()
-	data := NewTemplateData(cfg, gitConfig, settings)
+	data := NewTemplateData(cfg, src, settings)
 
 	if trustBundlePEM != "" {
 		data.TrustManagerEnabled = true

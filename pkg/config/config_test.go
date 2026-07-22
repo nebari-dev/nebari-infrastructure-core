@@ -2,12 +2,11 @@ package config
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
 func TestClusterConfig_NilReceiver(t *testing.T) {
@@ -65,61 +64,32 @@ cluster:
 			},
 		},
 		{
-			name: "config with git_repository",
+			name: "config with repository block",
 			yaml: `
 project_name: test-project
 cluster:
   aws: {}
-git_repository:
-  url: "git@github.com:org/repo.git"
-  branch: main
-  path: "clusters/test"
-  auth:
-    ssh_key_env: GIT_SSH_KEY
+repository:
+  existing:
+    url: "git@github.com:org/repo.git"
+    branch: main
+    auth:
+      token:
+        env: GIT_TOKEN
 `,
 			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.GitRepository == nil {
-					t.Fatal("GitRepository is nil")
+				if cfg.Repository == nil {
+					t.Fatal("Repository is nil")
 				}
-				if cfg.GitRepository.URL != "git@github.com:org/repo.git" {
-					t.Errorf("GitRepository.URL = %q, want %q", cfg.GitRepository.URL, "git@github.com:org/repo.git")
+				if cfg.Repository.ProviderName() != "existing" {
+					t.Errorf("Repository.ProviderName() = %q, want %q", cfg.Repository.ProviderName(), "existing")
 				}
-				if cfg.GitRepository.Branch != "main" {
-					t.Errorf("GitRepository.Branch = %q, want %q", cfg.GitRepository.Branch, "main")
+				pc := cfg.Repository.ProviderConfig()
+				if pc == nil {
+					t.Fatal("Repository.ProviderConfig() is nil")
 				}
-				if cfg.GitRepository.Path != "clusters/test" {
-					t.Errorf("GitRepository.Path = %q, want %q", cfg.GitRepository.Path, "clusters/test")
-				}
-				if cfg.GitRepository.Auth.SSHKeyEnv != "GIT_SSH_KEY" {
-					t.Errorf("GitRepository.Auth.SSHKeyEnv = %q, want %q", cfg.GitRepository.Auth.SSHKeyEnv, "GIT_SSH_KEY")
-				}
-			},
-		},
-		{
-			name: "config with git_repository and argocd_auth",
-			yaml: `
-project_name: test-project
-cluster:
-  aws: {}
-git_repository:
-  url: "https://github.com/org/repo.git"
-  auth:
-    token_env: GIT_TOKEN
-  argocd_auth:
-    token_env: ARGOCD_TOKEN
-`,
-			validate: func(t *testing.T, cfg *NebariConfig) {
-				if cfg.GitRepository == nil {
-					t.Fatal("GitRepository is nil")
-				}
-				if cfg.GitRepository.Auth.TokenEnv != "GIT_TOKEN" {
-					t.Errorf("GitRepository.Auth.TokenEnv = %q, want %q", cfg.GitRepository.Auth.TokenEnv, "GIT_TOKEN")
-				}
-				if cfg.GitRepository.ArgoCDAuth == nil {
-					t.Fatal("GitRepository.ArgoCDAuth is nil")
-				}
-				if cfg.GitRepository.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
-					t.Errorf("GitRepository.ArgoCDAuth.TokenEnv = %q, want %q", cfg.GitRepository.ArgoCDAuth.TokenEnv, "ARGOCD_TOKEN")
+				if pc["url"] != "git@github.com:org/repo.git" {
+					t.Errorf("repository url = %v, want %q", pc["url"], "git@github.com:org/repo.git")
 				}
 			},
 		},
@@ -330,21 +300,21 @@ func TestNebariConfigValidate(t *testing.T) {
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "valid config with git_repository",
+			name: "valid config with repository",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				GitRepository: &git.Config{
-					URL: "git@github.com:org/repo.git",
-					Auth: git.AuthConfig{
-						SSHKeyEnv: "GIT_SSH_KEY",
-					},
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{"url": "git@github.com:org/repo.git"}},
 				},
 			},
 			wantErr: false,
@@ -402,6 +372,9 @@ func TestNebariConfigValidate(t *testing.T) {
 						"cloudflare": map[string]any{"zone_name": "example.com"},
 					},
 				},
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
 			},
 			wantErr: false,
 		},
@@ -436,19 +409,29 @@ func TestNebariConfigValidate(t *testing.T) {
 			errContains: "invalid DNS provider",
 		},
 		{
-			name: "invalid git_repository",
+			name: "invalid repository - no provider",
 			config: NebariConfig{
 				ProjectName: "test-project",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
-				GitRepository: &git.Config{
-					URL: "git@github.com:org/repo.git",
-					// missing auth
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{},
 				},
 			},
 			wantErr:     true,
-			errContains: "invalid git_repository",
+			errContains: "invalid repository",
+		},
+		{
+			name: "missing repository",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+			},
+			wantErr:     true,
+			errContains: "repository field is required",
 		},
 	}
 
@@ -670,6 +653,197 @@ func TestDNSConfigNilReceiver(t *testing.T) {
 	}
 }
 
+func TestRepositoryConfigValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		repo        RepositoryConfig
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid single provider",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "no provider configured",
+			repo: RepositoryConfig{
+				Providers: map[string]any{},
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "nil providers map",
+			repo: RepositoryConfig{
+				Providers: nil,
+			},
+			wantErr:     true,
+			errContains: "no provider is configured",
+		},
+		{
+			name: "multiple providers",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+					"local":    map[string]any{"path": "/tmp/gitops"},
+				},
+			},
+			wantErr:     true,
+			errContains: "only one repository provider",
+		},
+		{
+			name: "invalid provider name",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"notreal": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid repository provider",
+		},
+		{
+			name: "scalar provider value rejected",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": "not-a-map",
+				},
+			},
+			wantErr:     true,
+			errContains: "must be a mapping",
+		},
+	}
+
+	validRepositoryProviders := []string{"existing", "local"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.repo.Validate(validRepositoryProviders)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errContains)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigProviderName(t *testing.T) {
+	tests := []struct {
+		name string
+		repo RepositoryConfig
+		want string
+	}{
+		{
+			name: "existing provider",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			want: "existing",
+		},
+		{
+			name: "empty config",
+			repo: RepositoryConfig{},
+			want: "",
+		},
+		{
+			name: "nil providers",
+			repo: RepositoryConfig{Providers: nil},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.repo.ProviderName()
+			if got != tt.want {
+				t.Errorf("ProviderName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigProviderConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    RepositoryConfig
+		wantNil bool
+		wantKey string
+		wantVal string
+	}{
+		{
+			name: "returns provider config map",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{"url": "git@github.com:org/repo.git"},
+				},
+			},
+			wantNil: false,
+			wantKey: "url",
+			wantVal: "git@github.com:org/repo.git",
+		},
+		{
+			name:    "nil when empty",
+			repo:    RepositoryConfig{},
+			wantNil: true,
+		},
+		{
+			name: "nil when value is not a map",
+			repo: RepositoryConfig{
+				Providers: map[string]any{
+					"existing": "not-a-map",
+				},
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.repo.ProviderConfig()
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("ProviderConfig() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("ProviderConfig() = nil, want non-nil")
+			}
+			if got[tt.wantKey] != tt.wantVal {
+				t.Errorf("ProviderConfig()[%q] = %v, want %q", tt.wantKey, got[tt.wantKey], tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestRepositoryConfigNilReceiver(t *testing.T) {
+	var repo *RepositoryConfig
+
+	if got := repo.ProviderName(); got != "" {
+		t.Errorf("nil.ProviderName() = %q, want empty string", got)
+	}
+	if got := repo.ProviderConfig(); got != nil {
+		t.Errorf("nil.ProviderConfig() = %v, want nil", got)
+	}
+}
+
 func TestClusterConfigValidate(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -759,44 +933,6 @@ func TestClusterConfigValidate(t *testing.T) {
 	}
 }
 
-func TestNebariConfigGitRepositoryIntegration(t *testing.T) {
-	// Test that the git.Config type works correctly when embedded in NebariConfig
-	cfg := &NebariConfig{
-		ProjectName: "test",
-		Cluster: &ClusterConfig{
-			Providers: map[string]any{"aws": map[string]any{}},
-		},
-		GitRepository: &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "develop",
-			Path:   "clusters/prod",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-			},
-		},
-	}
-
-	// Verify GetBranch works
-	if cfg.GitRepository.GetBranch() != "develop" {
-		t.Errorf("GetBranch() = %q, want %q", cfg.GitRepository.GetBranch(), "develop")
-	}
-
-	// Verify GetArgoCDAuth falls back to Auth
-	argoAuth := cfg.GitRepository.GetArgoCDAuth()
-	if argoAuth.SSHKeyEnv != "MY_SSH_KEY" {
-		t.Errorf("GetArgoCDAuth().SSHKeyEnv = %q, want %q", argoAuth.SSHKeyEnv, "MY_SSH_KEY")
-	}
-
-	// Verify NebariConfig.Validate works
-	opts := ValidateOptions{
-		ClusterProviders: []string{"aws", "gcp", "azure", "hetzner", "local"},
-		DNSProviders:     []string{"cloudflare"},
-	}
-	if err := cfg.Validate(opts); err != nil {
-		t.Errorf("Validate() unexpected error: %v", err)
-	}
-}
-
 func TestUnmarshalProviderConfig(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -834,6 +970,52 @@ func TestUnmarshalProviderConfig(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("UnmarshalProviderConfig() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDefaultLocalRepositoryPath(t *testing.T) {
+	originalUserHomeDir := userHomeDir
+	defer func() {
+		userHomeDir = originalUserHomeDir
+	}()
+
+	tests := []struct {
+		name        string
+		userHomeDir func() (string, error)
+		want        string
+	}{
+		{
+			name: "uses home directory",
+			userHomeDir: func() (string, error) {
+				return filepath.Join("home", "test-user"), nil
+			},
+			want: filepath.Join("home", "test-user", ".nic", "gitops", "my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory errors",
+			userHomeDir: func() (string, error) {
+				return "", errors.New("home unavailable")
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory is empty",
+			userHomeDir: func() (string, error) {
+				return "", nil
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userHomeDir = tt.userHomeDir
+
+			got := DefaultLocalRepositoryPath("my-nebari-local")
+			if got != tt.want {
+				t.Fatalf("DefaultLocalRepositoryPath() = %q, want %q", got, tt.want)
 			}
 		})
 	}

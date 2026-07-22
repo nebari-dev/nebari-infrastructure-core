@@ -1,6 +1,20 @@
 project_name: my-nebari
 domain: nebari.example.com
 
+# GitOps repository configuration (required)
+# ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
+repository:
+  existing:
+    url: "git@github.com:my-org/my-gitops-repo.git"
+    branch: main
+    path: "clusters/my-nebari"  # Optional subdirectory within the repository
+    auth:
+      ssh:
+        env: GIT_SSH_PRIVATE_KEY
+      # OR use a token for HTTPS:
+      # token:
+      #   env: GIT_TOKEN
+
 cluster:
   hetzner:
     location: ash

@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	provider "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 // TestCloudNativePGTemplate_PinsChartAndTarget verifies the app template is
@@ -65,7 +65,7 @@ func TestWriteAllToGit_CloudNativePGAlwaysWritten(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+	if err := WriteAllToGit(context.Background(), dir, cfg, nil, cluster.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	got, err := os.ReadFile(appPath(dir))

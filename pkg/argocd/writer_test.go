@@ -727,8 +727,7 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		StorageClass: "gp2",
 	}
 
-	mock := &mockGitClient{workDir: tmpDir}
-	err := WriteAllToGit(ctx, mock, cfg, nil, settings, "")
+	err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, "")
 	if err != nil {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
@@ -770,8 +769,7 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 			StorageClass:    "longhorn",
 			LonghornEnabled: true,
 		}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -806,8 +804,7 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 			StorageClass:    "gp2",
 			LonghornEnabled: false,
 		}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -822,19 +819,6 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 		}
 	})
 }
-
-// mockGitClient satisfies git.Client for tests that only need WorkDir().
-type mockGitClient struct {
-	workDir string
-}
-
-func (m *mockGitClient) ValidateAuth(_ context.Context) error            { return nil }
-func (m *mockGitClient) Init(_ context.Context) error                    { return nil }
-func (m *mockGitClient) WorkDir() string                                 { return m.workDir }
-func (m *mockGitClient) CommitAndPush(_ context.Context, _ string) error { return nil }
-func (m *mockGitClient) IsBootstrapped(_ context.Context) (bool, error)  { return false, nil }
-func (m *mockGitClient) WriteBootstrapMarker(_ context.Context) error    { return nil }
-func (m *mockGitClient) Cleanup() error                                  { return nil }
 
 // nopWriteCloser wraps a bytes.Buffer to satisfy io.WriteCloser
 type nopWriteCloser struct {
@@ -883,8 +867,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			StorageClass:    "longhorn",
 			LonghornEnabled: true,
 		}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -932,15 +915,14 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	t.Run("removes previously written SecurityPolicy templates on an enable-to-disable toggle", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		mock := &mockGitClient{workDir: tmpDir}
 
 		enabled := cluster.InfraSettings{StorageClass: "longhorn", LonghornEnabled: true}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, enabled, ""); err != nil {
 			t.Fatalf("WriteAllToGit() enabled error: %v", err)
 		}
 
 		disabled := cluster.InfraSettings{StorageClass: "gp2", LonghornEnabled: false}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, disabled, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, disabled, ""); err != nil {
 			t.Fatalf("WriteAllToGit() disabled error: %v", err)
 		}
 
@@ -961,8 +943,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			StorageClass:    "gp2",
 			LonghornEnabled: false,
 		}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -1027,8 +1008,7 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := cluster.InfraSettings{LonghornEnabled: true}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -1058,8 +1038,7 @@ func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := cluster.InfraSettings{LonghornEnabled: false}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -1087,8 +1066,7 @@ func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := cluster.InfraSettings{LonghornEnabled: true}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
@@ -1106,8 +1084,7 @@ func TestWriteAllToGit_GatewayCertIncludesLonghorn(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := cluster.InfraSettings{LonghornEnabled: false}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 

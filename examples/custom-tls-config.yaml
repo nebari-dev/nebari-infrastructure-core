@@ -51,9 +51,11 @@ certificate:
   #   key_env: NEBARI_TLS_KEY
 
 # GitOps repository configuration (required for foundational services)
-git_repository:
-  url: "git@github.com:my-org/my-gitops-repo.git"
-  branch: main
-  path: "clusters/my-nebari-custom-tls"
-  auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY
+repository:
+  existing:
+    url: "git@github.com:my-org/my-gitops-repo.git"
+    branch: main
+    path: "clusters/my-nebari-custom-tls"
+    auth:
+      ssh:
+        env: GIT_SSH_PRIVATE_KEY

@@ -13,6 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	repositorylocal "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -159,7 +160,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		WithMetadata("provider", clusterProvider.Name()))
 
 	if !opts.DryRun {
-		reportRetainedGitOpsDir(ctx, cfg, clusterProvider)
+		reportRetainedGitOpsDir(ctx, cfg)
 	}
 
 	return nil
@@ -169,29 +170,19 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 // left in place after a destroy so the user knows it exists and where to find
 // it. Cluster teardown does not remove this directory: it may hold local
 // commits or edits the user still wants, and it is cheap to delete manually.
-// Only local file:// directories are reported; remote git repositories have no
-// retained host directory to report. Nothing is logged when the directory no
+// Only the local repository provider retains a host directory; remote git
+// repositories have nothing to report. Nothing is logged when the directory no
 // longer exists on disk.
-func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")
 	defer span.End()
 
-	gitConfig := cfg.GitRepository
-	if gitConfig == nil {
-		// Fall back to the same auto-generated local config deploy uses, but
-		// only for providers that manage a local GitOps directory.
-		if !clusterProvider.InfraSettings(cfg.Cluster).SupportsLocalGitOps {
-			return
-		}
-		gitConfig = defaultGitConfig(cfg.ProjectName)
-	}
-
-	if !gitConfig.IsLocalPath() {
+	if cfg.Repository == nil || cfg.Repository.ProviderName() != repositorylocal.ProviderName {
 		return
 	}
 
-	localPath, err := gitConfig.GetLocalPath()
+	localPath, err := repositorylocal.ResolveDir(ctx, cfg.ProjectName, cfg.Repository)
 	if err != nil {
 		span.RecordError(err)
 		return
