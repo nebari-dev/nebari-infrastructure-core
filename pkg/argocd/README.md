@@ -4,14 +4,14 @@ Generates ArgoCD Application manifests for Nebari's foundational software stack.
 
 ## Adding a New Application
 
-1. Create a YAML file in `templates/`:
+1. Create a YAML file in `templates/apps/`:
    ```
-   pkg/argocd/templates/cert-manager.yaml
+   pkg/argocd/templates/apps/cert-manager.yaml
    ```
 
 2. Done. The file is automatically picked up.
 
-The filename (without `.yaml`) becomes the application name. See `_example.yaml` for a template.
+The filename (without `.yaml`) becomes the application name.
 
 ### Adding a Helm-based application
 
