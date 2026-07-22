@@ -3,9 +3,9 @@
 Each foundational Helm app reads its values from this directory via ArgoCD
 `valueFiles` (multi-source `$values` ref):
 
-- `<app>/base.yaml` — owned by nebari-infrastructure-core. Rewritten on every
+- `<app>/base.yaml` - owned by nebari-infrastructure-core. Rewritten on every
   `nic deploy --regen-apps`. Do not edit; your changes will be overwritten.
-- `<app>/overlays/*.yaml` — owned by you (or a software pack). NIC never
+- `<app>/overlays/*.yaml` - owned by you (or a software pack). NIC never
   writes or deletes files here. Create the directory if it does not exist.
 
 How overlays merge:

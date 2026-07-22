@@ -1486,15 +1486,15 @@ func TestHelmApps_SeamInvariants(t *testing.T) {
 		}
 		content := string(raw)
 
-		if strings.Contains(content, "values: |") {
-			t.Errorf("%s: inline helm values blob — use values/%s/base.yaml + valueFiles instead (#406)", e.Name(), app)
+		if strings.Contains(content, "values:") || strings.Contains(content, "valuesObject:") {
+			t.Errorf("%s: inline helm values (values:/valuesObject:) take precedence over valueFiles and break the overlay seam - use values/%s/base.yaml + overlays (#406)", e.Name(), app)
 		}
 		hasHelm := strings.Contains(content, "helm:")
 		if hasHelm && !strings.Contains(content, "valueFiles:") {
-			t.Errorf("%s: helm block without valueFiles — every Helm app must use the overlay seam (#406)", e.Name())
+			t.Errorf("%s: helm block without valueFiles - every Helm app must use the overlay seam (#406)", e.Name())
 		}
 		if hasHelm && !enrolled[app] {
-			t.Errorf("%s: Helm app not enrolled in helmValueFilesApps — add a table row with a signature", e.Name())
+			t.Errorf("%s: Helm app not enrolled in helmValueFilesApps - add a table row with a signature", e.Name())
 		}
 	}
 
