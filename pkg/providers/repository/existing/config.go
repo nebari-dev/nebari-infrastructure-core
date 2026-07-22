@@ -46,6 +46,12 @@ type AuthConfig struct {
 
 	// SSH authenticates over SSH with a private key read from SSH.Env.
 	SSH *EnvRef `yaml:"ssh,omitempty" json:"ssh,omitempty"`
+
+	// InsecureSkipHostKeyVerification disables SSH host key verification,
+	// removing protection against man-in-the-middle attacks. Only intended
+	// for ephemeral environments (e.g. CI) where maintaining a known_hosts
+	// file is impractical. Has no effect on token (HTTPS) authentication.
+	InsecureSkipHostKeyVerification bool `yaml:"insecure_skip_host_key_verification,omitempty" json:"insecure_skip_host_key_verification,omitempty"`
 }
 
 // EnvRef names the environment variable a secret is read from.
@@ -102,7 +108,7 @@ func (a *AuthConfig) resolve() (repository.Auth, error) {
 		if v == "" {
 			return nil, fmt.Errorf("environment variable %s is not set or empty", a.SSH.Env)
 		}
-		return repository.SSHKeyAuth{Key: v}, nil
+		return repository.SSHKeyAuth{Key: v, InsecureSkipHostKeyVerification: a.InsecureSkipHostKeyVerification}, nil
 	default:
 		return nil, fmt.Errorf("no auth method configured")
 	}

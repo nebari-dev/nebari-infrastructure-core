@@ -1,4 +1,4 @@
-# ADR-0005: OpenTelemetry Collector Software Pack Override Point
+# ADR-0008: OpenTelemetry Collector Software Pack Override Point
 
 ## Status
 

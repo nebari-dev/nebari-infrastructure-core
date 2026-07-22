@@ -41,6 +41,12 @@ type TokenAuth struct {
 // SSHKeyAuth authenticates over SSH with a private key (PEM).
 type SSHKeyAuth struct {
 	Key string
+
+	// InsecureSkipHostKeyVerification disables SSH host key verification,
+	// removing protection against man-in-the-middle attacks. Only intended
+	// for ephemeral environments (e.g. CI) where maintaining a known_hosts
+	// file is impractical.
+	InsecureSkipHostKeyVerification bool
 }
 
 func (TokenAuth) isAuth()  {}

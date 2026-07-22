@@ -43,9 +43,10 @@ type Client struct {
 	branch string
 	path   string // optional subdirectory within the repository
 
-	repo    *git.Repository
-	workDir string
-	tempDir string // temp dir used to clone a remote repo. It is removed by Cleanup.
+	repo     *git.Repository
+	workDir  string
+	tempDir  string // temp dir used to clone a remote repo. It is removed by Cleanup.
+	localDir string // repository root passed to Init. Empty for a cloned repo.
 
 	auth transport.AuthMethod // set by Clone, used by Push
 }
@@ -67,17 +68,25 @@ func (c *Client) WorkDir() string {
 
 // Init opens the git repository at dir, initializing a new one if dir is not yet
 // a repository. Used for a local on-disk repository that NIC commits to in place.
+// Init also repairs the additive permissions ArgoCD needs on the repository root
+// and Git-serving metadata before returning (see upgradeLocalPermissions).
 func (c *Client) Init(ctx context.Context, dir string) error {
 	tracer := otel.Tracer(tracerName)
-	_, span := tracer.Start(ctx, "git.Init")
+	ctx, span := tracer.Start(ctx, "git.Init")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("git.dir", dir), attribute.String("git.branch", c.branch))
 
+	if err := EnsureLocalGitOpsDir(ctx, dir); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	c.localDir = dir
 	c.workDir = dir
 	if c.path != "" {
 		c.workDir = filepath.Join(dir, c.path)
-		if err := os.MkdirAll(c.workDir, dirPerm); err != nil {
+		if err := os.MkdirAll(c.workDir, GitOpsDirMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create subdirectory %s: %w", c.path, err)
 		}
@@ -99,7 +108,6 @@ func (c *Client) Init(ctx context.Context, dir string) error {
 			return fmt.Errorf("failed to set HEAD to branch %s: %w", c.branch, err)
 		}
 		c.repo = repo
-		return nil
 	case err != nil:
 		span.RecordError(err)
 		return fmt.Errorf("failed to check git directory: %w", err)
@@ -115,8 +123,15 @@ func (c *Client) Init(ctx context.Context, dir string) error {
 			return fmt.Errorf("failed to open git repository: %w", err)
 		}
 		c.repo = repo
-		return nil
 	}
+
+	// Repair stale repositories before callers can take the already-bootstrapped
+	// skip path. Commit runs the same repair after creating new objects.
+	if err := c.upgradeLocalPermissions(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
 
 // Clone clones the repository at url into a temporary directory managed by the
@@ -249,6 +264,11 @@ func (c *Client) ValidateAuth(ctx context.Context, url string, auth Auth) error 
 
 // Commit stages all changes and commits them. Returns nil without error when
 // there is nothing to commit.
+// For a repository acquired with Init (any local repo, including a
+// user-supplied one), Commit also upgrades the repo root and Git-serving data
+// under .git to be group/other-readable so ArgoCD's non-root repo-server can
+// read the objects the commit wrote. Working-tree and private Git metadata are
+// left untouched; permission bits are only ever added.
 func (c *Client) Commit(ctx context.Context, message string) error {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "git.Commit")
@@ -261,8 +281,16 @@ func (c *Client) Commit(ctx context.Context, message string) error {
 		span.RecordError(err)
 		return err
 	}
-	_, err := c.stageAndCommit(ctx, message)
-	return err
+	if _, err := c.stageAndCommit(ctx, message); err != nil {
+		return err
+	}
+	if c.localDir != "" {
+		if err := c.upgradeLocalPermissions(ctx); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
+	return nil
 }
 
 // Push pushes committed changes to the origin remote configured by Clone, using
@@ -317,7 +345,7 @@ func (c *Client) WriteBootstrapMarker(ctx context.Context) error {
 
 	markerPath := filepath.Join(c.workDir, bootstrapMarkerFile)
 	content := fmt.Sprintf("bootstrapped_at: %s\n", time.Now().UTC().Format(time.RFC3339))
-	if err := os.WriteFile(markerPath, []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(markerPath, []byte(content), GitOpsFileMode); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}

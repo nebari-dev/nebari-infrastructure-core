@@ -559,7 +559,7 @@ cmd/nic/
 
 ## Version Information
 
-- **Go Version**: 1.21+
+- **Go Version**: 1.26+
 - **AWS SDK**: github.com/aws/aws-sdk-go-v2
 - **CLI Framework**: github.com/spf13/cobra
 - **Telemetry**: go.opentelemetry.io/otel

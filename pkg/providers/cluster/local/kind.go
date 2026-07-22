@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
 const (
@@ -74,9 +75,9 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
 	defaultGitOps := config.DefaultLocalRepositoryPath(name)
-	if err := os.MkdirAll(defaultGitOps, 0o750); err != nil {
+	if err := git.EnsureLocalGitOpsDir(ctx, defaultGitOps); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("create local gitops directory %s: %w", defaultGitOps, err)
+		return err
 	}
 	mounts = append(mounts, v1alpha4.Mount{
 		HostPath:      defaultGitOps,
@@ -85,6 +86,9 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	})
 
 	for _, m := range kindCfg.ExtraMounts {
+		// Create custom mount roots with the historical restricted default.
+		// Existing paths are untouched. GitOps bootstrap separately upgrades only
+		// the root and Git-serving metadata of a configured file:// repository.
 		if err := os.MkdirAll(m.HostPath, 0o750); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("create extra_mount host path %s: %w", m.HostPath, err)

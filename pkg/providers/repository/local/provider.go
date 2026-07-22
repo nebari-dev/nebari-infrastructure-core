@@ -8,12 +8,12 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
@@ -23,8 +23,6 @@ const (
 
 	// defaultBranch is used when the config does not specify a branch.
 	defaultBranch = "main"
-
-	dirPerm = 0o750
 )
 
 // Provider implements the local-repository provider.
@@ -60,13 +58,24 @@ func extractConfig(ctx context.Context, repoConfig *config.RepositoryConfig) (*C
 	return &localCfg, nil
 }
 
-// resolveDir returns the configured directory, or a per-project default under
-// the OS temp dir when none is set.
+// resolveDir returns the configured directory, or the per-project default when
+// none is set.
 func resolveDir(cfg *Config, projectName string) string {
 	if cfg.Path != "" {
 		return cfg.Path
 	}
 	return config.DefaultLocalRepositoryPath(projectName)
+}
+
+// ResolveDir returns the directory the provider would provision for the given
+// configuration, without creating it. Used after a destroy to report a
+// retained local GitOps directory without re-creating one that is gone.
+func ResolveDir(ctx context.Context, projectName string, repoConfig *config.RepositoryConfig) (string, error) {
+	localCfg, err := extractConfig(ctx, repoConfig)
+	if err != nil {
+		return "", err
+	}
+	return resolveDir(localCfg, projectName), nil
 }
 
 // Validate checks that the local-repository configuration is valid.
@@ -117,9 +126,9 @@ func (p *Provider) Provision(ctx context.Context, projectName string, repoConfig
 	}
 
 	dir := resolveDir(localCfg, projectName)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
+	if err := git.EnsureLocalGitOpsDir(ctx, dir); err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("create local repository directory %s: %w", dir, err)
+		return nil, err
 	}
 
 	span.SetAttributes(attribute.String("repository.dir", dir))

@@ -224,11 +224,18 @@ func (r *RepositoryConfig) ProviderConfig() map[string]any {
 	return nil
 }
 
+var userHomeDir = os.UserHomeDir
+
 // DefaultLocalRepositoryPath returns the host directory NIC manages for a project's
 // local GitOps repository when the local repository provider is used without an
-// explicit path.
+// explicit path. It lives under the user's home directory so the repository is
+// durable and stays on host paths that kind/Docker Desktop can mount reliably.
 func DefaultLocalRepositoryPath(projectName string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	homeDir, err := userHomeDir()
+	if err != nil || homeDir == "" {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("nebari-gitops-%s", projectName))
+	}
+	return filepath.Join(homeDir, ".nic", "gitops", projectName)
 }
 
 // Certificate type values accepted in CertificateConfig.Type.

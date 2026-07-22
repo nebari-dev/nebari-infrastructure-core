@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	repositorylocal "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -156,7 +158,50 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
 		WithMetadata("provider", clusterProvider.Name()))
+
+	if !opts.DryRun {
+		reportRetainedGitOpsDir(ctx, cfg)
+	}
+
 	return nil
+}
+
+// reportRetainedGitOpsDir logs a reminder that the local GitOps directory is
+// left in place after a destroy so the user knows it exists and where to find
+// it. Cluster teardown does not remove this directory: it may hold local
+// commits or edits the user still wants, and it is cheap to delete manually.
+// Only the local repository provider retains a host directory; remote git
+// repositories have nothing to report. Nothing is logged when the directory no
+// longer exists on disk.
+func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")
+	defer span.End()
+
+	if cfg.Repository == nil || cfg.Repository.ProviderName() != repositorylocal.ProviderName {
+		return
+	}
+
+	localPath, err := repositorylocal.ResolveDir(ctx, cfg.ProjectName, cfg.Repository)
+	if err != nil {
+		span.RecordError(err)
+		return
+	}
+
+	if _, err := os.Stat(localPath); err != nil {
+		if !os.IsNotExist(err) {
+			// Some other problem (e.g. a permission error on an ancestor
+			// directory) means we can't tell whether the directory is
+			// actually gone, so record it instead of silently assuming so.
+			span.RecordError(err)
+		}
+		return
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo,
+		fmt.Sprintf("The local GitOps directory was left in place and can be removed manually: %s", localPath)).
+		WithResource("gitops").
+		WithMetadata("path", localPath))
 }
 
 // destroyDNS removes DNS records associated with the cluster's domain.

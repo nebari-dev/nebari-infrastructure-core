@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -969,6 +970,52 @@ func TestUnmarshalProviderConfig(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("UnmarshalProviderConfig() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDefaultLocalRepositoryPath(t *testing.T) {
+	originalUserHomeDir := userHomeDir
+	defer func() {
+		userHomeDir = originalUserHomeDir
+	}()
+
+	tests := []struct {
+		name        string
+		userHomeDir func() (string, error)
+		want        string
+	}{
+		{
+			name: "uses home directory",
+			userHomeDir: func() (string, error) {
+				return filepath.Join("home", "test-user"), nil
+			},
+			want: filepath.Join("home", "test-user", ".nic", "gitops", "my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory errors",
+			userHomeDir: func() (string, error) {
+				return "", errors.New("home unavailable")
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+		{
+			name: "falls back to temp dir when home directory is empty",
+			userHomeDir: func() (string, error) {
+				return "", nil
+			},
+			want: filepath.Join(os.TempDir(), "nebari-gitops-my-nebari-local"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userHomeDir = tt.userHomeDir
+
+			got := DefaultLocalRepositoryPath("my-nebari-local")
+			if got != tt.want {
+				t.Fatalf("DefaultLocalRepositoryPath() = %q, want %q", got, tt.want)
 			}
 		})
 	}

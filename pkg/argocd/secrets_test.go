@@ -32,7 +32,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -77,7 +77,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -103,7 +103,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 
 	t.Run("creates git secret with token auth", func(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		src := repository.RemoteSource{
 			URL:      "https://github.com/example/repo.git",
@@ -140,7 +140,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 
 	t.Run("returns error when no credentials provided", func(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		src := repository.RemoteSource{URL: "https://github.com/example/repo.git"}
 
@@ -155,7 +155,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "gitops-repo-creds", Namespace: namespace},
 			Data:       map[string][]byte{"old-key": []byte("old-value")},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		src := repository.RemoteSource{
 			URL:      "https://github.com/example/new-repo.git",
@@ -176,7 +176,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 
 	t.Run("prefers ArgoCD read credentials over push credentials", func(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		src := repository.RemoteSource{
 			URL:      "https://github.com/example/repo.git",
@@ -196,7 +196,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	t.Run("creates git secret with SSH key auth", func(t *testing.T) {
 		sshKey := "-----BEGIN OPENSSH PRIVATE KEY-----\ntest-ssh-key-content\n-----END OPENSSH PRIVATE KEY-----"
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		src := repository.RemoteSource{
 			URL:      "git@github.com:example/repo.git",
