@@ -1,7 +1,8 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.6.0"
-  
+  version = "0.7.0"
+
+
   project_name                             = var.project_name
   tags                                     = var.tags
   availability_zones                       = var.availability_zones
@@ -32,4 +33,9 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
+
+  longhorn_backup_bucket_create        = var.backup_bucket_create
+  longhorn_backup_bucket_name          = var.backup_bucket_name
+  longhorn_backup_bucket_force_destroy = var.backup_bucket_force_destroy
+  enable_longhorn_backup_pod_identity  = var.backup_pod_identity_enable
 }
