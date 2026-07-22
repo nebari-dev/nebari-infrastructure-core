@@ -20,102 +20,15 @@ spec:
       targetRevision: 7.1.6
       helm:
         releaseName: keycloak
-        values: |
-          args:
-            - start
-          replicas: 1
-          http:
-            relativePath: "{{ .KeycloakBasePath }}/"
-          extraEnv: |
-            - name: KEYCLOAK_ADMIN
-              value: admin
-            - name: KEYCLOAK_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .KeycloakAdminSecretName }}
-                  key: admin-password
-            - name: KC_DB
-              value: postgres
-            - name: KC_DB_URL_HOST
-              value: postgresql.{{ .KeycloakNamespace }}.svc.cluster.local
-            - name: KC_DB_URL_DATABASE
-              value: keycloak
-            - name: KC_DB_USERNAME
-              value: keycloak
-            - name: KC_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-postgresql-credentials
-                  key: password
-            - name: KC_HOSTNAME
-              value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
-            - name: KC_FEATURES
-              value: "token-exchange,admin-fine-grained-authz:v1"
-{{- if .TrustManagerEnabled }}
-            # Keycloak 26 (Quarkus) ignores X509_CA_BUNDLE; the org CA is loaded
-            # via the native truststore. KC_TRUSTSTORE_PATHS points at the
-            # trust-manager-projected bundle mounted below and feeds every
-            # outbound TLS call (IdP federation, token introspection).
-            - name: KC_TRUSTSTORE_PATHS
-              value: /etc/nebari/truststore
-{{- end }}
-          proxy:
-            mode: xforwarded
-          livenessProbe: |
-            httpGet:
-              path: {{ .KeycloakBasePath }}/health/live
-              port: 9000
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe: |
-            httpGet:
-              path: {{ .KeycloakBasePath }}/health/ready
-              port: 9000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          startupProbe: |
-            httpGet:
-              path: {{ .KeycloakBasePath }}/health
-              port: 9000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 30
-          service:
-            type: ClusterIP
-            httpPort: 8080
-          ingress:
-            enabled: false
-          postgresql:
-            enabled: false
-          resources:
-            requests:
-              cpu: 500m
-              memory: 1Gi
-            limits:
-              cpu: 2000m
-              memory: 2Gi
-{{- if .TrustManagerEnabled }}
-          extraVolumes: |
-            - name: nebari-trust-bundle
-              configMap:
-                name: nebari-trust-bundle
-                items:
-                  - key: ca-certificates.crt
-                    path: ca-certificates.crt
-          extraVolumeMounts: |
-            - name: nebari-trust-bundle
-              mountPath: /etc/nebari/truststore
-              readOnly: true
-{{- end }}
-    # Source 2: Realm setup job (PostSync hook)
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/keycloak/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/keycloak/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    # Source 2: Realm setup job (PostSync hook); also the $values ref for valueFiles
     - repoURL: {{ .GitRepoURL }}
       targetRevision: {{ .GitBranch }}
       path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/keycloak
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

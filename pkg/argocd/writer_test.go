@@ -287,9 +287,13 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 		},
 	}
 
-	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	appContent, err := templates.ReadFile("templates/apps/keycloak.yaml")
 	if err != nil {
 		t.Fatalf("failed to read keycloak template: %v", err)
+	}
+	baseContent, err := templates.ReadFile("templates/values/keycloak/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak base values template: %v", err)
 	}
 
 	for _, tt := range tests {
@@ -303,12 +307,15 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 				GitBranch:               "main",
 			}
 
-			processed, err := processTemplate("apps/keycloak.yaml", content, data)
+			processedApp, err := processTemplate("apps/keycloak.yaml", appContent, data)
 			if err != nil {
-				t.Fatalf("processTemplate() error: %v", err)
+				t.Fatalf("processTemplate(app) error: %v", err)
 			}
-
-			output := string(processed)
+			processedBase, err := processTemplate("values/keycloak/base.yaml", baseContent, data)
+			if err != nil {
+				t.Fatalf("processTemplate(base) error: %v", err)
+			}
+			output := string(processedApp) + "\n" + string(processedBase)
 
 			if !strings.Contains(output, tt.wantProbe) {
 				t.Errorf("expected health probe path %q in rendered template, got:\n%s", tt.wantProbe, output)
@@ -330,9 +337,9 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 // Keycloak only when trust-manager is enabled: the projected ConfigMap is
 // mounted and KC_TRUSTSTORE_PATHS points at it so outbound TLS trusts the org CA.
 func TestKeycloakTemplate_TrustBundle(t *testing.T) {
-	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	content, err := templates.ReadFile("templates/values/keycloak/base.yaml")
 	if err != nil {
-		t.Fatalf("failed to read keycloak template: %v", err)
+		t.Fatalf("failed to read keycloak base values template: %v", err)
 	}
 
 	baseData := func() TemplateData {
@@ -345,34 +352,19 @@ func TestKeycloakTemplate_TrustBundle(t *testing.T) {
 		}
 	}
 
-	// helmValues renders the template, confirms the Application manifest is valid
-	// YAML, and returns the inner keycloakx Helm values (also parsed as YAML).
+	// helmValues renders the keycloak base values template and returns both the
+	// raw render and its parsed form.
 	helmValues := func(t *testing.T, data TemplateData) (string, map[string]any) {
 		t.Helper()
-		processed, err := processTemplate("apps/keycloak.yaml", content, data)
+		processed, err := processTemplate("values/keycloak/base.yaml", content, data)
 		if err != nil {
 			t.Fatalf("processTemplate() error: %v", err)
 		}
-		out := string(processed)
-
-		var app map[string]any
-		if err := yaml.Unmarshal(processed, &app); err != nil {
-			t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, out)
-		}
-		spec, _ := app["spec"].(map[string]any)
-		sources, _ := spec["sources"].([]any)
-		if len(sources) == 0 {
-			t.Fatalf("expected at least one source in:\n%s", out)
-		}
-		src0, _ := sources[0].(map[string]any)
-		helm, _ := src0["helm"].(map[string]any)
-		valuesStr, _ := helm["values"].(string)
-
 		var values map[string]any
-		if err := yaml.Unmarshal([]byte(valuesStr), &values); err != nil {
-			t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, valuesStr)
+		if err := yaml.Unmarshal(processed, &values); err != nil {
+			t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, processed)
 		}
-		return out, values
+		return string(processed), values
 	}
 
 	t.Run("mounts bundle and sets truststore path when enabled", func(t *testing.T) {
@@ -1149,35 +1141,36 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	tests := []struct {
 		name        string
 		in          string // which document to search
+		doc         string // human-readable label for the searched document
 		fragment    string
 		wantPresent bool
 	}{
 		// Application manifest fragments
-		{"managedNamespaceMetadata block", appContent, "managedNamespaceMetadata:", true},
-		{"nebari.dev/managed namespace label", appContent, "nebari.dev/managed: \"true\"", true},
-		{"inline values blob (old design)", appContent, "values: |", false},
-		{"ignoreDifferences (old design)", appContent, "ignoreDifferences:", false},
-		{"RespectIgnoreDifferences (old design)", appContent, "RespectIgnoreDifferences=true", false},
-		{"jsonPointers (old design)", appContent, "jsonPointers:", false},
+		{"managedNamespaceMetadata block", appContent, "app template", "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", appContent, "app template", "nebari.dev/managed: \"true\"", true},
+		{"inline values blob (old design)", appContent, "app template", "values: |", false},
+		{"ignoreDifferences (old design)", appContent, "app template", "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", appContent, "app template", "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", appContent, "app template", "jsonPointers:", false},
 		// Helm values fragments (dedented 8 from their pre-#406 indentation)
-		{"extraVolumes section", baseContent, "extraVolumes:", true},
-		{"overrides-src volume with configmap name", baseContent, "name: overrides-src\n    configMap:\n      name: opentelemetry-collector-overrides\n      optional: true", true},
-		{"overrides-resolved emptyDir", baseContent, "name: overrides-resolved\n    emptyDir: {}", true},
-		{"initContainers section", baseContent, "initContainers:", true},
-		{"ensure-overrides init container", baseContent, "name: ensure-overrides", true},
-		{"config flag for overrides", baseContent, "--config=/conf/overrides/relay.yaml", true},
-		{"escaped relabel replacement", baseContent, "replacement: $$1:$$2", true},
-		{"bare relabel replacement (deprecated)", baseContent, "replacement: $1:$2", false},
+		{"extraVolumes section", baseContent, "base.yaml", "extraVolumes:", true},
+		{"overrides-src volume with configmap name", baseContent, "base.yaml", "name: overrides-src\n    configMap:\n      name: opentelemetry-collector-overrides\n      optional: true", true},
+		{"overrides-resolved emptyDir", baseContent, "base.yaml", "name: overrides-resolved\n    emptyDir: {}", true},
+		{"initContainers section", baseContent, "base.yaml", "initContainers:", true},
+		{"ensure-overrides init container", baseContent, "base.yaml", "name: ensure-overrides", true},
+		{"config flag for overrides", baseContent, "base.yaml", "--config=/conf/overrides/relay.yaml", true},
+		{"escaped relabel replacement", baseContent, "base.yaml", "replacement: $$1:$$2", true},
+		{"bare relabel replacement (deprecated)", baseContent, "base.yaml", "replacement: $1:$2", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			found := strings.Contains(tc.in, tc.fragment)
 			if tc.wantPresent && !found {
-				t.Errorf("missing fragment %q", tc.fragment)
+				t.Errorf("%s missing fragment %q", tc.doc, tc.fragment)
 			}
 			if !tc.wantPresent && found {
-				t.Errorf("contains forbidden fragment %q", tc.fragment)
+				t.Errorf("%s contains forbidden fragment %q", tc.doc, tc.fragment)
 			}
 		})
 	}
@@ -1198,6 +1191,7 @@ var helmValueFilesApps = []struct {
 	{"metallb", "speaker:"},
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
+	{"keycloak", "name: KEYCLOAK_ADMIN"},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
