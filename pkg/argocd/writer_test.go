@@ -1129,8 +1129,13 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	if err := WriteApplication(ctx, &buf, "opentelemetry-collector"); err != nil {
 		t.Fatalf("WriteApplication(opentelemetry-collector) error: %v", err)
 	}
+	appContent := buf.String()
 
-	content := buf.String()
+	baseRaw, err := templates.ReadFile("templates/values/opentelemetry-collector/base.yaml")
+	if err != nil {
+		t.Fatalf("read otel base.yaml template: %v", err)
+	}
+	baseContent := string(baseRaw)
 
 	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
 	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
@@ -1138,41 +1143,41 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	// collector reads via an extra --config flag. This sidesteps the upstream
 	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
 	// keeping the base CM and the override CM completely separate.
+	// The values-shaped fragments live in values/opentelemetry-collector/base.yaml
+	// since the #406 valueFiles conversion; Application-shaped fragments stay in
+	// the app template.
 	tests := []struct {
 		name        string
+		in          string // which document to search
 		fragment    string
 		wantPresent bool
 	}{
-		// Required fragments — composite where possible to pin context
-		{"extraVolumes section", "extraVolumes:", true},
-		{"overrides-src volume with configmap name", "name: overrides-src\n            configMap:\n              name: opentelemetry-collector-overrides\n              optional: true", true},
-		{"overrides-resolved emptyDir", "name: overrides-resolved\n            emptyDir: {}", true},
-		{"initContainers section", "initContainers:", true},
-		{"ensure-overrides init container", "name: ensure-overrides", true},
-		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
-		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
-		// OTel collector confmap resolver doesn't treat it as env expansion.
-		{"escaped relabel replacement", "replacement: $$1:$$2", true},
-		// Opts the monitoring namespace into Nebari management at creation so
-		// software packs (e.g. nebari-lgtm-pack) can drop a NebariApp here and
-		// have the nebari-operator reconcile it instead of rejecting it.
-		{"managedNamespaceMetadata block", "managedNamespaceMetadata:", true},
-		{"nebari.dev/managed namespace label", "nebari.dev/managed: \"true\"", true},
-		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
-		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
-		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
-		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
-		{"jsonPointers (old design)", "jsonPointers:", false},
+		// Application manifest fragments
+		{"managedNamespaceMetadata block", appContent, "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", appContent, "nebari.dev/managed: \"true\"", true},
+		{"inline values blob (old design)", appContent, "values: |", false},
+		{"ignoreDifferences (old design)", appContent, "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", appContent, "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", appContent, "jsonPointers:", false},
+		// Helm values fragments (dedented 8 from their pre-#406 indentation)
+		{"extraVolumes section", baseContent, "extraVolumes:", true},
+		{"overrides-src volume with configmap name", baseContent, "name: overrides-src\n    configMap:\n      name: opentelemetry-collector-overrides\n      optional: true", true},
+		{"overrides-resolved emptyDir", baseContent, "name: overrides-resolved\n    emptyDir: {}", true},
+		{"initContainers section", baseContent, "initContainers:", true},
+		{"ensure-overrides init container", baseContent, "name: ensure-overrides", true},
+		{"config flag for overrides", baseContent, "--config=/conf/overrides/relay.yaml", true},
+		{"escaped relabel replacement", baseContent, "replacement: $$1:$$2", true},
+		{"bare relabel replacement (deprecated)", baseContent, "replacement: $1:$2", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			found := strings.Contains(content, tc.fragment)
+			found := strings.Contains(tc.in, tc.fragment)
 			if tc.wantPresent && !found {
-				t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", tc.fragment, content)
+				t.Errorf("missing fragment %q", tc.fragment)
 			}
 			if !tc.wantPresent && found {
-				t.Errorf("rendered opentelemetry-collector.yaml contains forbidden fragment %q from the old ignoreDifferences design", tc.fragment)
+				t.Errorf("contains forbidden fragment %q", tc.fragment)
 			}
 		})
 	}
@@ -1190,8 +1195,9 @@ var helmValueFilesApps = []struct {
 	{"cert-manager", "installCRDs: true"},
 	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
 	{"postgresql", "username: postgres"},
-	{"metallb", "controller:"},
+	{"metallb", "speaker:"},
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
+	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
@@ -1236,8 +1242,12 @@ func TestHelmApps_ValueFilesOverlaySeam(t *testing.T) {
 					spec["source"], spec["sources"])
 			}
 
-			if first, _ := sources[0].(map[string]any); first["ref"] == "values" {
-				t.Error("chart source must be listed first (ref source is sources[0])")
+			if len(sources) == 0 {
+				t.Fatalf("spec.sources is empty in:\n%s", processed)
+			}
+			first, _ := sources[0].(map[string]any)
+			if h, ok := first["helm"].(map[string]any); !ok || h["valueFiles"] == nil {
+				t.Errorf("sources[0] must be the chart source carrying helm.valueFiles, got: %#v", first)
 			}
 
 			for i, s := range sources {
