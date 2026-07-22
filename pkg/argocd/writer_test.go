@@ -1354,3 +1354,66 @@ func TestHelmApps_ValueFilesRespectGitPath(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("disabled gates remove base.yaml but preserve overlays", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Seed a user overlay and a stale base.yaml from a previous
+		// enabled-state run for both gated apps.
+		for _, app := range []string{"metallb", "trust-manager"} {
+			overlayDir := filepath.Join(tmpDir, "values", app, "overlays")
+			if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(tmpDir, "values", app, "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{StorageClass: "gp2"} // NeedsMetalLB=false
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		for _, app := range []string{"metallb", "trust-manager"} {
+			basePath := filepath.Join(tmpDir, "values", app, "base.yaml")
+			if _, err := os.Stat(basePath); !os.IsNotExist(err) {
+				t.Errorf("%s: stale base.yaml should be removed when the app is disabled", app)
+			}
+			overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", app, "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
+			if err != nil {
+				t.Fatalf("%s: user overlay was destroyed: %v", app, err)
+			}
+			if string(overlay) != "user: overlay\n" {
+				t.Errorf("%s: user overlay content changed: %q", app, overlay)
+			}
+		}
+	})
+
+	t.Run("enabled gates write base.yaml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:       "gp2",
+			NeedsMetalLB:       true,
+			MetalLBAddressPool: "10.0.0.100-10.0.0.110",
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, testCAPEM); err != nil { // PEM => TrustManagerEnabled=true
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		for _, app := range []string{"metallb", "trust-manager"} {
+			if _, err := os.Stat(filepath.Join(tmpDir, "values", app, "base.yaml")); err != nil {
+				t.Errorf("%s: expected values/%s/base.yaml to be written: %v", app, app, err)
+			}
+		}
+	})
+}

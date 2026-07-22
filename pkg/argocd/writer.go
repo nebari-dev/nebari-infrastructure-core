@@ -416,9 +416,12 @@ func removeStaleTemplate(destPath string, d fs.DirEntry) error {
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
+// values/metallb is matched only at its base.yaml FILE: matching the directory
+// would make removeStaleTemplate os.RemoveAll it, destroying user overlays.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
+		relPath == "values/metallb/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
 }
 
@@ -431,10 +434,14 @@ func isLonghornOnlyPath(relPath string) bool {
 }
 
 // isTrustBundlePath returns true if the relative path is a trust-manager-related
-// template (the chart Application, the Bundle Application, or the Bundle manifest).
+// template (the chart Application, the Bundle Application, the Bundle manifest,
+// or the chart's base values). values/trust-manager is matched only at its
+// base.yaml FILE: matching the directory would make removeStaleTemplate
+// os.RemoveAll it, destroying user overlays.
 func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||
+		relPath == "values/trust-manager/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
 }
 
