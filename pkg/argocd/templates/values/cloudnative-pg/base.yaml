@@ -1,0 +1,9 @@
+# Operator-only install: per-database Cluster resources are created
+# by consumers (nebari-operator / software packs), not by this chart.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

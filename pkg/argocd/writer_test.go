@@ -1187,6 +1187,11 @@ var helmValueFilesApps = []struct {
 	signature string
 }{
 	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
+	{"cert-manager", "installCRDs: true"},
+	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
+	{"postgresql", "username: postgres"},
+	{"metallb", "controller:"},
+	{"trust-manager", "The default CA package (debian ca-certificates)"},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
@@ -1231,6 +1236,19 @@ func TestHelmApps_ValueFilesOverlaySeam(t *testing.T) {
 					spec["source"], spec["sources"])
 			}
 
+			if first, _ := sources[0].(map[string]any); first["ref"] == "values" {
+				t.Error("chart source must be listed first (ref source is sources[0])")
+			}
+
+			for i, s := range sources {
+				m, _ := s.(map[string]any)
+				if h, ok := m["helm"].(map[string]any); ok {
+					if _, hasInline := h["values"]; hasInline {
+						t.Errorf("sources[%d] has inline helm.values (takes precedence over valueFiles, breaks the overlay seam)", i)
+					}
+				}
+			}
+
 			var refSource, helmSource map[string]any
 			for _, s := range sources {
 				m, _ := s.(map[string]any)
@@ -1255,9 +1273,6 @@ func TestHelmApps_ValueFilesOverlaySeam(t *testing.T) {
 			}
 
 			helm := helmSource["helm"].(map[string]any)
-			if _, hasInline := helm["values"]; hasInline {
-				t.Error("helm.values inline blob must be removed (it would take precedence over valueFiles)")
-			}
 			if helm["ignoreMissingValueFiles"] != true {
 				t.Errorf("ignoreMissingValueFiles = %v, want true", helm["ignoreMissingValueFiles"])
 			}
