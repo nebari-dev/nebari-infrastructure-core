@@ -31,7 +31,7 @@ A Helm-based app needs two files, not one, because Helm values are sourced from 
 
 2. `templates/values/<name>/base.yaml` - the chart's default values, rendered from the same `TemplateData` as the Application.
 
-Do not use inline `helm.values` or `helm.valuesObject` on any source. ArgoCD's Helm precedence is `parameters` > `valuesObject` > `values` > `valueFiles`, so an inline block outranks every `valueFiles` entry and silently defeats overlays. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a Helm app template contains `values:`/`valuesObject:`, is missing `valueFiles:`, or is not enrolled below.
+Do not use inline `helm.values` or `helm.valuesObject` on any source. ArgoCD's Helm precedence is `parameters` > `valuesObject` > `values` > `valueFiles`, so an inline block outranks every `valueFiles` entry and silently defeats overlays. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a Helm app template contains `values:`/`valuesObject:`, is missing `valueFiles:`, or is not enrolled in the `helmValueFilesApps` table in `writer_test.go` (see next section).
 
 You must also:
 

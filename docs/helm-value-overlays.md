@@ -1,13 +1,26 @@
 # Overriding foundational Helm values
 
-Foundational Helm apps (envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, postgresql, metallb, trust-manager, nebari-landingpage) read their Helm values from the GitOps repo:
+The foundational Helm apps, that is, those with a `values/<app>/` directory in your gitops repo (currently: envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, postgresql, metallb, trust-manager, nebari-landingpage), read their Helm values from the GitOps repo:
 
 ```
 values/<app>/base.yaml          # NIC-owned; --regen-apps rewrites it
 values/<app>/overlays/*.yaml    # yours; NIC never touches it
 ```
 
-To override a value, commit a file under the app's `overlays/` directory (create the directory if it does not exist yet), for example `values/envoy-gateway/overlays/30-llm.yaml` with a map-shaped override. ArgoCD picks up new files at sync time; you do not need to edit the Application manifest.
+To override a value, commit a file under the app's `overlays/` directory (create the directory if it does not exist yet), for example `values/envoy-gateway/overlays/30-llm.yaml` with a map-shaped override. The file contains bare chart values, not a Kubernetes resource:
+
+```yaml
+# values/envoy-gateway/overlays/30-llm.yaml
+deployment:
+  envoyGateway:
+    resources:
+      limits:
+        memory: 1Gi
+```
+
+ArgoCD picks up new files at sync time; you do not need to edit the Application manifest.
+
+To find out what keys are available and what NIC currently sets, read `values/<app>/base.yaml` in your gitops repo. Any key you don't set there, or in an overlay, falls through to the chart's own defaults.
 
 Note that git does not track empty directories, so `overlays/` only exists in the repo once it contains at least one file. There is no need for a placeholder file such as `.gitkeep`; just commit your first overlay and the directory comes along with it.
 
