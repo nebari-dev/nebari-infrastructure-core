@@ -1177,3 +1177,153 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 		})
 	}
 }
+
+// helmValueFilesApps lists every Helm-based foundational app converted to the
+// base.yaml + overlays/*.yaml valueFiles seam (issue #406), with a signature
+// string expected in its rendered values/<app>/base.yaml. Extended as each
+// app converts.
+var helmValueFilesApps = []struct {
+	app       string
+	signature string
+}{
+	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
+}
+
+// seamTemplateData returns TemplateData populated enough that every Helm
+// app's template and base.yaml render with no unresolved placeholders.
+func seamTemplateData() TemplateData {
+	return TemplateData{
+		Domain:                       "test.example.com",
+		StorageClass:                 "gp2",
+		GitRepoURL:                   "https://github.com/example/repo",
+		GitBranch:                    "main",
+		KeycloakNamespace:            "keycloak",
+		KeycloakServiceURL:           "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+		KeycloakIssuerURL:            "https://keycloak.test.example.com",
+		KeycloakRealm:                "nebari",
+		KeycloakAdminSecretName:      "keycloak-admin",
+		KeycloakAdminSecretNamespace: "keycloak",
+	}
+}
+
+func TestHelmApps_ValueFilesOverlaySeam(t *testing.T) {
+	data := seamTemplateData()
+
+	for _, tc := range helmValueFilesApps {
+		t.Run(tc.app, func(t *testing.T) {
+			content, err := templates.ReadFile("templates/apps/" + tc.app + ".yaml")
+			if err != nil {
+				t.Fatalf("read app template: %v", err)
+			}
+			processed, err := processTemplate("apps/"+tc.app+".yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			var app map[string]any
+			if err := yaml.Unmarshal(processed, &app); err != nil {
+				t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, processed)
+			}
+			spec, _ := app["spec"].(map[string]any)
+			sources, ok := spec["sources"].([]any)
+			if !ok {
+				t.Fatalf("expected spec.sources list (multi-source), got source=%#v sources=%#v",
+					spec["source"], spec["sources"])
+			}
+
+			var refSource, helmSource map[string]any
+			for _, s := range sources {
+				m, _ := s.(map[string]any)
+				if m["ref"] == "values" {
+					refSource = m
+				}
+				if h, ok := m["helm"].(map[string]any); ok && h["valueFiles"] != nil {
+					helmSource = m
+				}
+			}
+			if refSource == nil {
+				t.Fatalf("no source with ref: values in:\n%s", processed)
+			}
+			if refSource["repoURL"] != data.GitRepoURL {
+				t.Errorf("ref source repoURL = %v, want %v", refSource["repoURL"], data.GitRepoURL)
+			}
+			if refSource["targetRevision"] != data.GitBranch {
+				t.Errorf("ref source targetRevision = %v, want %v", refSource["targetRevision"], data.GitBranch)
+			}
+			if helmSource == nil {
+				t.Fatalf("no source with helm.valueFiles in:\n%s", processed)
+			}
+
+			helm := helmSource["helm"].(map[string]any)
+			if _, hasInline := helm["values"]; hasInline {
+				t.Error("helm.values inline blob must be removed (it would take precedence over valueFiles)")
+			}
+			if helm["ignoreMissingValueFiles"] != true {
+				t.Errorf("ignoreMissingValueFiles = %v, want true", helm["ignoreMissingValueFiles"])
+			}
+			wantFiles := []string{
+				"$values/values/" + tc.app + "/base.yaml",
+				"$values/values/" + tc.app + "/overlays/*.yaml",
+			}
+			vf, _ := helm["valueFiles"].([]any)
+			if len(vf) != len(wantFiles) {
+				t.Fatalf("valueFiles = %v, want %v", vf, wantFiles)
+			}
+			for i, want := range wantFiles {
+				if vf[i] != want {
+					t.Errorf("valueFiles[%d] = %v, want %q", i, vf[i], want)
+				}
+			}
+
+			// base.yaml template exists, renders to non-empty valid YAML with
+			// no unresolved placeholders, and carries this app's signature.
+			baseRaw, err := templates.ReadFile("templates/values/" + tc.app + "/base.yaml")
+			if err != nil {
+				t.Fatalf("read values/%s/base.yaml template: %v", tc.app, err)
+			}
+			rendered, err := processTemplate("values/"+tc.app+"/base.yaml", baseRaw, data)
+			if err != nil {
+				t.Fatalf("render base.yaml: %v", err)
+			}
+			var vals map[string]any
+			if err := yaml.Unmarshal(rendered, &vals); err != nil {
+				t.Fatalf("rendered base.yaml is not valid YAML: %v\n%s", err, rendered)
+			}
+			if len(vals) == 0 {
+				t.Error("rendered base.yaml is empty")
+			}
+			if strings.Contains(string(rendered), "{{") {
+				t.Errorf("rendered base.yaml has unresolved placeholders:\n%s", rendered)
+			}
+			if !strings.Contains(string(rendered), tc.signature) {
+				t.Errorf("rendered base.yaml missing signature %q:\n%s", tc.signature, rendered)
+			}
+		})
+	}
+}
+
+func TestHelmApps_ValueFilesRespectGitPath(t *testing.T) {
+	data := seamTemplateData()
+	data.GitPath = "clusters/prod"
+
+	for _, tc := range helmValueFilesApps {
+		t.Run(tc.app, func(t *testing.T) {
+			content, err := templates.ReadFile("templates/apps/" + tc.app + ".yaml")
+			if err != nil {
+				t.Fatalf("read app template: %v", err)
+			}
+			processed, err := processTemplate("apps/"+tc.app+".yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+			for _, want := range []string{
+				"$values/clusters/prod/values/" + tc.app + "/base.yaml",
+				"$values/clusters/prod/values/" + tc.app + "/overlays/*.yaml",
+			} {
+				if !strings.Contains(string(processed), want) {
+					t.Errorf("rendered app missing GitPath-prefixed path %q:\n%s", want, processed)
+				}
+			}
+		})
+	}
+}
