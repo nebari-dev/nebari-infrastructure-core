@@ -14,6 +14,7 @@ spec:
   project: foundational
 
   sources:
+    # Source 1: landing page Helm chart (hosted in the nebari-landing git repo)
     - repoURL: https://github.com/nebari-dev/nebari-landing
       targetRevision: v0.1.0-alpha.5
       path: charts/nebari-landing
@@ -23,6 +24,7 @@ spec:
           - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-landingpage/base.yaml
           - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-landingpage/overlays/*.yaml
         ignoreMissingValueFiles: true
+    # Source 2: gitops repo, $values ref for valueFiles
     - repoURL: {{ .GitRepoURL }}
       targetRevision: {{ .GitBranch }}
       ref: values

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1416,4 +1417,122 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestWriteAllToGit_PreservesOverlays pins the core #406 invariant: nothing
+// under values/<app>/overlays/ is ever written or deleted by NIC, across
+// repeated regeneration runs.
+func TestWriteAllToGit_PreservesOverlays(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	overlayDir := filepath.Join(tmpDir, "values", "envoy-gateway", "overlays")
+	if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	overlayPath := filepath.Join(overlayDir, "30-llm.yaml")
+	overlayContent := []byte("config:\n  envoyGateway:\n    extensionManager: {}\n")
+	if err := os.WriteFile(overlayPath, overlayContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	settings := cluster.InfraSettings{StorageClass: "gp2"}
+	mock := &mockGitClient{workDir: tmpDir}
+
+	// Bootstrap, then regen (WriteAllToGit is the shared path for both).
+	for i := 0; i < 2; i++ {
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() run %d error: %v", i+1, err)
+		}
+	}
+
+	got, err := os.ReadFile(overlayPath) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("overlay file was removed: %v", err)
+	}
+	if !bytes.Equal(got, overlayContent) {
+		t.Errorf("overlay file was modified:\ngot:  %q\nwant: %q", got, overlayContent)
+	}
+
+	// And base.yaml was (re)written alongside it.
+	if _, err := os.Stat(filepath.Join(tmpDir, "values", "envoy-gateway", "base.yaml")); err != nil {
+		t.Errorf("expected values/envoy-gateway/base.yaml to be written: %v", err)
+	}
+}
+
+// TestHelmApps_SeamInvariants makes the #406 seam self-enforcing for apps
+// added later: every app template with a helm block must use valueFiles
+// (never inline values), be enrolled in helmValueFilesApps, and every
+// values/<app> template dir must correspond to an enrolled app.
+func TestHelmApps_SeamInvariants(t *testing.T) {
+	enrolled := make(map[string]bool, len(helmValueFilesApps))
+	for _, tc := range helmValueFilesApps {
+		enrolled[tc.app] = true
+	}
+
+	entries, err := fs.ReadDir(templates, "templates/apps")
+	if err != nil {
+		t.Fatalf("read templates/apps: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
+		app := strings.TrimSuffix(e.Name(), ".yaml")
+		raw, err := templates.ReadFile("templates/apps/" + e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		content := string(raw)
+
+		if strings.Contains(content, "values: |") {
+			t.Errorf("%s: inline helm values blob — use values/%s/base.yaml + valueFiles instead (#406)", e.Name(), app)
+		}
+		hasHelm := strings.Contains(content, "helm:")
+		if hasHelm && !strings.Contains(content, "valueFiles:") {
+			t.Errorf("%s: helm block without valueFiles — every Helm app must use the overlay seam (#406)", e.Name())
+		}
+		if hasHelm && !enrolled[app] {
+			t.Errorf("%s: Helm app not enrolled in helmValueFilesApps — add a table row with a signature", e.Name())
+		}
+	}
+
+	valueDirs, err := fs.ReadDir(templates, "templates/values")
+	if err != nil {
+		t.Fatalf("read templates/values: %v", err)
+	}
+	for _, d := range valueDirs {
+		if !d.IsDir() {
+			continue
+		}
+		if !enrolled[d.Name()] {
+			t.Errorf("templates/values/%s exists but %s is not enrolled in helmValueFilesApps", d.Name(), d.Name())
+		}
+	}
+}
+
+// TestWriteAllToGit_WritesValuesReadme pins that the in-repo contract doc for
+// values/<app>/base.yaml vs overlays/ is generated so it's always present in
+// the gitops repo, not just in this source tree.
+func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	settings := cluster.InfraSettings{StorageClass: "gp2"}
+	mock := &mockGitClient{workDir: tmpDir}
+	if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "values", "README.md")) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("values/README.md not written: %v", err)
+	}
+	for _, want := range []string{"overlays/", "base.yaml", "lexical"} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("values/README.md missing %q", want)
+		}
+	}
 }

@@ -402,6 +402,8 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 // files removed from the gitops repo rather than skipped-but-retained. Missing
 // files are a no-op (the common case: the feature was never enabled). Returns
 // fs.SkipDir for directories so the walk does not descend into them.
+// Never route values/<app> directories here — only their base.yaml files — or
+// user overlays would be destroyed by the RemoveAll branch.
 func removeStaleTemplate(destPath string, d fs.DirEntry) error {
 	if d.IsDir() {
 		if err := os.RemoveAll(destPath); err != nil {
