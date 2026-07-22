@@ -552,9 +552,13 @@ func TestLandingPageTemplate(t *testing.T) {
 		},
 	}
 
-	content, err := templates.ReadFile("templates/apps/nebari-landingpage.yaml")
+	appContent, err := templates.ReadFile("templates/apps/nebari-landingpage.yaml")
 	if err != nil {
 		t.Fatalf("failed to read nebari-landingpage template: %v", err)
+	}
+	baseContent, err := templates.ReadFile("templates/values/nebari-landingpage/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read nebari-landingpage base values template: %v", err)
 	}
 
 	for _, tt := range tests {
@@ -570,12 +574,15 @@ func TestLandingPageTemplate(t *testing.T) {
 				GitBranch:                    "main",
 			}
 
-			processed, err := processTemplate("apps/nebari-landingpage.yaml", content, data)
+			processedApp, err := processTemplate("apps/nebari-landingpage.yaml", appContent, data)
 			if err != nil {
-				t.Fatalf("processTemplate() error: %v", err)
+				t.Fatalf("processTemplate(app) error: %v", err)
 			}
-
-			output := string(processed)
+			processedBase, err := processTemplate("values/nebari-landingpage/base.yaml", baseContent, data)
+			if err != nil {
+				t.Fatalf("processTemplate(base) error: %v", err)
+			}
+			output := string(processedApp) + "\n" + string(processedBase)
 
 			if !strings.Contains(output, "kind: Application") {
 				t.Error("expected 'kind: Application' in rendered output")
@@ -1192,6 +1199,7 @@ var helmValueFilesApps = []struct {
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
+	{"nebari-landingpage", "existingSecret: \"nebari-landing-redis\""},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
