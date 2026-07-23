@@ -21,6 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	longhorn "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 //go:embed templates
@@ -91,6 +92,18 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// Longhorn backup configuration (rendered into manifests/storage/longhorn-backup)
+	LonghornBackupEnabled          bool
+	LonghornBackupTargetURL        string
+	LonghornBackupCredentialSecret string
+	LonghornSnapshotCron           string
+	LonghornSnapshotRetain         int
+	LonghornSnapshotConcurrency    int
+	LonghornBackupCron             string
+	LonghornBackupRetain           int
+	LonghornBackupConcurrency      int
+	LonghornAllowDetached          string // "true" | "false"
 
 	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
 	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
@@ -184,6 +197,25 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 	// template will need a guard or a separate value for the OIDC issuer URL.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
+	}
+
+	// Longhorn backup configuration.
+	if cfg.Backups.LonghornEnabled() {
+		lh := cfg.Backups.Longhorn
+		data.LonghornBackupEnabled = true
+		data.LonghornBackupTargetURL = lh.BackupTargetURL()
+		data.LonghornBackupCredentialSecret = longhorn.BackupCredentialSecretName
+		data.LonghornSnapshotCron = lh.Schedules.Snapshot.Cron
+		data.LonghornSnapshotRetain = lh.Schedules.Snapshot.Retain
+		data.LonghornSnapshotConcurrency = lh.Schedules.Snapshot.Concurrency
+		data.LonghornBackupCron = lh.Schedules.Backup.Cron
+		data.LonghornBackupRetain = lh.Schedules.Backup.Retain
+		data.LonghornBackupConcurrency = lh.Schedules.Backup.Concurrency
+		if lh.AllowDetached() {
+			data.LonghornAllowDetached = "true"
+		} else {
+			data.LonghornAllowDetached = "false"
+		}
 	}
 
 	return data
@@ -350,6 +382,11 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return removeStaleTemplate(destPath, d)
 		}
 
+		// Longhorn backup templates are gated on backups being enabled.
+		if isBackupPath(relPath) && !data.LonghornBackupEnabled {
+			return removeStaleTemplate(destPath, d)
+		}
+
 		// trust-manager templates only apply when a trust bundle is configured
 		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
 			return removeStaleTemplate(destPath, d)
@@ -413,6 +450,14 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	}
 
 	return nil
+}
+
+// isBackupPath reports whether relPath is part of the Longhorn backup app or its
+// rendered manifests, so it can be removed when backups are disabled.
+func isBackupPath(relPath string) bool {
+	return relPath == "apps/longhorn-backup.yaml" ||
+		relPath == "manifests/storage/longhorn-backup" ||
+		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup/")
 }
 
 // removeStaleTemplate deletes the previously written output of a template

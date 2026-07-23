@@ -7,6 +7,28 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
+// BackupBucketSpec describes an object-storage bucket/container the provider's
+// Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec
+// in DeployOptions means "do not provision" (external or pre-existing bucket).
+type BackupBucketSpec struct {
+	// Name is the S3 bucket name (AWS) or storage container name (Azure).
+	Name string
+	// StorageAccount is the Azure storage account name (Azure only; empty for AWS).
+	StorageAccount string
+	// Create asks the module to provision the bucket/container. When false the
+	// spec still carries the bucket Name for other wiring (e.g. scoping the Pod
+	// Identity IAM policy to a pre-existing bucket), but no bucket is created.
+	Create bool
+	// PodIdentity asks the module to provision a keyless IAM-role association
+	// (EKS Pod Identity) for Longhorn's service account, scoped to Name. AWS-only;
+	// set when the S3 target uses keyless auth (no static credentials).
+	PodIdentity bool
+	// ForceDestroy allows `tofu destroy` to remove a non-empty bucket. Derived
+	// from the inverse of the target's retain_on_destroy (default false => retain).
+	// Only meaningful when Create is true.
+	ForceDestroy bool
+}
+
 // DeployOptions holds runtime flags for infrastructure deployment.
 type DeployOptions struct {
 	DryRun  bool
@@ -15,6 +37,10 @@ type DeployOptions struct {
 	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
 	// passed so providers can apply it without seeing the full NebariConfig.
 	TrustBundle string
+
+	// BackupBucket, when non-nil, asks the provider to provision a Longhorn
+	// backup bucket/container in its Terraform module.
+	BackupBucket *BackupBucketSpec
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.
@@ -26,6 +52,12 @@ type DestroyOptions struct {
 	// TrustBundle mirrors DeployOptions.TrustBundle; destroy must compute the
 	// same tofu variables as deploy for the plan to match.
 	TrustBundle string
+
+	// BackupBucket, when non-nil, describes a NIC-provisioned Longhorn backup
+	// bucket/container. When its ForceDestroy is false (retain_on_destroy on),
+	// providers remove it from Terraform state before destroy so it (and its
+	// backups) survive teardown.
+	BackupBucket *BackupBucketSpec
 }
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -56,12 +57,18 @@ type TFVars struct {
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
 	// No omitempty: a false value must be emitted so it overrides the module's
 	// `true` default when the autoscaler is disabled.
-	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
-	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
+	EnableClusterAutoscalerPodIdentity bool   `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableIRSA                         *bool  `json:"enable_irsa,omitempty"`
+	BackupBucketCreate                 bool   `json:"backup_bucket_create"`
+	BackupBucketName                   string `json:"backup_bucket_name,omitempty"`
+	BackupBucketForceDestroy           bool   `json:"backup_bucket_force_destroy"`
+	// BackupPodIdentityEnable provisions a keyless IAM-role (EKS Pod Identity)
+	// association for Longhorn's service account, scoped to the backup bucket.
+	BackupPodIdentityEnable bool `json:"backup_pod_identity_enable"`
 	// CrossplaneCapabilities lists the bare capability keys (e.g. "s3", "rds")
 	// the cluster opted into. crossplane-iam.tf expands capability dependencies
-	// and provisions one scoped Pod Identity role per AWS provider controller.
-	// Sorted for deterministic tfvars output.
+	// and binds all AWS provider controllers to one shared account-local role
+	// (ADR-0012 dedicated-account model). Sorted for deterministic tfvars output.
 	CrossplaneCapabilities []string `json:"crossplane_capabilities,omitempty"`
 }
 
@@ -149,8 +156,9 @@ func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
 
 // toTFVars builds the OpenTofu variables for the cluster. caBundle is the
 // top-level trust_bundle resolved by the orchestration layer (base64-encoded
-// PEM), empty when no bundle is configured.
-func (c *Config) toTFVars(projectName, caBundle string) TFVars {
+// PEM), empty when no bundle is configured. backup, when non-nil, asks the
+// module to provision the Longhorn backup bucket and/or Pod Identity role.
+func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBucketSpec) TFVars {
 	nodeGroups := resolveNodeGroupDefaults(c.NodeGroups)
 	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
 	// the create-default-disk label or Longhorn provisions no disks and every
@@ -250,6 +258,13 @@ func (c *Config) toTFVars(projectName, caBundle string) TFVars {
 		if c.EFS.KMSKeyArn != "" {
 			vars.EFSKMSKeyArn = &c.EFS.KMSKeyArn
 		}
+	}
+
+	if backup != nil {
+		vars.BackupBucketCreate = backup.Create
+		vars.BackupBucketName = backup.Name
+		vars.BackupBucketForceDestroy = backup.ForceDestroy
+		vars.BackupPodIdentityEnable = backup.PodIdentity
 	}
 
 	return vars
