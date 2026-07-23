@@ -15,7 +15,7 @@ The filename (without `.yaml`) becomes the application name.
 
 ### Adding a Helm-based application
 
-A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0010](../../docs/adr/0010-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
+A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0012](../../docs/adr/0012-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
 
 1. `templates/apps/<name>.yaml` - the Application manifest. It must be multi-source:
    - The chart source comes first and carries `helm.valueFiles` using the `GitPath` idiom, plus `ignoreMissingValueFiles: true`:
