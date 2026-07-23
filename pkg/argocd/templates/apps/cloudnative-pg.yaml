@@ -13,22 +13,19 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    chart: cloudnative-pg
-    repoURL: https://cloudnative-pg.github.io/charts
-    targetRevision: 0.29.0
-    helm:
-      releaseName: cloudnative-pg
-      values: |
-        # Operator-only install: per-database Cluster resources are created
-        # by consumers (nebari-operator / software packs), not by this chart.
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
+  sources:
+    - chart: cloudnative-pg
+      repoURL: https://cloudnative-pg.github.io/charts
+      targetRevision: 0.29.0
+      helm:
+        releaseName: cloudnative-pg
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/cloudnative-pg/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/cloudnative-pg/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

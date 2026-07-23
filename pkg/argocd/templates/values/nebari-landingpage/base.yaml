@@ -1,0 +1,36 @@
+frontend:
+  keycloak:
+    # External public Keycloak URL - used by the browser for OIDC login.
+    url: "{{ .KeycloakIssuerURL }}"
+    realm: "{{ .KeycloakRealm }}"
+  oauth2Proxy:
+    oidcIssuerUrl: "{{ .KeycloakIssuerURL }}/realms/{{ .KeycloakRealm }}"
+
+webapi:
+  keycloak:
+    # In-cluster URL for JWK fetching (fast, no TLS hop).
+    url: "{{ .KeycloakServiceURL }}"
+    realm: "{{ .KeycloakRealm }}"
+    # External public URL for validating the iss claim in tokens.
+    issuerUrl: "{{ .KeycloakIssuerURL }}"
+    adminSecretName: "{{ .KeycloakAdminSecretName }}"
+    adminSecretNamespace: "{{ .KeycloakAdminSecretNamespace }}"
+
+# Use NebariApp CRs so the nebari-operator manages HTTPRoutes.
+nebariApp:
+  enabled: true
+
+httpRoute:
+  hostname: "{{ .Domain }}"
+  tls: true
+
+# Pin Redis auth to the existing secret so ArgoCD's selfHeal sync does
+# not regenerate the password. Without this, the Bitnami subchart's
+# helm lookup() returns nil during ArgoCD template rendering (helm
+# template has no cluster access), generating a new random password on
+# every sync. Redis reloads the new password immediately from its
+# mounted secret file, but the webapi pod keeps the old password from
+# its startup env var - causing WRONGPASS ~every 30 min.
+redis:
+  auth:
+    existingSecret: "nebari-landing-redis"

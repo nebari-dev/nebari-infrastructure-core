@@ -13,31 +13,19 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    chart: trust-manager
-    repoURL: https://charts.jetstack.io
-    targetRevision: v0.22.1
-    helm:
-      releaseName: trust-manager
-      values: |
-        crds:
-          enabled: true
-        # The default CA package (debian ca-certificates) backs the
-        # useDefaultCAs source in the nebari-trust-bundle Bundle; trust-manager
-        # rejects such Bundles when it runs without a default package. Enabled
-        # by chart default, pinned explicitly because the Bundle depends on it.
-        defaultPackage:
-          enabled: true
-        app:
-          trust:
-            namespace: cert-manager
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
+  sources:
+    - chart: trust-manager
+      repoURL: https://charts.jetstack.io
+      targetRevision: v0.22.1
+      helm:
+        releaseName: trust-manager
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/trust-manager/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/trust-manager/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

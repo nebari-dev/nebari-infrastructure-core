@@ -447,6 +447,8 @@ func isBackupPath(relPath string) bool {
 // files removed from the gitops repo rather than skipped-but-retained. Missing
 // files are a no-op (the common case: the feature was never enabled). Returns
 // fs.SkipDir for directories so the walk does not descend into them.
+// Never route values/<app> directories here — only their base.yaml files — or
+// user overlays would be destroyed by the RemoveAll branch.
 func removeStaleTemplate(destPath string, d fs.DirEntry) error {
 	if d.IsDir() {
 		if err := os.RemoveAll(destPath); err != nil {
@@ -461,9 +463,12 @@ func removeStaleTemplate(destPath string, d fs.DirEntry) error {
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
+// values/metallb is matched only at its base.yaml FILE: matching the directory
+// would make removeStaleTemplate os.RemoveAll it, destroying user overlays.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
+		relPath == "values/metallb/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
 }
 
@@ -476,10 +481,14 @@ func isLonghornOnlyPath(relPath string) bool {
 }
 
 // isTrustBundlePath returns true if the relative path is a trust-manager-related
-// template (the chart Application, the Bundle Application, or the Bundle manifest).
+// template (the chart Application, the Bundle Application, the Bundle manifest,
+// or the chart's base values). values/trust-manager is matched only at its
+// base.yaml FILE: matching the directory would make removeStaleTemplate
+// os.RemoveAll it, destroying user overlays.
 func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||
+		relPath == "values/trust-manager/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
 }
 

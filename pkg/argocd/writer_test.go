@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -287,9 +288,13 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 		},
 	}
 
-	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	appContent, err := templates.ReadFile("templates/apps/keycloak.yaml")
 	if err != nil {
 		t.Fatalf("failed to read keycloak template: %v", err)
+	}
+	baseContent, err := templates.ReadFile("templates/values/keycloak/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak base values template: %v", err)
 	}
 
 	for _, tt := range tests {
@@ -303,12 +308,15 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 				GitBranch:               "main",
 			}
 
-			processed, err := processTemplate("apps/keycloak.yaml", content, data)
+			processedApp, err := processTemplate("apps/keycloak.yaml", appContent, data)
 			if err != nil {
-				t.Fatalf("processTemplate() error: %v", err)
+				t.Fatalf("processTemplate(app) error: %v", err)
 			}
-
-			output := string(processed)
+			processedBase, err := processTemplate("values/keycloak/base.yaml", baseContent, data)
+			if err != nil {
+				t.Fatalf("processTemplate(base) error: %v", err)
+			}
+			output := string(processedApp) + "\n" + string(processedBase)
 
 			if !strings.Contains(output, tt.wantProbe) {
 				t.Errorf("expected health probe path %q in rendered template, got:\n%s", tt.wantProbe, output)
@@ -330,9 +338,9 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 // Keycloak only when trust-manager is enabled: the projected ConfigMap is
 // mounted and KC_TRUSTSTORE_PATHS points at it so outbound TLS trusts the org CA.
 func TestKeycloakTemplate_TrustBundle(t *testing.T) {
-	content, err := templates.ReadFile("templates/apps/keycloak.yaml")
+	content, err := templates.ReadFile("templates/values/keycloak/base.yaml")
 	if err != nil {
-		t.Fatalf("failed to read keycloak template: %v", err)
+		t.Fatalf("failed to read keycloak base values template: %v", err)
 	}
 
 	baseData := func() TemplateData {
@@ -345,34 +353,19 @@ func TestKeycloakTemplate_TrustBundle(t *testing.T) {
 		}
 	}
 
-	// helmValues renders the template, confirms the Application manifest is valid
-	// YAML, and returns the inner keycloakx Helm values (also parsed as YAML).
+	// helmValues renders the keycloak base values template and returns both the
+	// raw render and its parsed form.
 	helmValues := func(t *testing.T, data TemplateData) (string, map[string]any) {
 		t.Helper()
-		processed, err := processTemplate("apps/keycloak.yaml", content, data)
+		processed, err := processTemplate("values/keycloak/base.yaml", content, data)
 		if err != nil {
 			t.Fatalf("processTemplate() error: %v", err)
 		}
-		out := string(processed)
-
-		var app map[string]any
-		if err := yaml.Unmarshal(processed, &app); err != nil {
-			t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, out)
-		}
-		spec, _ := app["spec"].(map[string]any)
-		sources, _ := spec["sources"].([]any)
-		if len(sources) == 0 {
-			t.Fatalf("expected at least one source in:\n%s", out)
-		}
-		src0, _ := sources[0].(map[string]any)
-		helm, _ := src0["helm"].(map[string]any)
-		valuesStr, _ := helm["values"].(string)
-
 		var values map[string]any
-		if err := yaml.Unmarshal([]byte(valuesStr), &values); err != nil {
-			t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, valuesStr)
+		if err := yaml.Unmarshal(processed, &values); err != nil {
+			t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, processed)
 		}
-		return out, values
+		return string(processed), values
 	}
 
 	t.Run("mounts bundle and sets truststore path when enabled", func(t *testing.T) {
@@ -560,9 +553,13 @@ func TestLandingPageTemplate(t *testing.T) {
 		},
 	}
 
-	content, err := templates.ReadFile("templates/apps/nebari-landingpage.yaml")
+	appContent, err := templates.ReadFile("templates/apps/nebari-landingpage.yaml")
 	if err != nil {
 		t.Fatalf("failed to read nebari-landingpage template: %v", err)
+	}
+	baseContent, err := templates.ReadFile("templates/values/nebari-landingpage/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read nebari-landingpage base values template: %v", err)
 	}
 
 	for _, tt := range tests {
@@ -578,12 +575,15 @@ func TestLandingPageTemplate(t *testing.T) {
 				GitBranch:                    "main",
 			}
 
-			processed, err := processTemplate("apps/nebari-landingpage.yaml", content, data)
+			processedApp, err := processTemplate("apps/nebari-landingpage.yaml", appContent, data)
 			if err != nil {
-				t.Fatalf("processTemplate() error: %v", err)
+				t.Fatalf("processTemplate(app) error: %v", err)
 			}
-
-			output := string(processed)
+			processedBase, err := processTemplate("values/nebari-landingpage/base.yaml", baseContent, data)
+			if err != nil {
+				t.Fatalf("processTemplate(base) error: %v", err)
+			}
+			output := string(processedApp) + "\n" + string(processedBase)
 
 			if !strings.Contains(output, "kind: Application") {
 				t.Error("expected 'kind: Application' in rendered output")
@@ -1129,8 +1129,13 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	if err := WriteApplication(ctx, &buf, "opentelemetry-collector"); err != nil {
 		t.Fatalf("WriteApplication(opentelemetry-collector) error: %v", err)
 	}
+	appContent := buf.String()
 
-	content := buf.String()
+	baseRaw, err := templates.ReadFile("templates/values/opentelemetry-collector/base.yaml")
+	if err != nil {
+		t.Fatalf("read otel base.yaml template: %v", err)
+	}
+	baseContent := string(baseRaw)
 
 	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
 	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
@@ -1138,42 +1143,396 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	// collector reads via an extra --config flag. This sidesteps the upstream
 	// ArgoCD ignoreDifferences-during-sync bug (argoproj/argo-cd#7478) by
 	// keeping the base CM and the override CM completely separate.
+	// The values-shaped fragments live in values/opentelemetry-collector/base.yaml
+	// since the #406 valueFiles conversion; Application-shaped fragments stay in
+	// the app template.
 	tests := []struct {
 		name        string
+		in          string // which document to search
+		doc         string // human-readable label for the searched document
 		fragment    string
 		wantPresent bool
 	}{
-		// Required fragments — composite where possible to pin context
-		{"extraVolumes section", "extraVolumes:", true},
-		{"overrides-src volume with configmap name", "name: overrides-src\n            configMap:\n              name: opentelemetry-collector-overrides\n              optional: true", true},
-		{"overrides-resolved emptyDir", "name: overrides-resolved\n            emptyDir: {}", true},
-		{"initContainers section", "initContainers:", true},
-		{"ensure-overrides init container", "name: ensure-overrides", true},
-		{"config flag for overrides", "--config=/conf/overrides/relay.yaml", true},
-		// kubernetes-pods relabel uses the escaped $$1:$$2 backreference so the
-		// OTel collector confmap resolver doesn't treat it as env expansion.
-		{"escaped relabel replacement", "replacement: $$1:$$2", true},
-		// Opts the monitoring namespace into Nebari management at creation so
-		// software packs (e.g. nebari-lgtm-pack) can drop a NebariApp here and
-		// have the nebari-operator reconcile it instead of rejecting it.
-		{"managedNamespaceMetadata block", "managedNamespaceMetadata:", true},
-		{"nebari.dev/managed namespace label", "nebari.dev/managed: \"true\"", true},
-		// Forbidden fragments — old ignoreDifferences design + deprecated bare backref
-		{"bare relabel replacement (deprecated)", "replacement: $1:$2", false},
-		{"ignoreDifferences (old design)", "ignoreDifferences:", false},
-		{"RespectIgnoreDifferences (old design)", "RespectIgnoreDifferences=true", false},
-		{"jsonPointers (old design)", "jsonPointers:", false},
+		// Application manifest fragments
+		{"managedNamespaceMetadata block", appContent, "app template", "managedNamespaceMetadata:", true},
+		{"nebari.dev/managed namespace label", appContent, "app template", "nebari.dev/managed: \"true\"", true},
+		{"inline values blob (old design)", appContent, "app template", "values: |", false},
+		{"ignoreDifferences (old design)", appContent, "app template", "ignoreDifferences:", false},
+		{"RespectIgnoreDifferences (old design)", appContent, "app template", "RespectIgnoreDifferences=true", false},
+		{"jsonPointers (old design)", appContent, "app template", "jsonPointers:", false},
+		// Helm values fragments (dedented 8 from their pre-#406 indentation)
+		{"extraVolumes section", baseContent, "base.yaml", "extraVolumes:", true},
+		{"overrides-src volume with configmap name", baseContent, "base.yaml", "name: overrides-src\n    configMap:\n      name: opentelemetry-collector-overrides\n      optional: true", true},
+		{"overrides-resolved emptyDir", baseContent, "base.yaml", "name: overrides-resolved\n    emptyDir: {}", true},
+		{"initContainers section", baseContent, "base.yaml", "initContainers:", true},
+		{"ensure-overrides init container", baseContent, "base.yaml", "name: ensure-overrides", true},
+		{"config flag for overrides", baseContent, "base.yaml", "--config=/conf/overrides/relay.yaml", true},
+		{"escaped relabel replacement", baseContent, "base.yaml", "replacement: $$1:$$2", true},
+		{"bare relabel replacement (deprecated)", baseContent, "base.yaml", "replacement: $1:$2", false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			found := strings.Contains(content, tc.fragment)
+			found := strings.Contains(tc.in, tc.fragment)
 			if tc.wantPresent && !found {
-				t.Errorf("rendered opentelemetry-collector.yaml is missing fragment %q\n--- rendered:\n%s", tc.fragment, content)
+				t.Errorf("%s missing fragment %q", tc.doc, tc.fragment)
 			}
 			if !tc.wantPresent && found {
-				t.Errorf("rendered opentelemetry-collector.yaml contains forbidden fragment %q from the old ignoreDifferences design", tc.fragment)
+				t.Errorf("%s contains forbidden fragment %q", tc.doc, tc.fragment)
 			}
 		})
+	}
+}
+
+// helmValueFilesApps lists every Helm-based foundational app converted to the
+// base.yaml + overlays/*.yaml valueFiles seam (issue #406), with a signature
+// string expected in its rendered values/<app>/base.yaml. Extended as each
+// app converts.
+var helmValueFilesApps = []struct {
+	app       string
+	signature string
+}{
+	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
+	{"cert-manager", "installCRDs: true"},
+	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
+	{"postgresql", "username: postgres"},
+	{"metallb", "speaker:"},
+	{"trust-manager", "The default CA package (debian ca-certificates)"},
+	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
+	{"keycloak", "name: KEYCLOAK_ADMIN"},
+	{"nebari-landingpage", "existingSecret: \"nebari-landing-redis\""},
+}
+
+// seamTemplateData returns TemplateData populated enough that every Helm
+// app's template and base.yaml render with no unresolved placeholders.
+func seamTemplateData() TemplateData {
+	return TemplateData{
+		Domain:                       "test.example.com",
+		StorageClass:                 "gp2",
+		GitRepoURL:                   "https://github.com/example/repo",
+		GitBranch:                    "main",
+		KeycloakNamespace:            "keycloak",
+		KeycloakServiceURL:           "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
+		KeycloakIssuerURL:            "https://keycloak.test.example.com",
+		KeycloakRealm:                "nebari",
+		KeycloakAdminSecretName:      "keycloak-admin",
+		KeycloakAdminSecretNamespace: "keycloak",
+	}
+}
+
+func TestHelmApps_ValueFilesOverlaySeam(t *testing.T) {
+	data := seamTemplateData()
+
+	for _, tc := range helmValueFilesApps {
+		t.Run(tc.app, func(t *testing.T) {
+			content, err := templates.ReadFile("templates/apps/" + tc.app + ".yaml")
+			if err != nil {
+				t.Fatalf("read app template: %v", err)
+			}
+			processed, err := processTemplate("apps/"+tc.app+".yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+
+			var app map[string]any
+			if err := yaml.Unmarshal(processed, &app); err != nil {
+				t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, processed)
+			}
+			spec, _ := app["spec"].(map[string]any)
+			sources, ok := spec["sources"].([]any)
+			if !ok {
+				t.Fatalf("expected spec.sources list (multi-source), got source=%#v sources=%#v",
+					spec["source"], spec["sources"])
+			}
+
+			if len(sources) == 0 {
+				t.Fatalf("spec.sources is empty in:\n%s", processed)
+			}
+			first, _ := sources[0].(map[string]any)
+			if h, ok := first["helm"].(map[string]any); !ok || h["valueFiles"] == nil {
+				t.Errorf("sources[0] must be the chart source carrying helm.valueFiles, got: %#v", first)
+			}
+
+			for i, s := range sources {
+				m, _ := s.(map[string]any)
+				if h, ok := m["helm"].(map[string]any); ok {
+					if _, hasInline := h["values"]; hasInline {
+						t.Errorf("sources[%d] has inline helm.values (takes precedence over valueFiles, breaks the overlay seam)", i)
+					}
+				}
+			}
+
+			var refSource, helmSource map[string]any
+			for _, s := range sources {
+				m, _ := s.(map[string]any)
+				if m["ref"] == "values" {
+					refSource = m
+				}
+				if h, ok := m["helm"].(map[string]any); ok && h["valueFiles"] != nil {
+					helmSource = m
+				}
+			}
+			if refSource == nil {
+				t.Fatalf("no source with ref: values in:\n%s", processed)
+			}
+			if refSource["repoURL"] != data.GitRepoURL {
+				t.Errorf("ref source repoURL = %v, want %v", refSource["repoURL"], data.GitRepoURL)
+			}
+			if refSource["targetRevision"] != data.GitBranch {
+				t.Errorf("ref source targetRevision = %v, want %v", refSource["targetRevision"], data.GitBranch)
+			}
+			if helmSource == nil {
+				t.Fatalf("no source with helm.valueFiles in:\n%s", processed)
+			}
+
+			helm := helmSource["helm"].(map[string]any)
+			if helm["ignoreMissingValueFiles"] != true {
+				t.Errorf("ignoreMissingValueFiles = %v, want true", helm["ignoreMissingValueFiles"])
+			}
+			wantFiles := []string{
+				"$values/values/" + tc.app + "/base.yaml",
+				"$values/values/" + tc.app + "/overlays/*.yaml",
+			}
+			vf, _ := helm["valueFiles"].([]any)
+			if len(vf) != len(wantFiles) {
+				t.Fatalf("valueFiles = %v, want %v", vf, wantFiles)
+			}
+			for i, want := range wantFiles {
+				if vf[i] != want {
+					t.Errorf("valueFiles[%d] = %v, want %q", i, vf[i], want)
+				}
+			}
+
+			// base.yaml template exists, renders to non-empty valid YAML with
+			// no unresolved placeholders, and carries this app's signature.
+			baseRaw, err := templates.ReadFile("templates/values/" + tc.app + "/base.yaml")
+			if err != nil {
+				t.Fatalf("read values/%s/base.yaml template: %v", tc.app, err)
+			}
+			rendered, err := processTemplate("values/"+tc.app+"/base.yaml", baseRaw, data)
+			if err != nil {
+				t.Fatalf("render base.yaml: %v", err)
+			}
+			var vals map[string]any
+			if err := yaml.Unmarshal(rendered, &vals); err != nil {
+				t.Fatalf("rendered base.yaml is not valid YAML: %v\n%s", err, rendered)
+			}
+			if len(vals) == 0 {
+				t.Error("rendered base.yaml is empty")
+			}
+			if strings.Contains(string(rendered), "{{") {
+				t.Errorf("rendered base.yaml has unresolved placeholders:\n%s", rendered)
+			}
+			if !strings.Contains(string(rendered), tc.signature) {
+				t.Errorf("rendered base.yaml missing signature %q:\n%s", tc.signature, rendered)
+			}
+		})
+	}
+}
+
+func TestHelmApps_ValueFilesRespectGitPath(t *testing.T) {
+	data := seamTemplateData()
+	data.GitPath = "clusters/prod"
+
+	for _, tc := range helmValueFilesApps {
+		t.Run(tc.app, func(t *testing.T) {
+			content, err := templates.ReadFile("templates/apps/" + tc.app + ".yaml")
+			if err != nil {
+				t.Fatalf("read app template: %v", err)
+			}
+			processed, err := processTemplate("apps/"+tc.app+".yaml", content, data)
+			if err != nil {
+				t.Fatalf("processTemplate() error: %v", err)
+			}
+			for _, want := range []string{
+				"$values/clusters/prod/values/" + tc.app + "/base.yaml",
+				"$values/clusters/prod/values/" + tc.app + "/overlays/*.yaml",
+			} {
+				if !strings.Contains(string(processed), want) {
+					t.Errorf("rendered app missing GitPath-prefixed path %q:\n%s", want, processed)
+				}
+			}
+		})
+	}
+}
+
+func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("disabled gates remove base.yaml but preserve overlays", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Seed a user overlay and a stale base.yaml from a previous
+		// enabled-state run for both gated apps.
+		for _, app := range []string{"metallb", "trust-manager"} {
+			overlayDir := filepath.Join(tmpDir, "values", app, "overlays")
+			if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(tmpDir, "values", app, "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{StorageClass: "gp2"} // NeedsMetalLB=false
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		for _, app := range []string{"metallb", "trust-manager"} {
+			basePath := filepath.Join(tmpDir, "values", app, "base.yaml")
+			if _, err := os.Stat(basePath); !os.IsNotExist(err) {
+				t.Errorf("%s: stale base.yaml should be removed when the app is disabled", app)
+			}
+			overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", app, "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
+			if err != nil {
+				t.Fatalf("%s: user overlay was destroyed: %v", app, err)
+			}
+			if string(overlay) != "user: overlay\n" {
+				t.Errorf("%s: user overlay content changed: %q", app, overlay)
+			}
+		}
+	})
+
+	t.Run("enabled gates write base.yaml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:       "gp2",
+			NeedsMetalLB:       true,
+			MetalLBAddressPool: "10.0.0.100-10.0.0.110",
+		}
+		mock := &mockGitClient{workDir: tmpDir}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, testCAPEM); err != nil { // PEM => TrustManagerEnabled=true
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		for _, app := range []string{"metallb", "trust-manager"} {
+			if _, err := os.Stat(filepath.Join(tmpDir, "values", app, "base.yaml")); err != nil {
+				t.Errorf("%s: expected values/%s/base.yaml to be written: %v", app, app, err)
+			}
+		}
+	})
+}
+
+// TestWriteAllToGit_PreservesOverlays pins the core #406 invariant: nothing
+// under values/<app>/overlays/ is ever written or deleted by NIC, across
+// repeated regeneration runs.
+func TestWriteAllToGit_PreservesOverlays(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	overlayDir := filepath.Join(tmpDir, "values", "envoy-gateway", "overlays")
+	if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	overlayPath := filepath.Join(overlayDir, "30-llm.yaml")
+	overlayContent := []byte("config:\n  envoyGateway:\n    extensionManager: {}\n")
+	if err := os.WriteFile(overlayPath, overlayContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	settings := cluster.InfraSettings{StorageClass: "gp2"}
+	mock := &mockGitClient{workDir: tmpDir}
+
+	// Bootstrap, then regen (WriteAllToGit is the shared path for both).
+	for i := 0; i < 2; i++ {
+		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() run %d error: %v", i+1, err)
+		}
+	}
+
+	got, err := os.ReadFile(overlayPath) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("overlay file was removed: %v", err)
+	}
+	if !bytes.Equal(got, overlayContent) {
+		t.Errorf("overlay file was modified:\ngot:  %q\nwant: %q", got, overlayContent)
+	}
+
+	// And base.yaml was (re)written alongside it.
+	if _, err := os.Stat(filepath.Join(tmpDir, "values", "envoy-gateway", "base.yaml")); err != nil {
+		t.Errorf("expected values/envoy-gateway/base.yaml to be written: %v", err)
+	}
+}
+
+// TestHelmApps_SeamInvariants makes the #406 seam self-enforcing for apps
+// added later: every app template with a helm block must use valueFiles
+// (never inline values), be enrolled in helmValueFilesApps, and every
+// values/<app> template dir must correspond to an enrolled app.
+func TestHelmApps_SeamInvariants(t *testing.T) {
+	enrolled := make(map[string]bool, len(helmValueFilesApps))
+	for _, tc := range helmValueFilesApps {
+		enrolled[tc.app] = true
+	}
+
+	entries, err := fs.ReadDir(templates, "templates/apps")
+	if err != nil {
+		t.Fatalf("read templates/apps: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
+		app := strings.TrimSuffix(e.Name(), ".yaml")
+		raw, err := templates.ReadFile("templates/apps/" + e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		content := string(raw)
+
+		if strings.Contains(content, "values:") || strings.Contains(content, "valuesObject:") {
+			t.Errorf("%s: inline helm values (values:/valuesObject:) take precedence over valueFiles and break the overlay seam - use values/%s/base.yaml + overlays (#406)", e.Name(), app)
+		}
+		hasHelm := strings.Contains(content, "helm:")
+		if hasHelm && !strings.Contains(content, "valueFiles:") {
+			t.Errorf("%s: helm block without valueFiles - every Helm app must use the overlay seam (#406)", e.Name())
+		}
+		if hasHelm && !enrolled[app] {
+			t.Errorf("%s: Helm app not enrolled in helmValueFilesApps - add a table row with a signature", e.Name())
+		}
+	}
+
+	valueDirs, err := fs.ReadDir(templates, "templates/values")
+	if err != nil {
+		t.Fatalf("read templates/values: %v", err)
+	}
+	for _, d := range valueDirs {
+		if !d.IsDir() {
+			continue
+		}
+		if !enrolled[d.Name()] {
+			t.Errorf("templates/values/%s exists but %s is not enrolled in helmValueFilesApps", d.Name(), d.Name())
+		}
+	}
+}
+
+// TestWriteAllToGit_WritesValuesReadme pins that the in-repo contract doc for
+// values/<app>/base.yaml vs overlays/ is generated so it's always present in
+// the gitops repo, not just in this source tree.
+func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	settings := cluster.InfraSettings{StorageClass: "gp2"}
+	mock := &mockGitClient{workDir: tmpDir}
+	if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "values", "README.md")) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("values/README.md not written: %v", err)
+	}
+	for _, want := range []string{"overlays/", "base.yaml", "lexical"} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("values/README.md missing %q", want)
+		}
 	}
 }
