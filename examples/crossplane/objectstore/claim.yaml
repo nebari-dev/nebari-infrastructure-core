@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pack-app
+  namespace: pack-test
+---
+apiVersion: platform.nebari.dev/v1alpha1
+kind: XObjectStore
+metadata:
+  name: smokestore
+  namespace: pack-test
+spec:
+  bucketSuffix: smokestore
+  serviceAccount: pack-app
+  crossplane:
+    compositionRef:
+      name: xobjectstore-aws
