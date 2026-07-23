@@ -355,6 +355,24 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return removeStaleTemplate(destPath, d)
 		}
 
+		// Crossplane is provider/profile-conditional foundational software
+		// (ADR-0012 §3). When no capability is authorized the entire install is
+		// absent, not merely the per-capability layers: the core chart, the
+		// providers Application, and every provider/config manifest are removed.
+		// Only once at least one capability is enabled are the foundational
+		// manifests written and the per-capability gate below applied to the
+		// un-opted-in layers.
+		if isCrossplanePath(relPath) && !settings.CrossplaneEnabled() {
+			return removeStaleTemplate(destPath, d)
+		}
+
+		// Crossplane capability templates are an explicit provider capability.
+		// Other providers and clusters without the opt-in must not receive the
+		// provider package or its cloud-credentials config.
+		if id := crossplaneCapabilityForPath(relPath); id != "" && !settings.CrossplaneCapabilities[id] {
+			return removeStaleTemplate(destPath, d)
+		}
+
 		// Certificate templates that don't apply to the configured cert source.
 		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
 			return removeStaleTemplate(destPath, d)
@@ -436,6 +454,42 @@ func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
+}
+
+// isCrossplanePath returns true if the relative path is any Crossplane
+// template — the core chart Application, the providers Application, or any
+// manifest under the crossplane tree (foundational or per-capability). The
+// whole tree is gated on Crossplane being enabled at all (ADR-0012 §3); the
+// per-capability gate then trims individual layers when it is.
+func isCrossplanePath(relPath string) bool {
+	return strings.HasPrefix(relPath, "apps/crossplane") ||
+		strings.HasPrefix(relPath, "manifests/crossplane")
+}
+
+// crossplaneCapabilities enumerates the gateable Crossplane provider
+// capabilities. Each id maps by convention to three template locations:
+//   - manifests/crossplane/providers/provider-<id>.yaml (the provider package)
+//   - manifests/crossplane/configs/<id>/**              (its cloud-credentials config)
+//   - apps/crossplane-<id>-config.yaml                  (its post-install config Application)
+//
+// Foundational Crossplane manifests (the core chart, the providers Application)
+// are not listed here: they are not gated per-capability but on Crossplane being
+// enabled at all (see isCrossplanePath and CrossplaneEnabled). Adding a
+// capability is one entry here plus the matching templates and IAM — the gating
+// logic does not change.
+var crossplaneCapabilities = []string{"aws-s3", "aws-rds"}
+
+// crossplaneCapabilityForPath returns the capability id that owns relPath, or ""
+// if the path does not belong to a gateable Crossplane capability.
+func crossplaneCapabilityForPath(relPath string) string {
+	for _, id := range crossplaneCapabilities {
+		if relPath == "apps/crossplane-"+id+"-config.yaml" ||
+			relPath == "manifests/crossplane/providers/provider-"+id+".yaml" ||
+			strings.HasPrefix(relPath, "manifests/crossplane/configs/"+id) {
+			return id
+		}
+	}
+	return ""
 }
 
 const (

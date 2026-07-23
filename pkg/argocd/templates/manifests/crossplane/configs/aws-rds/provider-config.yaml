@@ -1,0 +1,9 @@
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: aws-rds
+spec:
+  credentials:
+    # EKS injects the Pod Identity credential endpoint into the provider pod.
+    # No Kubernetes Secret or static AWS key is involved.
+    source: PodIdentity

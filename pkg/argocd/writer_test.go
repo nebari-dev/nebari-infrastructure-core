@@ -978,6 +978,130 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	})
 }
 
+func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+
+	// capabilityPaths returns the three template locations owned by a capability.
+	capabilityPaths := func(tmpDir, id string) []string {
+		return []string{
+			filepath.Join(tmpDir, "apps", "crossplane-"+id+"-config.yaml"),
+			filepath.Join(tmpDir, "manifests", "crossplane", "providers", "provider-"+id+".yaml"),
+			filepath.Join(tmpDir, "manifests", "crossplane", "configs", id),
+		}
+	}
+
+	// foundationalCrossplanePaths returns the Crossplane manifests that are not
+	// owned by any single capability: the core chart Application and the
+	// providers Application.
+	foundationalCrossplanePaths := func(tmpDir string) []string {
+		return []string{
+			filepath.Join(tmpDir, "apps", "crossplane.yaml"),
+			filepath.Join(tmpDir, "apps", "crossplane-providers.yaml"),
+		}
+	}
+
+	t.Run("writes only the enabled capability's layers", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		if err := WriteAllToGit(ctx, &mockGitClient{workDir: tmpDir}, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		for _, want := range capabilityPaths(tmpDir, "aws-s3") {
+			if _, err := os.Stat(want); err != nil {
+				t.Errorf("enabled capability template %s should be written: %v", want, err)
+			}
+		}
+		// A capability that was not opted into must be absent.
+		for _, absent := range capabilityPaths(tmpDir, "aws-rds") {
+			if _, err := os.Stat(absent); !os.IsNotExist(err) {
+				t.Errorf("%s should not exist when aws-rds is disabled, stat err: %v", absent, err)
+			}
+		}
+		// Foundational Crossplane manifests are written because a capability is
+		// enabled (Crossplane is on), independent of any single capability.
+		for _, f := range foundationalCrossplanePaths(tmpDir) {
+			if _, err := os.Stat(f); err != nil {
+				t.Errorf("foundational Crossplane manifest %s should be written when a capability is enabled: %v", f, err)
+			}
+		}
+	})
+
+	t.Run("multiple capabilities enable independently", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true, "aws-rds": true}}
+		if err := WriteAllToGit(ctx, &mockGitClient{workDir: tmpDir}, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		for _, id := range []string{"aws-s3", "aws-rds"} {
+			for _, want := range capabilityPaths(tmpDir, id) {
+				if _, err := os.Stat(want); err != nil {
+					t.Errorf("enabled capability %s template %s should be written: %v", id, want, err)
+				}
+			}
+		}
+	})
+
+	t.Run("omits and removes capability layers when disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mock := &mockGitClient{workDir: tmpDir}
+		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() enabled error: %v", err)
+		}
+		// Re-render with no capabilities: previously written files must be pruned.
+		if err := WriteAllToGit(ctx, mock, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+			t.Fatalf("WriteAllToGit() disabled error: %v", err)
+		}
+
+		for _, stale := range capabilityPaths(tmpDir, "aws-s3") {
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Errorf("%s should not exist when the capability is disabled, stat err: %v", stale, err)
+			}
+		}
+	})
+
+	t.Run("omits the entire Crossplane install when no capability is enabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// No capabilities enabled: Crossplane is provider/profile-conditional
+		// foundational software, so the whole tree — core chart, providers
+		// Application, and every provider/config manifest — is absent.
+		settings := cluster.InfraSettings{}
+		if err := WriteAllToGit(ctx, &mockGitClient{workDir: tmpDir}, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		absent := foundationalCrossplanePaths(tmpDir)
+		absent = append(absent, capabilityPaths(tmpDir, "aws-s3")...)
+		absent = append(absent, capabilityPaths(tmpDir, "aws-rds")...)
+		for _, f := range absent {
+			if _, err := os.Stat(f); !os.IsNotExist(err) {
+				t.Errorf("%s should not exist when Crossplane is disabled, stat err: %v", f, err)
+			}
+		}
+	})
+
+	t.Run("prunes foundational manifests when the last capability is disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mock := &mockGitClient{workDir: tmpDir}
+		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
+			t.Fatalf("WriteAllToGit() enabled error: %v", err)
+		}
+		// Toggle Crossplane off entirely: the foundational manifests written on
+		// the first render must be pruned, not left orphaned in git.
+		if err := WriteAllToGit(ctx, mock, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+			t.Fatalf("WriteAllToGit() disabled error: %v", err)
+		}
+		for _, stale := range foundationalCrossplanePaths(tmpDir) {
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Errorf("%s should be pruned when Crossplane is disabled, stat err: %v", stale, err)
+			}
+		}
+	})
+}
+
 func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	ctx := context.Background()
 
