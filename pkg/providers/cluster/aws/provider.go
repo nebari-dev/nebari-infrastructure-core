@@ -188,6 +188,16 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
+	// Validate crossplane_capabilities against the supported set.
+	for _, capKey := range awsCfg.CrossplaneCapabilities {
+		if !contains(validCrossplaneCapabilities, capKey) {
+			err := fmt.Errorf("invalid crossplane_capabilities entry %q (must be one of: %v)",
+				capKey, validCrossplaneCapabilities)
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	// Validate node groups
 	if len(awsCfg.NodeGroups) == 0 {
 		err := fmt.Errorf("at least one node group is required")
@@ -774,6 +784,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 	longhornEnabled := true // AWS default — see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
+	var crossplaneCapabilities map[string]bool
 
 	rawCfg := clusterConfig.ProviderConfig()
 	if rawCfg != nil {
@@ -787,14 +798,16 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 				efsSC = awsCfg.EFSStorageClassName()
 			}
 			lbScheme = awsCfg.LoadBalancerSchemeOrDefault()
+			crossplaneCapabilities = awsCfg.EnabledCrossplaneCapabilities()
 		}
 	}
 
 	return cluster.InfraSettings{
-		StorageClass:    sc,
-		NeedsMetalLB:    false,
-		EFSStorageClass: efsSC,
-		LonghornEnabled: longhornEnabled,
+		StorageClass:           sc,
+		NeedsMetalLB:           false,
+		EFSStorageClass:        efsSC,
+		LonghornEnabled:        longhornEnabled,
+		CrossplaneCapabilities: crossplaneCapabilities,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

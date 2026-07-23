@@ -3,6 +3,7 @@ package aws
 import (
 	"embed"
 	"maps"
+	"slices"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
@@ -57,6 +58,10 @@ type TFVars struct {
 	// `true` default when the autoscaler is disabled.
 	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
 	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
+	// CrossplaneCapabilities lists the bare capability keys (e.g. "s3", "rds")
+	// the cluster opted into. crossplane-iam.tf provisions one scoped Pod
+	// Identity role per entry. Sorted for deterministic tfvars output.
+	CrossplaneCapabilities []string `json:"crossplane_capabilities,omitempty"`
 }
 
 // resolveNodeGroupDefaults derives per-node-group defaults from the parsed
@@ -200,6 +205,12 @@ func (c *Config) toTFVars(projectName, caBundle string) TFVars {
 	}
 	if c.EnableIRSA != nil {
 		vars.EnableIRSA = c.EnableIRSA
+	}
+
+	if len(c.CrossplaneCapabilities) > 0 {
+		caps := slices.Clone(c.CrossplaneCapabilities)
+		slices.Sort(caps)
+		vars.CrossplaneCapabilities = caps
 	}
 
 	if c.LonghornEnabled() {

@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 
@@ -57,6 +58,35 @@ func TestProvider_InfraSettings_LonghornEnabled(t *testing.T) {
 			t.Errorf("InfraSettings.LonghornEnabled = true, want false")
 		}
 	})
+}
+
+func TestProvider_InfraSettings_CrossplaneCapabilities(t *testing.T) {
+	p := NewProvider()
+
+	for _, tt := range []struct {
+		name string
+		raw  map[string]any
+		want map[string]bool
+	}{
+		{name: "defaults to none", raw: map[string]any{}, want: nil},
+		{
+			name: "single capability",
+			raw:  map[string]any{"crossplane_capabilities": []any{"s3"}},
+			want: map[string]bool{"aws-s3": true},
+		},
+		{
+			name: "multiple capabilities",
+			raw:  map[string]any{"crossplane_capabilities": []any{"s3", "rds"}},
+			want: map[string]bool{"aws-s3": true, "aws-rds": true},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{"aws": tt.raw}}
+			if got := p.InfraSettings(cfg).CrossplaneCapabilities; !maps.Equal(got, tt.want) {
+				t.Errorf("InfraSettings.CrossplaneCapabilities = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestInfraSettings(t *testing.T) {
@@ -122,6 +152,39 @@ func TestValidate_LoadBalancerScheme(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "load_balancer_scheme") {
 				t.Fatalf("expected error to mention load_balancer_scheme, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_CrossplaneCapabilities(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities []any
+	}{
+		{name: "unknown capability is rejected", capabilities: []any{"dynamodb"}},
+		{name: "provider-qualified id is rejected", capabilities: []any{"aws-s3"}},
+		{name: "one bad entry among valid ones is rejected", capabilities: []any{"s3", "bogus"}},
+	}
+
+	p := NewProvider()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
+				"region":                  "us-west-2",
+				"kubernetes_version":      "1.34",
+				"crossplane_capabilities": tt.capabilities,
+				"node_groups": map[string]any{
+					"general": map[string]any{"instance": "m5.large"},
+				},
+			}}}
+
+			err := p.Validate(context.Background(), "test-project", cfg)
+			if err == nil {
+				t.Fatalf("expected error for capabilities %v, got nil", tt.capabilities)
+			}
+			if !strings.Contains(err.Error(), "crossplane_capabilities") {
+				t.Fatalf("expected error to mention crossplane_capabilities, got: %v", err)
 			}
 		})
 	}

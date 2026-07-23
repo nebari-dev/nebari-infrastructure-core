@@ -76,6 +76,28 @@ type InfraSettings struct {
 	// cluster config. Used by the foundational deploy flow to decide whether to
 	// expose longhorn.<domain> through the gateway and provision an OIDC client.
 	LonghornEnabled bool
+
+	// CrossplaneCapabilities is the set of Crossplane provider capabilities the
+	// provider has been explicitly authorized to install, keyed by capability id
+	// (e.g. "aws-s3", "aws-rds"). Provider-agnostic: each cloud provider
+	// populates the ids it supports and the admin has opted into. Shared
+	// orchestration gates capability manifests on membership in this set instead
+	// of branching on the cluster provider name. A nil map means none enabled.
+	CrossplaneCapabilities map[string]bool
+}
+
+// CrossplaneEnabled reports whether any Crossplane capability has been
+// authorized. Crossplane is provider/profile-conditional foundational software
+// (ADR-0012 §3): with no capability enabled the entire install is omitted, so
+// the foundational manifests (core chart, providers Application,
+// provider-keycloak) are only written when this returns true.
+func (s InfraSettings) CrossplaneEnabled() bool {
+	for _, enabled := range s.CrossplaneCapabilities {
+		if enabled {
+			return true
+		}
+	}
+	return false
 }
 
 // Provider defines the interface that all cloud providers must implement.

@@ -36,16 +36,49 @@ type Config struct {
 	// when the VPC cannot resolve oidc.eks.<region>.amazonaws.com (a fully
 	// private deployment with no public DNS resolution for AWS hostnames).
 	EnableIRSA *bool `yaml:"enable_irsa,omitempty"`
+
+	// CrossplaneCapabilities lists the Crossplane provider capabilities this
+	// cluster is explicitly opted into (e.g. "s3", "rds"). It defaults empty
+	// because each capability grants new cloud permissions and installs an AWS
+	// provider controller. Values are validated against validCrossplaneCapabilities
+	// at config load.
+	CrossplaneCapabilities []string `yaml:"crossplane_capabilities,omitempty"`
 }
 
 const (
 	loadBalancerSchemeInternetFacing = "internet-facing"
 	loadBalancerSchemeInternal       = "internal"
+
+	// crossplaneCapabilityPrefix qualifies a bare capability key (e.g. "s3")
+	// with its provider to form the id shared by the gitops layer and the
+	// Upbound provider package name (e.g. "aws-s3").
+	crossplaneCapabilityPrefix = "aws-"
 )
 
 var validLoadBalancerSchemes = []string{
 	loadBalancerSchemeInternetFacing,
 	loadBalancerSchemeInternal,
+}
+
+// validCrossplaneCapabilities is the set of bare capability keys an AWS cluster
+// may opt into via crossplane_capabilities. Extend this list together with the
+// matching gitops manifests (provider-aws-<key>.yaml, configs/aws-<key>/, the
+// per-capability config Application) and the IAM in crossplane-iam.tf to add a
+// capability.
+var validCrossplaneCapabilities = []string{"s3", "rds"}
+
+// EnabledCrossplaneCapabilities returns the enabled Crossplane capability ids,
+// provider-qualified (e.g. "aws-s3") and keyed for membership tests. Safe on a
+// nil receiver. Keys are trusted valid because they are checked at config load.
+func (c *Config) EnabledCrossplaneCapabilities() map[string]bool {
+	if c == nil || len(c.CrossplaneCapabilities) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(c.CrossplaneCapabilities))
+	for _, key := range c.CrossplaneCapabilities {
+		set[crossplaneCapabilityPrefix+key] = true
+	}
+	return set
 }
 
 // LoadBalancerSchemeOrDefault returns the configured AWS load balancer scheme,

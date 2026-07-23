@@ -137,3 +137,8 @@ variable "enable_irsa" {
   type    = bool
   default = true
 }
+
+variable "crossplane_capabilities" {
+  type    = list(string)
+  default = []
+}
