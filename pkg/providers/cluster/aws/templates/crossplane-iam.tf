@@ -1,87 +1,43 @@
-# Day-0 IAM trust anchors for Crossplane software-pack provisioning (ADR-0012).
-# Scoped, secret-less provider roles assumed via EKS Pod Identity — no static AWS
-# keys ever land in-cluster (Security Req #4). Each capability gets its OWN role
-# (Req #5) under a permissions boundary as a hard ceiling (Req #6).
+# Opt-in AWS permissions for application infrastructure provisioned through
+# Crossplane. Each capability gets a separate EKS Pod Identity role and no
+# static AWS credentials are stored in the cluster.
 #
-# Capabilities are opt-in per cluster via `crossplane_capabilities`. Everything
-# here is a for_each over the enabled set, so nothing is provisioned unless a
-# capability is explicitly requested. Add a capability by extending
-# local.crossplane_capability_defs plus the matching gitops manifests
-# (provider-aws-<key>.yaml, configs/aws-<key>/) — no other HCL changes.
+# Cloud resources must use the tool-neutral `${project_name}-apps-*` lifecycle
+# namespace; foundational OpenTofu resources must not. Mutations and deletion
+# additionally require the provider's `crossplane-providerconfig` ownership tag.
 #
-# SCOPING MODEL (see below): application infrastructure lives in the neutral
-# `${project_name}-apps-*` lifecycle namespace. Foundational OpenTofu resources
-# MUST NOT use that prefix. Within the namespace, the role can only mutate/delete
-# resources carrying its `crossplane-providerconfig` ownership tag, which upjet
-# stamps on managed resources automatically.
+# Tags are not immutable creation provenance, so reserve the apps prefix and
+# prevent workload users from adopting resources through
+# `crossplane.io/external-name`. Packs intentionally share each capability role;
+# pack isolation belongs in Kubernetes RBAC and admission policy.
 #
-# This is lifecycle-domain isolation, not immutable creation provenance: AWS tag
-# APIs cannot distinguish tag-on-create from a later claim of an untagged
-# resource. Reserve the apps prefix for this control plane (through organization
-# policy where other principals can create resources) and prevent workload users
-# from supplying `crossplane.io/external-name` through admission policy or a
-# constrained Composition API. Pack-to-pack isolation is intentionally NOT
-# enforced here — all packs share a capability's ProviderConfig/role (same-admin
-# trust model); that boundary lives in Crossplane RBAC/namespaces.
-#
-# NOTE: the per-capability action lists must be verified against provider-aws v2
-# behavior in-cluster (Describe calls that need Resource:"*", the create->readback
-# bootstrap order per service). S3 was verified end-to-end on 2026-07-22 (a raw
-# Bucket reconcile plus iam simulate-principal-policy) — its provision tier now
-# carries the create-time reads that would otherwise deadlock. RDS is still a
-# first cut (unverified; also needs supporting ec2/kms grants + an iam:PassRole
-# decision). The lists are structured so tuning means editing actions, not shape.
+# S3 was verified with provider-aws v2.6.1. RDS remains unverified and may need
+# tightly scoped EC2, KMS, or PassRole permissions.
 
 locals {
   crossplane_namespace = "crossplane-system"
-  # Tool-neutral lifecycle namespace shared by the IAM resources and the cloud
-  # resources they are allowed to manage. This remains stable if Crossplane is
-  # replaced by another application-infrastructure controller.
+  # Stable lifecycle namespace independent of the provisioning tool.
   name_prefix = "${var.project_name}-apps"
 
-  # Per-capability provisioner definitions. service_account is part of the EKS
-  # Pod Identity trust contract and MUST match the DeploymentRuntimeConfig service
-  # account in manifests/crossplane/providers/provider-aws-<key>.yaml. The tag
-  # value equals the ProviderConfig name (configs/aws-<key>/provider-config.yaml),
-  # which is what upjet writes into `crossplane-providerconfig`.
+  # service_account and the aws-<key> ProviderConfig name form the Pod Identity
+  # and ownership-tag contracts with the GitOps manifests.
   crossplane_capability_defs = {
     s3 = {
       service_account = "provider-aws-s3"
       resource_arns = [
         "arn:aws:s3:::${local.name_prefix}-*",
       ]
-      # Account-level discovery that cannot be resource-scoped (ListAllMyBuckets)
-      # plus GetBucketLocation (harmless, returns a region) so the provider can
-      # locate buckets during its reconcile sweep.
+      # Bucket discovery cannot be resource-scoped.
       observe_actions = ["s3:ListAllMyBuckets", "s3:GetBucketLocation"]
-      # Modern S3 supports tags in CreateBucket. provider-aws-s3 v2 uses that path
-      # when TagResource is allowed, so creation can require the ownership tag in
-      # the request instead of granting the legacy, takeover-prone
-      # PutBucketTagging action on every name-matching bucket.
+      # CreateBucket supplies the ownership tag and requires TagResource.
       create_actions = ["s3:CreateBucket", "s3:TagResource"]
-      # The upjet provider reads the new bucket's sub-configs
-      # (GetAccelerateConfiguration, GetLifecycleConfiguration, …) immediately
-      # after create to populate state. Those reads happen before ABAC is enabled,
-      # so they remain name-prefix-scoped but un-tag-gated.
-      #
-      # Bucket ABAC is disabled by default. aws:ResourceTag conditions are not
-      # evaluated until it is enabled, so s3:PutBucketAbac must also bootstrap
-      # without the ownership-tag condition. Workload compositions should create
-      # a BucketAbac whose managementPolicies omit Delete so deleting that helper
-      # does not disable ABAC before the Bucket controller calls DeleteBucket.
-      # Verified in-cluster with provider-aws-s3 v2.6.1 on 2026-07-23.
-      # Reads stay name-prefix-scoped (NOT account-wide); mutate/delete stay gated.
-      # Only bucket ARNs are in resource_arns, so these wildcards cannot authorize
-      # GetObject or other object-ARN data access. ListBucket remains available for
-      # the provider's bucket reconcile and can reveal object names, but not data.
+      # Bootstrap reads and PutBucketAbac run before resource-tag conditions work.
+      # Only bucket ARNs are allowed, so GetObject remains denied. BucketAbac
+      # compositions must omit Delete to keep ABAC active until Bucket deletion.
       provision_actions = ["s3:PutBucketAbac", "s3:Get*", "s3:List*"]
-      # Mutate/delete on owned buckets only, gated by the ownership tag.
-      manage_actions = ["s3:*"]
-      # Once present, the ownership tag is reserved. These actions are denied
-      # separately below when they would claim a differently-owned bucket, change
-      # this ownership value, or remove the ownership key.
-      tag_actions   = ["s3:TagResource"]
-      untag_actions = ["s3:UntagResource"]
+      manage_actions    = ["s3:*"]
+      tag_actions       = ["s3:TagResource"]
+      untag_actions     = ["s3:UntagResource"]
     }
     rds = {
       service_account = "provider-aws-rds"
@@ -92,12 +48,10 @@ locals {
         "arn:aws:rds:${var.region}:*:og:${local.name_prefix}-*",
         "arn:aws:rds:${var.region}:*:secgrp:${local.name_prefix}-*",
       ]
-      # RDS Describe* largely cannot be resource-scoped, so reads stay at "*"
-      # (unlike S3, which name-prefix-scopes reads in its provision tier).
+      # RDS discovery largely cannot be resource-scoped.
       observe_actions = ["rds:Describe*", "rds:ListTagsForResource"]
-      # RDS create APIs accept tags and require AddTagsToResource as a dependent
-      # action. Keep all of them in CreateOwned so the ownership request tag is
-      # mandatory; there is no untagged RDS provisioning tier.
+      # AddTagsToResource is a dependent create action; all creates require the
+      # ownership request tag.
       create_actions = [
         "rds:CreateDBInstance",
         "rds:CreateDBSubnetGroup",
@@ -111,19 +65,12 @@ locals {
     }
   }
 
-  # Intersection of what the operator enabled and what we know how to provision.
-  # Unknown keys are rejected at config validation, so this is belt-and-suspenders.
   enabled_crossplane_capabilities = {
     for key, def in local.crossplane_capability_defs :
     key => def if contains(var.crossplane_capabilities, key)
   }
 
-  # The statement groups for one capability, reused by the per-role inline
-  # policy and the shared boundary. Sids are key-suffixed so the union in the
-  # boundary has no Sid collisions. Observe is read-only at "*"; Create requires
-  # the ownership request tag; Provision contains the narrow operations that must
-  # run before bucket ABAC can evaluate resource tags; Manage requires both the
-  # ARN prefix and the ownership tag.
+  # Reused by each role's inline policy and the shared permissions boundary.
   crossplane_statements = {
     for key, def in local.enabled_crossplane_capabilities : key => concat(
       length(def.observe_actions) > 0 ? [{
@@ -162,9 +109,7 @@ locals {
       }],
       length(def.tag_actions) > 0 ? [
         {
-          # Do not let the role replace another owner's reserved tag. The Null
-          # check limits this Deny to resources where the key already exists;
-          # tag-on-create has no existing resource tag and remains possible.
+          # Preserve another provider's existing ownership tag.
           Sid      = "${key}DenyClaimTagged"
           Effect   = "Deny"
           Action   = def.tag_actions
@@ -210,8 +155,7 @@ locals {
     )
   }
 
-  # The shared boundary ceiling: the union of every enabled capability's Allows
-  # plus a hard Deny on IAM (no privilege escalation, no self-granting roles).
+  # Boundary ceiling: enabled capabilities only, with no IAM access.
   crossplane_boundary_statements = concat(
     flatten([for stmts in values(local.crossplane_statements) : stmts]),
     [{ Sid = "DenyIAMEscalation", Effect = "Deny", Action = ["iam:*"], Resource = ["*"] }],
@@ -219,16 +163,13 @@ locals {
 
   any_crossplane_capability = length(local.enabled_crossplane_capabilities) > 0
 
-  # Many orgs enforce a specific permissions-boundary ARN on every role via SCP.
-  # When one is provided, defer to it (AWS allows only one boundary per role, and
-  # the SCP would reject ours); the inline policies below still enforce the
-  # Crossplane scoping. Otherwise attach our own tag-scoped ceiling.
+  # AWS permits one boundary per role; an organization boundary takes precedence.
+  # The per-role inline policy still enforces capability and ownership scoping.
   org_boundary_set        = var.iam_role_permissions_boundary != null && var.iam_role_permissions_boundary != ""
   crossplane_boundary_arn = local.org_boundary_set ? var.iam_role_permissions_boundary : (local.any_crossplane_capability ? aws_iam_policy.crossplane_boundary[0].arn : null)
 }
 
-# Our own permissions boundary — created only when capabilities are enabled and
-# the org did not mandate its own.
+# Local boundary when the organization does not mandate one.
 resource "aws_iam_policy" "crossplane_boundary" {
   count       = local.any_crossplane_capability && !local.org_boundary_set ? 1 : 0
   name        = "${local.name_prefix}-boundary"
@@ -240,7 +181,6 @@ resource "aws_iam_policy" "crossplane_boundary" {
   })
 }
 
-# Provisioner roles are trusted only by the EKS Pod Identity service principal.
 data "aws_iam_policy_document" "crossplane_provider_trust" {
   statement {
     effect  = "Allow"
@@ -270,8 +210,7 @@ resource "aws_iam_role_policy" "crossplane_provider" {
   })
 }
 
-# Pod Identity association: binds each role to its provider SA. Secret-less —
-# the pod gets creds from the Pod Identity Agent (verified ACTIVE in Phase 0).
+# Bind each capability role to its provider service account.
 resource "aws_eks_pod_identity_association" "crossplane_provider" {
   for_each        = local.enabled_crossplane_capabilities
   cluster_name    = module.eks_cluster.cluster_name
