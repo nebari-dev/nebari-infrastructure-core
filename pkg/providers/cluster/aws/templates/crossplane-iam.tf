@@ -28,6 +28,11 @@ locals {
   # conditions for iam:PassRole.
   crossplane_workload_role_path = "/nebari/${var.project_name}/workloads/"
   crossplane_workload_role_arn  = "arn:aws:iam::*:role${local.crossplane_workload_role_path}${local.name_prefix}-*"
+  # Name-addressed reads (iam:GetRole) authorize against role/<name> with no
+  # path when the role does not yet exist, so the provider's observe-before-
+  # create call cannot match the path-scoped ARN above. Reads therefore also
+  # allow this name-only ARN; all writes stay path- + boundary- + tag-scoped.
+  crossplane_workload_role_name_arn = "arn:aws:iam::*:role/${local.name_prefix}-*"
 
   object_store_identity_enabled = contains(var.crossplane_capabilities, "s3")
   org_boundary_set              = var.iam_role_permissions_boundary != null && var.iam_role_permissions_boundary != ""
@@ -181,57 +186,55 @@ locals {
           }
         }
       }],
-      length(def.tag_actions) > 0 ? [
-        {
-          # Preserve another provider's existing ownership tag.
-          Sid      = "${key}DenyClaimTagged"
-          Effect   = "Deny"
-          Action   = def.tag_actions
-          Resource = def.resource_arns
-          Condition = {
-            StringNotEquals = {
-              "aws:ResourceTag/crossplane-providerconfig" = "aws-${key}"
-            }
-            Null = {
-              "aws:ResourceTag/crossplane-providerconfig" = "false"
-            }
+      length(def.tag_actions) > 0 ? [{
+        # Preserve another provider's existing ownership tag.
+        Sid      = "${key}DenyClaimTagged"
+        Effect   = "Deny"
+        Action   = def.tag_actions
+        Resource = def.resource_arns
+        Condition = {
+          StringNotEquals = {
+            "aws:ResourceTag/crossplane-providerconfig" = "aws-${key}"
           }
-        },
-        {
-          Sid      = "${key}DenyChangeOwnership"
-          Effect   = "Deny"
-          Action   = def.tag_actions
-          Resource = def.resource_arns
-          Condition = {
-            StringEquals = {
-              "aws:ResourceTag/crossplane-providerconfig" = "aws-${key}"
-            }
-            StringNotEquals = {
-              "aws:RequestTag/crossplane-providerconfig" = "aws-${key}"
-            }
-            Null = {
-              "aws:RequestTag/crossplane-providerconfig" = "false"
-            }
+          Null = {
+            "aws:ResourceTag/crossplane-providerconfig" = "false"
           }
-        },
-        {
-          Sid      = "${key}DenyRemoveOwnership"
-          Effect   = "Deny"
-          Action   = def.untag_actions
-          Resource = def.resource_arns
-          Condition = {
-            "ForAnyValue:StringEquals" = {
-              "aws:TagKeys" = ["crossplane-providerconfig"]
-            }
+        }
+      }] : [],
+      length(def.tag_actions) > 0 ? [{
+        Sid      = "${key}DenyChangeOwnership"
+        Effect   = "Deny"
+        Action   = def.tag_actions
+        Resource = def.resource_arns
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/crossplane-providerconfig" = "aws-${key}"
           }
-        },
-        {
-          Sid      = "${key}DenyIAMEscalation"
-          Effect   = "Deny"
-          Action   = ["iam:*"]
-          Resource = ["*"]
-        },
-      ] : [],
+          StringNotEquals = {
+            "aws:RequestTag/crossplane-providerconfig" = "aws-${key}"
+          }
+          Null = {
+            "aws:RequestTag/crossplane-providerconfig" = "false"
+          }
+        }
+      }] : [],
+      length(def.tag_actions) > 0 ? [{
+        Sid      = "${key}DenyRemoveOwnership"
+        Effect   = "Deny"
+        Action   = def.untag_actions
+        Resource = def.resource_arns
+        Condition = {
+          "ForAnyValue:StringEquals" = {
+            "aws:TagKeys" = ["crossplane-providerconfig"]
+          }
+        }
+      }] : [],
+      length(def.tag_actions) > 0 ? [{
+        Sid      = "${key}DenyIAMEscalation"
+        Effect   = "Deny"
+        Action   = ["iam:*"]
+        Resource = ["*"]
+      }] : [],
     )
   }
 
@@ -249,7 +252,10 @@ locals {
         "iam:ListRolePolicies",
         "iam:ListRoleTags",
       ]
-      Resource = [local.crossplane_workload_role_arn]
+      Resource = [
+        local.crossplane_workload_role_arn,
+        local.crossplane_workload_role_name_arn,
+      ]
     },
     {
       Sid      = "iamCreateBoundedWorkloadRoles"
@@ -419,6 +425,18 @@ locals {
       }
     },
     {
+      # CreatePodIdentityAssociation validates the target role via iam:GetRole,
+      # so the EKS provider must read (never mutate) workload roles. The name-
+      # only ARN covers the no-path authorization used for name-addressed reads.
+      Sid      = "eksReadWorkloadRoles"
+      Effect   = "Allow"
+      Action   = ["iam:GetRole"]
+      Resource = [
+        local.crossplane_workload_role_arn,
+        local.crossplane_workload_role_name_arn,
+      ]
+    },
+    {
       # PassRole is the EKS provider's only IAM permission.
       Sid    = "eksDenyIAMMutation"
       Effect = "Deny"
@@ -452,7 +470,10 @@ locals {
 # When an organization boundary is configured it occupies the single available
 # boundary slot; the identical per-role inline policy still enforces this scope.
 resource "aws_iam_policy" "crossplane_provider_boundary" {
-  for_each = local.org_boundary_set ? {} : local.crossplane_provider_statements
+  for_each = {
+    for key, statements in local.crossplane_provider_statements :
+    key => statements if !local.org_boundary_set
+  }
 
   name        = "${local.name_prefix}-${each.key}-provider-boundary"
   description = "Permissions boundary for the Crossplane AWS ${each.key} provider"
