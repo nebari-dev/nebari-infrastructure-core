@@ -1003,14 +1003,20 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 
 	t.Run("writes only the enabled capability's layers", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{
+			"aws-s3":  true,
+			"aws-iam": true,
+			"aws-eks": true,
+		}}
 		if err := WriteAllToGit(ctx, &mockGitClient{workDir: tmpDir}, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
-		for _, want := range capabilityPaths(tmpDir, "aws-s3") {
-			if _, err := os.Stat(want); err != nil {
-				t.Errorf("enabled capability template %s should be written: %v", want, err)
+		for _, id := range []string{"aws-s3", "aws-iam", "aws-eks"} {
+			for _, want := range capabilityPaths(tmpDir, id) {
+				if _, err := os.Stat(want); err != nil {
+					t.Errorf("enabled capability %s template %s should be written: %v", id, want, err)
+				}
 			}
 		}
 		// A capability that was not opted into must be absent.
@@ -1030,11 +1036,16 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 
 	t.Run("multiple capabilities enable independently", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true, "aws-rds": true}}
+		settings := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{
+			"aws-s3":  true,
+			"aws-iam": true,
+			"aws-eks": true,
+			"aws-rds": true,
+		}}
 		if err := WriteAllToGit(ctx, &mockGitClient{workDir: tmpDir}, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
-		for _, id := range []string{"aws-s3", "aws-rds"} {
+		for _, id := range []string{"aws-s3", "aws-iam", "aws-eks", "aws-rds"} {
 			for _, want := range capabilityPaths(tmpDir, id) {
 				if _, err := os.Stat(want); err != nil {
 					t.Errorf("enabled capability %s template %s should be written: %v", id, want, err)
@@ -1046,7 +1057,11 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 	t.Run("omits and removes capability layers when disabled", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		mock := &mockGitClient{workDir: tmpDir}
-		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{
+			"aws-s3":  true,
+			"aws-iam": true,
+			"aws-eks": true,
+		}}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
 			t.Fatalf("WriteAllToGit() enabled error: %v", err)
 		}
@@ -1055,9 +1070,11 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 			t.Fatalf("WriteAllToGit() disabled error: %v", err)
 		}
 
-		for _, stale := range capabilityPaths(tmpDir, "aws-s3") {
-			if _, err := os.Stat(stale); !os.IsNotExist(err) {
-				t.Errorf("%s should not exist when the capability is disabled, stat err: %v", stale, err)
+		for _, id := range []string{"aws-s3", "aws-iam", "aws-eks"} {
+			for _, stale := range capabilityPaths(tmpDir, id) {
+				if _, err := os.Stat(stale); !os.IsNotExist(err) {
+					t.Errorf("%s should not exist when the capability is disabled, stat err: %v", stale, err)
+				}
 			}
 		}
 	})
@@ -1074,6 +1091,8 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 
 		absent := foundationalCrossplanePaths(tmpDir)
 		absent = append(absent, capabilityPaths(tmpDir, "aws-s3")...)
+		absent = append(absent, capabilityPaths(tmpDir, "aws-iam")...)
+		absent = append(absent, capabilityPaths(tmpDir, "aws-eks")...)
 		absent = append(absent, capabilityPaths(tmpDir, "aws-rds")...)
 		for _, f := range absent {
 			if _, err := os.Stat(f); !os.IsNotExist(err) {
@@ -1085,7 +1104,11 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 	t.Run("prunes foundational manifests when the last capability is disabled", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		mock := &mockGitClient{workDir: tmpDir}
-		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{"aws-s3": true}}
+		enabled := cluster.InfraSettings{CrossplaneCapabilities: map[string]bool{
+			"aws-s3":  true,
+			"aws-iam": true,
+			"aws-eks": true,
+		}}
 		if err := WriteAllToGit(ctx, mock, cfg, nil, enabled, ""); err != nil {
 			t.Fatalf("WriteAllToGit() enabled error: %v", err)
 		}

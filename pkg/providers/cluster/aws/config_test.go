@@ -61,14 +61,24 @@ func TestEnabledCrossplaneCapabilities(t *testing.T) {
 		{name: "zero value", config: &Config{}, expected: nil},
 		{name: "empty list", config: &Config{CrossplaneCapabilities: []string{}}, expected: nil},
 		{
-			name:     "single capability is provider-qualified",
+			name:     "s3 capability includes workload identity dependencies",
 			config:   &Config{CrossplaneCapabilities: []string{"s3"}},
-			expected: map[string]bool{"aws-s3": true},
+			expected: map[string]bool{"aws-s3": true, "aws-iam": true, "aws-eks": true},
 		},
 		{
-			name:     "multiple capabilities",
-			config:   &Config{CrossplaneCapabilities: []string{"s3", "rds"}},
-			expected: map[string]bool{"aws-s3": true, "aws-rds": true},
+			name:     "rds remains independent",
+			config:   &Config{CrossplaneCapabilities: []string{"rds"}},
+			expected: map[string]bool{"aws-rds": true},
+		},
+		{
+			name:   "multiple capabilities",
+			config: &Config{CrossplaneCapabilities: []string{"s3", "rds"}},
+			expected: map[string]bool{
+				"aws-s3":  true,
+				"aws-iam": true,
+				"aws-eks": true,
+				"aws-rds": true,
+			},
 		},
 	}
 

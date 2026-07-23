@@ -37,11 +37,13 @@ type Config struct {
 	// private deployment with no public DNS resolution for AWS hostnames).
 	EnableIRSA *bool `yaml:"enable_irsa,omitempty"`
 
-	// CrossplaneCapabilities lists the Crossplane provider capabilities this
+	// CrossplaneCapabilities lists the managed infrastructure capabilities this
 	// cluster is explicitly opted into (e.g. "s3", "rds"). It defaults empty
-	// because each capability grants new cloud permissions and installs an AWS
-	// provider controller. Values are validated against validCrossplaneCapabilities
-	// at config load.
+	// because each capability grants new cloud permissions and installs AWS
+	// provider controllers. A capability may expand to internal provider
+	// dependencies; for example, s3 also enables the narrowly scoped IAM and EKS
+	// providers needed to create per-workload Pod Identity bindings. Values are
+	// validated against validCrossplaneCapabilities at config load.
 	CrossplaneCapabilities []string `yaml:"crossplane_capabilities,omitempty"`
 }
 
@@ -67,8 +69,10 @@ var validLoadBalancerSchemes = []string{
 // capability.
 var validCrossplaneCapabilities = []string{"s3", "rds"}
 
-// EnabledCrossplaneCapabilities returns the enabled Crossplane capability ids,
-// provider-qualified (e.g. "aws-s3") and keyed for membership tests. Safe on a
+// EnabledCrossplaneCapabilities returns the enabled Crossplane provider ids,
+// provider-qualified (e.g. "aws-s3") and keyed for membership tests. It expands
+// user-facing capabilities to their internal provider dependencies: managed S3
+// object stores also need IAM roles and EKS Pod Identity associations. Safe on a
 // nil receiver. Keys are trusted valid because they are checked at config load.
 func (c *Config) EnabledCrossplaneCapabilities() map[string]bool {
 	if c == nil || len(c.CrossplaneCapabilities) == 0 {
@@ -77,6 +81,10 @@ func (c *Config) EnabledCrossplaneCapabilities() map[string]bool {
 	set := make(map[string]bool, len(c.CrossplaneCapabilities))
 	for _, key := range c.CrossplaneCapabilities {
 		set[crossplaneCapabilityPrefix+key] = true
+		if key == "s3" {
+			set[crossplaneCapabilityPrefix+"iam"] = true
+			set[crossplaneCapabilityPrefix+"eks"] = true
+		}
 	}
 	return set
 }

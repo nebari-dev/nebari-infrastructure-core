@@ -1,27 +1,40 @@
 # Opt-in AWS permissions for application infrastructure provisioned through
-# Crossplane. Each capability gets a separate EKS Pod Identity role and no
-# static AWS credentials are stored in the cluster.
+# Crossplane. Every provider controller has its own EKS Pod Identity role,
+# inline policy, and (unless an organization boundary is supplied) permissions
+# boundary. No static AWS credentials are stored in the cluster.
 #
-# Cloud resources must use the tool-neutral `${project_name}-apps-*` lifecycle
-# namespace; foundational OpenTofu resources must not. Mutations and deletion
-# additionally require the provider's `crossplane-providerconfig` ownership tag.
+# Enabling the S3 capability also enables dedicated IAM and EKS providers. S3
+# creates the bucket; IAM creates one bounded runtime role per ObjectStore; EKS
+# binds that role to the requesting Kubernetes ServiceAccount. The S3 provider
+# never receives IAM or EKS permissions.
 #
-# Tags are not immutable creation provenance, so reserve the apps prefix and
-# prevent workload users from adopting resources through
-# `crossplane.io/external-name`. Packs intentionally share each capability role;
-# pack isolation belongs in Kubernetes RBAC and admission policy.
+# Cloud resources use the tool-neutral `${project_name}-apps-*` lifecycle
+# namespace. Mutations and deletion additionally require the provider's
+# `crossplane-providerconfig` ownership tag. Tags are not immutable creation
+# provenance, so reserve the apps prefix and prevent workload users from
+# adopting resources through `crossplane.io/external-name`.
 #
-# S3 was verified with provider-aws v2.6.1. RDS remains unverified and may need
-# tightly scoped EC2, KMS, or PassRole permissions.
+# S3 was verified with provider-aws v2.6.1. IAM and EKS permissions must be
+# verified end-to-end with the ObjectStore Composition before production use.
+# RDS remains unverified and may need tightly scoped EC2 or KMS permissions.
 
 locals {
   crossplane_namespace = "crossplane-system"
   # Stable lifecycle namespace independent of the provisioning tool.
   name_prefix = "${var.project_name}-apps"
 
+  # Workload roles exist under a dedicated IAM path and name prefix. PassRole
+  # uses this ARN rather than tags because AWS does not recommend ResourceTag
+  # conditions for iam:PassRole.
+  crossplane_workload_role_path = "/nebari/${var.project_name}/workloads/"
+  crossplane_workload_role_arn  = "arn:aws:iam::*:role${local.crossplane_workload_role_path}${local.name_prefix}-*"
+
+  object_store_identity_enabled = contains(var.crossplane_capabilities, "s3")
+  org_boundary_set              = var.iam_role_permissions_boundary != null && var.iam_role_permissions_boundary != ""
+
   # service_account and the aws-<key> ProviderConfig name form the Pod Identity
   # and ownership-tag contracts with the GitOps manifests.
-  crossplane_capability_defs = {
+  crossplane_resource_capability_defs = {
     s3 = {
       service_account = "provider-aws-s3"
       resource_arns = [
@@ -65,14 +78,75 @@ locals {
     }
   }
 
-  enabled_crossplane_capabilities = {
-    for key, def in local.crossplane_capability_defs :
+  enabled_crossplane_resource_capabilities = {
+    for key, def in local.crossplane_resource_capability_defs :
     key => def if contains(var.crossplane_capabilities, key)
   }
 
-  # Reused by each role's inline policy and the shared permissions boundary.
-  crossplane_statements = {
-    for key, def in local.enabled_crossplane_capabilities : key => concat(
+  # IAM and EKS are internal dependencies of managed object storage, not
+  # additional user-facing opt-ins.
+  crossplane_provider_service_accounts = merge(
+    {
+      for key, def in local.enabled_crossplane_resource_capabilities :
+      key => def.service_account
+    },
+    local.object_store_identity_enabled ? {
+      iam = "provider-aws-iam"
+      eks = "provider-aws-eks"
+    } : {},
+  )
+}
+
+# Maximum runtime permissions for roles created by the IAM provider. This is
+# deliberately separate from any organization boundary used by NIC's own
+# controller roles: allowing a broader organization boundary to substitute here
+# would let a compromised IAM provider grant that broader permission set.
+resource "aws_iam_policy" "crossplane_workload_boundary" {
+  count       = local.object_store_identity_enabled ? 1 : 0
+  name        = "${local.name_prefix}-workload-boundary"
+  description = "Maximum permissions for Crossplane-created application workload roles"
+  tags        = var.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ObjectStoreBucketAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetBucketLocation",
+          "s3:ListBucket",
+          "s3:ListBucketMultipartUploads",
+        ]
+        Resource = ["arn:aws:s3:::${local.name_prefix}-*"]
+      },
+      {
+        Sid    = "ObjectStoreObjectAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:AbortMultipartUpload",
+          "s3:DeleteObject",
+          "s3:GetObject",
+          "s3:ListMultipartUploadParts",
+          "s3:PutObject",
+        ]
+        Resource = ["arn:aws:s3:::${local.name_prefix}-*/*"]
+      },
+      {
+        Sid      = "DenyWorkloadPrivilegeEscalation"
+        Effect   = "Deny"
+        Action   = ["iam:*", "eks:*"]
+        Resource = ["*"]
+      },
+    ]
+  })
+}
+
+locals {
+  crossplane_workload_boundary_arn = local.object_store_identity_enabled ? aws_iam_policy.crossplane_workload_boundary[0].arn : null
+
+  # Resource-provider policies use a common create/manage/ownership shape.
+  crossplane_resource_statements = {
+    for key, def in local.enabled_crossplane_resource_capabilities : key => concat(
       length(def.observe_actions) > 0 ? [{
         Sid      = "${key}Observe"
         Effect   = "Allow"
@@ -151,37 +225,248 @@ locals {
             }
           }
         },
+        {
+          Sid      = "${key}DenyIAMEscalation"
+          Effect   = "Deny"
+          Action   = ["iam:*"]
+          Resource = ["*"]
+        },
       ] : [],
     )
   }
 
-  # Boundary ceiling: enabled capabilities only, with no IAM access.
-  crossplane_boundary_statements = concat(
-    flatten([for stmts in values(local.crossplane_statements) : stmts]),
-    [{ Sid = "DenyIAMEscalation", Effect = "Deny", Action = ["iam:*"], Resource = ["*"] }],
+  # The IAM provider may create and reconcile only bounded workload roles. It
+  # cannot create users, access keys, instance profiles, or managed policies.
+  crossplane_iam_statements = [
+    {
+      Sid    = "iamObserveWorkloadRoles"
+      Effect = "Allow"
+      Action = [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+      ]
+      Resource = [local.crossplane_workload_role_arn]
+    },
+    {
+      Sid      = "iamCreateBoundedWorkloadRoles"
+      Effect   = "Allow"
+      Action   = ["iam:CreateRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "aws:RequestTag/crossplane-providerconfig" = "aws-iam"
+          "iam:PermissionsBoundary"                  = local.crossplane_workload_boundary_arn
+        }
+      }
+    },
+    {
+      # TagRole is a dependent create action. Name-prefix scoping plus the
+      # request tag permits initial ownership; explicit denies below prevent
+      # taking over a differently owned role or changing the reserved tag.
+      Sid      = "iamTagWorkloadRoles"
+      Effect   = "Allow"
+      Action   = ["iam:TagRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "aws:RequestTag/crossplane-providerconfig" = "aws-iam"
+        }
+      }
+    },
+    {
+      Sid    = "iamManageOwnedWorkloadRoles"
+      Effect = "Allow"
+      Action = [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
+      ]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "iam:ResourceTag/crossplane-providerconfig" = "aws-iam"
+        }
+      }
+    },
+    {
+      Sid      = "iamRestoreRequiredBoundary"
+      Effect   = "Allow"
+      Action   = ["iam:PutRolePermissionsBoundary"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "iam:PermissionsBoundary"                   = local.crossplane_workload_boundary_arn
+          "iam:ResourceTag/crossplane-providerconfig" = "aws-iam"
+        }
+      }
+    },
+    {
+      Sid      = "iamDenyBoundaryRemoval"
+      Effect   = "Deny"
+      Action   = ["iam:DeleteRolePermissionsBoundary"]
+      Resource = [local.crossplane_workload_role_arn]
+    },
+    {
+      Sid      = "iamDenyClaimTagged"
+      Effect   = "Deny"
+      Action   = ["iam:TagRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringNotEquals = {
+          "iam:ResourceTag/crossplane-providerconfig" = "aws-iam"
+        }
+        Null = {
+          "iam:ResourceTag/crossplane-providerconfig" = "false"
+        }
+      }
+    },
+    {
+      Sid      = "iamDenyChangeOwnership"
+      Effect   = "Deny"
+      Action   = ["iam:TagRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "iam:ResourceTag/crossplane-providerconfig" = "aws-iam"
+        }
+        StringNotEquals = {
+          "aws:RequestTag/crossplane-providerconfig" = "aws-iam"
+        }
+        Null = {
+          "aws:RequestTag/crossplane-providerconfig" = "false"
+        }
+      }
+    },
+    {
+      Sid      = "iamDenyRemoveOwnership"
+      Effect   = "Deny"
+      Action   = ["iam:UntagRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        "ForAnyValue:StringEquals" = {
+          "aws:TagKeys" = ["crossplane-providerconfig"]
+        }
+      }
+    },
+  ]
+
+  # The EKS provider may manage Pod Identity associations only on this cluster.
+  # Namespace and ServiceAccount are not IAM condition keys for the create API;
+  # the platform Composition and generated workload-role trust policy must bind
+  # those exact values.
+  crossplane_eks_statements = [
+    {
+      Sid      = "eksObserveClusterAssociations"
+      Effect   = "Allow"
+      Action   = ["eks:DescribeCluster", "eks:ListPodIdentityAssociations"]
+      Resource = [module.eks_cluster.cluster_arn]
+    },
+    {
+      Sid      = "eksCreateOwnedAssociations"
+      Effect   = "Allow"
+      Action   = ["eks:CreatePodIdentityAssociation"]
+      Resource = [module.eks_cluster.cluster_arn]
+      Condition = {
+        StringEquals = {
+          "aws:RequestTag/crossplane-providerconfig" = "aws-eks"
+        }
+      }
+    },
+    {
+      Sid    = "eksObserveOwnedAssociations"
+      Effect = "Allow"
+      Action = [
+        "eks:DescribePodIdentityAssociation",
+        "eks:ListTagsForResource",
+      ]
+      Resource = [
+        "arn:aws:eks:${var.region}:*:podidentityassociation/${module.eks_cluster.cluster_name}/*",
+      ]
+    },
+    {
+      Sid    = "eksManageOwnedAssociations"
+      Effect = "Allow"
+      Action = [
+        "eks:DeletePodIdentityAssociation",
+        "eks:TagResource",
+        "eks:UntagResource",
+        "eks:UpdatePodIdentityAssociation",
+      ]
+      Resource = [
+        "arn:aws:eks:${var.region}:*:podidentityassociation/${module.eks_cluster.cluster_name}/*",
+      ]
+      Condition = {
+        StringEquals = {
+          "aws:ResourceTag/crossplane-providerconfig" = "aws-eks"
+        }
+      }
+    },
+    {
+      Sid      = "eksPassOnlyWorkloadRoles"
+      Effect   = "Allow"
+      Action   = ["iam:PassRole"]
+      Resource = [local.crossplane_workload_role_arn]
+      Condition = {
+        StringEquals = {
+          "iam:PassedToService" = "pods.eks.amazonaws.com"
+        }
+      }
+    },
+    {
+      # PassRole is the EKS provider's only IAM permission.
+      Sid    = "eksDenyIAMMutation"
+      Effect = "Deny"
+      Action = [
+        "iam:Attach*",
+        "iam:Create*",
+        "iam:Delete*",
+        "iam:Detach*",
+        "iam:Put*",
+        "iam:Set*",
+        "iam:Tag*",
+        "iam:Untag*",
+        "iam:Update*",
+      ]
+      Resource = ["*"]
+    },
+  ]
+
+  crossplane_provider_statements = merge(
+    local.crossplane_resource_statements,
+    {
+      for key, statements in {
+        iam = local.crossplane_iam_statements
+        eks = local.crossplane_eks_statements
+      } : key => statements if local.object_store_identity_enabled
+    },
   )
-
-  any_crossplane_capability = length(local.enabled_crossplane_capabilities) > 0
-
-  # AWS permits one boundary per role; an organization boundary takes precedence.
-  # The per-role inline policy still enforces capability and ownership scoping.
-  org_boundary_set        = var.iam_role_permissions_boundary != null && var.iam_role_permissions_boundary != ""
-  crossplane_boundary_arn = local.org_boundary_set ? var.iam_role_permissions_boundary : (local.any_crossplane_capability ? aws_iam_policy.crossplane_boundary[0].arn : null)
 }
 
-# Local boundary when the organization does not mandate one.
-resource "aws_iam_policy" "crossplane_boundary" {
-  count       = local.any_crossplane_capability && !local.org_boundary_set ? 1 : 0
-  name        = "${local.name_prefix}-boundary"
-  description = "Permissions boundary (upper bound) for Crossplane provider roles"
+# One local boundary per provider prevents permission bleed between capabilities.
+# When an organization boundary is configured it occupies the single available
+# boundary slot; the identical per-role inline policy still enforces this scope.
+resource "aws_iam_policy" "crossplane_provider_boundary" {
+  for_each = local.org_boundary_set ? {} : local.crossplane_provider_statements
+
+  name        = "${local.name_prefix}-${each.key}-provider-boundary"
+  description = "Permissions boundary for the Crossplane AWS ${each.key} provider"
   tags        = var.tags
   policy = jsonencode({
     Version   = "2012-10-17"
-    Statement = local.crossplane_boundary_statements
+    Statement = each.value
   })
 }
 
+# Provider roles are usable only by their exact ServiceAccount in this cluster.
 data "aws_iam_policy_document" "crossplane_provider_trust" {
+  for_each = local.crossplane_provider_service_accounts
+
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRole", "sts:TagSession"]
@@ -189,38 +474,68 @@ data "aws_iam_policy_document" "crossplane_provider_trust" {
       type        = "Service"
       identifiers = ["pods.eks.amazonaws.com"]
     }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/eks-cluster-arn"
+      values   = [module.eks_cluster.cluster_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/kubernetes-namespace"
+      values   = [local.crossplane_namespace]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/kubernetes-service-account"
+      values   = [each.value]
+    }
   }
 }
 
 resource "aws_iam_role" "crossplane_provider" {
-  for_each             = local.enabled_crossplane_capabilities
-  name                 = "${local.name_prefix}-${each.key}"
-  assume_role_policy   = data.aws_iam_policy_document.crossplane_provider_trust.json
-  permissions_boundary = local.crossplane_boundary_arn
-  tags                 = var.tags
+  for_each = local.crossplane_provider_service_accounts
+
+  name               = "${local.name_prefix}-${each.key}"
+  assume_role_policy = data.aws_iam_policy_document.crossplane_provider_trust[each.key].json
+  permissions_boundary = local.org_boundary_set ? (
+    var.iam_role_permissions_boundary
+  ) : aws_iam_policy.crossplane_provider_boundary[each.key].arn
+  tags = var.tags
 }
 
 resource "aws_iam_role_policy" "crossplane_provider" {
-  for_each = local.enabled_crossplane_capabilities
-  name     = "${each.key}-provisioner"
-  role     = aws_iam_role.crossplane_provider[each.key].id
+  for_each = local.crossplane_provider_service_accounts
+
+  name = "${each.key}-provisioner"
+  role = aws_iam_role.crossplane_provider[each.key].id
   policy = jsonencode({
     Version   = "2012-10-17"
-    Statement = local.crossplane_statements[each.key]
+    Statement = local.crossplane_provider_statements[each.key]
   })
 }
 
-# Bind each capability role to its provider service account.
+# Bind each provider role to its exact controller ServiceAccount.
 resource "aws_eks_pod_identity_association" "crossplane_provider" {
-  for_each        = local.enabled_crossplane_capabilities
+  for_each = local.crossplane_provider_service_accounts
+
   cluster_name    = module.eks_cluster.cluster_name
   namespace       = local.crossplane_namespace
-  service_account = each.value.service_account
+  service_account = each.value
   role_arn        = aws_iam_role.crossplane_provider[each.key].arn
   tags            = var.tags
 }
 
 output "crossplane_provider_role_arns" {
-  description = "IAM roles assumed by Crossplane providers via Pod Identity, keyed by capability"
+  description = "IAM roles assumed by Crossplane providers via Pod Identity, keyed by provider"
   value       = { for key, role in aws_iam_role.crossplane_provider : key => role.arn }
+}
+
+output "crossplane_workload_boundary_arn" {
+  description = "Required permissions boundary for Crossplane-created workload roles"
+  value       = local.crossplane_workload_boundary_arn
+}
+
+output "crossplane_workload_role_path" {
+  description = "Required IAM path for Crossplane-created workload roles"
+  value       = local.object_store_identity_enabled ? local.crossplane_workload_role_path : null
 }

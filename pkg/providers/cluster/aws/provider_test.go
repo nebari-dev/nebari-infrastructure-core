@@ -72,12 +72,22 @@ func TestProvider_InfraSettings_CrossplaneCapabilities(t *testing.T) {
 		{
 			name: "single capability",
 			raw:  map[string]any{"crossplane_capabilities": []any{"s3"}},
-			want: map[string]bool{"aws-s3": true},
+			want: map[string]bool{"aws-s3": true, "aws-iam": true, "aws-eks": true},
+		},
+		{
+			name: "rds remains independent",
+			raw:  map[string]any{"crossplane_capabilities": []any{"rds"}},
+			want: map[string]bool{"aws-rds": true},
 		},
 		{
 			name: "multiple capabilities",
 			raw:  map[string]any{"crossplane_capabilities": []any{"s3", "rds"}},
-			want: map[string]bool{"aws-s3": true, "aws-rds": true},
+			want: map[string]bool{
+				"aws-s3":  true,
+				"aws-iam": true,
+				"aws-eks": true,
+				"aws-rds": true,
+			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

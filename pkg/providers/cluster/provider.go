@@ -79,10 +79,11 @@ type InfraSettings struct {
 
 	// CrossplaneCapabilities is the set of Crossplane provider capabilities the
 	// provider has been explicitly authorized to install, keyed by capability id
-	// (e.g. "aws-s3", "aws-rds"). Provider-agnostic: each cloud provider
-	// populates the ids it supports and the admin has opted into. Shared
-	// orchestration gates capability manifests on membership in this set instead
-	// of branching on the cluster provider name. A nil map means none enabled.
+	// (e.g. "aws-s3", "aws-iam", "aws-eks"). Provider-agnostic: each cloud
+	// provider populates the ids required by the capabilities the admin opted
+	// into, including internal dependencies. Shared orchestration gates provider
+	// manifests on membership in this set instead of branching on the cluster
+	// provider name. A nil map means none enabled.
 	CrossplaneCapabilities map[string]bool
 }
 

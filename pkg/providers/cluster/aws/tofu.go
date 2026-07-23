@@ -59,8 +59,9 @@ type TFVars struct {
 	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
 	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
 	// CrossplaneCapabilities lists the bare capability keys (e.g. "s3", "rds")
-	// the cluster opted into. crossplane-iam.tf provisions one scoped Pod
-	// Identity role per entry. Sorted for deterministic tfvars output.
+	// the cluster opted into. crossplane-iam.tf expands capability dependencies
+	// and provisions one scoped Pod Identity role per AWS provider controller.
+	// Sorted for deterministic tfvars output.
 	CrossplaneCapabilities []string `json:"crossplane_capabilities,omitempty"`
 }
 

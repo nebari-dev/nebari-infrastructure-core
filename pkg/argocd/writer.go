@@ -477,7 +477,7 @@ func isCrossplanePath(relPath string) bool {
 // enabled at all (see isCrossplanePath and CrossplaneEnabled). Adding a
 // capability is one entry here plus the matching templates and IAM — the gating
 // logic does not change.
-var crossplaneCapabilities = []string{"aws-s3", "aws-rds"}
+var crossplaneCapabilities = []string{"aws-s3", "aws-iam", "aws-eks", "aws-rds"}
 
 // crossplaneCapabilityForPath returns the capability id that owns relPath, or ""
 // if the path does not belong to a gateable Crossplane capability.
