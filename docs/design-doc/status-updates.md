@@ -38,11 +38,11 @@ In `cmd/nic/deploy.go:63-64`:
 
 ```go
 // Setup status handler for progress updates
-ctx, cleanupStatus := status.StartHandler(ctx, statusLogHandler())
-defer cleanupStatus()
+ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+defer cleanup()
 ```
 
-The `statusLogHandler()` in `cmd/nic/status_handler.go:12-48` converts status updates to `slog` calls at the appropriate log level.
+`SlogHandler` in `pkg/nic/status.go` converts status updates to `slog` calls at the appropriate log level; `cmd/nic` wires it up via `nic.StartSlogHandler(ctx, slog.Default())`.
 
 ## Usage in Library Code
 
