@@ -23,8 +23,9 @@ go.work
 go.work.sum
 
 # Environment variables
+!.env.example
 .env
-.env.local
+.env*
 
 # IDE
 .vscode/
