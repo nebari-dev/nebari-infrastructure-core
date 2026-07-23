@@ -2,7 +2,10 @@ package nic
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -121,10 +124,27 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
+	// Re-resolve the bundle so the destroy plan matches what was deployed. The
+	// applied value already lives in TF state, so a source PEM that was deleted
+	// or moved after deploy must not block teardown: downgrade a missing file to
+	// an empty bundle and warn rather than fail.
+	caBundle, err := cfg.TrustBundle.ResolveBase64()
+	if errors.Is(err, fs.ErrNotExist) {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			"trust_bundle PEM file is no longer present; continuing destroy with the value already in Terraform state").
+			WithResource("trust_bundle"))
+		caBundle, err = "", nil
+	}
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+
 	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
-		DryRun:  opts.DryRun,
-		Force:   opts.Force,
-		Timeout: opts.Timeout,
+		DryRun:      opts.DryRun,
+		Force:       opts.Force,
+		Timeout:     opts.Timeout,
+		TrustBundle: caBundle,
 	}); err != nil {
 		span.RecordError(err)
 		if opts.Force {
@@ -137,7 +157,60 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
 		WithMetadata("provider", clusterProvider.Name()))
+
+	if !opts.DryRun {
+		reportRetainedGitOpsDir(ctx, cfg, clusterProvider)
+	}
+
 	return nil
+}
+
+// reportRetainedGitOpsDir logs a reminder that the local GitOps directory is
+// left in place after a destroy so the user knows it exists and where to find
+// it. Cluster teardown does not remove this directory: it may hold local
+// commits or edits the user still wants, and it is cheap to delete manually.
+// Only local file:// directories are reported; remote git repositories have no
+// retained host directory to report. Nothing is logged when the directory no
+// longer exists on disk.
+func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")
+	defer span.End()
+
+	gitConfig := cfg.GitRepository
+	if gitConfig == nil {
+		// Fall back to the same auto-generated local config deploy uses, but
+		// only for providers that manage a local GitOps directory.
+		if !clusterProvider.InfraSettings(cfg.Cluster).SupportsLocalGitOps {
+			return
+		}
+		gitConfig = defaultGitConfig(cfg.ProjectName)
+	}
+
+	if !gitConfig.IsLocalPath() {
+		return
+	}
+
+	localPath, err := gitConfig.GetLocalPath()
+	if err != nil {
+		span.RecordError(err)
+		return
+	}
+
+	if _, err := os.Stat(localPath); err != nil {
+		if !os.IsNotExist(err) {
+			// Some other problem (e.g. a permission error on an ancestor
+			// directory) means we can't tell whether the directory is
+			// actually gone, so record it instead of silently assuming so.
+			span.RecordError(err)
+		}
+		return
+	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo,
+		fmt.Sprintf("The local GitOps directory was left in place and can be removed manually: %s", localPath)).
+		WithResource("gitops").
+		WithMetadata("path", localPath))
 }
 
 // destroyDNS removes DNS records associated with the cluster's domain.

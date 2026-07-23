@@ -305,11 +305,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -428,6 +424,23 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Install the NVIDIA GPU Operator when the cluster has GPU node groups, so
+	// nvidia.com/gpu is advertised before the GitOps/ArgoCD stage. Gated on the
+	// gpu: true config flag, matching the LBC and cluster-autoscaler; teardown
+	// happens in Destroy. Decision recorded in ADR-0006 (#361).
+	if awsCfg.HasGPUNodeGroups() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for GPU Operator install: %w", err)
+		}
+
+		if err := installGPUOperator(ctx, kubeconfigBytes); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install GPU Operator: %w", err)
+		}
+	}
+
 	// Create EFS StorageClass if EFS is enabled
 	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
@@ -528,11 +541,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars, err := awsCfg.toTFVars(projectName)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to resolve terraform variables: %w", err)
-	}
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -640,6 +649,25 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Uninstall the GPU Operator before tofu destroy, gated on the GPU config
+	// flag to mirror the Longhorn block above. The operator has no cloud
+	// resources that can block teardown, so an uninstall failure is never fatal
+	// to the destroy: we warn and continue even without --force (unlike
+	// Longhorn, whose CSI finalizers can wedge node-group deletion). Best-effort.
+	if awsCfg.HasGPUNodeGroups() {
+		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		switch {
+		case kErr != nil:
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping GPU Operator uninstall: kubeconfig unavailable: %v", kErr)).
+				WithResource("gpu-operator").WithAction("uninstalling"))
+		default:
+			if err := uninstallGPUOperator(ctx, kubeconfigBytes); err != nil {
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("GPU Operator uninstall failed, continuing: %v", err)).
+					WithResource("gpu-operator").WithAction("uninstalling"))
+			}
+		}
+	}
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
@@ -743,6 +771,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	sc := longhorn.StorageClassName
+	longhornEnabled := true // AWS default — see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
 
@@ -750,7 +779,8 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
-			if !awsCfg.LonghornEnabled() {
+			longhornEnabled = awsCfg.LonghornEnabled()
+			if !longhornEnabled {
 				sc = storageClassGP2
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
@@ -764,6 +794,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LonghornEnabled: longhornEnabled,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

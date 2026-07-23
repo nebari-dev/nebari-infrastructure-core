@@ -119,6 +119,8 @@ func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName 
 	createInput := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}
+	// us-east-1 is special-cased in S3: CreateBucket rejects a LocationConstraint
+	// of "us-east-1" because that region is the default.
 	if region != "us-east-1" {
 		createInput.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 			LocationConstraint: types.BucketLocationConstraint(region),

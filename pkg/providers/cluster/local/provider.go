@@ -147,7 +147,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 	if exists {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image or extra_mounts only take effect on a recreate)", projectName)).
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, or the default local GitOps mount path only take effect on a recreate)", projectName)).
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
@@ -301,12 +301,14 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // Parse errors are intentionally ignored: InfraSettings is called after Validate()
 // has confirmed the config is parseable. If it somehow fails (e.g., nil config in
 // tests), we return valid defaults.
+// LonghornEnabled is false: Longhorn is not yet wired for the local provider.
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:        defaultStorageClass,
 		NeedsMetalLB:        true,
 		MetalLBAddressPool:  defaultMetalLBAddressPool,
 		SupportsLocalGitOps: true,
+		LonghornEnabled:     false,
 	}
 
 	localCfg, err := parseConfig(context.Background(), cfg)

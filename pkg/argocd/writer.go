@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -65,6 +66,14 @@ type TemplateData struct {
 	// MetalLB configuration (for local provider)
 	MetalLBAddressRange string
 
+	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
+	// when a top-level trust_bundle is configured.
+	TrustManagerEnabled bool
+
+	// TrustBundlePEM is the raw PEM of the org CA, rendered inline into the
+	// trust-manager Bundle. Empty unless TrustManagerEnabled is true.
+	TrustBundlePEM string
+
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
 	HTTPSPort int
 
@@ -82,6 +91,18 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
+	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
+	// rendered. Keycloak is mandatory infrastructure in this codebase (always
+	// provisioned during foundational install), so a separate Keycloak-enabled
+	// gate is not part of the conditional.
+	LonghornEnabled bool
+
+	// LonghornOIDCSecretName is the name of the Kubernetes secret holding the
+	// Longhorn UI OIDC client secret, threaded from LonghornOIDCClientSecretName
+	// so the Go constant and the rendered manifests cannot drift.
+	LonghornOIDCSecretName string
 }
 
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
@@ -102,6 +123,8 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
+		LonghornEnabled:         settings.LonghornEnabled,
+		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -263,13 +286,20 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 
 // WriteAllToGit writes all templates (apps and manifests) to the git repository.
 // Templates are processed with Go template syntax for dynamic values.
-func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings) error {
+// trustBundlePEM is the top-level CA bundle already resolved by the orchestration
+// layer (empty when no bundle is configured); it is not re-read from disk here.
+func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.NebariConfig, gitConfig *git.Config, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	workDir := gitClient.WorkDir()
 	data := NewTemplateData(cfg, gitConfig, settings)
+
+	if trustBundlePEM != "" {
+		data.TrustManagerEnabled = true
+		data.TrustBundlePEM = trustBundlePEM
+	}
 
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),
@@ -299,24 +329,39 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for providers that don't need it
-		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		// Skip certificate templates that don't apply to the configured cert source.
-		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
-			return nil
-		}
-
 		destPath := filepath.Join(workDir, relPath)
 
+		// Gated templates are removed (not just skipped) when their gate is
+		// off, so toggling a feature off on an already-bootstrapped repo
+		// deletes its manifests and lets ArgoCD prune the resources, instead
+		// of leaving them orphaned in git.
+
+		// MetalLB templates only apply to providers that need it
+		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
+			return removeStaleTemplate(destPath, d)
+		}
+
+		// Longhorn-only templates are gated on LonghornEnabled. The
+		// securitypolicies Application targets manifests/networking/policies,
+		// whose only content is the Longhorn SecurityPolicy; writing the app
+		// without its manifest would create an Application with zero resources
+		// (rejected by allowEmpty: false).
+		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
+			return removeStaleTemplate(destPath, d)
+		}
+
+		// trust-manager templates only apply when a trust bundle is configured
+		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
+			return removeStaleTemplate(destPath, d)
+		}
+
+		// Certificate templates that don't apply to the configured cert source.
+		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
+			return removeStaleTemplate(destPath, d)
+		}
+
 		if d.IsDir() {
-			// Create directory
-			return os.MkdirAll(destPath, 0750)
+			return os.MkdirAll(destPath, git.GitOpsDirMode)
 		}
 
 		// Read template content
@@ -332,12 +377,12 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), git.GitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, 0600); err != nil {
+		if err := os.WriteFile(destPath, processed, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
 
@@ -352,11 +397,45 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	return nil
 }
 
+// removeStaleTemplate deletes the previously written output of a template
+// whose gate is now off, so a feature toggled from enabled to disabled has its
+// files removed from the gitops repo rather than skipped-but-retained. Missing
+// files are a no-op (the common case: the feature was never enabled). Returns
+// fs.SkipDir for directories so the walk does not descend into them.
+func removeStaleTemplate(destPath string, d fs.DirEntry) error {
+	if d.IsDir() {
+		if err := os.RemoveAll(destPath); err != nil {
+			return fmt.Errorf("failed to remove stale directory %s: %w", destPath, err)
+		}
+		return fs.SkipDir
+	}
+	if err := os.Remove(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale file %s: %w", destPath, err)
+	}
+	return nil
+}
+
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
+}
+
+// isLonghornOnlyPath returns true if the relative path is a template that only
+// produces Longhorn resources and must be skipped entirely when Longhorn is
+// disabled.
+func isLonghornOnlyPath(relPath string) bool {
+	return relPath == "apps/securitypolicies.yaml" ||
+		strings.HasPrefix(relPath, "manifests/networking/policies")
+}
+
+// isTrustBundlePath returns true if the relative path is a trust-manager-related
+// template (the chart Application, the Bundle Application, or the Bundle manifest).
+func isTrustBundlePath(relPath string) bool {
+	return relPath == "apps/trust-manager.yaml" ||
+		relPath == "apps/trust-bundle.yaml" ||
+		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
 }
 
 const (
@@ -386,6 +465,28 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	}
 }
 
+// templateFuncs is the single extension point for helpers available to every
+// template; it is consumed only by processTemplate, not a broader public surface.
+// indent and nindent mirror the common Helm helpers for embedding multi-line
+// values (e.g. a PEM bundle) at a fixed YAML indentation.
+var templateFuncs = template.FuncMap{
+	"indent":  indentLines,
+	"nindent": func(spaces int, s string) string { return "\n" + indentLines(spaces, s) },
+}
+
+// indentLines prefixes every non-empty line of s with the given number of spaces.
+func indentLines(spaces int, s string) string {
+	pad := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = pad + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 // processTemplate processes a template file with the given data.
 // Only YAML files are processed as templates; other files are returned as-is.
 func processTemplate(name string, content []byte, data TemplateData) ([]byte, error) {
@@ -394,7 +495,7 @@ func processTemplate(name string, content []byte, data TemplateData) ([]byte, er
 		return content, nil
 	}
 
-	tmpl, err := template.New(name).Parse(string(content))
+	tmpl, err := template.New(name).Funcs(templateFuncs).Parse(string(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse template: %w", err)
 	}

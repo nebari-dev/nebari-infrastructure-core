@@ -11,6 +11,10 @@ import (
 type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
+
+	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
+	// passed so providers can apply it without seeing the full NebariConfig.
+	TrustBundle string
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.
@@ -18,6 +22,10 @@ type DestroyOptions struct {
 	DryRun  bool
 	Force   bool
 	Timeout time.Duration
+
+	// TrustBundle mirrors DeployOptions.TrustBundle; destroy must compute the
+	// same tofu variables as deploy for the plan to match.
+	TrustBundle string
 }
 
 // InfraSettings describes provider-specific Kubernetes infrastructure settings.
@@ -62,6 +70,12 @@ type InfraSettings struct {
 	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).
 	// Cloud providers (AWS, GCP, Azure) return false - their nodes can't see the dev machine's FS.
 	SupportsLocalGitOps bool
+
+	// LonghornEnabled indicates whether the Longhorn distributed block storage
+	// (and therefore the Longhorn UI) is deployed by this provider for the given
+	// cluster config. Used by the foundational deploy flow to decide whether to
+	// expose longhorn.<domain> through the gateway and provision an OIDC client.
+	LonghornEnabled bool
 }
 
 // Provider defines the interface that all cloud providers must implement.

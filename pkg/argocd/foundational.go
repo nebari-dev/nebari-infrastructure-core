@@ -3,10 +3,12 @@ package argocd
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -30,6 +32,9 @@ const (
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
 
+	// PartOfLabel is the app.kubernetes.io/part-of label key.
+	PartOfLabel = "app.kubernetes.io/part-of"
+
 	// NebariFoundationalPartOf is the value of the app.kubernetes.io/part-of label for foundational resources.
 	NebariFoundationalPartOf = "nebari-foundational"
 
@@ -38,6 +43,15 @@ const (
 
 	// NebariManagedByValue is the value of the app.kubernetes.io/managed-by label for Nebari-managed resources.
 	NebariManagedByValue = "nebari-infrastructure-core"
+
+	// LonghornDefaultNamespace is the namespace where Longhorn (and its UI) is deployed.
+	LonghornDefaultNamespace = "longhorn-system"
+
+	// LonghornOIDCClientSecretName is the name of the Kubernetes secret holding the
+	// pre-generated OIDC client secret for the Longhorn UI Keycloak client. The same
+	// value is written into both the keycloak namespace (read by realm-setup-job) and
+	// the longhorn-system namespace (read by the SecurityPolicy that fronts the UI).
+	LonghornOIDCClientSecretName = "longhorn-oidc-client-secret" //nolint:gosec // Secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -47,6 +61,9 @@ type FoundationalConfig struct {
 
 	// ArgoCD SSO configuration
 	ArgoCD ArgoCDSSOConfig
+
+	// Longhorn UI SSO configuration
+	Longhorn LonghornSSOConfig
 
 	// LandingPage configuration
 	LandingPage LandingPageConfig
@@ -84,6 +101,14 @@ type ArgoCDSSOConfig struct {
 	ClientSecret string // Pre-generated OIDC client secret for ArgoCD's Keycloak integration
 }
 
+// LonghornSSOConfig holds Longhorn UI SSO configuration.
+// ClientSecret is the pre-generated OIDC client secret used by the Envoy Gateway
+// SecurityPolicy that protects longhorn.<domain>. Empty when Longhorn UI exposure
+// is disabled — either because Longhorn is not installed or Keycloak is not enabled.
+type LonghornSSOConfig struct {
+	ClientSecret string
+}
+
 // InstallFoundationalServices installs foundational services via GitOps.
 // This function handles the bootstrap phase:
 // 1. Creates the ArgoCD Project for foundational services
@@ -115,8 +140,10 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
 
-	// 1. Install ArgoCD Project for foundational services
-	if err := InstallProject(ctx, kubeconfigBytes); err != nil {
+	// 1. Install ArgoCD AppProjects (foundational scoped, nebari-apps, default deny-all)
+	settings := clusterProvider.InfraSettings(cfg.Cluster)
+	projectData := NewTemplateData(cfg, gitConfig, settings)
+	if err := InstallProject(ctx, kubeconfigBytes, projectData); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install ArgoCD Project").
 			WithResource("argocd-project").
@@ -156,6 +183,19 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 		if err := createLandingPageSecrets(ctx, k8sClient, foundationalCfg.LandingPage); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create landing page secrets: %w", err)
+		}
+
+		// Create namespace + dual OIDC client-secret Secret for Longhorn UI exposure.
+		// No-op when foundationalCfg.Longhorn.ClientSecret == "" (Longhorn disabled or Keycloak off).
+		if foundationalCfg.Longhorn.ClientSecret != "" {
+			if err := createNamespace(ctx, k8sClient, LonghornDefaultNamespace); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn namespace: %w", err)
+			}
+			if err := createLonghornSecrets(ctx, k8sClient, foundationalCfg.Longhorn); err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Longhorn secrets: %w", err)
+			}
 		}
 	}
 
@@ -220,7 +260,83 @@ func createNamespace(ctx context.Context, client kubernetes.Interface, namespace
 	return nil
 }
 
-// createSecret creates a Kubernetes secret if it doesn't already exist
+// createOrUpdateConfigMap creates the ConfigMap, or reconciles its data and
+// labels when it already exists with different contents. Unlike createSecret
+// (create-only by design, for generated one-time credentials), an org CA bundle
+// is operator-supplied and rotates, so this upserts to make a changed
+// trust_bundle actually propagate.
+func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, cm *corev1.ConfigMap) error {
+	namespace := cm.Namespace
+	existing, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, cm.Name, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			// A transient/permission error must not be mistaken for "absent" —
+			// otherwise we'd blindly Create and mask the real failure.
+			return fmt.Errorf("failed to get configmap %s: %w", cm.Name, err)
+		}
+		if _, err := client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("failed to create configmap %s: %w", cm.Name, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created ConfigMap %s", cm.Name)).
+			WithResource("configmap").
+			WithAction("created").
+			WithMetadata("configmap_name", cm.Name))
+		return nil
+	}
+
+	// Reconcile both data and our managed labels; no-op when already in sync.
+	if reflect.DeepEqual(existing.Data, cm.Data) && labelsContain(existing.Labels, cm.Labels) {
+		return nil
+	}
+	existing.Data = cm.Data
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	for k, v := range cm.Labels {
+		existing.Labels[k] = v
+	}
+	if _, err := client.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to update configmap %s: %w", cm.Name, err)
+	}
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Updated ConfigMap %s", cm.Name)).
+		WithResource("configmap").
+		WithAction("updated").
+		WithMetadata("configmap_name", cm.Name))
+	return nil
+}
+
+// labelsContain reports whether have already includes every key/value in want.
+func labelsContain(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// createOrgCAConfigMap upserts the install-time argocd-org-ca ConfigMap holding
+// the operator's org CA, labeled as a foundational resource. It is the org-CA
+// analogue of createKeycloakSecrets — keeping the resource construction beside
+// the other foundational create helpers rather than inline in Install.
+func createOrgCAConfigMap(ctx context.Context, client kubernetes.Interface, namespace, orgCABundlePEM string) error {
+	return createOrUpdateConfigMap(ctx, client, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      orgCAConfigMapName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
+			},
+		},
+		Data: map[string]string{orgCAConfigMapKey: orgCABundlePEM},
+	})
+}
+
+// createSecret creates a Kubernetes secret if it doesn't already exist.
+// Create-only by design: these are generated one-time credentials that must
+// never be overwritten on re-deploy. For operator-supplied data that can rotate
+// (e.g. a CA bundle), use createOrUpdateConfigMap / createOrgCAConfigMap instead.
 func createSecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret) error {
 	namespace := secret.Namespace
 	_, err := client.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
@@ -293,8 +409,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "nebari-realm-admin-credentials",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -314,8 +430,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 				Name:      "argocd-oidc-client-secret",
 				Namespace: namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-					ManagedByLabel:              NebariManagedByValue,
+					PartOfLabel:    NebariFoundationalPartOf,
+					ManagedByLabel: NebariManagedByValue,
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -325,6 +441,92 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		}); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// createLonghornSecrets ensures the OIDC client secret used to protect the
+// Longhorn UI holds a single value in both the keycloak namespace (read by
+// realm-setup-job) and the longhorn-system namespace (read by the Envoy
+// Gateway SecurityPolicy). A fresh random value is generated on every deploy,
+// so a value already present in either namespace is canonical and wins over
+// the generated one: a partial failure on a prior deploy (one namespace
+// written, the other not) must reconcile both namespaces to the surviving
+// value, not leave the Keycloak client and the SecurityPolicy presenting
+// different secrets. The keycloak copy takes precedence because realm-setup-job
+// registers the Keycloak client from it. When longhornSSO.ClientSecret is
+// empty, nothing is created.
+func createLonghornSecrets(ctx context.Context, client kubernetes.Interface, longhornSSO LonghornSSOConfig) error {
+	if longhornSSO.ClientSecret == "" {
+		return nil
+	}
+
+	namespaces := []string{KeycloakDefaultNamespace, LonghornDefaultNamespace}
+
+	existing := make(map[string]*corev1.Secret, len(namespaces))
+	for _, ns := range namespaces {
+		secret, err := client.CoreV1().Secrets(ns).Get(ctx, LonghornOIDCClientSecretName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			// A transient/permission error must not be mistaken for "absent" —
+			// creating with a fresh value here is exactly the divergence we
+			// are trying to prevent.
+			return fmt.Errorf("failed to get %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+		}
+		existing[ns] = secret
+	}
+
+	canonical := longhornSSO.ClientSecret
+	for _, ns := range namespaces {
+		if secret, ok := existing[ns]; ok {
+			if v := secret.Data["client-secret"]; len(v) > 0 {
+				canonical = string(v)
+				break
+			}
+		}
+	}
+
+	for _, ns := range namespaces {
+		secret, ok := existing[ns]
+		if !ok {
+			if _, err := client.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      LonghornOIDCClientSecretName,
+					Namespace: ns,
+					Labels: map[string]string{
+						PartOfLabel:    NebariFoundationalPartOf,
+						ManagedByLabel: NebariManagedByValue,
+					},
+				},
+				Type: corev1.SecretTypeOpaque,
+				StringData: map[string]string{
+					"client-secret": canonical,
+				},
+			}, metav1.CreateOptions{}); err != nil {
+				return fmt.Errorf("failed to create %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Created secret %s in %s", LonghornOIDCClientSecretName, ns)).
+				WithResource("secret").
+				WithAction("created").
+				WithMetadata("secret_name", LonghornOIDCClientSecretName))
+			continue
+		}
+
+		if string(secret.Data["client-secret"]) == canonical {
+			continue
+		}
+		secret.Data = nil
+		secret.StringData = map[string]string{"client-secret": canonical}
+		if _, err := client.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update %s in %s: %w", LonghornOIDCClientSecretName, ns, err)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Reconciled secret %s in %s to the canonical value", LonghornOIDCClientSecretName, ns)).
+			WithResource("secret").
+			WithAction("updated").
+			WithMetadata("secret_name", LonghornOIDCClientSecretName))
 	}
 
 	return nil
@@ -341,8 +543,8 @@ func createLandingPageSecrets(ctx context.Context, client kubernetes.Interface, 
 			Name:      NebariLandingRedisSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/part-of": NebariFoundationalPartOf,
-				ManagedByLabel:              NebariManagedByValue,
+				PartOfLabel:    NebariFoundationalPartOf,
+				ManagedByLabel: NebariManagedByValue,
 			},
 		},
 		Type: corev1.SecretTypeOpaque,
