@@ -394,6 +394,7 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "valid config with DNS",
 			config: NebariConfig{
 				ProjectName: "test-project",
+				Domain:      "nebari.example.com",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
@@ -406,9 +407,43 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "DNS configured but domain missing",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+				DNS: &DNSConfig{
+					Providers: map[string]any{
+						"cloudflare": map[string]any{"zone_name": "example.com"},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "domain is required when a dns block is configured",
+		},
+		{
+			name: "DNS configured but domain outside zone",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Domain:      "nebari.other.com",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+				DNS: &DNSConfig{
+					Providers: map[string]any{
+						"cloudflare": map[string]any{"zone_name": "example.com"},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "is not within DNS zone_name",
+		},
+		{
 			name: "invalid DNS - no provider",
 			config: NebariConfig{
 				ProjectName: "test-project",
+				Domain:      "nebari.example.com",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
@@ -423,6 +458,7 @@ func TestNebariConfigValidate(t *testing.T) {
 			name: "invalid DNS provider name",
 			config: NebariConfig{
 				ProjectName: "test-project",
+				Domain:      "nebari.example.com",
 				Cluster: &ClusterConfig{
 					Providers: map[string]any{"aws": map[string]any{}},
 				},
@@ -506,17 +542,62 @@ func TestDNSConfigValidate(t *testing.T) {
 	tests := []struct {
 		name        string
 		dns         DNSConfig
+		domain      string
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "valid single provider",
+			name: "valid single provider - domain within zone",
 			dns: DNSConfig{
 				Providers: map[string]any{
 					"cloudflare": map[string]any{"zone_name": "example.com"},
 				},
 			},
+			domain:  "nebari.example.com",
 			wantErr: false,
+		},
+		{
+			name: "valid single provider - domain equals zone apex",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			domain:  "example.com",
+			wantErr: false,
+		},
+		{
+			name: "missing zone_name",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{},
+				},
+			},
+			domain:      "nebari.example.com",
+			wantErr:     true,
+			errContains: "requires zone_name",
+		},
+		{
+			name: "domain outside zone",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			domain:      "nebari.other.com",
+			wantErr:     true,
+			errContains: "is not within DNS zone_name",
+		},
+		{
+			name: "domain suffix collision rejected",
+			dns: DNSConfig{
+				Providers: map[string]any{
+					"cloudflare": map[string]any{"zone_name": "example.com"},
+				},
+			},
+			domain:      "notexample.com",
+			wantErr:     true,
+			errContains: "is not within DNS zone_name",
 		},
 		{
 			name: "no provider configured",
@@ -571,7 +652,7 @@ func TestDNSConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.dns.Validate(validDNSProviders)
+			err := tt.dns.Validate(validDNSProviders, tt.domain)
 
 			if tt.wantErr {
 				if err == nil {
