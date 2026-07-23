@@ -1,38 +1,48 @@
-# Consuming the ObjectStore platform API
+# ObjectStore: platform capability + consumer example
 
-How an application pack (e.g. `nebari-mlflow`) asks the platform for object
-storage. `XObjectStore` is a **platform capability** — its XRD + Composition
-are provided by the platform, GitOps-managed alongside the Crossplane providers.
-A pack doesn't define it; a pack just *consumes* it.
+`XObjectStore` is a **platform capability**: one namespaced claim yields an S3
+bucket plus least-privilege, keyless access (EKS Pod Identity) for a named
+ServiceAccount. Application packs (e.g. `nebari-mlflow`) *consume* it — they
+don't define it.
 
-To get a bucket plus least-privilege access, a pack:
+- `platform/` — the capability itself: XRD + Composition + composition
+  functions. In a finished system this lives NIC-side, GitOps-managed next to
+  the Crossplane providers. **It is not there yet** (see the call-out below).
+- `claim.yaml` + `probe-pod.yaml` — the **consumer** side: how a pack requests
+  a bucket and how its workload uses it.
 
-1. Creates an `XObjectStore` in its own namespace naming a ServiceAccount
-   (`claim.yaml`).
-2. Runs its workload as that ServiceAccount — EKS Pod Identity then gives the
-   pods scoped read/write to the provisioned bucket, with no static AWS keys.
+## ⚠️ platform/ is PoC-only (hardcoded)
 
-The Composition provisions, from that one claim: an S3 bucket, a workload IAM
-role (under the platform's workload path + permissions boundary, trust bound to
-this namespace + ServiceAccount), an inline policy scoped to the bucket, and the
-Pod Identity association.
+`platform/composition.yaml` hardcodes account `390259467264`, region
+`us-east-1`, cluster `nebari-xp-poc`, and prefix `nebari-xp-poc-apps`, so it
+works only against the phase-0 PoC cluster. Making it a real, portable
+NIC-managed contract needs parameterization (EnvironmentConfig) plus a
+verbatim-copy writer change — its `{{ }}` go-templating collides with NIC's own
+`text/template` pass. Tracked as the "parameterize + wire into NIC GitOps"
+follow-up; hand-applied until then.
 
-## Prerequisites (platform side)
+## Prerequisites
 
-- An NIC-deployed EKS cluster with `crossplane_capabilities: [s3]`, so the
-  provisioner IAM exists.
-- The `XObjectStore` XRD + Composition + composition functions installed on the
-  cluster (the platform layer under `manifests/crossplane/compositions/…`).
+An NIC-deployed EKS cluster with `crossplane_capabilities: [s3]`, so the
+provisioner IAM (provider roles, boundaries, Pod Identity associations) exists,
+plus Crossplane core and the `provider-aws-{s3,iam,eks}` providers and their
+`aws-{s3,iam,eks}` ClusterProviderConfigs (`source: PodIdentity`).
 
-## Apply (consumer side)
+## Apply
 
 ```sh
+# Platform capability (once per cluster)
+kubectl apply -f platform/functions.yaml
+kubectl apply -f platform/definition.yaml    # XRD; wait for Established
+kubectl apply -f platform/composition.yaml
+
+# Consumer: request a bucket + prove read/write
 kubectl apply -f claim.yaml                            # SA + XObjectStore
-kubectl get xobjectstore smokestore -n pack-test -w    # wait for READY=True
-kubectl apply -f probe-pod.yaml                        # workload using the SA
+kubectl get xobjectstore smokestore -n pack-test -w    # wait READY=True
+kubectl apply -f probe-pod.yaml
 kubectl logs -f s3-probe -n pack-test                  # expect "SMOKE-OK"
 ```
 
-`probe-pod.yaml` stands in for the pack's own workload: it assumes the workload
-role via Pod Identity, writes+reads an object, and confirms a *different* bucket
-is denied — proving the access is scoped to just this claim's bucket.
+`probe-pod.yaml` stands in for a pack's workload: it assumes the workload role
+via Pod Identity, writes+reads an object, and confirms a *different* bucket is
+denied — proving access is scoped to just this claim's bucket.

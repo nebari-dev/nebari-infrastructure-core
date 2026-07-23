@@ -1,0 +1,139 @@
+# !! POC-ONLY, HARDCODED VALUES !!
+# The account ID (390259467264), region (us-east-1), cluster (nebari-xp-poc),
+# and name prefix (nebari-xp-poc-apps) are baked into the go-template below.
+# This works only against the phase-0 PoC cluster. Before this becomes a real
+# NIC-managed platform contract consumed by packs (nebari-mlflow, etc.) across
+# projects, these must be parameterized -- see task "Follow-up: parameterize +
+# wire Composition into NIC GitOps" (EnvironmentConfig + argocd TemplateData +
+# a verbatim-copy writer change, since the {{ }} here collides with NIC's own
+# text/template pass).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xobjectstore-aws
+  labels:
+    provider: aws
+spec:
+  compositeTypeRef:
+    apiVersion: platform.nebari.dev/v1alpha1
+    kind: XObjectStore
+  mode: Pipeline
+  pipeline:
+    - step: render-objectstore
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $ns := $xr.metadata.namespace }}
+            {{- $suffix := $xr.spec.bucketSuffix }}
+            {{- $sa := $xr.spec.serviceAccount }}
+            {{- $name := printf "nebari-xp-poc-apps-%s" $suffix }}
+            {{- $account := "390259467264" }}
+            {{- $clusterArn := "arn:aws:eks:us-east-1:390259467264:cluster/nebari-xp-poc" }}
+            {{- $bucketArn := printf "arn:aws:s3:::%s" $name }}
+            {{- $rolePath := "/nebari/nebari-xp-poc/workloads/" }}
+            {{- $roleArn := printf "arn:aws:iam::%s:role%s%s" $account $rolePath $name }}
+            ---
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: bucket
+                crossplane.io/external-name: {{ $name }}
+            spec:
+              forProvider:
+                region: us-east-1
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: aws-s3
+            ---
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: Role
+            metadata:
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: role
+                crossplane.io/external-name: {{ $name }}
+            spec:
+              forProvider:
+                path: {{ $rolePath }}
+                permissionsBoundary: arn:aws:iam::{{ $account }}:policy/nebari-xp-poc-apps-workload-boundary
+                assumeRolePolicy: |
+                  {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Effect": "Allow",
+                        "Principal": { "Service": "pods.eks.amazonaws.com" },
+                        "Action": ["sts:AssumeRole", "sts:TagSession"],
+                        "Condition": {
+                          "StringEquals": {
+                            "aws:RequestTag/eks-cluster-arn": "{{ $clusterArn }}",
+                            "aws:RequestTag/kubernetes-namespace": "{{ $ns }}",
+                            "aws:RequestTag/kubernetes-service-account": "{{ $sa }}"
+                          }
+                        }
+                      }
+                    ]
+                  }
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: aws-iam
+            ---
+            apiVersion: iam.aws.m.upbound.io/v1beta1
+            kind: RolePolicy
+            metadata:
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rolepolicy
+                crossplane.io/external-name: {{ $name }}-s3
+            spec:
+              forProvider:
+                role: {{ $name }}
+                policy: |
+                  {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                      {
+                        "Sid": "BucketLevel",
+                        "Effect": "Allow",
+                        "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+                        "Resource": "{{ $bucketArn }}"
+                      },
+                      {
+                        "Sid": "ObjectLevel",
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                        "Resource": "{{ $bucketArn }}/*"
+                      }
+                    ]
+                  }
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: aws-iam
+            ---
+            apiVersion: eks.aws.m.upbound.io/v1beta1
+            kind: PodIdentityAssociation
+            metadata:
+              namespace: {{ $ns }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: podidentity
+            spec:
+              forProvider:
+                region: us-east-1
+                clusterName: nebari-xp-poc
+                namespace: {{ $ns }}
+                serviceAccount: {{ $sa }}
+                roleArn: {{ $roleArn }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: aws-eks
+    - step: ready
+      functionRef:
+        name: function-auto-ready
