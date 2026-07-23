@@ -19,6 +19,19 @@ asks for research and a PoC of using Crossplane in-cluster to provision the
 infrastructure software packs need, while retaining OpenTofu for foundational
 cluster infrastructure.
 
+**What Crossplane is.** Crossplane is a set of Kubernetes controllers that
+continuously reconcile custom resources into cloud resources — the way a Deployment
+reconciles pods, but the "pods" are buckets and IAM roles. *Provider* packages run
+per-cloud controller pods that hold cloud credentials and expose low-level *managed
+resources* (roughly one CRD per cloud resource type: `Bucket`, `Role`, …). A platform
+team defines its own higher-level API with an *XRD* (composite resource definition);
+each instance of that API is an *XR* (composite resource); a platform-owned
+*Composition* — in Crossplane v2, driven by pluggable *Composition functions* — maps
+one XR to the set of managed resources that implement it. A *Configuration package*
+bundles XRDs, Compositions, and their dependencies into a versioned, installable
+unit. Reconciliation is continuous: drift is corrected automatically, but there is no
+Terraform-style plan/preview step before changes take effect.
+
 NIC has a clean lifecycle boundary today: cluster providers own foundational
 out-of-cluster infrastructure (AWS/Azure via OpenTofu); ArgoCD owns in-cluster
 software; packs are ArgoCD Applications that may use `NebariApp` for routing, TLS,
@@ -82,6 +95,9 @@ control-plane loss — not just a working bucket demo.
   auditable.
 - Use temporary workload identity, never static cloud credentials.
 - Preserve a bring-your-own (BYO) path for organizations that provision elsewhere.
+- Don't overfit Crossplane to packs: operators may adopt Crossplane for their own
+  infrastructure, so NIC's install must coexist with operator-owned packages and
+  provider configs rather than assume exclusive ownership.
 - Keep data retention distinct from app and cluster deletion.
 - Avoid installing privileged controllers on clusters that don't use them (ADR-0006
   conditional install; ADR-0003 pack model).
@@ -208,6 +224,51 @@ role/policy and Pod Identity association (deleted with the XR), and a non-secret
 clouds supply the same destination key; a backend that cannot honor the behavioral
 contract forces an API version bump, not an untyped map. MLflow consumes the same
 Secret in managed and BYO modes, so provisioning choice never leaks into app config.
+
+**The same bucket under Option 1, and what a second pack costs.** Without
+Crossplane, the same production-shaped result is foundational code — written,
+reviewed, and re-applied by an admin running `nic deploy` for every pack instance:
+
+```hcl
+# cluster module — edited and re-applied for EVERY pack instance
+resource "aws_s3_bucket" "mlflow_artifacts" { # + encryption, versioning, retention
+  bucket_prefix = "nebari-mlflow-artifacts-"
+}
+resource "aws_iam_role" "mlflow_artifacts" { ... }        # trust: EKS Pod Identity
+resource "aws_iam_role_policy" "mlflow_artifacts" { ... } # this bucket only
+resource "aws_eks_pod_identity_association" "mlflow" {
+  cluster_name    = var.cluster_name
+  namespace       = "mlflow"
+  service_account = "mlflow"
+  role_arn        = aws_iam_role.mlflow_artifacts.arn
+}
+# ...plus wiring the binding values back into the pack's namespace
+```
+
+Under Option 4 the equivalent is the short `ObjectStore` above, delivered through
+the pack's own GitOps. The difference compounds with the second consumer: under
+Option 1 a second pack means another copy of the HCL block, another foundational PR,
+and another `nic deploy`; under Option 4 it is one more XR in a different namespace,
+with no foundational or IAM change:
+
+```mermaid
+flowchart LR
+    subgraph gitops["Pack GitOps — no foundational change, no new IAM grant"]
+        xr1["ObjectStore mlflow-artifacts<br/>namespace: mlflow"]
+        xr2["ObjectStore pack-b-data<br/>namespace: pack-b"]
+    end
+    comp["Same platform-owned<br/>Composition"]
+    aws1["bucket + scoped role + Pod Identity<br/>usable by mlflow only"]
+    aws2["bucket + scoped role + Pod Identity<br/>usable by pack-b only"]
+    xr1 --> comp
+    xr2 --> comp
+    comp --> aws1
+    comp --> aws2
+```
+
+The same shape — one XR per instance, one platform Composition per cloud — is how a
+future capability (an external relational database, say) would scale to multiple
+packs, though this ADR commits to `ObjectStore` only.
 
 **Security model.** The recommended baseline is a **dedicated-account model**: the
 AWS account is dedicated to one Nebari administrative trust domain (cloud, cluster,
@@ -344,7 +405,10 @@ Move from Proposed to Accepted only when an AWS PoC demonstrates all of:
 - **Lifecycle/ops:** a healthy XR has an external inventory record discoverable after
   removal; purge handles non-empty versioned buckets; `nic destroy` leaves no orphan
   role/association; a recovery drill finds resources after simulated cluster loss;
-  provider/Configuration upgrade-rollback tested against an existing bucket; controller
+  provider/Configuration upgrade-rollback tested against an existing bucket; an induced
+  reconcile failure (e.g. a denied provider action) is diagnosable from XR conditions,
+  events, and provider logs through the platform's normal observability path and
+  surfaces as degraded in ArgoCD; controller
   memory/pods/CRDs/latency measured and judged acceptable for one capability; a
   minimal operator-owned package survives NIC upgrade untouched; unsupported profiles
   (local, Hetzner) fail cleanly with a BYO path.
