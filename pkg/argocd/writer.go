@@ -467,25 +467,24 @@ func isCrossplanePath(relPath string) bool {
 }
 
 // crossplaneCapabilities enumerates the gateable Crossplane provider
-// capabilities. Each id maps by convention to three template locations:
+// capabilities. Each id maps by convention to one per-capability template:
 //   - manifests/crossplane/providers/provider-<id>.yaml (the provider package)
-//   - manifests/crossplane/configs/<id>/**              (its cloud-credentials config)
-//   - apps/crossplane-<id>-config.yaml                  (its post-install config Application)
 //
-// Foundational Crossplane manifests (the core chart, the providers Application)
-// are not listed here: they are not gated per-capability but on Crossplane being
-// enabled at all (see isCrossplanePath and CrossplaneEnabled). Adding a
-// capability is one entry here plus the matching templates and IAM — the gating
-// logic does not change.
+// ADR-0012's dedicated-account model shares one account-local role and one
+// ProviderConfig across all providers, so the cloud-credentials config
+// (manifests/crossplane/configs/aws + apps/crossplane-aws-config.yaml) is
+// foundational, not per-capability: it is written whenever Crossplane is
+// enabled at all (see isCrossplanePath and CrossplaneEnabled). Only the provider
+// packages themselves are gated per-capability, so a cluster installs just the
+// controllers it opted into. Adding a capability is one entry here plus the
+// matching provider manifest and IAM — the gating logic does not change.
 var crossplaneCapabilities = []string{"aws-s3", "aws-iam", "aws-eks", "aws-rds"}
 
 // crossplaneCapabilityForPath returns the capability id that owns relPath, or ""
 // if the path does not belong to a gateable Crossplane capability.
 func crossplaneCapabilityForPath(relPath string) string {
 	for _, id := range crossplaneCapabilities {
-		if relPath == "apps/crossplane-"+id+"-config.yaml" ||
-			relPath == "manifests/crossplane/providers/provider-"+id+".yaml" ||
-			strings.HasPrefix(relPath, "manifests/crossplane/configs/"+id) {
+		if relPath == "manifests/crossplane/providers/provider-"+id+".yaml" {
 			return id
 		}
 	}

@@ -982,22 +982,24 @@ func TestWriteAllToGit_CrossplaneCapabilities(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
 
-	// capabilityPaths returns the three template locations owned by a capability.
+	// capabilityPaths returns the per-capability template location: only the
+	// provider package is gated per-capability. The shared ProviderConfig is
+	// foundational under the dedicated-account model (ADR-0012).
 	capabilityPaths := func(tmpDir, id string) []string {
 		return []string{
-			filepath.Join(tmpDir, "apps", "crossplane-"+id+"-config.yaml"),
 			filepath.Join(tmpDir, "manifests", "crossplane", "providers", "provider-"+id+".yaml"),
-			filepath.Join(tmpDir, "manifests", "crossplane", "configs", id),
 		}
 	}
 
 	// foundationalCrossplanePaths returns the Crossplane manifests that are not
-	// owned by any single capability: the core chart Application and the
-	// providers Application.
+	// owned by any single capability: the core chart Application, the providers
+	// Application, and the single shared AWS ProviderConfig (Application + manifest).
 	foundationalCrossplanePaths := func(tmpDir string) []string {
 		return []string{
 			filepath.Join(tmpDir, "apps", "crossplane.yaml"),
 			filepath.Join(tmpDir, "apps", "crossplane-providers.yaml"),
+			filepath.Join(tmpDir, "apps", "crossplane-aws-config.yaml"),
+			filepath.Join(tmpDir, "manifests", "crossplane", "configs", "aws", "provider-config.yaml"),
 		}
 	}
 

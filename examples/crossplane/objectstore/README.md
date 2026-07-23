@@ -24,9 +24,10 @@ follow-up; hand-applied until then.
 ## Prerequisites
 
 An NIC-deployed EKS cluster with `crossplane_capabilities: [s3]`, so the
-provisioner IAM (provider roles, boundaries, Pod Identity associations) exists,
-plus Crossplane core and the `provider-aws-{s3,iam,eks}` providers and their
-`aws-{s3,iam,eks}` ClusterProviderConfigs (`source: PodIdentity`).
+provisioner IAM (the shared account-local provider role, workload boundary, and
+Pod Identity associations) exists, plus Crossplane core and the
+`provider-aws-{s3,iam,eks}` providers, all sharing the single `aws`
+ClusterProviderConfig (`source: PodIdentity`).
 
 ## Apply
 

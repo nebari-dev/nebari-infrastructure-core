@@ -51,7 +51,7 @@ spec:
                 region: us-east-1
               providerConfigRef:
                 kind: ClusterProviderConfig
-                name: aws-s3
+                name: aws
             ---
             apiVersion: iam.aws.m.upbound.io/v1beta1
             kind: Role
@@ -84,7 +84,7 @@ spec:
                   }
               providerConfigRef:
                 kind: ClusterProviderConfig
-                name: aws-iam
+                name: aws
             ---
             apiVersion: iam.aws.m.upbound.io/v1beta1
             kind: RolePolicy
@@ -116,7 +116,7 @@ spec:
                   }
               providerConfigRef:
                 kind: ClusterProviderConfig
-                name: aws-iam
+                name: aws
             ---
             apiVersion: eks.aws.m.upbound.io/v1beta1
             kind: PodIdentityAssociation
@@ -133,7 +133,7 @@ spec:
                 roleArn: {{ $roleArn }}
               providerConfigRef:
                 kind: ClusterProviderConfig
-                name: aws-eks
+                name: aws
     - step: ready
       functionRef:
         name: function-auto-ready

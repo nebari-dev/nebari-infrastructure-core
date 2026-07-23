@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: crossplane-aws-eks-config
+  name: crossplane-aws-config
   namespace: argocd
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
   annotations:
     # The ProviderConfig CRD is installed asynchronously by the provider
-    # package in wave 3, so keep configuration in a distinct, retryable wave.
+    # packages in wave 3, so keep configuration in a distinct, retryable wave.
     argocd.argoproj.io/sync-wave: "4"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -18,7 +18,7 @@ spec:
   source:
     repoURL: {{ .GitRepoURL }}
     targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/crossplane/configs/aws-eks
+    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/crossplane/configs/aws
 
   destination:
     server: https://kubernetes.default.svc

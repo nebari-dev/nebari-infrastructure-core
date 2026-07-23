@@ -41,9 +41,10 @@ type Config struct {
 	// cluster is explicitly opted into (e.g. "s3", "rds"). It defaults empty
 	// because each capability grants new cloud permissions and installs AWS
 	// provider controllers. A capability may expand to internal provider
-	// dependencies; for example, s3 also enables the narrowly scoped IAM and EKS
-	// providers needed to create per-workload Pod Identity bindings. Values are
-	// validated against validCrossplaneCapabilities at config load.
+	// dependencies; for example, s3 also enables the IAM and EKS providers needed
+	// to create per-workload Pod Identity bindings. All providers share one
+	// account-local role (ADR-0012 dedicated-account model). Values are validated
+	// against validCrossplaneCapabilities at config load.
 	CrossplaneCapabilities []string `yaml:"crossplane_capabilities,omitempty"`
 }
 

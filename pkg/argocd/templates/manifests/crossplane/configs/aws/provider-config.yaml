@@ -1,7 +1,10 @@
 apiVersion: aws.m.upbound.io/v1beta1
 kind: ClusterProviderConfig
 metadata:
-  name: aws-s3
+  # A single ProviderConfig shared by every AWS provider controller. ADR-0012's
+  # dedicated-account model binds them all to one account-local role, so the
+  # Compositions reference just this one config (name: aws).
+  name: aws
 spec:
   credentials:
     # EKS injects the Pod Identity credential endpoint into the provider pod.
