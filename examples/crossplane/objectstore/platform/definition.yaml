@@ -1,0 +1,35 @@
+# XObjectStore — the "pack" API surface. A namespaced composite resource that
+# asks for one S3 bucket plus the least-privilege workload access to use it.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xobjectstores.platform.nebari.dev
+spec:
+  group: platform.nebari.dev
+  names:
+    kind: XObjectStore
+    plural: xobjectstores
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # Bucket name is "<project>-apps-<bucketSuffix>"; the suffix
+                # must satisfy S3 naming and the provisioner IAM name scope.
+                bucketSuffix:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$"
+                # ServiceAccount (in this XR's namespace) that the workload
+                # pod runs as; it is bound to the generated role via Pod Identity.
+                serviceAccount:
+                  type: string
+              required:
+                - bucketSuffix
+                - serviceAccount
