@@ -219,7 +219,17 @@ explicitly not claimed as a hard security boundary. The tradeoff, stated plainly
 **strict-separation model** (capability-specific default-deny roles, permissions
 boundaries, per-service identities) is documented as an alternative for reviewers but
 is *not* proposed for initial support; selecting it materially expands the
-implementation and PoC scope. Equal administrators does not mean privileged
+implementation and PoC scope. The initial PoC (on the
+[`crossplane-isolated-iam-snapshot-2026-07-23`](https://github.com/nebari-dev/nebari-infrastructure-core/tree/crossplane-isolated-iam-snapshot-2026-07-23)
+branch) in fact implemented this strict-separation variant — per-capability provider roles
+(`provider-aws-s3`/`-iam`/`-eks`) with individually scoped policies, per-provider
+permissions boundaries, ownership-tag denies, and boundary-constrained workload roles
+— and it runs end-to-end. That confirmed the predicted cost: the tight IAM was the
+dominant implementation effort and surfaced AWS edge cases such as `iam:GetRole` on a
+not-yet-created role authorizing against the path-less name (which blocked the
+provider's observe-before-create) and `CreatePodIdentityAssociation` requiring
+`iam:GetRole` on the target role. Equal
+administrators does not mean privileged
 workloads: pack pods, ServiceAccounts, and GitOps must remain unable to use
 provider-controller credentials or mutate provider config and Compositions.
 
