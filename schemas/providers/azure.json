@@ -102,7 +102,12 @@
         },
         "mode": {
           "type": "string",
-          "description": "\"System\" | \"User\"; defaults to \"User\""
+          "enum": [
+            "System",
+            "User"
+          ],
+          "description": "defaults to \"User\"",
+          "default": "User"
         },
         "os_disk_size_gb": {
           "type": "integer"

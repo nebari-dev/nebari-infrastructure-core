@@ -14,7 +14,8 @@
         },
         "storage_class": {
           "type": "string",
-          "description": "StorageClass is the default Kubernetes StorageClass for persistent volumes.\nDefaults to \"standard\" when empty, or to \"longhorn\" when Longhorn is\nenabled below and StorageClass is left unset."
+          "description": "StorageClass is the default Kubernetes StorageClass for persistent volumes.\nDefaults to \"standard\" when empty, or to \"longhorn\" when Longhorn is\nenabled below and StorageClass is left unset.",
+          "default": "standard"
         },
         "load_balancer_annotations": {
           "additionalProperties": {

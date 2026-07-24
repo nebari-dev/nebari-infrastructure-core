@@ -8,7 +8,8 @@
           "type": "boolean"
         },
         "chart_version": {
-          "type": "string"
+          "type": "string",
+          "default": "3.2.1"
         },
         "destroy_timeout": {
           "type": "integer"
@@ -113,7 +114,12 @@
           "$ref": "#/$defs/aws.ClusterAutoscalerConfig"
         },
         "load_balancer_scheme": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "internet-facing",
+            "internal"
+          ],
+          "default": "internet-facing"
         },
         "enable_irsa": {
           "type": "boolean",
