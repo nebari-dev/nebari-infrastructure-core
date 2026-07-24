@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/opentofu/tofudl"
 	"github.com/spf13/afero"
 
@@ -118,6 +119,21 @@ func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.Destroy
 // interact with the status writers.
 func (te *TerraformExecutor) Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error) {
 	return te.Terraform.Output(signalSafeContext(ctx), opts...)
+}
+
+// Show wraps tfexec.Terraform.Show with a signal-safe context. Show parses the
+// current state into its own buffer, so it does not interact with the status
+// writers. The non-variadic signature lets it satisfy a narrow state-editing
+// interface cleanly.
+func (te *TerraformExecutor) Show(ctx context.Context) (*tfjson.State, error) {
+	return te.Terraform.Show(signalSafeContext(ctx))
+}
+
+// StateRm wraps tfexec.Terraform.StateRm with a signal-safe context. The
+// non-variadic signature lets it satisfy a narrow state-editing interface
+// cleanly.
+func (te *TerraformExecutor) StateRm(ctx context.Context, address string) error {
+	return te.Terraform.StateRm(signalSafeContext(ctx), address)
 }
 
 // backendOverrideJSON overrides the configured backend with a local backend.

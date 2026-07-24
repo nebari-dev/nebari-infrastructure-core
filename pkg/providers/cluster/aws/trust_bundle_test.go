@@ -42,7 +42,7 @@ func TestToTFVarsExtraCABundle(t *testing.T) {
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 			}
-			vars := cfg.toTFVars("test-project", tt.caBundle)
+			vars := cfg.toTFVars("test-project", tt.caBundle, nil)
 
 			raw, err := json.Marshal(vars)
 			if err != nil {

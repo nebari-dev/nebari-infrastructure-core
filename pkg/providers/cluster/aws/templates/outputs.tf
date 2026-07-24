@@ -43,3 +43,8 @@ output "efs_id" {
   description = "The ID of the EFS file system"
   value       = module.eks_cluster.efs_id
 }
+
+output "longhorn_backup_bucket" {
+  description = "Name of the Longhorn backup S3 bucket; empty when not created by NIC"
+  value       = module.eks_cluster.longhorn_backup_bucket
+}
