@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/azure.Config",
+  "$defs": {
+    "azure.Config": {
+      "properties": {
+        "region": {
+          "type": "string"
+        },
+        "resource_group_name": {
+          "type": "string"
+        },
+        "create_resource_group": {
+          "type": "boolean",
+          "description": "CreateResourceGroup is tri-state: nil = infer (true unless ResourceGroupName\nis set), \u0026true = always create, \u0026false = never create (must supply ResourceGroupName)."
+        },
+        "kubernetes_version": {
+          "type": "string"
+        },
+        "sku_tier": {
+          "type": "string"
+        },
+        "private_cluster_enabled": {
+          "type": "boolean"
+        },
+        "authorized_ip_ranges": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/azure.NetworkConfig"
+        },
+        "node_groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/azure.NodeGroup"
+          },
+          "type": "object"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "node_provisioning_mode": {
+          "type": "string",
+          "description": "NodeProvisioningMode enables AKS Node Auto Provisioning (Karpenter) when\nset to \"Auto\". Defaults to \"Manual\". \"Auto\" requires the cilium dataplane\n(network.dataplane: cilium)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "region",
+        "node_groups"
+      ],
+      "description": "Config is the user-facing Azure cluster configuration as parsed from the `cluster.azure:` block of NIC YAML."
+    },
+    "azure.NetworkConfig": {
+      "properties": {
+        "vnet_cidr_block": {
+          "type": "string"
+        },
+        "node_subnet_cidr_block": {
+          "type": "string"
+        },
+        "pod_cidr": {
+          "type": "string"
+        },
+        "service_cidr": {
+          "type": "string"
+        },
+        "dns_service_ip": {
+          "type": "string"
+        },
+        "dataplane": {
+          "type": "string",
+          "description": "DataPlane selects the AKS network dataplane: \"azure\" (default) or\n\"cilium\" (Azure CNI Powered by Cilium)."
+        },
+        "existing_vnet_id": {
+          "type": "string"
+        },
+        "existing_node_subnet_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "NetworkConfig groups all VNet/subnet/CIDR knobs."
+    },
+    "azure.NodeGroup": {
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "min_nodes": {
+          "type": "integer"
+        },
+        "max_nodes": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string",
+          "description": "\"System\" | \"User\"; defaults to \"User\""
+        },
+        "os_disk_size_gb": {
+          "type": "integer"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "taints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Taints in \"key=value:Effect\" form, e.g. \"dedicated=gpu:NoSchedule\"."
+        },
+        "zones": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance",
+        "min_nodes",
+        "max_nodes"
+      ],
+      "description": "NodeGroup describes one AKS node pool."
+    }
+  },
+  "title": "azure cluster provider configuration"
+}

@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/aws.Config",
+  "$defs": {
+    "aws.AWSLoadBalancerControllerConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "chart_version": {
+          "type": "string"
+        },
+        "destroy_timeout": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "aws.ClusterAutoscalerConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "chart_version": {
+          "type": "string"
+        },
+        "image_tag": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "aws.Config": {
+      "properties": {
+        "region": {
+          "type": "string"
+        },
+        "state_bucket": {
+          "type": "string"
+        },
+        "availability_zones": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vpc_cidr_block": {
+          "type": "string"
+        },
+        "existing_vpc_id": {
+          "type": "string"
+        },
+        "existing_private_subnet_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "existing_security_group_id": {
+          "type": "string"
+        },
+        "kubernetes_version": {
+          "type": "string"
+        },
+        "endpoint_private_access": {
+          "type": "boolean"
+        },
+        "endpoint_public_access": {
+          "type": "boolean"
+        },
+        "eks_kms_arn": {
+          "type": "string"
+        },
+        "enabled_log_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "existing_cluster_role_arn": {
+          "type": "string"
+        },
+        "existing_node_role_arn": {
+          "type": "string"
+        },
+        "permissions_boundary": {
+          "type": "string"
+        },
+        "node_groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/aws.NodeGroup"
+          },
+          "type": "object"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "efs": {
+          "$ref": "#/$defs/aws.EFSConfig"
+        },
+        "longhorn": {
+          "$ref": "#/$defs/longhorn.Config"
+        },
+        "aws_load_balancer_controller": {
+          "$ref": "#/$defs/aws.AWSLoadBalancerControllerConfig"
+        },
+        "cluster_autoscaler": {
+          "$ref": "#/$defs/aws.ClusterAutoscalerConfig"
+        },
+        "load_balancer_scheme": {
+          "type": "string"
+        },
+        "enable_irsa": {
+          "type": "boolean",
+          "description": "EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for\nService Accounts. When unset, the upstream module default (true) applies.\nSet false when the cluster relies exclusively on EKS Pod Identity, or\nwhen the VPC cannot resolve oidc.eks.\u003cregion\u003e.amazonaws.com (a fully\nprivate deployment with no public DNS resolution for AWS hostnames)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "region",
+        "kubernetes_version",
+        "node_groups"
+      ]
+    },
+    "aws.EFSConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "performance_mode": {
+          "type": "string",
+          "description": "default: generalPurpose"
+        },
+        "throughput_mode": {
+          "type": "string",
+          "description": "default: bursting"
+        },
+        "provisioned_throughput_mibps": {
+          "type": "integer"
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "default: true"
+        },
+        "kms_key_arn": {
+          "type": "string"
+        },
+        "storage_class_name": {
+          "type": "string",
+          "description": "default: efs-sc"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "aws.NodeGroup": {
+      "properties": {
+        "instance": {
+          "type": "string"
+        },
+        "min_nodes": {
+          "type": "integer"
+        },
+        "max_nodes": {
+          "type": "integer"
+        },
+        "gpu": {
+          "type": "boolean"
+        },
+        "ami_type": {
+          "type": "string"
+        },
+        "spot": {
+          "type": "boolean"
+        },
+        "disk_size": {
+          "type": "integer"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "taints": {
+          "items": {
+            "$ref": "#/$defs/aws.Taint"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance"
+      ]
+    },
+    "aws.Taint": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "NO_SCHEDULE",
+            "NO_EXECUTE",
+            "PREFER_NO_SCHEDULE"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "key",
+        "value",
+        "effect"
+      ]
+    },
+    "longhorn.Config": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replica_count": {
+          "type": "integer"
+        },
+        "dedicated_nodes": {
+          "type": "boolean",
+          "description": "DedicatedNodes confines Longhorn replica data to a dedicated, tainted\nstorage node group (disks are created only there; see NodeSelector and\nCreateDefaultDiskLabel).\n\nWARNING — toggling this is a MANUAL migration, not a hands-off switch.\nThe setting only governs FUTURE default-disk creation; it never moves or\nre-syncs replicas that already exist, and neither NIC nor Longhorn migrates\nthem for you:\n  - false -\u003e true: existing replicas stay on the colocated (general/user)\n    node disks — Longhorn does not delete those disks on a setting change.\n    Those nodes then cannot scale down (they still hold replicas) and the\n    data is NOT auto-moved to the storage nodes. To finish the migration,\n    manually evict the old disks/nodes in Longhorn (allowScheduling:false\n    or evictionRequested) so replicas rebuild onto the storage nodes first.\n  - true -\u003e false while also removing the storage node group: terraform\n    tears down the nodes holding the only replicas before they are rebuilt\n    elsewhere -\u003e DATA LOSS (this is the #354 node-removal hazard). Migrate\n    replicas off the storage nodes (evict, wait for rebuild) BEFORE removing\n    the group.\n\nBefore switching modes, take a fresh OFF-CLUSTER backup (NIC's\n`backups.longhorn` config provisions scheduled S3 backups; trigger an\non-demand one right before the switch). In-cluster snapshots do not survive\nthe destructive true-\u003efalse case since they live on the disks being removed;\nonly the S3 backup does, and you can restore onto the new topology."
+        },
+        "node_selector": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "NodeSelector is the label set that identifies the dedicated storage nodes\nwhen DedicatedNodes is true (defaults to {node.longhorn.io/storage: \"true\"},\ni.e. NodeStorageLabel). It no longer pins Longhorn's system components by\nnode selector — pinning broke PVC mounts on workload nodes (#366). Instead\nit tells the provider which node group is the storage pool, so the provider\ncan add CreateDefaultDiskLabel to it; Longhorn then provisions disks only\nthere, which is what confines replicas to storage nodes.\n\nMatching is an exact key/value comparison: a storage node group labeled\nnode.longhorn.io/storage=\"yes\" (any value other than the configured one)\nwill not match, so it gets no disk label and its volumes fault. Use the\nexact values set here.\n\nConstraint: the taint toleration is NOT derived from this field. Longhorn's\nsystem components tolerate every taint (see tolerateAllTaints in install.go),\nso the storage nodes' taint - and any taint on a workload pool where a PVC\nmust mount - is covered regardless of what you set here. This selector only\ncontrols which nodes are labeled as the storage (replica) pool."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Config carries the user-tunable Longhorn settings shared across providers."
+    }
+  },
+  "title": "aws cluster provider configuration"
+}

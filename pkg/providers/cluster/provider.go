@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -124,6 +125,11 @@ type Provider interface {
 	// Name returns the short provider identifier used in CLI output, logging,
 	// and OpenTelemetry span attributes (e.g., "aws", "gcp", "azure", "local").
 	Name() string
+
+	// ConfigType returns the reflect.Type of this provider's configuration
+	// struct. It lets schema-generation tooling enumerate provider config
+	// types through the registry without importing concrete provider packages.
+	ConfigType() reflect.Type
 
 	// Validate checks that the configuration is valid before any infrastructure
 	// operations. This includes verifying required fields, validating formats,

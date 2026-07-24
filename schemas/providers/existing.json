@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/existing.Config",
+  "$defs": {
+    "existing.Config": {
+      "properties": {
+        "kubeconfig": {
+          "type": "string",
+          "description": "Kubeconfig is the path to the kubeconfig file.\nDefaults to KUBECONFIG env or ~/.kube/config when empty."
+        },
+        "context": {
+          "type": "string",
+          "description": "Context is the name of the context entry in the kubeconfig file.\nRequired — must be explicitly set to avoid accidentally deploying\nto the wrong cluster."
+        },
+        "storage_class": {
+          "type": "string",
+          "description": "StorageClass is the default Kubernetes StorageClass for persistent volumes.\nDefaults to \"standard\" when empty, or to \"longhorn\" when Longhorn is\nenabled below and StorageClass is left unset."
+        },
+        "load_balancer_annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "LoadBalancerAnnotations are added to the Gateway's LoadBalancer Service.\nUse this to pass cloud-specific annotations the Cloud Controller Manager may require for\nprovisioning LoadBalancers (e.g., \"load-balancer.hetzner.cloud/location: ash\")."
+        },
+        "longhorn": {
+          "$ref": "#/$defs/longhorn.Config",
+          "description": "Longhorn opts the existing-cluster provider into installing Longhorn for\ndistributed/replicated block + RWX storage. The block is required to\nopt-in (nil means \"do not install\"). Use this on bare-metal / hetzner-k3s\nclusters that lack a managed RWX StorageClass — without it, charts that\nneed RWX (e.g. jupyterhub shared-storage for group dirs) fall back to\nthe in-cluster NFS-on-RWO workaround."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "context"
+      ],
+      "description": "Config represents configuration for connecting to a pre-existing Kubernetes cluster."
+    },
+    "longhorn.Config": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replica_count": {
+          "type": "integer"
+        },
+        "dedicated_nodes": {
+          "type": "boolean",
+          "description": "DedicatedNodes confines Longhorn replica data to a dedicated, tainted\nstorage node group (disks are created only there; see NodeSelector and\nCreateDefaultDiskLabel).\n\nWARNING — toggling this is a MANUAL migration, not a hands-off switch.\nThe setting only governs FUTURE default-disk creation; it never moves or\nre-syncs replicas that already exist, and neither NIC nor Longhorn migrates\nthem for you:\n  - false -\u003e true: existing replicas stay on the colocated (general/user)\n    node disks — Longhorn does not delete those disks on a setting change.\n    Those nodes then cannot scale down (they still hold replicas) and the\n    data is NOT auto-moved to the storage nodes. To finish the migration,\n    manually evict the old disks/nodes in Longhorn (allowScheduling:false\n    or evictionRequested) so replicas rebuild onto the storage nodes first.\n  - true -\u003e false while also removing the storage node group: terraform\n    tears down the nodes holding the only replicas before they are rebuilt\n    elsewhere -\u003e DATA LOSS (this is the #354 node-removal hazard). Migrate\n    replicas off the storage nodes (evict, wait for rebuild) BEFORE removing\n    the group.\n\nBefore switching modes, take a fresh OFF-CLUSTER backup (NIC's\n`backups.longhorn` config provisions scheduled S3 backups; trigger an\non-demand one right before the switch). In-cluster snapshots do not survive\nthe destructive true-\u003efalse case since they live on the disks being removed;\nonly the S3 backup does, and you can restore onto the new topology."
+        },
+        "node_selector": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "NodeSelector is the label set that identifies the dedicated storage nodes\nwhen DedicatedNodes is true (defaults to {node.longhorn.io/storage: \"true\"},\ni.e. NodeStorageLabel). It no longer pins Longhorn's system components by\nnode selector — pinning broke PVC mounts on workload nodes (#366). Instead\nit tells the provider which node group is the storage pool, so the provider\ncan add CreateDefaultDiskLabel to it; Longhorn then provisions disks only\nthere, which is what confines replicas to storage nodes.\n\nMatching is an exact key/value comparison: a storage node group labeled\nnode.longhorn.io/storage=\"yes\" (any value other than the configured one)\nwill not match, so it gets no disk label and its volumes fault. Use the\nexact values set here.\n\nConstraint: the taint toleration is NOT derived from this field. Longhorn's\nsystem components tolerate every taint (see tolerateAllTaints in install.go),\nso the storage nodes' taint - and any taint on a workload pool where a PVC\nmust mount - is covered regardless of what you set here. This selector only\ncontrols which nodes are labeled as the storage (replica) pool."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Config carries the user-tunable Longhorn settings shared across providers."
+    }
+  },
+  "title": "existing cluster provider configuration"
+}

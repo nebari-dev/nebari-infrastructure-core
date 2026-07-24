@@ -183,7 +183,7 @@ const (
 // CertificateConfig holds TLS certificate configuration
 type CertificateConfig struct {
 	// Type is the certificate type: "selfsigned", "letsencrypt", or "existing"
-	Type string `yaml:"type,omitempty"`
+	Type string `yaml:"type,omitempty" jsonschema:"enum=selfsigned,enum=letsencrypt,enum=existing"`
 
 	// ACME configuration for Let's Encrypt
 	ACME *ACMEConfig `yaml:"acme,omitempty"`

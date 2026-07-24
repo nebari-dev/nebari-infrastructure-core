@@ -164,7 +164,7 @@ type NodeGroup struct {
 type Taint struct {
 	Key    string `yaml:"key" json:"key"`
 	Value  string `yaml:"value" json:"value"`
-	Effect string `yaml:"effect" json:"effect"` // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
+	Effect string `yaml:"effect" json:"effect" jsonschema:"enum=NO_SCHEDULE,enum=NO_EXECUTE,enum=PREFER_NO_SCHEDULE"`
 }
 
 // HasGPUNodeGroups reports whether any node group is tagged gpu: true. This is
