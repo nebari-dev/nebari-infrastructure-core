@@ -9,5 +9,7 @@ metadata:
 spec:
   addresses:
     - {{ .MetalLBAddressRange }}
+  # Keep MetalLB's API-defaulted values explicit so the live object matches Git
+  # and ArgoCD does not report persistent defaulting-only drift.
   autoAssign: true
   avoidBuggyIPs: false
