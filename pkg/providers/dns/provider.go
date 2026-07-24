@@ -1,12 +1,20 @@
 package dns
 
-import "context"
+import (
+	"context"
+	"reflect"
+)
 
 // Provider defines the interface that all DNS providers must implement.
 // Providers are stateless - domain and DNS config are passed to each call.
 type Provider interface {
 	// Name returns the DNS provider name (cloudflare, route53, azure-dns, etc.)
 	Name() string
+
+	// ConfigType returns the reflect.Type of this provider's configuration
+	// struct. It lets schema-generation tooling enumerate provider config
+	// types through the registry without importing concrete provider packages.
+	ConfigType() reflect.Type
 
 	// ProvisionRecords creates or updates DNS records for the deployment.
 	// It creates a root domain record and wildcard record pointing to the
