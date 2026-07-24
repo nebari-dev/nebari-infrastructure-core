@@ -40,8 +40,14 @@ spec:
               value: keycloak-db-rw.{{ .KeycloakNamespace }}.svc.cluster.local
             - name: KC_DB_URL_DATABASE
               value: keycloak
+            # Both credentials come from the CNPG-generated keycloak-db-app
+            # Secret so they cannot drift from initdb.owner in
+            # manifests/keycloak/keycloak-db-cluster.yaml.
             - name: KC_DB_USERNAME
-              value: keycloak
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-app
+                  key: username
             - name: KC_DB_PASSWORD
               valueFrom:
                 secretKeyRef:

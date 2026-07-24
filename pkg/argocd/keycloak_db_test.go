@@ -124,6 +124,99 @@ func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 	}
 }
 
+// TestWriteAllToGit_KeycloakDBCredentialsFromSecret pins both database
+// credentials to the CNPG-generated keycloak-db-app Secret. A literal username
+// works only as long as it happens to equal initdb.owner in
+// keycloak-db-cluster.yaml; if either side changes, Keycloak fails to
+// authenticate with an opaque Postgres error that points nowhere near the
+// cause. CNPG owns the credential material, so both keys are read from it.
+func TestWriteAllToGit_KeycloakDBCredentialsFromSecret(t *testing.T) {
+	keycloakPath := func(dir string) string {
+		return filepath.Join(dir, "apps", "keycloak.yaml")
+	}
+
+	dir := t.TempDir()
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+		t.Fatalf("WriteAllToGit: %v", err)
+	}
+	raw, err := os.ReadFile(keycloakPath(dir))
+	if err != nil {
+		t.Fatalf("read rendered keycloak app: %v", err)
+	}
+
+	env := keycloakExtraEnv(t, raw)
+	for _, tc := range []struct{ name, key string }{
+		{"KC_DB_USERNAME", "username"},
+		{"KC_DB_PASSWORD", "password"},
+	} {
+		v, ok := env[tc.name]
+		if !ok {
+			t.Errorf("%s not set in the rendered keycloak extraEnv", tc.name)
+			continue
+		}
+		if _, literal := v["value"]; literal {
+			t.Errorf("%s is a literal value; it must come from the keycloak-db-app Secret", tc.name)
+			continue
+		}
+		valueFrom, _ := v["valueFrom"].(map[string]any)
+		ref, _ := valueFrom["secretKeyRef"].(map[string]any)
+		if ref["name"] != "keycloak-db-app" || ref["key"] != tc.key {
+			t.Errorf("%s secretKeyRef = %v, want name keycloak-db-app key %s", tc.name, ref, tc.key)
+		}
+	}
+}
+
+// keycloakExtraEnv digs the Keycloak chart's extraEnv out of a rendered
+// Application and returns it keyed by variable name, so assertions can tell a
+// literal apart from a secretKeyRef instead of matching indented substrings.
+func keycloakExtraEnv(t *testing.T, rendered []byte) map[string]map[string]any {
+	t.Helper()
+
+	var app struct {
+		Spec struct {
+			Sources []struct {
+				Chart string `yaml:"chart"`
+				Helm  struct {
+					Values string `yaml:"values"`
+				} `yaml:"helm"`
+			} `yaml:"sources"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(rendered, &app); err != nil {
+		t.Fatalf("rendered keycloak app is not valid YAML: %v", err)
+	}
+
+	var values string
+	for _, s := range app.Spec.Sources {
+		if s.Chart == "keycloakx" {
+			values = s.Helm.Values
+		}
+	}
+	if values == "" {
+		t.Fatal("rendered keycloak app has no keycloakx source with helm values")
+	}
+
+	var helmValues struct {
+		ExtraEnv string `yaml:"extraEnv"`
+	}
+	if err := yaml.Unmarshal([]byte(values), &helmValues); err != nil {
+		t.Fatalf("keycloakx helm values are not valid YAML: %v\n%s", err, values)
+	}
+
+	var envList []map[string]any
+	if err := yaml.Unmarshal([]byte(helmValues.ExtraEnv), &envList); err != nil {
+		t.Fatalf("keycloakx extraEnv is not a valid env list: %v\n%s", err, helmValues.ExtraEnv)
+	}
+
+	env := make(map[string]map[string]any, len(envList))
+	for _, e := range envList {
+		name, _ := e["name"].(string)
+		env[name] = e
+	}
+	return env
+}
+
 // TestApplications_NoBitnamiPostgresql pins the retirement of the Bitnami
 // postgresql app: fresh bootstraps must not emit it. Existing gitops repos
 // keep their committed copy (the writer never deletes committed files).
