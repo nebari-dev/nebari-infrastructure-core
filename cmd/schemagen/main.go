@@ -57,7 +57,7 @@ func main() {
 }
 
 func run(ctx context.Context, outDir, providersFlag, pkgRoot, version string) error {
-	if err := os.MkdirAll(filepath.Join(outDir, "providers"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(outDir, "providers"), 0o750); err != nil {
 		return fmt.Errorf("mkdir %s: %w", outDir, err)
 	}
 
@@ -129,7 +129,7 @@ func writeSchema(ctx context.Context, outDir, relPath string, t reflect.Type, ti
 		return fmt.Errorf("generate %s: %w", relPath, err)
 	}
 	full := filepath.Join(outDir, relPath)
-	if err := os.WriteFile(full, data, 0o644); err != nil {
+	if err := os.WriteFile(full, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", full, err)
 	}
 	return nil
@@ -157,7 +157,7 @@ func writeManifest(outDir, version string, cluster, dns []string) error {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(outDir, "manifest.json"), data, 0o644)
+	return os.WriteFile(filepath.Join(outDir, "manifest.json"), data, 0o600)
 }
 
 // collectPackagePaths walks root and returns every subdirectory that
@@ -200,7 +200,7 @@ func collectPackagePaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func sortedKeys[V any](m map[string]V) []string {
+func sortedKeys(m map[string]reflect.Type) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
