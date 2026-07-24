@@ -84,7 +84,9 @@ jobs:
   aws:
     name: Deploy (AWS)
     needs: build
-    if: github.event_name == 'release' || inputs.provider == 'aws' || inputs.provider == 'all'
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'aws' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     environment: deploy-aws
     # Only one AWS deploy test should run at a time and triggering a new one should
