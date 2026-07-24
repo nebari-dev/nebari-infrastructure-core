@@ -41,12 +41,12 @@ never an older one.
 kubectl exec postgresql-0 -n keycloak -- postgres --version
 ```
 
-NIC's pinned Bitnami chart (18.2.0) ships PostgreSQL 18.1, and the CNPG
-operator installed by NIC (1.30.0) defaults to PostgreSQL 18.4, so this check
+NIC's pinned Bitnami chart (18.2.0) ships PostgreSQL 18.1, and the
+`keycloak-db` manifest pins PostgreSQL 18.4 via `spec.imageName`, so this check
 passes for standard NIC deployments. If your source somehow reports a newer
 major version than 18, stop and file an issue before proceeding: the
-`keycloak-db` manifest is NIC-generated and does not currently expose an
-image override.
+`keycloak-db` manifest is NIC-generated and its pinned image is not
+configurable per deployment.
 
 ## 2. Start the maintenance window
 

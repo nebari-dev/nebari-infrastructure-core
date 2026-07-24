@@ -39,6 +39,13 @@ func TestKeycloakDBClusterTemplate_PinsShape(t *testing.T) {
 		t.Errorf("namespace = %v, want keycloak", meta["namespace"])
 	}
 	spec, _ := doc["spec"].(map[string]any)
+	// The PostgreSQL image must be pinned. Left unset, the operator picks its
+	// own default, so the Postgres major version would shift on a
+	// cloudnative-pg chart bump rather than on a deliberate change here.
+	imageName, _ := spec["imageName"].(string)
+	if !strings.HasPrefix(imageName, "ghcr.io/cloudnative-pg/postgresql:") {
+		t.Errorf("imageName = %q, want an explicitly pinned ghcr.io/cloudnative-pg/postgresql tag", imageName)
+	}
 	storage, _ := spec["storage"].(map[string]any)
 	if storage["size"] != "10Gi" {
 		t.Errorf("storage size = %v, want 10Gi (matches the Bitnami PVC)", storage["size"])
