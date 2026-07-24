@@ -1,0 +1,18 @@
+{
+  "name": "deploy-nic-action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Action that deploys a NIC platform from a config file and destroys it when the job ends",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "ncc build src/main.ts -o dist/main --license licenses.txt && ncc build src/post.ts -o dist/post --license licenses.txt"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.7.0"
+  }
+}

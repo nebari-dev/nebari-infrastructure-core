@@ -1,0 +1,194 @@
+name: Deployment Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider to deploy and test
+        type: choice
+        options:
+          - all
+          - local
+          - aws
+          - azure
+        default: local
+  release:
+    # published covers both stable and pre-releases
+    types: [published]
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: make build
+
+      - name: Upload binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nic
+          path: nic
+          retention-days: 1
+
+  local:
+    name: Deploy (local)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'local' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: local
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/local-config.yaml
+          nic-binary: nic
+
+  aws:
+    name: Deploy (AWS)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'aws' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    environment: deploy-aws
+    # Only one AWS deploy test should run at a time and triggering a new one should
+    # not cancel the previous one
+    concurrency:
+      group: deploy-test-aws
+      cancel-in-progress: false
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: aws
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+          # The default duration is 3600 seconds (one hour), so we bump it
+          # to 7200 seconds (two hours) to give it room to deploy and destroy.
+          role-duration-seconds: 7200
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/aws-config.yaml
+          nic-binary: nic
+
+  azure:
+    name: Deploy (Azure)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'azure' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    environment: deploy-azure
+    # Only one Azure deploy test should run at a time and triggering a new one
+    # should not cancel the previous one
+    concurrency:
+      group: deploy-test-azure
+      cancel-in-progress: false
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: azure
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Azure login
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          ARM_USE_OIDC: 'true'
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/azure-config.yaml
+          nic-binary: nic

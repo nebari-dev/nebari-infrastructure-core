@@ -1,0 +1,45 @@
+project_name: aws-ci
+domain: aws-ci.openteams.app
+
+certificate:
+  type: letsencrypt
+  acme:
+    email: ci@nebari.dev
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+dns:
+  cloudflare:
+    zone_name: openteams.app
+
+git_repository:
+  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+  branch: aws
+  path: "clusters/aws-ci"
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  aws:
+    region: us-west-2
+    kubernetes_version: "1.36"
+    availability_zones:
+      - us-west-2a
+      - us-west-2b
+    vpc_cidr_block: "10.10.0.0/16"
+    endpoint_private_access: true
+    endpoint_public_access: true
+
+    node_groups:
+      general:
+        instance: m5.2xlarge
+        min_nodes: 1
+        max_nodes: 1
+
+      user:
+        instance: m5.xlarge
+        min_nodes: 0
+        max_nodes: 3
+
+    tags:
+      Environment: ci
+      Project: nebari
