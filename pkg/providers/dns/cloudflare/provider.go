@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -39,6 +40,64 @@ func NewProviderForTesting(client CloudflareClient) *Provider {
 // Name returns the provider name.
 func (p *Provider) Name() string {
 	return "cloudflare"
+}
+
+// Validate checks that the Cloudflare configuration is consistent with the
+// deployment domain. The offline checks always run (no API calls, no
+// credentials): domain must be set, zone_name must be a non-empty string,
+// and domain must be the zone apex or a subdomain of zone_name, so the
+// records created at deploy time (apex + wildcard) actually live in that
+// zone. This lets `nic validate` and `nic deploy` catch misconfigurations
+// before any infrastructure is provisioned.
+func (p *Provider) Validate(ctx context.Context, domain string, cfg map[string]any, opts dns.ValidateOptions) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "cloudflare.Validate")
+	defer span.End()
+
+	fail := func(err error) error {
+		span.RecordError(err)
+		return err
+	}
+
+	if domain == "" {
+		return fail(fmt.Errorf("domain is required when a dns block is configured"))
+	}
+	span.SetAttributes(attribute.String("domain", domain))
+	if cfg == nil {
+		return fail(fmt.Errorf("dns configuration is missing for cloudflare provider"))
+	}
+	raw, present := cfg["zone_name"]
+	if !present {
+		return fail(fmt.Errorf("cloudflare DNS provider requires zone_name"))
+	}
+	zoneName, ok := raw.(string)
+	if !ok {
+		return fail(fmt.Errorf("cloudflare zone_name must be a string, got %T", raw))
+	}
+	if zoneName == "" {
+		return fail(fmt.Errorf("cloudflare DNS provider requires zone_name"))
+	}
+	span.SetAttributes(attribute.String("zone_name", zoneName))
+	if !domainInZone(domain, zoneName) {
+		return fail(fmt.Errorf("domain %q is not within DNS zone_name %q", domain, zoneName))
+	}
+
+	if opts.CheckCreds {
+		// Live credential and zone-reachability checks (resolving zone_name
+		// via the Cloudflare API using CLOUDFLARE_API_TOKEN) are deferred
+		// until the credential-handling design in #6 lands; see #137. No
+		// caller passes CheckCreds=true yet, so this is a deliberate no-op.
+		return nil
+	}
+
+	return nil
+}
+
+// domainInZone reports whether domain is the zone apex or a subdomain of
+// zone. The dot separator requirement prevents suffix collisions such as
+// "notexample.com" matching zone "example.com".
+func domainInZone(domain, zone string) bool {
+	return domain == zone || strings.HasSuffix(domain, "."+zone)
 }
 
 // ProvisionRecords creates or updates DNS records for the deployment.
@@ -248,11 +307,9 @@ func extractCloudflareConfig(domain string, dnsConfig map[string]any) (*Config, 
 		return nil, fmt.Errorf("dns configuration is missing zone_name for cloudflare provider")
 	}
 
-	// Validate that domain is within the configured zone
-	// Must match exactly or be a subdomain (with dot separator) to prevent
-	// "notexample.com" from matching zone "example.com".
-	if domain != "" && domain != cfCfg.ZoneName && !strings.HasSuffix(domain, "."+cfCfg.ZoneName) {
-		return nil, fmt.Errorf("domain %q is not within zone %q", domain, cfCfg.ZoneName)
+	// Validate that domain is within the configured zone.
+	if domain != "" && !domainInZone(domain, cfCfg.ZoneName) {
+		return nil, fmt.Errorf("domain %q is not within DNS zone_name %q", domain, cfCfg.ZoneName)
 	}
 
 	return &cfCfg, nil

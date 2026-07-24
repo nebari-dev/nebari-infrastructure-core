@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
@@ -57,12 +56,9 @@ type DNSConfig struct {
 	Providers map[string]any `yaml:",inline"`
 }
 
-// Validate checks that exactly one valid DNS provider is configured and that
-// its zone settings are consistent with the deployment domain. domain is the
-// top-level NebariConfig.Domain. All checks are offline (no API calls, no
-// credentials), so `nic validate` catches a missing zone_name or a domain
-// outside the zone before any deploy provisions infrastructure.
-func (d *DNSConfig) Validate(validProviders []string, domain string) error {
+// Validate checks that exactly one valid DNS provider is configured.
+// When validProviders is non-empty, the provider name is checked against the list.
+func (d *DNSConfig) Validate(validProviders []string) error {
 	if len(d.Providers) == 0 {
 		return fmt.Errorf("dns block is present but no provider is configured")
 	}
@@ -75,21 +71,6 @@ func (d *DNSConfig) Validate(validProviders []string, domain string) error {
 	}
 	if d.ProviderConfig() == nil {
 		return fmt.Errorf("DNS provider %q config must be a mapping, not a scalar value", name)
-	}
-
-	// Offline zone consistency: the configured DNS zone must contain the
-	// deployment domain, so the records the provider will create at deploy time
-	// (apex + wildcard) actually live in that zone. zone_name is common to
-	// every currently supported DNS provider (cloudflare); if a provider that
-	// identifies its zone differently is added (e.g. route53 hosted_zone_id),
-	// lift this into a provider-level config check on the DNS provider
-	// interface (see #137) rather than special-casing keys here.
-	zoneName, _ := d.ProviderConfig()["zone_name"].(string)
-	if zoneName == "" {
-		return fmt.Errorf("DNS provider %q requires zone_name", name)
-	}
-	if domain != zoneName && !strings.HasSuffix(domain, "."+zoneName) {
-		return fmt.Errorf("domain %q is not within DNS zone_name %q", domain, zoneName)
 	}
 	return nil
 }
@@ -365,10 +346,7 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	}
 
 	if c.DNS != nil {
-		if c.Domain == "" {
-			return fmt.Errorf("domain is required when a dns block is configured")
-		}
-		if err := c.DNS.Validate(opts.DNSProviders, c.Domain); err != nil {
+		if err := c.DNS.Validate(opts.DNSProviders); err != nil {
 			return fmt.Errorf("invalid dns: %w", err)
 		}
 	}
