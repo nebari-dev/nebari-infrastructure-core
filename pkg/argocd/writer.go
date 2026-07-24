@@ -32,6 +32,9 @@ const (
 	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
 	// not configured a real ACME provider.
 	certificateIssuerSelfSigned = "selfsigned-issuer"
+	// certificateIssuerLetsEncrypt is the cert-manager ACME Issuer used when the
+	// user explicitly selects Let's Encrypt.
+	certificateIssuerLetsEncrypt = "letsencrypt-issuer"
 )
 
 // TemplateData holds the dynamic values for template processing
@@ -157,7 +160,7 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 
 	// Set certificate configuration
 	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
-		data.CertificateIssuer = "letsencrypt-issuer"
+		data.CertificateIssuer = certificateIssuerLetsEncrypt
 		if cfg.Certificate.ACME != nil {
 			data.ACMEEmail = cfg.Certificate.ACME.Email
 			data.ACMEServer = cfg.Certificate.ACME.Server
@@ -487,6 +490,8 @@ const (
 	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
 	certificatesAppPath       = "apps/certificates.yaml"
 	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
+	letsencryptIssuerPath     = "manifests/security/issuers/letsencrypt-clusterissuer.yaml"
+	selfSignedIssuerPath      = "manifests/security/issuers/selfsigned-clusterissuer.yaml"
 )
 
 // skipCertificateTemplate reports whether a cert-related template should be
@@ -498,13 +503,20 @@ const (
 // The certificates Application is skipped alongside the Certificate because the
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
-// it would report as failed.
+// it would report as failed. Issuer manifests are selected independently:
+// letsencrypt uses the ACME issuer, while selfsigned and existing use the
+// self-signed issuer (the latter remains available for operator-managed
+// per-application certificates).
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
 		return data.UseExistingCertificate
 	case gatewayReferenceGrantPath:
 		return !data.GatewayTLSCrossNamespace
+	case letsencryptIssuerPath:
+		return data.CertificateIssuer != certificateIssuerLetsEncrypt
+	case selfSignedIssuerPath:
+		return data.CertificateIssuer != certificateIssuerSelfSigned
 	default:
 		return false
 	}

@@ -111,6 +111,9 @@ func TestGatewayTemplate_CertificateRefName(t *testing.T) {
 		if !strings.Contains(output, "name: user-tls") {
 			t.Errorf("expected certificateRef name user-tls, got:\n%s", output)
 		}
+		if !strings.Contains(output, "group: \"\"\n            kind: Secret\n            name: user-tls") {
+			t.Errorf("expected explicit core Secret reference defaults, got:\n%s", output)
+		}
 		// The certificateRef namespace is indented under the ref (12 spaces);
 		// the Gateway's own metadata.namespace (2 spaces) is unrelated.
 		if strings.Contains(output, "            namespace:") {
@@ -221,6 +224,118 @@ func TestWriteAllToGit_RendersCertManagerForSelfSigned(t *testing.T) {
 	appPath := filepath.Join(tmpDir, "apps", "certificates.yaml")
 	if _, err := os.Stat(appPath); os.IsNotExist(err) {
 		t.Error("expected apps/certificates.yaml to be rendered for selfsigned default")
+	}
+}
+
+func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
+	tests := []struct {
+		name             string
+		certificate      *config.CertificateConfig
+		wantSelfSigned   bool
+		wantLetsEncrypt  bool
+		wantOperatorName string
+	}{
+		{
+			name:             "default uses selfsigned",
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+		{
+			name:             "selfsigned uses only selfsigned",
+			certificate:      &config.CertificateConfig{Type: config.CertificateTypeSelfSigned},
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+		{
+			name: "letsencrypt uses only letsencrypt",
+			certificate: &config.CertificateConfig{
+				Type: config.CertificateTypeLetsEncrypt,
+				ACME: &config.ACMEConfig{Email: "admin@example.com"},
+			},
+			wantLetsEncrypt:  true,
+			wantOperatorName: certificateIssuerLetsEncrypt,
+		},
+		{
+			name: "existing keeps selfsigned for operator managed certificates",
+			certificate: &config.CertificateConfig{
+				Type:           config.CertificateTypeExisting,
+				ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
+			},
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			for _, path := range []string{selfSignedIssuerPath, letsencryptIssuerPath} {
+				fullPath := filepath.Join(tmpDir, path)
+				if err := os.MkdirAll(filepath.Dir(fullPath), 0750); err != nil {
+					t.Fatalf("create stale issuer directory: %v", err)
+				}
+				if err := os.WriteFile(fullPath, []byte("stale"), 0600); err != nil {
+					t.Fatalf("create stale issuer manifest: %v", err)
+				}
+			}
+			cfg := &config.NebariConfig{Domain: "example.com", Certificate: tt.certificate}
+			mock := &mockGitClient{workDir: tmpDir}
+			if err := WriteAllToGit(context.Background(), mock, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
+
+			paths := []struct {
+				name string
+				path string
+				want bool
+			}{
+				{name: "selfsigned issuer", path: selfSignedIssuerPath, want: tt.wantSelfSigned},
+				{name: "letsencrypt issuer", path: letsencryptIssuerPath, want: tt.wantLetsEncrypt},
+				{name: "cluster issuers application", path: "apps/cluster-issuers.yaml", want: true},
+			}
+			for _, path := range paths {
+				_, err := os.Stat(filepath.Join(tmpDir, path.path))
+				if path.want && err != nil {
+					t.Errorf("expected %s to be rendered: %v", path.name, err)
+				}
+				if !path.want && !os.IsNotExist(err) {
+					t.Errorf("expected %s to be skipped, stat error = %v", path.name, err)
+				}
+			}
+
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			operatorPatch, err := os.ReadFile(filepath.Join(tmpDir, "manifests", "nebari-operator", "deployment-patch.yaml"))
+			if err != nil {
+				t.Fatalf("read operator deployment patch: %v", err)
+			}
+			wantIssuerValue := `value: "` + tt.wantOperatorName + `"`
+			if !strings.Contains(string(operatorPatch), wantIssuerValue) {
+				t.Errorf("operator deployment patch missing %q", wantIssuerValue)
+			}
+		})
+	}
+}
+
+func TestLetsEncryptIssuer_UsesExplicitGatewayParentRefDefaults(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/security/issuers/letsencrypt-clusterissuer.yaml")
+	if err != nil {
+		t.Fatalf("read letsencrypt issuer template: %v", err)
+	}
+
+	processed, err := processTemplate(
+		"manifests/security/issuers/letsencrypt-clusterissuer.yaml",
+		content,
+		TemplateData{
+			ACMEEmail:  "admin@example.com",
+			ACMEServer: "https://acme-v02.api.letsencrypt.org/directory",
+		},
+	)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	if !strings.Contains(string(processed), "group: gateway.networking.k8s.io\n                name: nebari-gateway") {
+		t.Errorf("expected explicit Gateway API group on ACME solver parentRef, got:\n%s", processed)
 	}
 }
 

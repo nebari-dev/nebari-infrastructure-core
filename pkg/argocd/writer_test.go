@@ -263,6 +263,32 @@ func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	}
 }
 
+func TestMetalLBIPAddressPool_ExplicitDefaults(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/metallb/ipaddresspool.yaml")
+	if err != nil {
+		t.Fatalf("failed to read MetalLB IPAddressPool template: %v", err)
+	}
+
+	processed, err := processTemplate(
+		"manifests/metallb/ipaddresspool.yaml",
+		content,
+		TemplateData{MetalLBAddressRange: "172.18.255.100-172.18.255.110"},
+	)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	output := string(processed)
+	for _, want := range []string{
+		"autoAssign: true",
+		"avoidBuggyIPs: false",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("MetalLB IPAddressPool template missing %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -523,7 +549,9 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 				contains string
 			}{
 				{"kind", "kind: HTTPRoute"},
+				{"explicit Gateway reference defaults", "group: gateway.networking.k8s.io\n      kind: Gateway"},
 				{"targets http listener", "sectionName: http"},
+				{"explicit default path match", "type: PathPrefix\n            value: /"},
 				{"redirect filter type", "type: RequestRedirect"},
 				{"redirect to https", "scheme: https"},
 				{"301 status code", "statusCode: 301"},
@@ -629,6 +657,7 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 		Domain:              "test.example.com",
 		HTTPSPort:           443,
 		KeycloakServiceName: "keycloak-keycloakx-http",
+		LonghornEnabled:     true,
 	}
 
 	for _, entry := range entries {
@@ -657,18 +686,24 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 			output := string(processed)
 
-			// This skips ANY route that renders empty with the zero-value test
-			// data, not just longhorn-httproute.yaml — so a conditionally
-			// rendered route silently drops out of this generic https check.
-			// Each such route needs its own test pinning the https-listener
-			// property with its gate enabled (see
-			// TestWriteAllToGit_LonghornHTTPRoute for the Longhorn one).
+			// Conditional routes must have their gates enabled in data above.
+			// Keep the empty-render guard so a future conditional route cannot
+			// produce misleading assertion failures without naming the cause.
 			if strings.TrimSpace(output) == "" {
-				t.Skipf("skipping %s: empty render with default test data", name)
+				t.Fatalf("%s rendered empty; enable its template gate in the test data", name)
 			}
 
 			if !strings.Contains(output, "sectionName: https") {
 				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "group: gateway.networking.k8s.io\n      kind: Gateway") {
+				t.Errorf("%s should declare explicit Gateway reference defaults, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "group: \"\"\n          kind: Service") {
+				t.Errorf("%s should declare explicit Service reference defaults, got:\n%s", name, output)
+			}
+			if !strings.Contains(output, "weight: 1") {
+				t.Errorf("%s should declare the default backend weight, got:\n%s", name, output)
 			}
 			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
 			if strings.Contains(output, "sectionName: http\n") {
@@ -786,12 +821,17 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 			"kind: HTTPRoute",
 			"name: longhorn",
 			"namespace: longhorn-system",
+			"group: gateway.networking.k8s.io",
+			"kind: Gateway",
 			"name: nebari-gateway",
 			"namespace: envoy-gateway-system",
 			"sectionName: https",
 			"longhorn.test.example.com",
+			"group: \"\"",
+			"kind: Service",
 			"name: longhorn-frontend",
 			"port: 80",
+			"weight: 1",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("longhorn-httproute.yaml missing %q\ngot:\n%s", want, out)
@@ -907,10 +947,14 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"name: longhorn-oidc-client-secret",
 			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
 			`logoutPath: "/oauth2/logout"`,
+			"group: \"\"",
+			"kind: Secret",
+			"refreshToken: true",
 			"forwardAccessToken: true",
 			"jwt:",
 			"name: keycloak",
 			"/realms/nebari/protocol/openid-connect/certs",
+			"cacheDuration: 300s",
 			"authorization:",
 			"defaultAction: Deny",
 			"name: allow-longhorn-admins",
