@@ -1,0 +1,50 @@
+project_name: azure-ci
+domain: azure-ci.openteams.app
+
+certificate:
+  type: letsencrypt
+  acme:
+    email: ci@nebari.dev
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+dns:
+  cloudflare:
+    zone_name: openteams.app
+
+git_repository:
+  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+  branch: azure
+  path: "clusters/azure-ci"
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  azure:
+    region: eastus
+
+    kubernetes_version: "1.34"
+    sku_tier: Free
+    private_cluster_enabled: false
+
+    network:
+      vnet_cidr_block: "10.0.0.0/16"
+      node_subnet_cidr_block: "10.0.0.0/22"
+      pod_cidr: "10.244.0.0/16"
+      service_cidr: "10.0.16.0/22"
+      dns_service_ip: "10.0.16.10"
+
+    node_groups:
+      general:
+        instance: Standard_D4_v3
+        min_nodes: 1
+        max_nodes: 3
+        mode: System
+
+      user:
+        instance: Standard_D8_v3
+        min_nodes: 1
+        max_nodes: 5
+
+    tags:
+      Environment: development
+      Project: nebari
