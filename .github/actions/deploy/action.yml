@@ -5,7 +5,7 @@ description: >-
   cancellation. Acquires nic from a prebuilt binary (nic-binary) or a release
   or git ref (nic-version). Exports KUBECONFIG so the steps after this action
   run against the deployed cluster, and by default waits for all Argo CD
-  Applications to become Synced and Healthy.
+  Applications to become Healthy.
 
 inputs:
   config:
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: ''
   wait:
-    description: Wait for all Argo CD Applications to be Synced and Healthy after deploy.
+    description: Wait for all Argo CD Applications to be Healthy after deploy.
     required: false
     default: 'true'
   wait-timeout:

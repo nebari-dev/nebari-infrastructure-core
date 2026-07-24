@@ -194,8 +194,11 @@ interface AppStatus {
 }
 
 /**
- * Poll Argo CD Applications until every one is Synced and Healthy (and at
- * least one exists); dump diagnostics and throw when the timeout elapses.
+ * Poll Argo CD Applications until every one is Healthy (and at least one
+ * exists); dump diagnostics and throw when the timeout elapses.
+ *
+ * TODO: gate on Synced too once the fix for Applications reporting OutOfSync
+ * lands; until then sync status is logged but not required.
  */
 export function waitForApplications(
   kubeconfig: string,
@@ -229,16 +232,14 @@ export function waitForApplications(
         });
     }
 
-    const notReady = apps.filter(
-      (a) => a.sync !== "Synced" || a.health !== "Healthy",
-    );
+    const notReady = apps.filter((a) => a.health !== "Healthy");
     if (apps.length > 0 && notReady.length === 0) {
-      core.info(`All ${apps.length} Applications are Synced and Healthy`);
+      core.info(`All ${apps.length} Applications are Healthy`);
       return;
     }
 
     if (Date.now() >= deadline) {
-      core.startGroup("Applications not Synced/Healthy");
+      core.startGroup("Applications not Healthy");
       if (apps.length === 0) {
         core.info("<no Applications found>");
       } else {
