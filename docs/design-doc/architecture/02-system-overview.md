@@ -7,11 +7,12 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. User defines nebari-config.yaml                          │
-│    - cluster.<provider>: ...     (aws | hetzner |           │
+│    - cluster.<provider>: ...     (aws | azure | hetzner |   │
 │                                   local | existing)         │
 │    - dns.<provider>: ...         (optional, cloudflare)     │
 │    - git_repository: ...         (optional on local)        │
-│    - certificate: ...            (selfsigned | letsencrypt) │
+│    - certificate: ...    (selfsigned|letsencrypt|existing)  │
+│    - trust_bundle: / backups: ...          (both optional)  │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐

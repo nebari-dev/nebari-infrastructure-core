@@ -22,6 +22,8 @@ type NebariConfig struct {
     DNS           *DNSConfig         `yaml:"dns,omitempty"`           // optional
     GitRepository *git.Config        `yaml:"git_repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
+    TrustBundle   *TrustBundleConfig `yaml:"trust_bundle,omitempty"`  // enterprise CA bundle
+    Backups       *BackupsConfig     `yaml:"backups,omitempty"`       // off-cluster Longhorn backups
 }
 ```
 
@@ -39,6 +41,8 @@ dns:                           # optional, exactly one provider
 
 git_repository: { ... }        # optional on local provider; required for cloud providers
 certificate: { ... }           # optional, defaults to selfsigned
+trust_bundle: { ... }          # optional, enterprise CA bundle (path OR inline)
+backups: { ... }               # optional, off-cluster Longhorn backups
 ```
 
 There is **no** top-level `provider:` field, **no** top-level `version:` field, **no** top-level `name:` field (use `project_name`), and **no** top-level `kubernetes:`, `node_pools:`, `tls:`, `foundational_software:`, `images:`, or `features:` blocks. If you find documentation that claims otherwise, it is out of date.
@@ -71,8 +75,13 @@ Valid provider names today: `cloudflare`. The DNS provider implementation owns t
 
 ```go
 type CertificateConfig struct {
-    Type string      `yaml:"type,omitempty"`   // "selfsigned" or "letsencrypt"
+    Type string      `yaml:"type,omitempty"`   // "selfsigned" (default), "letsencrypt", or "existing"
     ACME *ACMEConfig `yaml:"acme,omitempty"`
+
+    SecretName     string             `yaml:"secret_name,omitempty"`      // default: nebari-gateway-tls
+    ExistingSecret *ExistingSecretRef `yaml:"existing_secret,omitempty"`  // type=existing: one of
+    Files          *CertFiles         `yaml:"files,omitempty"`            //   these three
+    Env            *CertEnv           `yaml:"env,omitempty"`              //   must be set
 }
 
 type ACMEConfig struct {
@@ -81,7 +90,16 @@ type ACMEConfig struct {
 }
 ```
 
-`selfsigned` is the default and is appropriate for local and internal deployments. `letsencrypt` requires `acme.email` (and a publicly-routable `domain` configured via the DNS provider).
+`selfsigned` is the default and is appropriate for local and internal deployments. `letsencrypt` requires `acme.email` (and a publicly-routable `domain` configured via the DNS provider). `existing` is the bring-your-own-certificate path: it takes exactly one of `existing_secret` (reference a `kubernetes.io/tls` secret already in the cluster), `files` (PEM paths on disk), or `env` (raw PEM in env vars), and cannot be combined with `acme`. For the files/env sources NIC creates the secret directly in `envoy-gateway-system`, so the material never reaches the GitOps repo. See [`docs/custom-tls-certificate.md`](../../custom-tls-certificate.md).
+
+## 7.5b Trust Bundle and Backups Blocks
+
+Two further optional top-level blocks, defined in `pkg/config/trust_bundle.go` and `pkg/config/backups.go`:
+
+- `trust_bundle:` takes exactly one of `path` (a PEM file on the operator's machine) or `inline` (the PEM text). NIC propagates it to worker-node OS trust stores via the cluster provider and into the cluster via trust-manager. A `PRIVATE KEY` block is rejected: the resolved bundle ends up in OpenTofu state and is projected cluster-wide through the GitOps repo.
+- `backups.longhorn:` configures off-cluster backups against a Longhorn-native S3 or azblob target, plus the snapshot/backup RecurringJob schedules. Opt-in: an omitted block means no backups.
+
+Field-level detail for both lives in [`16-configuration-reference.md`](../appendix/16-configuration-reference.md).
 
 ## 7.6 Git Repository Block
 
@@ -103,9 +121,9 @@ type AuthConfig struct {
 
 The git repository is where NIC renders ArgoCD `Application` manifests during deploy. ArgoCD then syncs from it.
 
-- **Local file:// repos** are valid (and the default for local Kind clusters that have `InfraSettings.SupportsLocalGitOps = true`). The local provider's auto-bootstrap creates `/tmp/nebari-gitops-<project_name>` if no `git_repository:` block is provided.
+- **Local file:// repos** are valid (and the default for local Kind clusters that have `InfraSettings.SupportsLocalGitOps = true`). The local provider's auto-bootstrap creates `~/.nic/gitops/<project_name>` if no `git_repository:` block is provided (`git.DefaultLocalPath`), falling back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved.
 - **Cloud providers** require an explicit `git_repository:` block; cluster nodes cannot see the dev machine's filesystem, so a remote (SSH or HTTPS) repo is required.
-- Credentials are referenced by env-var name, never inlined. The CLI scrubs the `auth:` and `argocd_auth:` blocks from any copy of the config it writes into the GitOps repo.
+- Credentials are referenced by env-var name, never inlined. NIC scrubs the `auth:` and `argocd_auth:` blocks, and the resolved trust bundle, from any copy of the config it writes into the GitOps repo (`scrubbedConfig` in `pkg/nic/deploy.go`).
 
 ## 7.7 Example Configs
 
@@ -113,7 +131,9 @@ Authoritative examples live under [`examples/`](../../../examples/) in the repo.
 
 - [`examples/aws-config.yaml`](../../../examples/aws-config.yaml) - EKS with EFS and remote GitOps repo
 - [`examples/hetzner-config.yaml`](../../../examples/hetzner-config.yaml) - Hetzner k3s with `node_groups.master` and `node_groups.workers`
-- [`examples/local-config.yaml`](../../../examples/local-config.yaml) - Kind cluster with optional MetalLB and `file://` GitOps repo
+- [`examples/local-config.yaml`](../../../examples/local-config.yaml) - Kind cluster with optional `kind:` tuning, MetalLB address pool, and `file://` GitOps repo
+- [`examples/custom-tls-config.yaml`](../../../examples/custom-tls-config.yaml) - `certificate.type: existing` (bring your own TLS cert)
+- [`examples/longhorn-backups-config.yaml`](../../../examples/longhorn-backups-config.yaml) - EKS with a dedicated Longhorn storage pool and S3 backups
 - [`examples/existing-config.yaml`](../../../examples/existing-config.yaml) - Adopt an existing kubeconfig
 - [`examples/azure-config.yaml`](../../../examples/azure-config.yaml) - AKS (deployable; Azure is implemented)
 - [`examples/gcp-config.yaml`](../../../examples/gcp-config.yaml) - schema for the GCP stub provider (not deployable today)
@@ -130,12 +150,15 @@ Validation enforces:
 - `cluster:` is present with exactly one provider key matching `opts.ClusterProviders`
 - `dns:`, if present, has exactly one provider key matching `opts.DNSProviders`
 - `git_repository:`, if present, validates per `pkg/git.Config.Validate()`
+- `trust_bundle:`, if present, has at most one of `path` / `inline`; an inline value must contain a PEM certificate and no private key (a `path:` bundle is only read at deploy/destroy time, so `Validate()` never touches disk)
+- `certificate:` validates the type and, for `type: existing`, that exactly one of `existing_secret` / `files` / `env` is set
+- `backups:`, if present and enabled, validates the target, schedules, and credentials against the selected cluster provider name
 
 Provider-specific validation (e.g., that `cluster.aws.region` is set, that node groups are non-empty) lives inside the provider's own `Validate(ctx, projectName, clusterConfig)` method.
 
 ## 7.9 Auto-Discovery
 
-If `nic deploy` is invoked without `-f`, the CLI auto-discovers a config file in the working directory. See `cmd/nic/config_discovery.go` for the search order. Explicit `-f path/to/config.yaml` always wins.
+If `nic deploy` is invoked without `-f`, the CLI falls back to the `NIC_CONFIG_PATH` environment variable, then to `./config.yaml` in the working directory (`resolveConfigFile` in `cmd/nic/config_discovery.go`). Explicit `-f path/to/config.yaml` always wins. In every case the resolved path is checked for readability before parsing.
 
 ## 7.10 Secrets
 
@@ -145,7 +168,8 @@ Secrets are never written into the config file. The expected pattern:
 # .env (gitignored; loaded automatically by godotenv in main.go)
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
-HCLOUD_TOKEN=...
+HETZNER_TOKEN=...           # NIC re-exports this to the hetzner-k3s subprocess as HCLOUD_TOKEN
+AZURE_SUBSCRIPTION_ID=...   # mapped to ARM_SUBSCRIPTION_ID for the child tofu process
 CLOUDFLARE_API_TOKEN=...
 GIT_SSH_PRIVATE_KEY=...
 ```
