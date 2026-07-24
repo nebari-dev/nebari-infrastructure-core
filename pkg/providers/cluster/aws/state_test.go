@@ -126,6 +126,32 @@ func TestGenerateBucketName(t *testing.T) {
 		}
 	})
 
+	t.Run("normalizes project name for S3", func(t *testing.T) {
+		name, err := generateBucketName("123456789012", "us-east-1", "My_Project")
+		if err != nil {
+			t.Fatalf("generateBucketName() error = %v", err)
+		}
+
+		if strings.ContainsAny(name, "ABCDEFGHIJKLMNOPQRSTUVWXYZ_") {
+			t.Errorf("generateBucketName() = %q, should contain only S3-compatible project name characters", name)
+		}
+		if !strings.Contains(name, "my-project") {
+			t.Errorf("generateBucketName() = %q, should contain normalized project name", name)
+		}
+	})
+
+	t.Run("preserves valid lowercase project name", func(t *testing.T) {
+		got, err := generateBucketName("123456789012", "us-east-1", "my-project")
+		if err != nil {
+			t.Fatalf("generateBucketName() error = %v", err)
+		}
+
+		const want = "nic-tfstate-my-project-us-east-1-2a33349e"
+		if got != want {
+			t.Errorf("generateBucketName() = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("returns error for name exceeding max length", func(t *testing.T) {
 		longProjectName := "this-is-a-very-long-project-name-that-will-exceed-the-limit"
 		_, err := generateBucketName("123456789012", "us-east-1", longProjectName)
