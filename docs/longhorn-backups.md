@@ -78,6 +78,19 @@ Balancer Controller and the EBS/EFS CSI drivers. Nothing to export before
 > Longhorn release regresses this, the fallback is IRSA (annotate the same
 > service account) with the identical IAM role and policy.
 
+Keyless auth depends on the Pod Identity webhook having injected
+`AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+into **every** `longhorn-manager` pod, because those variables are the only
+usable credentials on the backup delete/inspect path. `AWS_IAM_ROLE_ARN` in the
+credential Secret is a mode switch, not a credential — Longhorn never forwards it
+to the AWS SDK. A pod created *before* the Pod Identity association existed never
+received the injection, and the Longhorn Helm chart does not roll the DaemonSet
+when only the association changed, so `nic deploy` checks the running pods and
+restarts `longhorn-manager` when any of them is missing the injection. This is
+non-disruptive: volume I/O is served by the `instance-manager` pods, which are
+left running. See [Keyless backups never delete](#keyless-backups-never-delete)
+for what the unrepaired state looks like.
+
 **Static keys.** Set both `s3.access_key_id_env` and `s3.secret_access_key_env`
 (or `azure.account_name_env` / `azure.account_key_env` for Azure) to the names of
 environment variables holding the credentials. This is **required** for any
@@ -260,6 +273,56 @@ Helm chart, migrate with a one-time cutover:
 Removing the RecurringJobs does **not** delete already-taken snapshots or backups
 in S3. NIC recreates resources with the same names (`default-hourly-snapshot`,
 `default-daily-backup`), so coverage is seamless across the cutover.
+
+## Troubleshooting
+
+### Keyless backups never delete
+
+Symptom: backups are created and synced fine, restore works, but retention
+pruning never removes anything. `Backup` CRs sit in `state=Deleting` for tens of
+minutes, the `longhorn.io` finalizer is re-added every 5 minutes, and
+`backup_<name>.cfg` stays in the bucket. `longhorn-manager` logs this every
+~30 seconds for every backup:
+
+```
+Error inspecting backup config ... longhorn backup inspect s3://... :
+get credentials: failed to refresh cached credentials, no EC2 IMDS role found,
+operation error ec2imds: GetMetadata, canceled, context deadline exceeded
+```
+
+Cause: the `longhorn-manager` pod that owns those `Backup` CRs is missing the
+Pod Identity container-credential environment variables, so the engine
+subprocess it execs for `backup inspect` / `backup rm` finds no credentials and
+falls through to EC2 IMDS, which pods cannot reach. Upload is unaffected because
+that engine runs long-lived inside `instance-manager` and inherits that pod's
+environment. Only some pods may be affected, so a spot check of one healthy pod
+proves nothing — check all of them:
+
+```bash
+for pod in $(kubectl -n longhorn-system get pods -l app=longhorn-manager -o name); do
+  echo -n "$pod "
+  kubectl -n longhorn-system get "$pod" \
+    -o jsonpath='{.spec.containers[0].env[?(@.name=="AWS_CONTAINER_CREDENTIALS_FULL_URI")].value}'
+  echo
+done
+```
+
+Any pod printing an empty value cannot delete backups. `nic deploy` detects and
+repairs this automatically; to fix it out of band:
+
+```bash
+kubectl -n longhorn-system rollout restart daemonset/longhorn-manager
+```
+
+If the restarted pods still come back without the variables, the
+`eks-pod-identity-agent` addon or its mutating webhook is missing or unhealthy —
+NIC emits a deploy warning in that case. Verify with
+`aws eks describe-addon --cluster-name <cluster> --addon-name eks-pod-identity-agent`
+and confirm a Pod Identity association exists for `longhorn-service-account`:
+
+```bash
+aws eks list-pod-identity-associations --cluster-name <cluster>
+```
 
 ## Teardown behaviour
 
