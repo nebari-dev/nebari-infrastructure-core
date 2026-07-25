@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
@@ -30,6 +31,11 @@ func NewProvider() *Provider {
 }
 
 // Name returns the provider name used in cluster.azure: dispatch.
+// ConfigType reports the Go type of this provider's configuration struct
+// (the optional cluster.ConfigTyped capability used by schema generation and
+// config scaffolding).
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
+
 func (p *Provider) Name() string { return providerName }
 
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {

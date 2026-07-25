@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -58,6 +59,11 @@ func NewProvider() *Provider {
 }
 
 // Name returns the provider name
+// ConfigType reports the Go type of this provider's configuration struct
+// (the optional cluster.ConfigTyped capability used by schema generation and
+// config scaffolding).
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
+
 func (p *Provider) Name() string {
 	return ProviderName
 }

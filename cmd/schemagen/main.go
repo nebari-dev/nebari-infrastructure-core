@@ -10,11 +10,11 @@
 //	  providers/
 //	    <name>.json    (one per registered cluster + DNS provider)
 //
-// The provider Config types are referenced directly below rather than through
-// the runtime registry, so the provider interfaces stay free of a schema-only
-// method. schemagen is an internal build tool, so a small hard-coded map is an
-// acceptable trade for not coupling the interfaces to it. A provider added to
-// the registry must be added to clusterConfigTypes / dnsConfigTypes here too.
+// The provider list comes from the nic registry (pkg/nic/registry.go) via
+// (*nic.Client).RegisteredConfigTypes, which reads each provider's config type
+// through the optional cluster.ConfigTyped / dns.ConfigTyped capability. There
+// is no parallel hard-coded list: registering a provider (that self-describes
+// its config type) extends the schemagen output automatically.
 //
 // Invocation: `make schemas` or `go run ./cmd/schemagen -out ./schemas`.
 package main
@@ -34,30 +34,8 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/configschema"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/aws"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/azure"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/existing"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/gcp"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/hetzner"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster/local"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns/cloudflare"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
-
-// clusterConfigTypes and dnsConfigTypes map each registered provider name to
-// its config struct. Keep these in sync with pkg/nic/registry.go; CI regenerates
-// schemas/ and fails on drift, so a stale value here shows up in review.
-var clusterConfigTypes = map[string]reflect.Type{
-	"aws":      reflect.TypeFor[aws.Config](),
-	"azure":    reflect.TypeFor[azure.Config](),
-	"existing": reflect.TypeFor[existing.Config](),
-	"gcp":      reflect.TypeFor[gcp.Config](),
-	"hetzner":  reflect.TypeFor[hetzner.Config](),
-	"local":    reflect.TypeFor[local.Config](),
-}
-
-var dnsConfigTypes = map[string]reflect.Type{
-	"cloudflare": reflect.TypeFor[cloudflare.Config](),
-}
 
 func main() {
 	var (
@@ -89,11 +67,17 @@ func run(ctx context.Context, outDir, providersFlag, pkgRoot, version string) er
 		return fmt.Errorf("collect package paths under %s: %w", pkgRoot, err)
 	}
 
+	client, err := nic.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("build nic client: %w", err)
+	}
+	types := client.RegisteredConfigTypes(ctx)
+
 	filter := parseFilter(providersFlag)
 	emitTopLevel := len(filter) == 0
 
-	clusterNames := sortedKeys(clusterConfigTypes)
-	dnsNames := sortedKeys(dnsConfigTypes)
+	clusterNames := sortedKeys(types.Cluster)
+	dnsNames := sortedKeys(types.DNS)
 
 	if emitTopLevel {
 		if err := writeSchema(ctx, outDir, "nebari-config.json",
@@ -108,7 +92,7 @@ func run(ctx context.Context, outDir, providersFlag, pkgRoot, version string) er
 			continue
 		}
 		if err := writeSchema(ctx, outDir, filepath.Join("providers", name+".json"),
-			clusterConfigTypes[name],
+			types.Cluster[name],
 			fmt.Sprintf("%s cluster provider configuration", name), pkgPaths); err != nil {
 			return err
 		}
@@ -119,7 +103,7 @@ func run(ctx context.Context, outDir, providersFlag, pkgRoot, version string) er
 			continue
 		}
 		if err := writeSchema(ctx, outDir, filepath.Join("providers", name+".json"),
-			dnsConfigTypes[name],
+			types.DNS[name],
 			fmt.Sprintf("%s DNS provider configuration", name), pkgPaths); err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -37,6 +38,11 @@ func NewProviderForTesting(client CloudflareClient) *Provider {
 }
 
 // Name returns the provider name.
+// ConfigType reports the Go type of this provider's configuration struct
+// (the optional dns.ConfigTyped capability used by schema generation and
+// config scaffolding).
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
+
 func (p *Provider) Name() string {
 	return "cloudflare"
 }
