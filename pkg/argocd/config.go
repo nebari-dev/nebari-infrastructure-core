@@ -6,7 +6,14 @@ import (
 )
 
 const (
-	defaultChartVersion = "9.4.1"
+	// defaultChartVersion is the Argo CD Helm chart version NIC installs.
+	// Chart 9.7.1 installs Argo CD v3.4.4. The 3.4 line is the floor for two
+	// reasons: chart 9.4.1 shipped Argo CD v3.3.0, which is affected by
+	// GHSA-3v3m-wc6v-x4x3 (critical), GHSA-h98r-wv3h-fr38 (high) and
+	// GHSA-rg3g-4rw9-gqrp (medium); and glob expansion of helm.valueFiles,
+	// which the foundational values overlay seam depends on, does not exist
+	// before Argo CD 3.4.
+	defaultChartVersion = "9.7.1"
 	defaultNamespace    = "argocd"
 )
 
@@ -89,7 +96,7 @@ g, /argocd-viewers, role:readonly`
 // DefaultConfig returns the default Argo CD configuration
 func DefaultConfig() Config {
 	return Config{
-		Version:     defaultChartVersion, // Chart version that installs Argo CD v3.3.0
+		Version:     defaultChartVersion, // Chart version that installs Argo CD v3.4.4
 		Namespace:   defaultNamespace,
 		ReleaseName: defaultNamespace,
 		Timeout:     5 * time.Minute,
