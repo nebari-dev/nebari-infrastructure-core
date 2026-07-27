@@ -11,6 +11,7 @@ on:
           - local
           - aws
           - azure
+          - hetzner
         default: local
   release:
     # published covers both stable and pre-releases
@@ -191,4 +192,48 @@ jobs:
           GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
         with:
           config: .github/fixtures/deploy/azure-config.yaml
+          nic-binary: nic
+
+  hetzner:
+    name: Deploy (Hetzner)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'hetzner' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    environment: hetzner
+    # Only one Hetzner deploy test should run at a time and triggering a new
+    # one should not cancel the previous one
+    concurrency:
+      group: deploy-test-hetzner
+      cancel-in-progress: false
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: hetzner
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/hetzner-config.yaml
           nic-binary: nic
