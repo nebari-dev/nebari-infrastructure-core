@@ -25,10 +25,10 @@ cluster:
 
     node_groups:
       master:
-        instance_type: cpx31
+        instance_type: cpx32
         count: 1
         master: true
 
       workers:
-        instance_type: cpx31
+        instance_type: cpx32
         count: 2
