@@ -1,5 +1,5 @@
 project_name: azure-ci
-domain: azure-ci.openteams.app
+domain: azure-ci.nebari.dev
 
 certificate:
   type: letsencrypt
@@ -9,7 +9,7 @@ certificate:
 
 dns:
   cloudflare:
-    zone_name: openteams.app
+    zone_name: nebari.dev
 
 git_repository:
   url: "https://github.com/nebari-dev/nic-ci-gitops.git"
