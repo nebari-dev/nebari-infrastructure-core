@@ -31,8 +31,8 @@ func TestBackupStateAddrs(t *testing.T) {
 			name: "retain returns container before account",
 			spec: &cluster.BackupBucketSpec{Create: true, ForceDestroy: false},
 			want: []string{
-				"module.aks_cluster.azurerm_storage_container.longhorn_backup[0]",
-				"module.aks_cluster.azurerm_storage_account.longhorn_backup[0]",
+				"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_container.this",
+				"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_account.this",
 			},
 		},
 	}
@@ -49,7 +49,7 @@ func TestBackupStateAddrs(t *testing.T) {
 			}
 			// The storage account must always be last so the container (its
 			// dependent) is removed first.
-			if len(got) > 0 && got[len(got)-1] != "module.aks_cluster.azurerm_storage_account.longhorn_backup[0]" {
+			if len(got) > 0 && got[len(got)-1] != "module.aks_cluster.module.longhorn_backup[0].azurerm_storage_account.this" {
 				t.Fatalf("expected storage account address last, got %q", got[len(got)-1])
 			}
 		})

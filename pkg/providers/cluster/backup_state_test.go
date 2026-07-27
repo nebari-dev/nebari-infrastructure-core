@@ -111,6 +111,19 @@ func TestRetainBackupResources(t *testing.T) {
 		}
 	})
 
+	t.Run("no expected address in state removes nothing", func(t *testing.T) {
+		// The signature of an address list that has drifted from the module:
+		// state is populated, but with entirely different addresses. Nothing is
+		// removed (and RetainBackupResources warns).
+		f := &fakeStateEditor{state: stateWith(
+			"module.eks_cluster.module.longhorn_backup[0].aws_s3_bucket.this[0]",
+		)}
+		RetainBackupResources(ctx, sp, f, &BackupBucketSpec{ForceDestroy: false}, addrs)
+		if len(f.rmCalls) != 0 {
+			t.Fatalf("expected no StateRm calls when no address matches, got %v", f.rmCalls)
+		}
+	})
+
 	t.Run("Show error aborts removal without panic", func(t *testing.T) {
 		f := &fakeStateEditor{showErr: errors.New("boom")}
 		RetainBackupResources(ctx, sp, f, &BackupBucketSpec{ForceDestroy: false}, addrs)
