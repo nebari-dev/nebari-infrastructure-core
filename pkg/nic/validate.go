@@ -7,6 +7,8 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
 // Validate checks that cfg is well-formed and references providers that are
@@ -18,6 +20,15 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	defer span.End()
 
 	if err := cfg.Validate(validateOptions(ctx, c.registry)); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	// Offline DNS provider validation (zone consistency) runs here and in
+	// deploy so misconfigurations surface before any infrastructure is
+	// provisioned. Destroy and kubeconfig deliberately skip it: destroy
+	// treats DNS problems as non-fatal, and kubeconfig never touches DNS.
+	if err := validateDNSProvider(ctx, cfg, c.registry); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
@@ -36,5 +47,24 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	return nil
+}
+
+// validateDNSProvider runs the registered DNS provider's offline validation
+// (zone consistency with the deployment domain). No-op when cfg has no dns
+// block. Called by validate and deploy only: destroy deliberately treats DNS
+// problems as non-fatal so teardown can proceed with a stale DNS config, and
+// kubeconfig never touches DNS, so neither gates on this check.
+func validateDNSProvider(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) error {
+	if cfg.DNS == nil {
+		return nil
+	}
+	dnsProvider, err := reg.DNSProviders.Get(ctx, cfg.DNS.ProviderName())
+	if err != nil {
+		return fmt.Errorf("get dns provider %q: %w", cfg.DNS.ProviderName(), err)
+	}
+	if err := dnsProvider.Validate(ctx, cfg.Domain, cfg.DNS.ProviderConfig(), dns.ValidateOptions{CheckCreds: false}); err != nil {
+		return fmt.Errorf("invalid dns: %w", err)
+	}
 	return nil
 }
