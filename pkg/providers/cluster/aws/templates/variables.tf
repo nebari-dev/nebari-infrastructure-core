@@ -137,3 +137,23 @@ variable "enable_irsa" {
   type    = bool
   default = true
 }
+
+variable "backup_bucket_create" {
+  type    = bool
+  default = false
+}
+
+variable "backup_bucket_name" {
+  type    = string
+  default = ""
+}
+
+variable "backup_bucket_force_destroy" {
+  type    = bool
+  default = false
+}
+
+variable "backup_pod_identity_enable" {
+  type    = bool
+  default = false
+}

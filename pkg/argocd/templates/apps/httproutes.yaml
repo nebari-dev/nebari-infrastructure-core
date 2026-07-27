@@ -20,6 +20,11 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
+    # HTTPRoutes span several namespaces (argocd, keycloak, envoy-gateway-system,
+    # longhorn-system) and each carries its own metadata.namespace. The scoped
+    # foundational AppProject still validates this app-level namespace, so it
+    # must be an allowed destination.
+    namespace: argocd
 
   syncPolicy:
     automated:

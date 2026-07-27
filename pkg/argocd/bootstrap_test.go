@@ -54,27 +54,6 @@ func TestPluralizeKind(t *testing.T) {
 	}
 }
 
-func TestArgoCDProjectManifest(t *testing.T) {
-	// Test that the embedded manifest is valid
-	if argoCDProjectManifest == "" {
-		t.Fatal("argoCDProjectManifest should not be empty")
-	}
-
-	// Check it contains expected fields
-	if !strings.Contains(argoCDProjectManifest, "kind: AppProject") {
-		t.Error("argoCDProjectManifest should contain 'kind: AppProject'")
-	}
-	if !strings.Contains(argoCDProjectManifest, "apiVersion: argoproj.io/v1alpha1") {
-		t.Error("argoCDProjectManifest should contain ArgoCD API version")
-	}
-	if !strings.Contains(argoCDProjectManifest, "name: foundational") {
-		t.Error("argoCDProjectManifest should contain 'name: foundational'")
-	}
-	if !strings.Contains(argoCDProjectManifest, "namespace: argocd") {
-		t.Error("argoCDProjectManifest should contain 'namespace: argocd'")
-	}
-}
-
 func TestRootAppOfAppsTemplate(t *testing.T) {
 	// Test that the template parses correctly
 	tmpl, err := template.New("test").Parse(rootAppOfAppsTemplate)

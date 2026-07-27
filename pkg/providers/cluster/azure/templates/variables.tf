@@ -118,3 +118,18 @@ variable "node_groups" {
     zones           = optional(list(string), [])
   }))
 }
+
+variable "backup_container_create" {
+  type    = bool
+  default = false
+}
+
+variable "backup_storage_account" {
+  type    = string
+  default = ""
+}
+
+variable "backup_container_name" {
+  type    = string
+  default = ""
+}

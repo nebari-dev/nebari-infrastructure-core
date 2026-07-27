@@ -20,6 +20,10 @@ spec:
 
   destination:
     server: https://kubernetes.default.svc
+    # The scoped foundational AppProject validates this app-level namespace, so
+    # it must be one of the project's allowed destinations. The Certificate
+    # carries its own metadata.namespace, so this is only the default.
+    namespace: envoy-gateway-system
 
   syncPolicy:
     automated:

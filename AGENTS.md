@@ -24,7 +24,7 @@ More categories (certificate issuers, git hosting, software installers) are plan
 | `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
 | `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
-| `local` | Validates an existing kubeconfig context for a Kind cluster. **The Kind cluster itself is brought up by `make localkind-up`**, not by `nic deploy` (the provider's `Deploy` is currently a stub) | Working for the Makefile-driven flow |
+| `local` | Kind. `nic deploy` creates the Kind cluster (reusing it if one already exists) and bootstraps it; `nic destroy` deletes it | Working |
 | `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
 | `gcp` | Stub implementation only | Not implemented |
 
@@ -76,8 +76,9 @@ make pre-commit               # run pre-commit checks
 ### Local Kind Cluster
 
 ```bash
-make localkind-up             # Build nic + create Kind cluster + deploy Nebari
-make localkind-down           # Tear down the Kind cluster
+make build                                     # build the nic binary
+./nic deploy -f examples/local-config.yaml     # create the Kind cluster + deploy Nebari
+./nic destroy -f examples/local-config.yaml    # tear the Kind cluster down
 ```
 
 See `docs/local-kind-development.md` for the full workflow.
@@ -431,7 +432,7 @@ Core libraries (see `go.mod`):
 Runtime dependencies (per cluster provider):
 - **AWS:** OpenTofu binary in `PATH` (NIC will also download into a cache if needed)
 - **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
-- **Local:** Kind (and Docker) in `PATH`, driven through `make localkind-up`
+- **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
 
 ## Pre-Commit Checklist

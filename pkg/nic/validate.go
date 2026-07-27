@@ -22,5 +22,19 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn.
+	// InfraSettings is a pure getter (no cloud I/O), so we can consult the
+	// registered provider here and catch the misconfiguration at validate time
+	// rather than mid-deploy.
+	clusterProvider, err := c.registry.ClusterProviders.Get(ctx, cfg.Cluster.ProviderName())
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("get cluster provider %q: %w", cfg.Cluster.ProviderName(), err)
+	}
+	if err := ensureBackupsHaveLonghorn(cfg, clusterProvider.InfraSettings(cfg.Cluster).StorageClass); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	return nil
 }

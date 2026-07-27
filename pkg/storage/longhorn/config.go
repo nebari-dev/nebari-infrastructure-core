@@ -12,6 +12,13 @@ const (
 	// Namespace is the Kubernetes namespace Longhorn is installed into.
 	Namespace = "longhorn-system"
 
+	// ServiceAccountName is the service account the Longhorn Helm chart creates
+	// and that longhorn-manager / instance-manager pods run under. Keyless S3
+	// backups bind an EKS Pod Identity association to this SA so Longhorn's AWS
+	// SDK resolves credentials from the cluster role. Must match the account name
+	// the association targets in the terraform-aws-eks-cluster module.
+	ServiceAccountName = "longhorn-service-account"
+
 	// ReleaseName is the Helm release name used for Longhorn.
 	ReleaseName = "longhorn"
 
@@ -72,8 +79,8 @@ type Config struct {
 	//     replicas off the storage nodes (evict, wait for rebuild) BEFORE removing
 	//     the group.
 	//
-	// Before switching modes, take a fresh OFF-CLUSTER backup (the
-	// nebari-longhorn-backup-pack provides scheduled S3 backups; trigger an
+	// Before switching modes, take a fresh OFF-CLUSTER backup (NIC's
+	// `backups.longhorn` config provisions scheduled S3 backups; trigger an
 	// on-demand one right before the switch). In-cluster snapshots do not survive
 	// the destructive true->false case since they live on the disks being removed;
 	// only the S3 backup does, and you can restore onto the new topology.
