@@ -305,7 +305,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, opts.BackupBucket)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -541,7 +541,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, nil)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -649,6 +649,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Preserve a retained Longhorn backup bucket: drop it (and its dependent
+	// resources) from Terraform state so `tofu destroy` leaves it — and its
+	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
+	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
+	// fails teardown, even if the bucket was never created.
+	cluster.RetainBackupResources(ctx, span, tf, opts.BackupBucket, backupStateAddrs(opts.BackupBucket))
+
 	// Uninstall the GPU Operator before tofu destroy, gated on the GPU config
 	// flag to mirror the Longhorn block above. The operator has no cloud
 	// resources that can block teardown, so an uninstall failure is never fatal
@@ -740,6 +747,32 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	p.kubeconfigMu.Unlock()
 
 	return kubeconfigBytes, nil
+}
+
+// BackupPodIdentityRoleARN returns the IAM role ARN of the EKS Pod Identity
+// association bound to Longhorn's service account for keyless S3 backups, or ""
+// when the cluster has none. NIC writes this into the Longhorn credential Secret
+// as AWS_IAM_ROLE_ARN so Longhorn accepts the secret without static keys (the
+// Pod Identity association supplies the actual credentials). Reads live cluster
+// state via the EKS API, mirroring GetKubeconfig, so it works after Deploy
+// without re-running Terraform. Satisfies the nic.backupRoleARNResolver
+// optional capability.
+func (p *Provider) BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.BackupPodIdentityRoleARN")
+	defer span.End()
+
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return "", err
+	}
+	eksClient, err := newEKSClient(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to create EKS client: %w", err)
+	}
+	return fetchBackupPodIdentityRoleARN(ctx, eksClient, projectName)
 }
 
 // Summary returns key configuration details for display purposes

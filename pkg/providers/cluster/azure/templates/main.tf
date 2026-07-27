@@ -1,6 +1,11 @@
 module "aks_cluster" {
-  source  = "nebari-dev/aks-cluster/azurerm"
-  version = "0.1.1"
+  # TEMPORARY: consuming the module from a branch while the Longhorn backup
+  # container support (nebari-dev/terraform-azurerm-aks-cluster#4) is unreleased.
+  # TODO(#431): revert to the registry source + pinned version once a release
+  # containing the longhorn_backup_container_* variables is cut:
+  #   source  = "nebari-dev/aks-cluster/azurerm"
+  #   version = "0.2.0"  # or whatever release includes the backup container
+  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=feat/longhorn-backup-container"
 
   project_name                 = var.project_name
   location                     = var.location
@@ -25,4 +30,8 @@ module "aks_cluster" {
   sku_tier                     = var.sku_tier
   identity_type                = var.identity_type
   node_groups                  = var.node_groups
+
+  longhorn_backup_container_create = var.backup_container_create
+  longhorn_backup_storage_account  = var.backup_storage_account
+  longhorn_backup_container_name   = var.backup_container_name
 }
