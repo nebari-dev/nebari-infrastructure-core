@@ -39,6 +39,9 @@ type NebariConfig struct {
 	// OS trust stores (via the cluster provider) and into the cluster via
 	// trust-manager. Required when egress is TLS-inspected by a corporate proxy.
 	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+
+	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
+	Backups *BackupsConfig `yaml:"backups,omitempty"`
 }
 
 // DNSConfig holds typed DNS provider configuration.
@@ -362,6 +365,10 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 
 	if err := c.Certificate.Validate(); err != nil {
 		return fmt.Errorf("invalid certificate: %w", err)
+	}
+
+	if err := c.Backups.Validate(c.Cluster.ProviderName()); err != nil {
+		return fmt.Errorf("invalid backups: %w", err)
 	}
 
 	return nil
