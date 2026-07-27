@@ -1,0 +1,18 @@
+project_name: existing-ci
+domain: nebari.local
+
+certificate:
+  type: selfsigned
+
+git_repository:
+  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+  branch: existing
+  path: "clusters/existing-ci"
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  existing:
+    context: k3d-existing-ci
+    storage_class: local-path
+  

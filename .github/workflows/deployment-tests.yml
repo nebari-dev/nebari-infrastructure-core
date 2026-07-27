@@ -12,6 +12,7 @@ on:
           - aws
           - azure
           - hetzner
+          - existing
         default: local
   release:
     # published covers both stable and pre-releases
@@ -236,4 +237,54 @@ jobs:
           GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
         with:
           config: .github/fixtures/deploy/hetzner-config.yaml
+          nic-binary: nic
+
+  existing:
+    name: Deploy (Existing)
+    needs: build
+    if: >-
+      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      inputs.provider == 'existing' || inputs.provider == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nic
+
+      # Artifacts don't preserve file permissions
+      - name: Make binary executable
+        run: chmod +x nic
+
+      - name: Reset gitops branch
+        uses: ./.github/actions/reset-gitops-branch
+        with:
+          branch: existing
+          token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+
+
+      # Disable Traefik as NIC will deploy its own Envoy gateway LoadBalancer.
+      # Also, pass --no-lb to drop k3d's external proxy container, which is 
+      # unnecessary on a Linux runner where the node IP is directly routable.
+      - name: Create k3d cluster
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
+          k3d cluster create existing-ci \
+            --image rancher/k3s:v1.36.2-k3s1 \
+            --no-lb \
+            --k3s-arg "--disable=traefik@server:0" \
+            --wait --timeout 120s
+          kubectl wait --for=condition=Ready nodes --all --timeout=60s
+
+      - name: Deploy
+        uses: ./.github/actions/deploy
+        env:
+          GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
+        with:
+          config: .github/fixtures/deploy/existing-config.yaml
           nic-binary: nic
