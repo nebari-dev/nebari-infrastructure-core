@@ -1,4 +1,4 @@
-# ADR-0012: Helm valueFiles Overlay Seam for Foundational Apps
+# ADR-0013: Helm valueFiles Overlay Seam for Foundational Apps
 
 ## Status
 
@@ -54,7 +54,9 @@ All 9 Helm-based foundational apps now source their Helm values from files in th
 Each app's values live at two paths in the gitops repo:
 
 - `values/<app>/base.yaml` is NIC-owned. It is rewritten by every `nic deploy --regen-apps` and must not be hand-edited.
-- `values/<app>/overlays/*.yaml` is user- or pack-owned. NIC never writes to or deletes from this directory. ArgoCD glob-expands the files at sync time and applies them in lexical filename order, with the last file winning on any key collision. `ignoreMissingValueFiles: true` is set on the chart source so a clean install with no overlay files yet, or a repo where the overlays directory does not exist, still syncs cleanly.
+- `values/<app>/overlays/*.yaml` is user- or pack-owned. NIC never writes to or deletes from this directory. **On ArgoCD 3.4 or later**, ArgoCD glob-expands the files at sync time and applies them in lexical filename order, with the last file winning on any key collision. `ignoreMissingValueFiles: true` is set on the chart source so a clean install with no overlay files yet, or a repo where the overlays directory does not exist, still syncs cleanly.
+
+  The 3.4 floor is load-bearing and its violation is silent. Glob expansion of `helm.valueFiles` was added in ArgoCD 3.4 ([argoproj/argo-cd#26768](https://github.com/argoproj/argo-cd/pull/26768), cherry-picked to `release-3.4` as [#26919](https://github.com/argoproj/argo-cd/pull/26919)). On 3.3.x and earlier, `getResolvedValueFiles` has no glob branch at all: the literal path `.../overlays/*.yaml` is passed to `os.Stat`, fails with `ENOENT`, and because `ignoreMissingValueFiles: true` is set the entry is skipped with only a `log.Debugf`. The repo-server runs at `info`, so the overlay is discarded, the Application still reports Synced/Healthy, and there is no diagnostic. NIC pins the ArgoCD chart at or above the version that ships 3.4 for exactly this reason; see the comment on `defaultChartVersion` in `pkg/argocd/config.go`.
 
 Each Application keeps its chart source first in `spec.sources`, and that chart source carries `helm.valueFiles` pointing at `$values/.../base.yaml` and `$values/.../overlays/*.yaml`. A second source supplies the `$values` ref:
 
@@ -66,7 +68,14 @@ Values files live under `values/`, a new top-level directory in the gitops repo,
 
 The two conditional apps, metallb and trust-manager, gate their `values/<app>/base.yaml` file through the same writer predicates (`isMetalLBPath`, `isTrustBundlePath` in `pkg/argocd/writer.go`) that already gate their Application manifest. Critically, these predicates match the `base.yaml` file specifically, never the `values/<app>` directory. Matching the directory would route it through `removeStaleTemplate`'s directory branch, which calls `os.RemoveAll` and would destroy any user overlays sitting alongside `base.yaml` the moment the gate is disabled.
 
-Raw-manifest foundational apps are unaffected by this decision. Kustomize remains the correct merge tool for apps whose ArgoCD source is manifest-shaped rather than Helm-values-shaped.
+Raw-manifest foundational apps are out of scope here, and they have no regen-surviving override seam yet. Kustomize is the right merge tool for manifest-shaped sources in principle, but nothing in the tree implements that today: the only `kustomization.yaml` (`pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`) is a NIC-owned template rewritten by every `--regen-apps`, so it has exactly the wipe-on-regen problem this ADR fixes for Helm apps. Extending an equivalent seam to raw-manifest apps is follow-up work.
+
+### Scope
+
+This ADR covers the foundational Helm apps whose Application manifests are embedded templates under `pkg/argocd/templates/apps/`. Two scope boundaries are deliberate:
+
+- **Applications NIC generates at runtime are exempt.** `TestHelmApps_SeamInvariants` walks the embedded template FS, so a runtime-generated Application is invisible to it and is neither covered nor enforced by this seam. In particular the pack Applications specified in [ADR-0003](0003-software-pack-codegen.md) are out of scope for now; if they land carrying inline `helm.values`, that does not violate this ADR. Deciding whether to extend the seam and its enforcement to the runtime generator is follow-up work, and doing so would need enforcement that does not rely on walking the embedded FS.
+- **Overlays are human-authored.** A software pack is a Helm chart deployed *by* ArgoCD; it has no write access to the gitops repo, and NIC deliberately never writes into `overlays/`. So the mechanism is reachable only by someone with commit rights to the gitops repo, and that is the intent, not a limitation to be worked around. The payoff is that an overlay takes effect on ArgoCD's next sync with no `nic deploy` run at all, which is the property [issue #406](https://github.com/nebari-dev/nebari-infrastructure-core/issues/406) asked for. Pack authors ship overrides by documenting the overlay file an operator should commit. Rendering a NIC-owned overlay slot from a config block (say `overlays/20-nic-config.yaml` from a `foundational_values:` key) would let overrides flow through `config.yaml` instead, but that is possible future work and not part of this decision.
 
 ### Consequences
 
@@ -81,7 +90,11 @@ Raw-manifest foundational apps are unaffected by this decision. Kustomize remain
 
 - Helm merges maps but replaces lists outright, so a list-valued field cannot be appended to from an overlay; a pack that needs to add an item to a list has no way to do so through this seam. The OTel Collector pipeline-routing design ([issue #409](https://github.com/nebari-dev/nebari-infrastructure-core/issues/409)) works within this constraint by giving each pack its own named pipeline, a distinct map key, rather than appending to a shared list.
 - `ignoreMissingValueFiles: true` applies to the `base.yaml` entry, not only the overlays glob. If the `GitBranch`/`GitPath` combination ever makes `base.yaml` unresolvable, for example a misconfigured path, the sync does not fail; it silently falls back to the chart's own defaults. The risk is low in practice because NIC writes the Application manifest and `base.yaml` together from the same template data, so the two can only disagree if something external mutates the gitops repo's layout, but it is a silent-degradation mode worth knowing about.
-- The mechanism requires ArgoCD 2.6 or later, which introduced multi-source Applications. NIC installs ArgoCD v3.3.0, well past that floor.
+- The mechanism depends on two distinct ArgoCD features with two different version floors, and the higher one binds:
+  - **Multi-source Applications with `$values` refs: 2.6+.** This is what lets `base.yaml` and the overlays live in the gitops repo while the chart comes from elsewhere.
+  - **Glob expansion of `helm.valueFiles`: 3.4+.** This is what makes `overlays/*.yaml` work, and it is the binding constraint. Below 3.4 the glob entry is silently discarded rather than erroring (see the mechanism described above), so the base half of the seam keeps working while the user-facing half stops, with no diagnostic.
+
+  NIC installs ArgoCD chart 9.7.1, which is ArgoCD v3.4.4, past both floors. Do not lower `defaultChartVersion` below the chart that ships 3.4.
 - Deployments that already exist adopt the new layout the next time `--regen-apps` runs. Any hand edits previously made to `apps/*.yaml` inline values are not migrated automatically; they must be moved into an overlay file by hand.
 
 ## Options Detail
@@ -124,7 +137,7 @@ Move all Helm values out of the Application manifest entirely and into files ref
 **Cons:**
 
 - Introduces a new top-level `values/` directory and a filename-ordering convention that pack authors need to learn.
-- Depends on multi-source Application support (ArgoCD 2.6+).
+- Depends on two ArgoCD features with different floors: multi-source Application `$values` refs (2.6+) and `helm.valueFiles` glob expansion (3.4+). The glob floor is the binding constraint, and below it the overlays half of the seam fails silently.
 
 ## Relationship to ADR-0008
 

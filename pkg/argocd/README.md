@@ -15,7 +15,7 @@ The filename (without `.yaml`) becomes the application name.
 
 ### Adding a Helm-based application
 
-A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0012](../../docs/adr/0012-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
+A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0013](../../docs/adr/0013-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
 
 1. `templates/apps/<name>.yaml` - the Application manifest. It must be multi-source:
    - The chart source comes first and carries `helm.valueFiles` using the `GitPath` idiom, plus `ignoreMissingValueFiles: true`:
@@ -31,7 +31,7 @@ A Helm-based app needs two files, not one, because Helm values are sourced from 
 
 2. `templates/values/<name>/base.yaml` - the chart's default values, rendered from the same `TemplateData` as the Application.
 
-Do not use inline `helm.values` or `helm.valuesObject` on any source. ArgoCD's Helm precedence is `parameters` > `valuesObject` > `values` > `valueFiles`, so an inline block outranks every `valueFiles` entry and silently defeats overlays. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a Helm app template contains `values:`/`valuesObject:`, is missing `valueFiles:`, or is not enrolled in the `helmValueFilesApps` table in `writer_test.go` (see next section).
+Do not use inline `helm.values` or `helm.valuesObject` on any source, and do not use `helm.parameters` or `helm.fileParameters`. ArgoCD's Helm precedence is `parameters` > `valuesObject` > `values` > `valueFiles`, so any of the four outranks every `valueFiles` entry and silently defeats overlays; `parameters` is the strongest of them, above even an inline values block. Set the value in `values/<name>/base.yaml` instead. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a Helm app template contains `values:`/`valuesObject:`/`parameters:`/`fileParameters:`, is missing `valueFiles:`, or is not enrolled in the `helmValueFilesApps` table in `writer_test.go` (see next section).
 
 You must also:
 

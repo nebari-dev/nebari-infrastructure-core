@@ -370,7 +370,7 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 
 		// MetalLB templates only apply to providers that need it
 		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			return removeStaleTemplate(destPath, d)
+			return removeStaleTemplate(relPath, destPath, d)
 		}
 
 		// Longhorn-only templates are gated on LonghornEnabled. The
@@ -379,22 +379,22 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		// without its manifest would create an Application with zero resources
 		// (rejected by allowEmpty: false).
 		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
-			return removeStaleTemplate(destPath, d)
+			return removeStaleTemplate(relPath, destPath, d)
 		}
 
 		// Longhorn backup templates are gated on backups being enabled.
 		if isBackupPath(relPath) && !data.LonghornBackupEnabled {
-			return removeStaleTemplate(destPath, d)
+			return removeStaleTemplate(relPath, destPath, d)
 		}
 
 		// trust-manager templates only apply when a trust bundle is configured
 		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
-			return removeStaleTemplate(destPath, d)
+			return removeStaleTemplate(relPath, destPath, d)
 		}
 
 		// Certificate templates that don't apply to the configured cert source.
 		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
-			return removeStaleTemplate(destPath, d)
+			return removeStaleTemplate(relPath, destPath, d)
 		}
 
 		if d.IsDir() {
@@ -442,15 +442,33 @@ func isBackupPath(relPath string) bool {
 		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup/")
 }
 
+// valuesDirPrefix is the gitops-repo subtree that holds NIC-owned base values
+// alongside user- and pack-owned overlays. removeStaleTemplate refuses to
+// recursively delete anything under it.
+const valuesDirPrefix = "values/"
+
 // removeStaleTemplate deletes the previously written output of a template
 // whose gate is now off, so a feature toggled from enabled to disabled has its
 // files removed from the gitops repo rather than skipped-but-retained. Missing
 // files are a no-op (the common case: the feature was never enabled). Returns
 // fs.SkipDir for directories so the walk does not descend into them.
-// Never route values/<app> directories here — only their base.yaml files — or
-// user overlays would be destroyed by the RemoveAll branch.
-func removeStaleTemplate(destPath string, d fs.DirEntry) error {
+//
+// The recursive branch is the only irreversible operation in this package, and
+// under values/ it would delete user overlays that NIC does not own and cannot
+// reconstruct. Rather than relying on every gate predicate to match
+// values/<app>/base.yaml as a FILE and never as a directory, this refuses the
+// RemoveAll branch for the values/ subtree outright: a directory there is
+// descended into instead, so the per-file gate still removes base.yaml while
+// overlays are left alone. A future contributor who writes the natural
+// strings.HasPrefix(relPath, "values/<app>") gets correct behaviour rather
+// than silent data loss.
+func removeStaleTemplate(relPath, destPath string, d fs.DirEntry) error {
 	if d.IsDir() {
+		if strings.HasPrefix(relPath, valuesDirPrefix) {
+			// Do not RemoveAll, and do not SkipDir: descending lets the
+			// base.yaml file be matched and removed on its own.
+			return nil
+		}
 		if err := os.RemoveAll(destPath); err != nil {
 			return fmt.Errorf("failed to remove stale directory %s: %w", destPath, err)
 		}

@@ -3,6 +3,7 @@ package argocd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1419,9 +1420,82 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 	})
 }
 
+// TestRemoveStaleTemplate_RefusesValuesDirRecursion pins the structural guard
+// that makes the os.RemoveAll footgun a no-op instead of data loss. A gate
+// predicate written in the natural but unsafe prefix form
+// (strings.HasPrefix(relPath, "values/<app>")) matches the values/<app>
+// DIRECTORY as well as its base.yaml, which previously routed the directory
+// into the recursive branch and deleted user overlays alongside it. The guard
+// must refuse recursion under values/ and descend instead, so the per-file gate
+// still removes base.yaml. Mutation check: dropping the valuesDirPrefix branch
+// in removeStaleTemplate turns the overlay assertion below red.
+func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	valuesAppDir := filepath.Join(tmpDir, "values", "metallb")
+	overlayDir := filepath.Join(valuesAppDir, "overlays")
+	if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	overlayPath := filepath.Join(overlayDir, "50-user.yaml")
+	if err := os.WriteFile(overlayPath, []byte("speaker:\n  logLevel: debug\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A real fs.DirEntry for the values/metallb directory.
+	parents, err := os.ReadDir(filepath.Join(tmpDir, "values"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dirEntry fs.DirEntry
+	for _, e := range parents {
+		if e.Name() == "metallb" {
+			dirEntry = e
+		}
+	}
+	if dirEntry == nil || !dirEntry.IsDir() {
+		t.Fatalf("expected a values/metallb directory entry, got %v", dirEntry)
+	}
+
+	err = removeStaleTemplate("values/metallb", valuesAppDir, dirEntry)
+	if err != nil {
+		t.Fatalf("removeStaleTemplate() error = %v, want nil", err)
+	}
+	// nil (not fs.SkipDir) so the walk descends and reaches base.yaml.
+	if errors.Is(err, fs.SkipDir) {
+		t.Error("removeStaleTemplate() returned fs.SkipDir for a values/ dir; base.yaml would never be visited")
+	}
+	if _, err := os.Stat(overlayPath); err != nil {
+		t.Errorf("user overlay was destroyed by the recursive branch: %v", err)
+	}
+
+	// A directory outside values/ is still removed recursively.
+	otherDir := filepath.Join(tmpDir, "manifests", "metallb")
+	if err := os.MkdirAll(otherDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifestParents, err := os.ReadDir(filepath.Join(tmpDir, "manifests"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaleTemplate("manifests/metallb", otherDir, manifestParents[0]); !errors.Is(err, fs.SkipDir) {
+		t.Errorf("removeStaleTemplate() for a non-values dir error = %v, want fs.SkipDir", err)
+	}
+	if _, err := os.Stat(otherDir); !os.IsNotExist(err) {
+		t.Error("expected a non-values stale directory to be removed recursively")
+	}
+}
+
 // TestWriteAllToGit_PreservesOverlays pins the core #406 invariant: nothing
 // under values/<app>/overlays/ is ever written or deleted by NIC, across
 // repeated regeneration runs.
+//
+// Scope note: this covers only the UNGATED case. envoy-gateway is never matched
+// by isMetalLBPath/isTrustBundlePath, so this test does not exercise the
+// gated-off removal path at all. The file-versus-directory gating regression is
+// pinned by TestWriteAllToGit_GatedValuesBase, and the structural guard behind
+// it by TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not de-scope
+// either of those on the assumption that this test covers them.
 func TestWriteAllToGit_PreservesOverlays(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -1488,6 +1562,15 @@ func TestHelmApps_SeamInvariants(t *testing.T) {
 
 		if strings.Contains(content, "values:") || strings.Contains(content, "valuesObject:") {
 			t.Errorf("%s: inline helm values (values:/valuesObject:) take precedence over valueFiles and break the overlay seam - use values/%s/base.yaml + overlays (#406)", e.Name(), app)
+		}
+		// parameters/fileParameters sit at the TOP of ArgoCD's Helm precedence
+		// order (parameters > valuesObject > values > valueFiles), so they
+		// outrank even an inline values block and defeat the seam more
+		// thoroughly than the two checked above. Guarding only values: and
+		// valuesObject: would leave the hole exactly where the strongest
+		// override mechanism lives.
+		if strings.Contains(content, "parameters:") || strings.Contains(content, "fileParameters:") {
+			t.Errorf("%s: helm parameters:/fileParameters: are the highest-precedence override and silently outrank every overlay file - use values/%s/base.yaml + overlays (#406)", e.Name(), app)
 		}
 		hasHelm := strings.Contains(content, "helm:")
 		if hasHelm && !strings.Contains(content, "valueFiles:") {
