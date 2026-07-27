@@ -3,7 +3,6 @@ package argocd
 import (
 	"bytes"
 	"context"
-	_ "embed" // Required for go:embed directive
 	"fmt"
 	"strings"
 	"text/template"
@@ -17,9 +16,6 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
-
-//go:embed manifests/argocd-project.yaml
-var argoCDProjectManifest string
 
 // rootAppOfAppsTemplate is the template for the root App-of-Apps Application
 const rootAppOfAppsTemplate = `apiVersion: argoproj.io/v1alpha1
@@ -129,42 +125,41 @@ func ApplyRootAppOfApps(ctx context.Context, kubeconfigBytes []byte, gitConfig *
 	return nil
 }
 
-// InstallProject installs the ArgoCD AppProject for foundational services
-func InstallProject(ctx context.Context, kubeconfigBytes []byte) error {
+// InstallProject installs the foundational, nebari-apps, and locked-down default
+// ArgoCD AppProjects. foundational is scoped to the repos and namespaces derived
+// from NIC's own app templates; nebari-apps is the home for software packs;
+// default is deny-all.
+func InstallProject(ctx context.Context, kubeconfigBytes []byte, data TemplateData) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "argocd.InstallProject")
+	ctx, span := tracer.Start(ctx, "argocd.InstallProject")
 	defer span.End()
 
-	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing ArgoCD Project for foundational services").
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Installing ArgoCD AppProjects").
 		WithResource("argocd-project").
 		WithAction("installing"))
 
-	// Create dynamic client
+	objs, err := RenderProjects(ctx, data)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to render AppProjects: %w", err)
+	}
+
 	dynamicClient, err := NewDynamicClient(kubeconfigBytes)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
-	// Parse ArgoCD Project manifest
-	decoder := yamlserializer.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-	obj := &unstructured.Unstructured{}
-	_, _, err = decoder.Decode([]byte(argoCDProjectManifest), nil, obj)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to decode ArgoCD Project manifest: %w", err)
+	for _, obj := range objs {
+		if err := applyResource(ctx, dynamicClient, obj); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to apply AppProject %q: %w", obj.GetName(), err)
+		}
 	}
 
-	// Apply ArgoCD Project resource
-	if err := applyResource(ctx, dynamicClient, obj); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to apply ArgoCD Project: %w", err)
-	}
-
-	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "ArgoCD Project created").
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "ArgoCD AppProjects installed").
 		WithResource("argocd-project").
-		WithAction("created"))
-
+		WithAction("installed"))
 	return nil
 }
 

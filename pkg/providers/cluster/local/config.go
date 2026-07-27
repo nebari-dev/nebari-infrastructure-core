@@ -16,9 +16,11 @@ type KindConfig struct {
 	// Empty means the default image of the bundled kind version.
 	NodeImage string `yaml:"node_image,omitempty"`
 
-	// ExtraMounts are additional host directories mounted into the cluster
-	// node container. The local file:// gitops repository (explicit or
-	// auto-created) is mounted automatically and does not need to be listed.
+	// ExtraMounts are additional host directories mounted into the cluster node
+	// container. NIC mounts its auto-created local GitOps repository
+	// automatically; an explicit file:// repository needs a matching entry here.
+	// Other custom mounts are user-managed, and NIC does not recursively
+	// normalize their permissions.
 	ExtraMounts []KindMount `yaml:"extra_mounts,omitempty"`
 }
 

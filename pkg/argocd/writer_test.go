@@ -733,9 +733,15 @@ func TestWriteAllToGit_IncludesRedirectRoute(t *testing.T) {
 		t.Fatalf("WriteAllToGit() error: %v", err)
 	}
 
+	// Working-tree modes are not asserted here: WriteFile requests
+	// git.GitOpsFileMode but the on-disk mode is masked by the ambient umask,
+	// and working-tree modes are no longer an invariant the code guarantees
+	// (ArgoCD reads via .git, repaired by the git client, not the working tree).
 	redirectPath := filepath.Join(tmpDir, "manifests", "networking", "routes", "http-to-https-redirect.yaml")
 	if _, err := os.Stat(redirectPath); os.IsNotExist(err) {
 		t.Error("WriteAllToGit did not write http-to-https-redirect.yaml")
+	} else if err != nil {
+		t.Fatalf("stat redirect route: %v", err)
 	}
 
 	content, err := os.ReadFile(redirectPath) //nolint:gosec // path is t.TempDir() + constant

@@ -190,7 +190,7 @@ spec:
             servicePort: 8888
             protocol: TCP
 
-        # Software-pack extension point — see ADR-0005. A Nebari software
+        # Software-pack extension point: see ADR-0008. A Nebari software
         # pack (e.g. nebari-lgtm-pack) creates a ConfigMap named
         # `opentelemetry-collector-overrides` in the `monitoring` namespace
         # containing a `relay.yaml` key — a partial OTel config that's

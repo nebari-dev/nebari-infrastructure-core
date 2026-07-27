@@ -1,0 +1,15 @@
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: default-hourly-snapshot
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  name: default-hourly-snapshot
+  cron: "{{ .LonghornSnapshotCron }}"
+  task: snapshot
+  groups:
+    - default
+  retain: {{ .LonghornSnapshotRetain }}
+  concurrency: {{ .LonghornSnapshotConcurrency }}

@@ -1,0 +1,15 @@
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: default-daily-backup
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  name: default-daily-backup
+  cron: "{{ .LonghornBackupCron }}"
+  task: backup
+  groups:
+    - default
+  retain: {{ .LonghornBackupRetain }}
+  concurrency: {{ .LonghornBackupConcurrency }}

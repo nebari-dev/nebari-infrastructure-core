@@ -176,7 +176,7 @@ Testing and validation:
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26+
 - OpenTofu 1.6+ (or Terraform 1.6+)
 - kubectl
 - Cloud provider CLI (aws-cli, gcloud, or az)
