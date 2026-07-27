@@ -22,7 +22,7 @@ cluster:
   azure:
     region: eastus
 
-    kubernetes_version: "1.34"
+    kubernetes_version: "1.36"
     sku_tier: Free
     private_cluster_enabled: false
 
