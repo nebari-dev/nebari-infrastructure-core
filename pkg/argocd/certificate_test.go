@@ -231,6 +231,8 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 		wantSelfSigned   bool
 		wantLetsEncrypt  bool
 		wantOperatorName string
+		wantACMEEmail    string
+		wantACMEServer   string
 	}{
 		{
 			name:             "default uses selfsigned",
@@ -251,6 +253,8 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			},
 			wantLetsEncrypt:  true,
 			wantOperatorName: certificateIssuerLetsEncrypt,
+			wantACMEEmail:    "admin@example.com",
+			wantACMEServer:   "https://acme-v02.api.letsencrypt.org/directory",
 		},
 		{
 			name: "existing keeps selfsigned for operator managed certificates",
@@ -297,6 +301,22 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				}
 				if !path.want && !os.IsNotExist(err) {
 					t.Errorf("expected %s to be skipped, stat error = %v", path.name, err)
+				}
+			}
+
+			if tt.wantLetsEncrypt {
+				// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+				issuer, err := os.ReadFile(filepath.Join(tmpDir, letsencryptIssuerPath))
+				if err != nil {
+					t.Fatalf("read letsencrypt issuer: %v", err)
+				}
+				for _, want := range []string{
+					"email: " + tt.wantACMEEmail,
+					"server: " + tt.wantACMEServer,
+				} {
+					if !strings.Contains(string(issuer), want) {
+						t.Errorf("letsencrypt issuer missing %q:\n%s", want, issuer)
+					}
 				}
 			}
 

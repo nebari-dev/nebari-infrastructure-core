@@ -546,6 +546,7 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 			}{
 				{"kind", "kind: HTTPRoute"},
 				{"targets http listener", "sectionName: http"},
+				{"explicit catch-all path match", "type: PathPrefix\n            value: /"},
 				{"redirect filter type", "type: RequestRedirect"},
 				{"redirect to https", "scheme: https"},
 				{"301 status code", "statusCode: 301"},

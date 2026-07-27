@@ -161,6 +161,8 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 	// Set certificate configuration
 	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
 		data.CertificateIssuer = certificateIssuerLetsEncrypt
+		// Precondition: Validate() requires ACME configuration for letsencrypt.
+		// Keep the nil guard because WriteAllToGit can also be called directly.
 		if cfg.Certificate.ACME != nil {
 			data.ACMEEmail = cfg.Certificate.ACME.Email
 			data.ACMEServer = cfg.Certificate.ACME.Server
