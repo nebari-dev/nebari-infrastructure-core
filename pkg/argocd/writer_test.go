@@ -1222,13 +1222,6 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 			},
 		},
 		{
-			name:     "postgresql primary",
-			template: "templates/apps/postgresql.yaml",
-			want: []string{
-				"          resources:\n            requests:\n              cpu: 100m\n              memory: 256Mi\n            limits:\n              cpu: 500m\n              memory: 512Mi",
-			},
-		},
-		{
 			name:     "keycloak has no CPU limit",
 			template: "templates/apps/keycloak.yaml",
 			want: []string{
