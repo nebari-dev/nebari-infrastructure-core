@@ -106,17 +106,21 @@ See [State Management](05-state-management.md).
 **Deployment Order (real apps under `pkg/argocd/templates/apps/`):**
 
 ```
-1. ArgoCD (installed by NIC via the Helm Go SDK)
+1. ArgoCD + the three AppProjects (installed by NIC via the Helm Go SDK
+   and client-go, not through GitOps)
    ↓
-2. App-of-apps root.yaml, then individual apps via sync waves:
-   ├── cert-manager + cluster-issuers + certificates
-   ├── Envoy Gateway + gateway-config + httproutes
-   ├── postgresql + Keycloak
-   ├── metallb + metallb-config (only when InfraSettings.NeedsMetalLB)
-   ├── opentelemetry-collector
-   ├── nebari-operator (Kustomized from nebari-dev/nebari-operator)
-   └── nebari-landingpage
+2. App-of-apps root.yaml, then individual apps by sync wave:
+   ├── wave 1: envoy-gateway, metallb, metallb-config
+   │           (metallb pair only when InfraSettings.NeedsMetalLB)
+   ├── wave 2: cert-manager, gateway-config
+   ├── wave 3: cluster-issuers, certificates, httproutes, trust-manager,
+   │           cloudnative-pg, securitypolicies, longhorn-backup
+   ├── wave 4: postgresql, keycloak, opentelemetry-collector, trust-bundle
+   ├── wave 5: nebari-operator (Kustomized from nebari-dev/nebari-operator)
+   └── wave 6: nebari-landingpage
 ```
+
+Every one of those apps runs in the `foundational` AppProject, scoped to just the repos and namespaces the shipped templates actually use. Software packs get a separate `nebari-apps` project, and ArgoCD's built-in `default` project is emptied out so it cannot be used as an escape hatch. See [§10.5 of Foundational Software](../implementation/10-foundational-software.md#105-appproject-scoping).
 
 A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not part of the foundational stack. It installs on top of the foundation as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, like any other pack.
 

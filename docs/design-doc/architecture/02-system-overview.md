@@ -60,13 +60,16 @@
 │    Manifests live under pkg/argocd/templates/apps/ and are  │
 │    rendered into the GitOps repo. ArgoCD then syncs them    │
 │    via a root app-of-apps:                                  │
-│    ├── cert-manager + cluster-issuers + certificates        │
-│    ├── Envoy Gateway + gateway-config + httproutes          │
-│    ├── postgresql + Keycloak                                │
-│    ├── metallb + metallb-config (only when needed)          │
-│    ├── opentelemetry-collector                              │
-│    ├── nebari-operator (kustomized from upstream repo)      │
-│    └── nebari-landingpage                                   │
+│    ├── w1: envoy-gateway, metallb + metallb-config          │
+│    ├── w2: cert-manager, gateway-config                     │
+│    ├── w3: cluster-issuers, certificates, httproutes,       │
+│    │       trust-manager, cloudnative-pg, securitypolicies, │
+│    │       longhorn-backup                                  │
+│    ├── w4: postgresql, keycloak, opentelemetry-collector,   │
+│    │       trust-bundle                                     │
+│    ├── w5: nebari-operator (kustomized from upstream repo)  │
+│    └── w6: nebari-landingpage                               │
+│    Conditional apps are omitted when not applicable.        │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -128,7 +131,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 **`pkg/argocd/` (ArgoCD orchestration)**
 
 - Installs ArgoCD via the embedded Helm Go SDK (`pkg/helm`), not via a Terraform `helm_release`.
-- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Every YAML under `apps/` ships (they are enumerated at render time via `fs.ReadDir`): cert-manager, cluster-issuers, certificates, trust-manager, trust-bundle, envoy-gateway, gateway-config, httproutes, securitypolicies, keycloak, postgresql, cloudnative-pg, metallb, metallb-config, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
+- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Every YAML under `apps/` ships (they are enumerated at render time via `fs.ReadDir`): cert-manager, cluster-issuers, certificates, trust-manager, trust-bundle, envoy-gateway, gateway-config, httproutes, securitypolicies, keycloak, postgresql, cloudnative-pg, metallb, metallb-config, longhorn-backup, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
 - The nebari-operator app references the upstream repository (`github.com/nebari-dev/nebari-operator`) via Kustomize; the operator's source code does not live in this repo.
 
 **`pkg/dns`/`pkg/endpoint`/`pkg/git`/`pkg/helm`/`pkg/kubeconfig`/`pkg/status`/`pkg/telemetry`**

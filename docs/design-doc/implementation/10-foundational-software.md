@@ -30,10 +30,13 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | **Keycloak** | `keycloak.yaml` | OIDC identity provider (Codecentric keycloakx chart - context path `/auth`) |
 | **MetalLB** | `metallb.yaml` | Bare-metal `LoadBalancer` implementation (only when `InfraSettings.NeedsMetalLB` is true) |
 | **metallb-config** | `metallb-config.yaml` | `IPAddressPool` and `L2Advertisement` for MetalLB |
+| **longhorn-backup** | `longhorn-backup.yaml` | Longhorn `BackupTarget`, the snapshot/backup `RecurringJob`s, and the `allow-recurring-job-while-volume-detached` Setting (only when `backups.longhorn` is enabled) |
 | **OpenTelemetry Collector** | `opentelemetry-collector.yaml` | Telemetry pipeline (no backend deployed yet) |
 | **Nebari Operator** | `nebari-operator.yaml` | Reconciles `NebariApp` CRs; source lives in `nebari-dev/nebari-operator` |
 | **Nebari Landing Page** | `nebari-landingpage.yaml` | React/Go service catalog UI |
 | **root** | `root.yaml` | App-of-apps entry point that owns all of the above |
+
+**Longhorn is the exception to the GitOps rule.** The Longhorn chart itself is installed directly via Helm by `pkg/storage/longhorn.Install`, not as an ArgoCD `Application`, because it has to be in place before anything can claim a `StorageClass` from it. Only the backup resources above are GitOps-managed.
 
 Not foundational apps (older docs reference them as if they were): Grafana, Loki, Mimir, Tempo, Promtail. Grafana, Loki, Mimir, and Tempo ship in the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, installed on top of the foundation; Promtail is not deployed by anything NIC owns.
 
@@ -45,26 +48,40 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `git_repository.p
 
 ```
 <repo>/<path>/
-├── root.yaml                        # App-of-apps root
 ├── nic-config.yaml                  # Scrubbed copy of nebari-config.yaml
 ├── .bootstrapped                    # Marker file
-└── manifests/
-    ├── cert-manager/                # Application + (optional) values
-    ├── cluster-issuers/
-    ├── certificates/
-    ├── envoy-gateway/
-    ├── gateway-config/
-    ├── httproutes/
-    ├── postgresql/
-    ├── keycloak/
-    ├── metallb/                     # Skipped when not needed
-    ├── metallb-config/              # Skipped when not needed
-    ├── opentelemetry-collector/
-    ├── nebari-operator/             # Kustomize patch over upstream operator
-    └── nebari-landingpage/
+├── apps/                            # One ArgoCD Application per app; root.yaml points here
+│   ├── root.yaml                    # App-of-apps root (recurse: false)
+│   ├── cert-manager.yaml
+│   ├── trust-manager.yaml           # Gated on trust_bundle
+│   ├── trust-bundle.yaml            # Gated on trust_bundle
+│   ├── cluster-issuers.yaml
+│   ├── certificates.yaml
+│   ├── envoy-gateway.yaml
+│   ├── gateway-config.yaml
+│   ├── httproutes.yaml
+│   ├── securitypolicies.yaml        # Gated on Longhorn
+│   ├── postgresql.yaml
+│   ├── cloudnative-pg.yaml
+│   ├── keycloak.yaml
+│   ├── metallb.yaml                 # Gated on NeedsMetalLB
+│   ├── metallb-config.yaml          # Gated on NeedsMetalLB
+│   ├── longhorn-backup.yaml         # Gated on backups.longhorn
+│   ├── opentelemetry-collector.yaml
+│   ├── nebari-operator.yaml
+│   └── nebari-landingpage.yaml
+└── manifests/                       # Plain-manifest and values content, grouped by concern
+    ├── keycloak/                    # Realm-setup job, values
+    ├── metallb/
+    ├── nebari-operator/             # Kustomize patch over the upstream operator
+    ├── networking/                  # Gateway, HTTPRoutes, SecurityPolicies, ReferenceGrants
+    ├── security/                    # ClusterIssuers, Certificates, trust bundle
+    └── storage/                     # Longhorn, longhorn-backup
 ```
 
-The exact file layout depends on each template; the templates are owned by `pkg/argocd/templates/`.
+The layout mirrors `pkg/argocd/templates/` one-for-one; `WriteManifests` walks the embedded template tree and renders it into the repo preserving relative paths. Files prefixed with `.` or `_` are skipped.
+
+Gated templates are **removed**, not merely skipped, when their gate turns off. Toggling a feature off on an already-bootstrapped repo deletes its manifests so ArgoCD prunes the resources, rather than leaving them orphaned in git.
 
 ## 10.4 ArgoCD Bootstrap
 
@@ -76,7 +93,23 @@ ArgoCD is installed in the `argocd` namespace by `pkg/argocd/install.go` via the
 
 After ArgoCD comes up, `pkg/argocd/bootstrap.go:ApplyRootAppOfApps` applies the root `Application` directly to the cluster via client-go. Everything else syncs from there.
 
-## 10.5 InfraSettings Drives Conditional Deployment
+## 10.5 AppProject Scoping
+
+NIC creates three `AppProject`s (`pkg/argocd/project.go`), applied directly to the cluster during bootstrap alongside the root app rather than written into the GitOps repo:
+
+| Project | Purpose | Source repos | Destinations |
+|---------|---------|--------------|--------------|
+| `foundational` | The NIC-owned stack in §10.2. Every foundational `Application` sets `project: foundational`. | Derived from the embedded templates | Derived from the embedded templates |
+| `nebari-apps` | Software packs (`NebariApp`-based user applications) | The Nebari Helm repository plus the cluster's own GitOps repo | `namespace: '*'` |
+| `default` | Deny-all. Exists so ArgoCD's built-in project cannot be used as a project-escape hatch. | `[]` | `[]` |
+
+`foundational`'s scopes are **derived, not hardcoded**: `deriveProjectScopes` renders the embedded app and manifest templates and collects the distinct `repoURL` and namespace values they use. Adding an app therefore widens the project automatically, with no second list to keep in sync.
+
+That derivation only recognizes specific shapes: namespaces from `metadata.namespace` and `spec.destination.namespace`, source repos from `spec.source.repoURL` and `spec.sources[].repoURL`. A template that declares a namespace or repo *only* some other way (a deeply-nested field, or a Kustomize top-level `namespace:`) is invisible to the scan and must also declare it via a recognized shape, or the app will be refused by its own project at sync time.
+
+`foundational` and `nebari-apps` both keep wildcard `clusterResourceWhitelist` / `namespaceResourceWhitelist` entries. That is deliberate for now: repo-and-namespace scoping is the boundary these projects enforce, and kind-level restriction is tracked as admission-controller follow-up work in [#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480).
+
+## 10.6 InfraSettings Drives Conditional Deployment
 
 The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provider.go`), and the foundational layer reads from it instead of branching on provider name:
 
@@ -91,28 +124,28 @@ The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provi
 
 Adding a new provider-shaped capability means adding a field to `InfraSettings` and populating it in each provider's `InfraSettings(cfg)`. There must be no `switch cfg.Cluster.ProviderName()` in `pkg/argocd` or `cmd/nic`.
 
-## 10.6 Sync Waves
+## 10.7 Sync Waves
 
-Cross-app dependencies are expressed via ArgoCD sync waves on each `Application`. The general ordering:
+Cross-app dependencies are expressed via ArgoCD sync waves on each `Application`. The waves as they stand in `pkg/argocd/templates/apps/`:
 
-1. cert-manager (CRDs and webhooks need to be available before anything else issues certs)
-2. cluster-issuers + certificates (initial issuers and the cert-manager `Certificate` resources foundational services depend on)
-3. MetalLB + metallb-config (only when needed; before `LoadBalancer` Services)
-4. Envoy Gateway + gateway-config + httproutes
-5. postgresql + Keycloak
-6. opentelemetry-collector
-7. nebari-operator
-8. nebari-landingpage
+| Wave | Apps | Why here |
+|------|------|----------|
+| 1 | envoy-gateway, metallb, metallb-config | CRDs and the `LoadBalancer` implementation must exist before anything asks for an address |
+| 2 | cert-manager, gateway-config | cert-manager CRDs/webhooks before any issuer or `Certificate`; the `Gateway` once its CRDs are in |
+| 3 | cluster-issuers, certificates, httproutes, trust-manager, cloudnative-pg, securitypolicies, longhorn-backup | Issuers and certs on top of cert-manager; routes on top of the `Gateway`; operators before the resources that need them |
+| 4 | postgresql, keycloak, opentelemetry-collector, trust-bundle | Keycloak needs its database and a served certificate; the trust `Bundle` needs trust-manager |
+| 5 | nebari-operator | Reconciles `NebariApp` CRs, so it wants routing and auth already up |
+| 6 | nebari-landingpage | Discovers services registered by everything above |
 
-Exact wave numbers live in the individual template files under `pkg/argocd/templates/apps/`.
+The waves are the authoritative ordering; do not infer it from the table in §10.2. Note in particular that cert-manager is **not** first: Envoy Gateway and MetalLB precede it.
 
-## 10.7 Health and Readiness
+## 10.8 Health and Readiness
 
 Foundational software health is observed via ArgoCD's own sync/health status, not a hardcoded list in NIC. NIC's `deploy` command does not block waiting for every component; it prints follow-up instructions (how to reach ArgoCD, how to reach Keycloak) and exits. Users who want to wait for full health can watch ArgoCD's UI or run `kubectl wait` against the relevant Applications.
 
 A first-class `nic status` / health-check subcommand does not exist today; that work is tracked but not started.
 
-## 10.8 Versions
+## 10.9 Versions
 
 Component versions are pinned in the individual template YAML files under `pkg/argocd/templates/apps/`. Search those files for `targetRevision:` and `version:` fields. The nebari-operator version is pinned in `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`.
 

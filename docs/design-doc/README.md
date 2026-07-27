@@ -148,7 +148,8 @@ Deployed by NIC today via ArgoCD:
 - **cert-manager** (+ trust-manager): Automated TLS certificate management
 - **Envoy Gateway**: Kubernetes Gateway API implementation
 - **MetalLB**: Load balancing (on providers that need it)
-- **ArgoCD**: GitOps continuous deployment
+- **Longhorn**: Distributed block and RWX storage, with optional off-cluster backups (`backups.longhorn`). Helm-installed rather than GitOps-managed, since it has to precede the first PVC
+- **ArgoCD**: GitOps continuous deployment, with the foundational stack scoped to a dedicated `foundational` AppProject
 - **Nebari Operator**: reconciles the `NebariApp` CRD
 - **Nebari landing page**: single entry point to deployed services
 - **Helm**: used by NIC to bootstrap the ArgoCD install itself

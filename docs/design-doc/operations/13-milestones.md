@@ -39,9 +39,14 @@ The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/ar
 | GitOps repo bootstrap (`pkg/argocd`, `pkg/git`) | ✅ |
 | `file://` GitOps repos for local development | ✅ |
 | Cert-manager + cluster-issuers + initial Certificates | ✅ |
-| Envoy Gateway + gateway-config + httproutes | ✅ |
+| Envoy Gateway + gateway-config + httproutes + securitypolicies | ✅ |
 | PostgreSQL + Keycloak (Codecentric keycloakx chart) | ✅ |
+| CloudNativePG operator (per [ADR-0007](../../adr/0007-cloudnativepg-managed-databases.md)) | ✅ |
 | MetalLB + metallb-config (conditional on `InfraSettings.NeedsMetalLB`) | ✅ |
+| trust-manager + trust-bundle (conditional on `trust_bundle:`) | ✅ |
+| Longhorn backup target + RecurringJobs (conditional on `backups.longhorn`) | ✅ |
+| AppProject scoping (`foundational` / `nebari-apps` / locked-down `default`) | ✅ |
+| Kind-level resource restriction within the AppProjects | ⏳ ([#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480)) |
 | OpenTelemetry Collector | ✅ |
 | Nebari Landing Page | ✅ |
 | Nebari Operator (Kustomized from `nebari-dev/nebari-operator`) | ✅ |
