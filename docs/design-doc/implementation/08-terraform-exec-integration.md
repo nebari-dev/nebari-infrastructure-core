@@ -57,7 +57,7 @@ OpenTofu's `-json` mode emits one structured event per line, with `@level`, `@me
 
 ### Logging policy
 
-`pkg/tofu` does not call `slog`. That's intentional and required: per [`CLAUDE.md`](../../../CLAUDE.md), library code never logs. Translation into log records happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
+`pkg/tofu` does not call `slog`. That's intentional and required: per [`AGENTS.md`](../../../AGENTS.md), library code never logs. Translation into log records happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
 
 ## 8.4 Setup
 
@@ -138,7 +138,7 @@ There is a known cleanup gap during destroy ([#63](https://github.com/nebari-dev
 
 ## 8.8 OpenTelemetry Instrumentation Status
 
-`TerraformExecutor`'s operation-granularity methods (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) are **not yet** wrapped in their own spans. This is acknowledged as outstanding work in `CLAUDE.md`. When that lands, each method will look like:
+`TerraformExecutor`'s operation-granularity methods (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) are **not yet** wrapped in their own spans. This is acknowledged as outstanding work in [`AGENTS.md`](../../../AGENTS.md). When that lands, each method will look like:
 
 ```go
 func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {

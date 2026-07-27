@@ -118,7 +118,7 @@ See [State Management](05-state-management.md).
    └── nebari-landingpage
 ```
 
-A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not deployed today; that is roadmap work.
+A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not part of the foundational stack. It installs on top of the foundation as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, like any other pack.
 
 ### 4.6 Decision: Nebari Operator Is Out-of-Tree
 
@@ -140,7 +140,7 @@ NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer cont
 
 **Decision:**
 
-- All new functions in `pkg/` are wrapped in OpenTelemetry trace spans, with the documented exemptions in [`CLAUDE.md`](../../../CLAUDE.md) (e.g., per-line writers in `pkg/status` and byte/line helpers in `pkg/tofu`).
+- All new functions in `pkg/` are wrapped in OpenTelemetry trace spans, with the documented exemptions in [`AGENTS.md`](../../../AGENTS.md) (e.g., per-line writers in `pkg/status` and byte/line helpers in `pkg/tofu`).
 - Library code never calls `slog`. User-visible progress goes through the status channel; `cmd/nic` is the only layer that translates it into structured logs, via `pkg/nic`'s `SlogHandler`.
 - Exporters are configurable via `OTEL_EXPORTER` (`none` default, `console`, `otlp`, `both`) and `OTEL_ENDPOINT`.
 

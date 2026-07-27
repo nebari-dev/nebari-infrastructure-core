@@ -8,7 +8,7 @@ NIC deploys an opinionated set of foundational platform services on every cluste
 2. Renders ArgoCD `Application` manifests for the rest of the stack into a Git repository (`pkg/argocd`).
 3. Lets ArgoCD sync the stack via the `root.yaml` app-of-apps and sync waves.
 
-The stack is intentionally small. A full LGTM observability backend (Loki / Grafana / Tempo / Mimir) is **not** deployed today; only an OpenTelemetry Collector is shipped. Adding the rest is roadmap work.
+The stack is intentionally small. A full LGTM observability backend (Loki / Grafana / Tempo / Mimir) is **not** part of it; only an OpenTelemetry Collector is shipped. The LGTM backend is a software pack ([`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack)) that installs on top of the foundation.
 
 ## 10.2 Components (Actual)
 
@@ -35,7 +35,7 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | **Nebari Landing Page** | `nebari-landingpage.yaml` | React/Go service catalog UI |
 | **root** | `root.yaml` | App-of-apps entry point that owns all of the above |
 
-Apps not yet shipped (referenced in older docs as if shipped): Grafana, Loki, Mimir, Tempo, Promtail. These are roadmap items.
+Not foundational apps (older docs reference them as if they were): Grafana, Loki, Mimir, Tempo, Promtail. Grafana, Loki, Mimir, and Tempo ship in the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, installed on top of the foundation; Promtail is not deployed by anything NIC owns.
 
 ## 10.3 GitOps Layout
 

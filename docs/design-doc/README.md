@@ -12,7 +12,7 @@ Nebari Infrastructure Core (NIC) is an opinionated Kubernetes deployment tool th
 - **OpenTofu/Terraform Modules**: Infrastructure provisioning via proven Terraform modules orchestrated by terraform-exec
 - **Standard State Management**: Terraform state files with remote backends (S3, GCS, Azure Blob)
 - **Go CLI Orchestration**: Go CLI wraps OpenTofu execution with OpenTelemetry instrumentation
-- **Observability**: an OpenTelemetry Collector ships today; a full metrics/logs/traces backend (e.g. an LGTM stack) is future work, not yet deployed by NIC
+- **Observability**: an OpenTelemetry Collector ships in the foundational stack; a full metrics/logs/traces backend installs on top as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack
 - **Integrated Authentication**: Keycloak with OIDC/SAML support
 - **GitOps Ready**: ArgoCD for continuous deployment of applications
 - **Kubernetes Operator**: the out-of-tree Nebari Operator watches the `NebariApp` CRD for seamless app registration
@@ -153,7 +153,7 @@ Deployed by NIC today via ArgoCD:
 - **Nebari landing page**: single entry point to deployed services
 - **Helm**: used by NIC to bootstrap the ArgoCD install itself
 
-A full metrics/logs/traces backend (e.g. an LGTM stack of Loki, Grafana, Tempo, Mimir) is future work and is **not** deployed by NIC today.
+A full metrics/logs/traces backend (Loki, Grafana, Tempo, Mimir) is **not** part of the foundational stack; it installs on top as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack.
 
 ### Kubernetes Infrastructure
 

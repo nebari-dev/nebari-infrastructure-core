@@ -13,16 +13,16 @@ Status icons reflect current state, not original ambition:
 1. ✅ Deploy production Kubernetes on **AWS (EKS)**, **Azure (AKS)**, and **Hetzner (k3s)**; ✅ local Kind clusters for development; ✅ `existing` provider to adopt a pre-provisioned cluster; ⏳ GCP provider (currently a registered stub)
 2. ✅ Deploy foundational software via ArgoCD: cert-manager, cluster-issuers, certificates, Envoy Gateway, gateway-config, httproutes, postgresql, Keycloak, MetalLB (where needed), OpenTelemetry Collector, nebari-operator, nebari-landingpage
 3. ✅ Nebari Operator deployed as a foundational app (operator source lives in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator))
-4. ✅ Working **auth** (Keycloak with OIDC SSO into ArgoCD) and **routing** (Envoy Gateway with Kubernetes Gateway API). 🟡 **Observability**: the OpenTelemetry Collector ships, but a full LGTM backend (Loki / Grafana / Tempo / Mimir) does not - that work is deferred.
+4. ✅ Working **auth** (Keycloak with OIDC SSO into ArgoCD) and **routing** (Envoy Gateway with Kubernetes Gateway API). 🟡 **Observability**: the OpenTelemetry Collector ships in the foundational stack, but a full LGTM backend (Loki / Grafana / Tempo / Mimir) does not - it installs on top as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack.
 5. ✅ Configuration-driven cluster provisioning, with per-provider backing tools (OpenTofu for AWS, hetzner-k3s for Hetzner, Kind for local, kubeconfig adoption for existing). State management is provider-specific; AWS uses S3 with native lockfile-based locking.
-6. 🟡 OpenTelemetry instrumentation in library code (CLAUDE.md documents exemptions for `pkg/status` and byte/line-level helpers inside `pkg/tofu`; operation-granularity wrappers on `TerraformExecutor` are tracked as outstanding work)
+6. 🟡 OpenTelemetry instrumentation in library code ([`AGENTS.md`](../../../AGENTS.md) documents exemptions for `pkg/status` and byte/line-level helpers inside `pkg/tofu`; operation-granularity wrappers on `TerraformExecutor` are tracked as outstanding work)
 7. ✅ A documented `Provider` interface and `InfraSettings` capability struct so adding a new cluster provider does not require changes to CLI or `pkg/argocd`
 
 **Phase 2 (Iteration):**
 
-1. ⏳ Full LGTM observability backend (Loki / Grafana / Tempo / Mimir)
+1. ✅ Full LGTM observability backend (Loki / Grafana / Tempo / Mimir) - delivered as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack rather than as a foundational app
 2. ⏳ Advanced Keycloak integration (SAML, LDAP federation)
-3. ⏳ Custom Grafana dashboards for NIC-deployed clusters
+3. ⏳ Custom Grafana dashboards for NIC-deployed clusters (Grafana itself ships in `lgtm-pack`; NIC-specific dashboards are not provisioned by anything today)
 4. ⏳ Automated backup and restore for foundational software
 5. ⏳ Multi-cluster support (deploy multiple clusters from one CLI)
 6. ⏳ Cost optimization features (spot instances, autoscaling policies)

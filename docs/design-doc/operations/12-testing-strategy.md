@@ -8,7 +8,7 @@ NIC has three testing levels today, plus one (health) that is planned but not ye
 
 - **Scope**: Pure Go packages under `pkg/` and `cmd/nic/`.
 - **Runner**: `go test ./...` (or `make test` / `make test-unit`).
-- **Conventions**: Table-driven tests (per [`CLAUDE.md`](../../../CLAUDE.md)). Interfaces are injected so concrete dependencies (AWS SDK, Helm, k8s client) can be mocked.
+- **Conventions**: Table-driven tests (per [`AGENTS.md`](../../../AGENTS.md)). Interfaces are injected so concrete dependencies (AWS SDK, Helm, k8s client) can be mocked.
 - **Where they run**: Every push and PR via `.github/workflows/ci.yml`, with `-race` and coverage.
 
 ### Integration tests (LocalStack)
@@ -33,7 +33,7 @@ There are no enforced coverage thresholds in CI today. The Codecov upload in `.g
 Coverage hygiene is enforced through review:
 
 - New code added under `pkg/` should have unit tests, ideally table-driven.
-- The interface-driven design (Go functions take interfaces, return concrete types - see [`CLAUDE.md`](../../../CLAUDE.md)) is what makes coverage feasible.
+- The interface-driven design (Go functions take interfaces, return concrete types - see [`AGENTS.md`](../../../AGENTS.md)) is what makes coverage feasible.
 
 ## 12.3 Test Infrastructure
 

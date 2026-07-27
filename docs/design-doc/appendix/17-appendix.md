@@ -5,7 +5,7 @@
 | Term              | Definition                                            |
 | ----------------- | ----------------------------------------------------- |
 | **NIC**           | Nebari Infrastructure Core - this project             |
-| **LGTM**          | Loki, Grafana, Tempo, Mimir - observability stack (planned; not yet deployed by NIC) |
+| **LGTM**          | Loki, Grafana, Tempo, Mimir - Grafana's observability stack; on Nebari it ships as the `lgtm-pack` software pack, not as a foundational app |
 | **CRD**           | Custom Resource Definition - Kubernetes API extension |
 | **HTTPRoute**     | Kubernetes Gateway API resource for HTTP routing      |
 | **OIDC**          | OpenID Connect - authentication protocol              |
@@ -46,7 +46,7 @@ The specific commit dates for the 2026 entries can be reconstructed from git his
 **v1.0 success (planned):**
 
 - ⏳ GCP provider functional (or replaced by an out-of-tree plugin per ADR-0004)
-- ⏳ LGTM observability backend deployed by NIC
+- ✅ LGTM observability backend available (as the `lgtm-pack` software pack; NIC does not deploy it as a foundational app)
 - ⏳ Documented upgrade paths between releases
 - ⏳ End-to-end test coverage across providers
 
@@ -55,8 +55,8 @@ The specific commit dates for the 2026 entries can be reconstructed from git his
 - ✅ One command to deploy: `nic deploy -f config.yaml`
 - ✅ One CR per app to register with the platform: `NebariApp`
 - ✅ Auth and routing wired automatically by the operator
-- ⏳ Grafana dashboards immediately available (depends on LGTM)
-- ⏳ End-to-end troubleshooting via traces/logs/metrics (depends on LGTM)
+- ⏳ Grafana dashboards immediately available (requires installing `lgtm-pack`; no NIC-specific dashboards are provisioned)
+- ⏳ End-to-end troubleshooting via traces/logs/metrics (requires installing `lgtm-pack`)
 
 ## 17.4 Risks and Mitigations
 

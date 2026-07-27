@@ -55,7 +55,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-A full LGTM (Loki / Grafana / Tempo / Mimir) observability backend is **not** currently deployed by NIC. Only the OpenTelemetry Collector is shipped today; building out the backend is on the roadmap (see [`13-milestones.md`](../operations/13-milestones.md)).
+NIC's foundational stack ships only the OpenTelemetry Collector; a full LGTM (Loki / Grafana / Tempo / Mimir) backend is **not** part of it. That backend is available as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, installed on top of the foundation rather than deployed by `nic deploy` (see [`13-milestones.md`](../operations/13-milestones.md)).
 
 ### 1.4 Scope
 

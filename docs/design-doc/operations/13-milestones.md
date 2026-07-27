@@ -45,7 +45,7 @@ The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/ar
 | OpenTelemetry Collector | ✅ |
 | Nebari Landing Page | ✅ |
 | Nebari Operator (Kustomized from `nebari-dev/nebari-operator`) | ✅ |
-| Full LGTM backend (Loki, Grafana, Tempo, Mimir, Promtail) | ⏳ |
+| Full LGTM backend (Loki, Grafana, Tempo, Mimir) | ✅ as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, not as a foundational app |
 
 ## 13.3 Phase 3: Operator Integration
 
@@ -60,7 +60,7 @@ The Nebari Operator is developed out-of-tree at [`nebari-dev/nebari-operator`](h
 | `InfraSettings.KeycloakBasePath` and `HTTPSPort` propagated via Kustomize patches | ✅ |
 | Operator-side reconciliation of `NebariApp` CRs | upstream-owned |
 | Operator-side `SecurityPolicy` and OIDC plumbing | upstream-owned |
-| Grafana dashboard provisioning | ⏳ (depends on LGTM stack) |
+| Grafana dashboard provisioning | ⏳ (Grafana ships in `lgtm-pack`; NIC provisions no dashboards) |
 
 ## 13.4 Phase 4: Multi-Cloud Parity
 
@@ -81,10 +81,10 @@ Note: [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md) (Proposed, 2026
 
 | Deliverable | Status |
 |-------------|--------|
-| OpenTelemetry instrumentation in library code | 🟡 (per `CLAUDE.md` exemptions for `pkg/status` and byte/line helpers in `pkg/tofu`; operation-granularity `TerraformExecutor` wrappers tracked as outstanding work) |
+| OpenTelemetry instrumentation in library code | 🟡 (per [`AGENTS.md`](../../../AGENTS.md) exemptions for `pkg/status` and byte/line helpers in `pkg/tofu`; operation-granularity `TerraformExecutor` wrappers tracked as outstanding work) |
 | Status-channel seam between `pkg/` and `cmd/` (`pkg/status`, `pkg/nic` `SlogHandler`) | ✅ |
 | OTLP exporter wiring (`OTEL_EXPORTER=otlp`, `OTEL_ENDPOINT=...`) | ✅ |
-| LGTM backend deployed on cluster | ⏳ |
+| LGTM backend deployed on cluster | ✅ via the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack |
 | Grafana dashboards for NIC operations | ⏳ |
 
 ## 13.6 Phase 6: Production Hardening
