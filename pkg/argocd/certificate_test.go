@@ -111,9 +111,6 @@ func TestGatewayTemplate_CertificateRefName(t *testing.T) {
 		if !strings.Contains(output, "name: user-tls") {
 			t.Errorf("expected certificateRef name user-tls, got:\n%s", output)
 		}
-		if !strings.Contains(output, "group: \"\"\n            kind: Secret\n            name: user-tls") {
-			t.Errorf("expected explicit core Secret reference defaults, got:\n%s", output)
-		}
 		// The certificateRef namespace is indented under the ref (12 spaces);
 		// the Gateway's own metadata.namespace (2 spaces) is unrelated.
 		if strings.Contains(output, "            namespace:") {
@@ -313,29 +310,6 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				t.Errorf("operator deployment patch missing %q", wantIssuerValue)
 			}
 		})
-	}
-}
-
-func TestLetsEncryptIssuer_UsesExplicitGatewayParentRefDefaults(t *testing.T) {
-	content, err := templates.ReadFile("templates/manifests/security/issuers/letsencrypt-clusterissuer.yaml")
-	if err != nil {
-		t.Fatalf("read letsencrypt issuer template: %v", err)
-	}
-
-	processed, err := processTemplate(
-		"manifests/security/issuers/letsencrypt-clusterissuer.yaml",
-		content,
-		TemplateData{
-			ACMEEmail:  "admin@example.com",
-			ACMEServer: "https://acme-v02.api.letsencrypt.org/directory",
-		},
-	)
-	if err != nil {
-		t.Fatalf("processTemplate() error: %v", err)
-	}
-
-	if !strings.Contains(string(processed), "group: gateway.networking.k8s.io\n                name: nebari-gateway") {
-		t.Errorf("expected explicit Gateway API group on ACME solver parentRef, got:\n%s", processed)
 	}
 }
 

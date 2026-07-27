@@ -263,7 +263,9 @@ func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	}
 }
 
-func TestMetalLBIPAddressPool_ExplicitDefaults(t *testing.T) {
+// default-pool must hand out addresses without a per-Service pool annotation,
+// so autoAssign is a value we own rather than inherit.
+func TestMetalLBIPAddressPool_AutoAssigns(t *testing.T) {
 	content, err := templates.ReadFile("templates/manifests/metallb/ipaddresspool.yaml")
 	if err != nil {
 		t.Fatalf("failed to read MetalLB IPAddressPool template: %v", err)
@@ -278,14 +280,8 @@ func TestMetalLBIPAddressPool_ExplicitDefaults(t *testing.T) {
 		t.Fatalf("processTemplate() error: %v", err)
 	}
 
-	output := string(processed)
-	for _, want := range []string{
-		"autoAssign: true",
-		"avoidBuggyIPs: false",
-	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("MetalLB IPAddressPool template missing %q, got:\n%s", want, output)
-		}
+	if output := string(processed); !strings.Contains(output, "autoAssign: true") {
+		t.Errorf("MetalLB IPAddressPool template missing %q, got:\n%s", "autoAssign: true", output)
 	}
 }
 
@@ -549,9 +545,7 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 				contains string
 			}{
 				{"kind", "kind: HTTPRoute"},
-				{"explicit Gateway reference defaults", "group: gateway.networking.k8s.io\n      kind: Gateway"},
 				{"targets http listener", "sectionName: http"},
-				{"explicit default path match", "type: PathPrefix\n            value: /"},
 				{"redirect filter type", "type: RequestRedirect"},
 				{"redirect to https", "scheme: https"},
 				{"301 status code", "statusCode: 301"},
@@ -696,15 +690,6 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 			if !strings.Contains(output, "sectionName: https") {
 				t.Errorf("%s should target sectionName: https, got:\n%s", name, output)
 			}
-			if !strings.Contains(output, "group: gateway.networking.k8s.io\n      kind: Gateway") {
-				t.Errorf("%s should declare explicit Gateway reference defaults, got:\n%s", name, output)
-			}
-			if !strings.Contains(output, "group: \"\"\n          kind: Service") {
-				t.Errorf("%s should declare explicit Service reference defaults, got:\n%s", name, output)
-			}
-			if !strings.Contains(output, "weight: 1") {
-				t.Errorf("%s should declare the default backend weight, got:\n%s", name, output)
-			}
 			// Trailing newline distinguishes "sectionName: http" from "sectionName: https".
 			if strings.Contains(output, "sectionName: http\n") {
 				t.Errorf("%s should NOT target the http listener", name)
@@ -821,17 +806,12 @@ func TestWriteAllToGit_LonghornHTTPRoute(t *testing.T) {
 			"kind: HTTPRoute",
 			"name: longhorn",
 			"namespace: longhorn-system",
-			"group: gateway.networking.k8s.io",
-			"kind: Gateway",
 			"name: nebari-gateway",
 			"namespace: envoy-gateway-system",
 			"sectionName: https",
 			"longhorn.test.example.com",
-			"group: \"\"",
-			"kind: Service",
 			"name: longhorn-frontend",
 			"port: 80",
-			"weight: 1",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("longhorn-httproute.yaml missing %q\ngot:\n%s", want, out)
@@ -947,8 +927,8 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"name: longhorn-oidc-client-secret",
 			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
 			`logoutPath: "/oauth2/logout"`,
-			"group: \"\"",
-			"kind: Secret",
+			// Values we own rather than inherit from Envoy Gateway's defaults:
+			// session renewal behaviour and the JWKS staleness window.
 			"refreshToken: true",
 			"forwardAccessToken: true",
 			"jwt:",

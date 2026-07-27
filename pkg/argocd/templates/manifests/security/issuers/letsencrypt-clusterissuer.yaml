@@ -15,7 +15,6 @@ spec:
       - http01:
           gatewayHTTPRoute:
             parentRefs:
-              - group: gateway.networking.k8s.io
-                name: nebari-gateway
+              - name: nebari-gateway
                 namespace: envoy-gateway-system
                 kind: Gateway

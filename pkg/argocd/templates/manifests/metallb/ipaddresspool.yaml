@@ -9,7 +9,7 @@ metadata:
 spec:
   addresses:
     - {{ .MetalLBAddressRange }}
-  # Keep MetalLB's API-defaulted values explicit so the live object matches Git
-  # and ArgoCD does not report persistent defaulting-only drift.
+  # default-pool exists so LoadBalancer Services get an address without needing
+  # a pool annotation. Automatic assignment is the whole point of it, so state it
+  # rather than inherit whatever MetalLB defaults to.
   autoAssign: true
-  avoidBuggyIPs: false

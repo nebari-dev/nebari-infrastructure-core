@@ -31,9 +31,8 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - group: ""
+          - name: {{ .GatewayTLSSecretName }}
             kind: Secret
-            name: {{ .GatewayTLSSecretName }}
 {{- if .GatewayTLSCrossNamespace }}
             namespace: {{ .GatewayTLSSecretNamespace }}
 {{- end }}

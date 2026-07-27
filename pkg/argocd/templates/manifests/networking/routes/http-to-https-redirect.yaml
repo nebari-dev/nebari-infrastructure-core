@@ -16,12 +16,12 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: nebari-gateway
+    - name: nebari-gateway
       namespace: envoy-gateway-system
       sectionName: http
   rules:
+    # Catch-all path match, spelled out because a rule with no `matches` reads
+    # as "matches nothing" rather than "matches everything".
     - matches:
         - path:
             type: PathPrefix
