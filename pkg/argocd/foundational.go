@@ -475,10 +475,11 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 // referenced by the BackupTarget that ArgoCD syncs from git, so it must exist
 // before the root App-of-Apps is applied.
 //
-// For a keyless target (iamRoleARN set) it additionally repairs longhorn-manager
-// pods that predate the Pod Identity association — without the injected
-// container credentials those pods cannot delete backups, so retention pruning
-// never completes (#500).
+// For a keyless target (iamRoleARN set) the Secret carries only
+// AWS_IAM_ROLE_ARN; the usable credentials are injected into longhorn-manager
+// pods by the EKS Pod Identity webhook, and repairing pods that predate the
+// association is the AWS provider's job (see
+// aws.repairLonghornBackupPodIdentity, #500).
 func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig, iamRoleARN string) error {
 	if err := createNamespace(ctx, client, longhorn.Namespace); err != nil {
 		return fmt.Errorf("ensure longhorn namespace: %w", err)
@@ -487,24 +488,7 @@ func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface
 	if err != nil {
 		return fmt.Errorf("build longhorn backup secret: %w", err)
 	}
-	if err := createSecret(ctx, client, secret); err != nil {
-		return err
-	}
-	if iamRoleARN == "" {
-		// Static-key target: the Secret itself carries usable credentials, so the
-		// pods' ambient environment is irrelevant.
-		return nil
-	}
-	if err := longhorn.EnsureManagerPodIdentityEnv(ctx, client); err != nil {
-		// Warn rather than fail: the credential Secret is applied and backups will
-		// still be created and restorable. Only deletion (retention pruning) is at
-		// risk, which does not justify aborting the deploy.
-		status.Send(ctx, status.NewUpdate(status.LevelWarning,
-			"Could not verify that longhorn-manager carries keyless backup credentials; backup retention pruning may not delete backups").
-			WithResource(longhorn.ManagerDaemonSetName).
-			WithMetadata("error", err.Error()))
-	}
-	return nil
+	return createSecret(ctx, client, secret)
 }
 
 // createLonghornSecrets ensures the OIDC client secret used to protect the

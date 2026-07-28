@@ -302,7 +302,7 @@ proves nothing — check all of them:
 for pod in $(kubectl -n longhorn-system get pods -l app=longhorn-manager -o name); do
   echo -n "$pod "
   kubectl -n longhorn-system get "$pod" \
-    -o jsonpath='{.spec.containers[0].env[?(@.name=="AWS_CONTAINER_CREDENTIALS_FULL_URI")].value}'
+    -o jsonpath='{.spec.containers[*].env[?(@.name=="AWS_CONTAINER_CREDENTIALS_FULL_URI")].value}'
   echo
 done
 ```
@@ -314,9 +314,12 @@ repairs this automatically; to fix it out of band:
 kubectl -n longhorn-system rollout restart daemonset/longhorn-manager
 ```
 
-If the restarted pods still come back without the variables, the
-`eks-pod-identity-agent` addon or its mutating webhook is missing or unhealthy —
-NIC emits a deploy warning in that case. Verify with
+Restarting only helps if the `eks-pod-identity-agent` addon is present to
+mutate the replacement pods, so `nic deploy` checks its DaemonSet in
+`kube-system` first and warns immediately (without restarting anything) when it
+is missing or has no ready pods. If the addon looks healthy but restarted pods
+still come back without the variables, NIC emits a deploy warning after the
+rollout wait times out. Verify with
 `aws eks describe-addon --cluster-name <cluster> --addon-name eks-pod-identity-agent`
 and confirm a Pod Identity association exists for `longhorn-service-account`:
 
