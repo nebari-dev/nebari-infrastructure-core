@@ -15,6 +15,8 @@ on:
         default: true
 
 permissions:
+  # Job-level permissions replace (not merge with) this default; the stale job's
+  # effective contents permission is none.
   contents: read
 
 jobs:
@@ -42,7 +44,7 @@ jobs:
           days-before-pr-stale: 30
           days-before-pr-close: 7
 
-          # Distinct from the existing "status: stale" label, which means
+          # Distinct from the existing "status: stale 🥖" label, which means
           # "not up to date with the default branch".
           stale-pr-label: 'status: inactive 💤'
           exempt-pr-labels: 'status: keep open 📌'
@@ -67,6 +69,7 @@ jobs:
 
             Closing is not final. The branch is kept, and the pull request can be reopened.
 
+          # 37 = days-before-pr-stale + days-before-pr-close; keep in sync if either changes.
           close-pr-message: |
             Closing this pull request after 37 days with no activity.
 
