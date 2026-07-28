@@ -70,7 +70,8 @@ go test ./pkg/providers/cluster/aws -v # single package
 make fmt                      # gofmt -s -w
 make vet                      # go vet
 make lint                     # golangci-lint run
-make pre-commit               # run pre-commit checks
+make pre-commit               # install the pre-commit hooks
+make pre-commit-run           # run the hooks across all files
 ```
 
 ### Local Kind Cluster
@@ -434,6 +435,18 @@ Runtime dependencies (per cluster provider):
 - **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
+
+## Pull Request Lifecycle
+
+Merging to `main` requires **one approving review from a `CODEOWNERS` owner**. Admin enforcement is on, so `gh pr merge --admin` does not bypass it, and GitHub never lets an author approve their own pull request. Approvals are **dismissed on every push**, so re-request review after pushing a fixup. `main` requires linear history: rebase, do not merge.
+
+Open pull requests expire. After **30 days** with no activity a pull request is labeled `status: inactive 💤` and warned; after **37 days** total it closes automatically. Any comment, push, or review resets the clock. Nothing is exempt by default, including drafts.
+
+To keep a pull request open indefinitely, add the **`status: keep open 📌`** label. Use it for long-running design work, or when the hold-up is on the maintainers' side.
+
+Closes are reversible: branches are preserved and the pull request can be reopened.
+
+The full human-facing process is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Pre-Commit Checklist
 
