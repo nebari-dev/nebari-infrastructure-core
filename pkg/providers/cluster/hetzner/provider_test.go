@@ -195,10 +195,16 @@ func TestProvider_Validate_MissingConfigBlock(t *testing.T) {
 
 	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
-		t.Fatal("expected error for missing hetzner_cloud block")
+		t.Fatal("expected error for empty cluster.hetzner block")
 	}
-	if !strings.Contains(err.Error(), "hetzner_cloud") {
-		t.Errorf("error should mention hetzner_cloud, got: %v", err)
+	// The error must name the current config path. "hetzner_cloud" was the
+	// pre-cluster-block key; pointing a user at it sends them to a key that no
+	// longer validates.
+	if !strings.Contains(err.Error(), "cluster.hetzner") {
+		t.Errorf("error should mention cluster.hetzner, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "hetzner_cloud") {
+		t.Errorf("error names the removed hetzner_cloud key: %v", err)
 	}
 }
 
