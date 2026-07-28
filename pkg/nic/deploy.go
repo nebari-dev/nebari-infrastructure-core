@@ -88,6 +88,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	// Offline DNS provider validation (zone consistency), so a missing
+	// domain/zone_name or a domain outside the zone fails before any
+	// infrastructure is provisioned.
+	if err := validateDNSProvider(ctx, cfg, reg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration parsed successfully").
 		WithResource("config").
 		WithAction("validated").
