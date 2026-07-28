@@ -30,11 +30,28 @@ Note that git does not track empty directories, so `overlays/` only exists in th
 2. **Merge semantics.** Helm merges maps but REPLACES lists. You cannot append to a list-valued field from an overlay. If the value you need to change is a list, this mechanism cannot help you; see [issue #409](https://github.com/nebari-dev/nebari-infrastructure-core/issues/409) for how the OTel Collector works around the same limitation with named pipelines instead of list entries.
 3. **Collision avoidance.** When your overlay contributes entries to a map that other packs might also write into, namespace your keys as `<kind>/<packname>`, for example `otlp/langfuse`, so two packs' entries do not overwrite each other.
 4. **Never edit `base.yaml` or `apps/*.yaml`.** Both are rewritten by `--regen-apps`. Anything you write there is lost on the next regeneration.
-5. **Requires ArgoCD 3.4 or later.** Glob expansion of `helm.valueFiles` was added in ArgoCD 3.4. On 3.3.x and earlier the `overlays/*.yaml` entry is silently discarded: your overlay has no effect, the Application still reports Synced/Healthy, and there is no diagnostic at the repo-server's default `info` log level. NIC installs a chart that ships 3.4 or later, so this only bites a cluster whose ArgoCD predates that. Check the repo-server specifically, not `argocd version`, because glob expansion happens only there:
+5. **Requires ArgoCD 3.4 or later.** Glob expansion of `helm.valueFiles` was added in ArgoCD 3.4. On 3.3.x and earlier the `overlays/*.yaml` entry is silently discarded: your overlay has no effect, the Application still reports Synced/Healthy, and there is no diagnostic at the repo-server's default `info` log level. NIC installs a chart that ships 3.4 or later, so this only bites a cluster whose ArgoCD predates that.
+
+   Check the repo-server, never `argocd version` or the UI, which report the API server. Glob expansion happens only in the repo-server, so a chart upgrade that did not roll that Deployment reads as 3.4.x while running 3.3.0.
+
+   The best check reads what the binary does rather than what a tag says:
+
+   ```bash
+   kubectl -n argocd logs deploy/argocd-repo-server -c repo-server | grep -c "resolved value files"
+   ```
+
+   That log statement is `log.Infof` at `reposerver/repository/repository.go:1488` in v3.4.4 and does not exist in v3.3.0 at all. A count of **zero proves you are pre-3.4**. A non-zero count is also the diagnostic for the next question, because the line lists the files that were actually passed to Helm:
+
+   ```bash
+   kubectl -n argocd logs deploy/argocd-repo-server -c repo-server \
+     | grep "resolved value files" | grep <app> | tail -2
+   ```
+
+   Two paths, `base.yaml` then your overlay, means expansion worked. Only `base.yaml` on a 3.4+ repo-server means the glob matched nothing, which an image tag cannot tell you. The image tag remains a useful cross-check, and also reveals pods from two different ReplicaSets serving at once:
 
    ```bash
    kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-repo-server \
-     -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
+     -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
    ```
 
 ### If you upgrade ArgoCD without running `--regen-apps`
@@ -42,6 +59,50 @@ Note that git does not track empty directories, so `overlays/` only exists in th
 Already-committed overlays can stay inert for up to 24 hours. ArgoCD's manifest cache key does not include the ArgoCD version, so upgrading alone does not invalidate cached manifests, and `--repo-cache-expiration` defaults to 24h. The symptom is identical to the version-floor problem above and reads as "the seam is broken" rather than "the cache is stale".
 
 Force a hard refresh on the affected Applications after an upgrade, or overlays will not take effect until the repo cache expires. Following the documented `--regen-apps` path avoids this entirely, because the regeneration commit changes the revision and therefore the cache key.
+
+## Verifying the seam end to end
+
+Use this when you suspect overlays are not being applied, or when validating the seam on a new provider. Every step has a pass condition, so a failure localises rather than leaving you guessing. Executed against Hetzner/k3s with a remote authenticated GitOps repo and a `git_repository.path` prefix, on both an OCI chart source and an HTTPS Helm repo source.
+
+**1. Confirm the repo-server is 3.4+.** Use the two checks in contract item 5 above. Do this first: everything below reports a false negative on a pre-3.4 repo-server.
+
+**2. Confirm the layout and the rendered Application.**
+
+```bash
+kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[0].helm.valueFiles}{"\n"}'
+kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[1]}{"\n"}'
+```
+
+Expect both `valueFiles` entries carrying your `git_repository.path` prefix, and a second source with `ref: values` pointing at your GitOps repo. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
+
+**3. Confirm `base.yaml` applies before testing overlays.** Assert specific values, not just that the app is Healthy. Because `ignoreMissingValueFiles: true` also covers the `base.yaml` entry, a typo in `git_repository.path` silently falls back to the chart's own defaults instead of erroring. If you see chart defaults here, fix that before going further; step 4 would be meaningless.
+
+**4. Drop an overlay, with no `nic deploy`.** This is the property the seam exists to provide.
+
+```bash
+mkdir -p <path>/values/envoy-gateway/overlays
+printf 'deployment:\n  replicas: 2\n' > <path>/values/envoy-gateway/overlays/30-test.yaml
+git add -A && git commit -m "test: overlay" && git push
+```
+
+The commit is mandatory. ArgoCD reads committed content only, so an uncommitted file has no effect, including for local `file://` repos where it is tempting to assume the file is read from disk.
+
+Pass condition: the live Deployment picks up the override with no edit to the Application and no `nic deploy` run. Observed within about a minute on a plain commit; a hard refresh (`kubectl -n argocd patch app <app> --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'`) makes it immediate.
+
+**5. Confirm at the resolution layer** with the `resolved value files` command in contract item 5. Two paths means expansion worked.
+
+**6. Confirm overlays survive regeneration.** Record the overlay's checksum, run `nic deploy -f <config>.yaml --regen-apps` twice, then re-check. Expect an identical checksum, `base.yaml` regenerated unchanged, the override still live, and gated apps still absent.
+
+**7. Confirm removal reverts.** Delete the overlay, commit, push. The value should return to what `base.yaml` specifies.
+
+**If step 5 shows only `base.yaml` on a confirmed 3.4+ repo-server**, look at what the repo-server actually has on disk, which is the one thing the checks above cannot see:
+
+```bash
+kubectl -n argocd exec deploy/argocd-repo-server -c repo-server -- \
+  sh -c 'ls -la /tmp/_argocd-repo/*/<path>/values/<app>/overlays/ 2>&1'
+```
+
+An absent or empty `overlays/` alongside a present `base.yaml` is a stale checkout rather than a glob problem; delete the repo-server pod and hard refresh. If the overlay is present at the right size and the glob still resolves to one file, that is an upstream bug worth reporting, and `ARGOCD_LOG_LEVEL=debug` on the repo-server will give the skip reason, which is debug-only.
 
 ## Migration from hand-edited manifests
 

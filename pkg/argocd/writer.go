@@ -450,8 +450,10 @@ const valuesDirPrefix = "values/"
 // removeStaleTemplate deletes the previously written output of a template
 // whose gate is now off, so a feature toggled from enabled to disabled has its
 // files removed from the gitops repo rather than skipped-but-retained. Missing
-// files are a no-op (the common case: the feature was never enabled). Returns
-// fs.SkipDir for directories so the walk does not descend into them.
+// files are a no-op (the common case: the feature was never enabled). For
+// directories it removes the tree and returns fs.SkipDir so the walk does not
+// descend, EXCEPT under values/, where recursive deletion is refused and the
+// walk descends instead (see below).
 //
 // The recursive branch is the only irreversible operation in this package, and
 // under values/ it would delete user overlays that NIC does not own and cannot
@@ -481,8 +483,10 @@ func removeStaleTemplate(relPath, destPath string, d fs.DirEntry) error {
 }
 
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
-// values/metallb is matched only at its base.yaml FILE: matching the directory
-// would make removeStaleTemplate os.RemoveAll it, destroying user overlays.
+// values/metallb is matched at its base.yaml FILE rather than at the directory,
+// so the gate removes only the file NIC owns. Overlay safety does not rest on
+// that choice: removeStaleTemplate refuses recursive deletion under values/
+// outright, so the broader directory-matching form would also be safe.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
@@ -500,9 +504,9 @@ func isLonghornOnlyPath(relPath string) bool {
 
 // isTrustBundlePath returns true if the relative path is a trust-manager-related
 // template (the chart Application, the Bundle Application, the Bundle manifest,
-// or the chart's base values). values/trust-manager is matched only at its
-// base.yaml FILE: matching the directory would make removeStaleTemplate
-// os.RemoveAll it, destroying user overlays.
+// or the chart's base values). values/trust-manager is matched at its base.yaml
+// FILE rather than at the directory, for the same reason as isMetalLBPath, and
+// with the same removeStaleTemplate guard underneath it.
 func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||

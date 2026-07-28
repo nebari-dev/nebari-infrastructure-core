@@ -15,7 +15,7 @@ The filename (without `.yaml`) becomes the application name.
 
 ### Adding a Helm-based application
 
-A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0013](../../docs/adr/0013-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
+A Helm-based app needs two files, not one, because Helm values are sourced from the gitops repo rather than inlined in the Application (see [ADR-0014](../../docs/adr/0014-helm-valuefiles-overlay-seam.md) and [docs/helm-value-overlays.md](../../docs/helm-value-overlays.md)):
 
 1. `templates/apps/<name>.yaml` - the Application manifest. It must be multi-source:
    - The chart source comes first and carries `helm.valueFiles` using the `GitPath` idiom, plus `ignoreMissingValueFiles: true`:
@@ -36,7 +36,7 @@ Do not use inline `helm.values` or `helm.valuesObject` on any source, and do not
 You must also:
 
 - Add a row for `<name>` to the `helmValueFilesApps` table in `pkg/argocd/writer_test.go`, with a signature string that appears in the rendered `base.yaml` (a distinctive substring is enough; it just proves the right template rendered). `TestHelmApps_SeamInvariants` enforces that every Helm app template and every `templates/values/<name>` directory is enrolled here.
-- If the app is gated (like `metallb` and `trust-manager`), add `values/<name>/base.yaml` as a **file** path to the corresponding gate predicate in `writer.go` (`isMetalLBPath`, `isTrustBundlePath`, or a new one), matching the file, never the `values/<name>` directory. Matching the directory routes it through `removeStaleTemplate`'s `os.RemoveAll` branch when the gate is off, which would delete any user overlays sitting next to `base.yaml`. See the warning comment above `removeStaleTemplate` in `writer.go`.
+- If the app is gated (like `metallb` and `trust-manager`), add `values/<name>/base.yaml` as a **file** path to the corresponding gate predicate in `writer.go` (`isMetalLBPath`, `isTrustBundlePath`, or a new one). Prefer the file form over the `values/<name>` directory so the gate visibly removes only the file NIC owns. This is a clarity preference, not a safety requirement: `removeStaleTemplate` refuses recursive deletion under `values/` outright, so the broader directory-matching form is safe too. See the comment above `removeStaleTemplate` in `writer.go`, and do not weaken that guard.
 
 ## Usage
 

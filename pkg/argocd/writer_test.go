@@ -1420,6 +1420,28 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 	})
 }
 
+// lookupDirEntry returns the fs.DirEntry named name inside parent, failing the
+// test if it is absent or not a directory. Named lookup rather than indexing so
+// a change to the surrounding fixture fails as a test failure with a useful
+// message instead of an index panic.
+func lookupDirEntry(t *testing.T, parent, name string) fs.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() == name {
+			if !e.IsDir() {
+				t.Fatalf("%s/%s exists but is not a directory", parent, name)
+			}
+			return e
+		}
+	}
+	t.Fatalf("no directory entry %q under %s", name, parent)
+	return nil
+}
+
 // TestRemoveStaleTemplate_RefusesValuesDirRecursion pins the structural guard
 // that makes the os.RemoveAll footgun a no-op instead of data loss. A gate
 // predicate written in the natural but unsafe prefix form
@@ -1442,28 +1464,13 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A real fs.DirEntry for the values/metallb directory.
-	parents, err := os.ReadDir(filepath.Join(tmpDir, "values"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dirEntry fs.DirEntry
-	for _, e := range parents {
-		if e.Name() == "metallb" {
-			dirEntry = e
-		}
-	}
-	if dirEntry == nil || !dirEntry.IsDir() {
-		t.Fatalf("expected a values/metallb directory entry, got %v", dirEntry)
-	}
+	dirEntry := lookupDirEntry(t, filepath.Join(tmpDir, "values"), "metallb")
 
-	err = removeStaleTemplate("values/metallb", valuesAppDir, dirEntry)
-	if err != nil {
-		t.Fatalf("removeStaleTemplate() error = %v, want nil", err)
-	}
-	// nil (not fs.SkipDir) so the walk descends and reaches base.yaml.
-	if errors.Is(err, fs.SkipDir) {
-		t.Error("removeStaleTemplate() returned fs.SkipDir for a values/ dir; base.yaml would never be visited")
+	// Want exactly nil. fs.SkipDir is non-nil, so this single assertion covers
+	// both halves of the guarantee: no error, and no SkipDir either, which is
+	// what lets the walk descend and reach base.yaml.
+	if err := removeStaleTemplate("values/metallb", valuesAppDir, dirEntry); err != nil {
+		t.Fatalf("removeStaleTemplate() error = %v, want nil (fs.SkipDir would mean base.yaml is never visited)", err)
 	}
 	if _, err := os.Stat(overlayPath); err != nil {
 		t.Errorf("user overlay was destroyed by the recursive branch: %v", err)
@@ -1474,11 +1481,8 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 	if err := os.MkdirAll(otherDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	manifestParents, err := os.ReadDir(filepath.Join(tmpDir, "manifests"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := removeStaleTemplate("manifests/metallb", otherDir, manifestParents[0]); !errors.Is(err, fs.SkipDir) {
+	otherEntry := lookupDirEntry(t, filepath.Join(tmpDir, "manifests"), "metallb")
+	if err := removeStaleTemplate("manifests/metallb", otherDir, otherEntry); !errors.Is(err, fs.SkipDir) {
 		t.Errorf("removeStaleTemplate() for a non-values dir error = %v, want fs.SkipDir", err)
 	}
 	if _, err := os.Stat(otherDir); !os.IsNotExist(err) {

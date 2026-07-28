@@ -1,4 +1,4 @@
-# ADR-0013: Helm valueFiles Overlay Seam for Foundational Apps
+# ADR-0014: Helm valueFiles Overlay Seam for Foundational Apps
 
 ## Status
 
@@ -66,7 +66,9 @@ Each Application keeps its chart source first in `spec.sources`, and that chart 
 
 Values files live under `values/`, a new top-level directory in the gitops repo, rather than under `apps/`. The root app-of-apps Application (`templates/apps/root.yaml`) points its directory source at `apps/` with `recurse: false` and `include: '*.yaml'`, so it applies every top-level `*.yaml` file directly under `apps/` as a Kubernetes resource, and does not descend into subdirectories at all. A values file placed flat in `apps/` would be applied as a bogus resource; one nested in a subdirectory of `apps/` would be silently ignored instead. Either way, `apps/` is the wrong home for values files, hence the separate top-level `values/` directory.
 
-The two conditional apps, metallb and trust-manager, gate their `values/<app>/base.yaml` file through the same writer predicates (`isMetalLBPath`, `isTrustBundlePath` in `pkg/argocd/writer.go`) that already gate their Application manifest. Critically, these predicates match the `base.yaml` file specifically, never the `values/<app>` directory. Matching the directory would route it through `removeStaleTemplate`'s directory branch, which calls `os.RemoveAll` and would destroy any user overlays sitting alongside `base.yaml` the moment the gate is disabled.
+The two conditional apps, metallb and trust-manager, gate their `values/<app>/base.yaml` file through the same writer predicates (`isMetalLBPath`, `isTrustBundlePath` in `pkg/argocd/writer.go`) that already gate their Application manifest. These predicates match the `base.yaml` file specifically rather than the `values/<app>` directory, which keeps the intent legible: the gate removes the file NIC owns and says nothing about the directory around it.
+
+The safety of user overlays does not depend on that discipline being maintained. `removeStaleTemplate` refuses recursive deletion for any path under `values/` before it can reach `os.RemoveAll`, descending instead so the per-file gate still removes `base.yaml`. A predicate written in the natural but broader `strings.HasPrefix(relPath, "values/<app>")` form therefore behaves correctly rather than destroying overlays. That guard is the guarantee; the file-versus-directory matching above is clarity on top of it. There is a third layer as well: `WriteAllToGit` walks the embedded template FS, which has no `overlays/` node at all, so overlays are structurally invisible to the writer rather than merely filtered out by predicates.
 
 Raw-manifest foundational apps are out of scope here, and they have no regen-surviving override seam yet. Kustomize is the right merge tool for manifest-shaped sources in principle, but nothing in the tree implements that today: the only `kustomization.yaml` (`pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`) is a NIC-owned template rewritten by every `--regen-apps`, so it has exactly the wipe-on-regen problem this ADR fixes for Helm apps. Extending an equivalent seam to raw-manifest apps is follow-up work.
 
@@ -84,7 +86,7 @@ This ADR covers the foundational Helm apps whose Application manifests are embed
 - Packs and users override values by committing a file under `values/<app>/overlays/`. No Application edit is required.
 - Regeneration cannot destroy pack or user changes, because `--regen-apps` only ever rewrites `base.yaml` and the Application manifest, never the overlays directory.
 - Overlay ordering is an explicit, visible contract: filenames are prefixed (e.g. `30-llm.yaml`) so pack authors can reason about precedence without reading ArgoCD internals.
-- The seam is test-enforced for apps added in the future. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a new Helm app template uses inline `values`/`valuesObject`, omits `valueFiles`, or is not enrolled in the test's app table.
+- The seam is test-enforced for apps added in the future. `TestHelmApps_SeamInvariants` (`pkg/argocd/writer_test.go`) fails the build if a new Helm app template uses any of the four higher-precedence override mechanisms (`values:`, `valuesObject:`, `parameters:`, `fileParameters:`), omits `valueFiles`, or is not enrolled in the test's app table. All four are covered because ArgoCD's precedence is `parameters` > `valuesObject` > `values` > `valueFiles`, so guarding only the inline values forms would leave the two strongest mechanisms free to outrank every overlay.
 
 **Bad:**
 
