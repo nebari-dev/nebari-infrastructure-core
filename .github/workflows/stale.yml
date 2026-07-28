@@ -19,12 +19,26 @@ permissions:
   # effective contents permission is none.
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}
+  # A cancelled mid-run stale pass would leave partial state (some pull requests
+  # labeled or commented on, others not), so a second trigger waits its turn
+  # instead of tearing down the one in flight.
+  cancel-in-progress: false
+
 jobs:
   stale:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      # Labels and comments on pull requests go through the issues API, so
-      # issues: write is required even though this workflow ignores issues.
+      # issues: write is load-bearing for enumeration: actions/stale pages
+      # client.rest.issues.listForRepo to find candidate pull requests and
+      # rethrows any failure into core.setFailed, so without this scope the
+      # job fails outright at startup, even though this workflow only manages
+      # pull requests and never touches issues (actions/stale#1343). Labels
+      # and comments on pull requests also go through the issues API, but
+      # that is secondary; the scope cannot be dropped just because this
+      # workflow ignores issues.
       issues: write
       pull-requests: write
     steps:
@@ -41,6 +55,15 @@ jobs:
           days-before-issue-stale: -1
           days-before-issue-close: -1
 
+          # Belt-and-suspenders for the -1 gates above: this points
+          # stale-issue-label at a label name verified absent from this
+          # repository, instead of the upstream default `Stale`, which is
+          # currently the only reason the issue path is fully inert. An issue
+          # that already carried `Stale` would otherwise enter processing
+          # before the -1 thresholds apply; this sentinel guarantees the
+          # issue path can never match anything.
+          stale-issue-label: 'nic-issues-not-managed-by-stale-bot'
+
           days-before-pr-stale: 30
           days-before-pr-close: 7
 
@@ -55,15 +78,21 @@ jobs:
           # Closes must stay reversible: keep the branch so the PR can be reopened.
           delete-branch: false
 
-          # Default is 30 operations, which is thin against 24+ open PRs; running
-          # out silently skips PRs. Oldest first so the most stale cannot starve.
+          # The default of 30 operations is thin for this repository's open
+          # pull request count. If the budget runs out mid-run, the action
+          # calls core.warning twice naming operations-per-run and exits;
+          # nothing is dropped silently, but whatever pull requests are left
+          # are skipped until the next run rather than processed. Sorting by
+          # updated with ascending: true means the longest-idle pull requests
+          # are processed first, so they cannot be starved by the cap.
+          sort-by: updated
           operations-per-run: 100
           ascending: true
 
           stale-pr-message: |
             This pull request has had no activity for 30 days, so it has been labeled `status: inactive 💤`.
 
-            It will close automatically in 7 days unless something happens. A comment, a push, or a review all reset the clock.
+            It will close automatically in 7 days unless something happens. A comment or a push resets the clock.
 
             If this pull request should stay open regardless, for example long-running design work or something blocked upstream, add the `status: keep open 📌` label and this bot will skip it permanently.
 
