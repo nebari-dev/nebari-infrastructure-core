@@ -26,7 +26,7 @@ You need:
 | Tool | Why | Notes |
 | --- | --- | --- |
 | Go 1.26.5 or newer | Building and testing NIC | `go.mod` holds the authoritative version |
-| Docker or Podman | The local Kind workflow and `make test-integration` | Either works |
+| Docker or Podman | The local Kind workflow and `make test-integration` | Either works for the Kind workflow. `make test-integration` checks for a `docker` binary specifically, so with Podman you need a `docker` alias on your PATH |
 | `golangci-lint` | `make lint`, and the pre-commit hook | [Install guide](https://golangci-lint.run/welcome/install/) |
 | `pre-commit` | `make pre-commit` | `pip install pre-commit` |
 | OpenTofu | Only if you want to supply your own | Optional. NIC downloads and caches a pinned binary when one is not on your `PATH` |
@@ -116,7 +116,35 @@ git fetch origin
 git rebase origin/main
 ```
 
+If you are working from a fork, that is `git fetch upstream && git rebase upstream/main` instead. See below.
+
+## Pushing your branch
+
+If you have write access to this repository, push the branch directly:
+
+```bash
+git push --set-upstream origin feat/your-change
+```
+
+Most contributors do not have write access and work from a fork instead. From inside your clone:
+
+```bash
+gh repo fork --remote
+```
+
+That creates your fork, sets it as your `origin`, and renames this repository to `upstream`. From then on you push to your fork and rebase against upstream:
+
+```bash
+git push --set-upstream origin feat/your-change
+git fetch upstream
+git rebase upstream/main
+```
+
+Fork-based pull requests are normal here, and CI is set up to handle them.
+
 ## Opening a pull request
+
+Open it with `gh pr create --draft`, or use the "Compare & pull request" button GitHub offers after you push.
 
 Fill in the template:
 
@@ -143,7 +171,7 @@ Labels that carry meaning during review:
 | `status: approved 💪🏾` | Reviewed and approved |
 | `needs: triage 🚦` | Nobody has assessed this yet |
 
-Your branch is deleted automatically when the pull request merges.
+If your branch lives in this repository, it is deleted automatically when the pull request merges. Branches on your own fork are yours to clean up.
 
 ## Stale pull requests
 
@@ -157,9 +185,7 @@ Closing is not destructive. The branch is kept and the pull request can be reope
 
 ## Architectural changes
 
-Decisions that change how NIC is structured get recorded as an Architectural Decision Record in [docs/adr/](docs/adr/). Copy [docs/adr/template.md](docs/adr/template.md), take the next free number, and open it as its own pull request so the decision can be discussed separately from the code implementing it.
-
-Worth an ADR: adding a provider category, changing a public interface, adopting a foundational dependency, changing how state or secrets are handled. Not worth one: bug fixes, behavior-preserving refactors, dependency bumps.
+Decisions that change how NIC is structured get recorded as an Architectural Decision Record in [docs/adr/](docs/adr/). Follow the process in [docs/adr/README.md](docs/adr/README.md) rather than a summary here, because it includes updating the index table, which is easy to forget. Open the ADR as its own pull request so the decision can be discussed separately from the code implementing it. Before you pick a number, check the open pull requests for in-flight ADRs: collisions between concurrent ADR branches have happened more than once here.
 
 ## Where the docs live
 
