@@ -30,6 +30,7 @@ You need:
 | `golangci-lint` | `make lint`, and the pre-commit hook | [Install guide](https://golangci-lint.run/welcome/install/) |
 | `pre-commit` | `make pre-commit` | `pip install pre-commit` |
 | OpenTofu | Only if you want to supply your own | Optional. NIC downloads and caches a pinned binary when one is not on your `PATH` |
+| `gh` (GitHub CLI) | Forking and opening pull requests from the terminal | Optional if you prefer the web UI. [Install guide](https://cli.github.com/) |
 
 Then:
 
@@ -75,7 +76,7 @@ make test-race          # race detector
 make vuln               # govulncheck gate
 ```
 
-`make check` is the one to run before you push. CI runs the same checks, so a green `make check` locally is a good predictor of a green pull request.
+`make check` is the one to run before you push. CI runs these same checks plus the race detector and a vulnerability gate, and does not use `-short`, so a green `make check` locally is a good predictor of a green pull request, but not a guarantee.
 
 The `golangci-lint` pre-commit hook deliberately runs without `--fix`. It reports and blocks rather than rewriting your staged files, because autofix once silently deleted `//nolint` directives and pulled unrelated edits into a commit. Run `golangci-lint run --fix` yourself if you want fixes applied.
 
@@ -132,7 +133,18 @@ Most contributors do not have write access and work from a fork instead. From in
 gh repo fork --remote
 ```
 
-That creates your fork, sets it as your `origin`, and renames this repository to `upstream`. From then on you push to your fork and rebase against upstream:
+That creates your fork, sets it as your `origin`, and renames this repository to `upstream`.
+
+If you do not have `gh`, do the same thing by hand: click **Fork** on the repository page, then rewire your remotes:
+
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/<your-username>/nebari-infrastructure-core.git
+```
+
+That produces the same remote layout the commands below assume: `origin` is your fork, `upstream` is this repository.
+
+From then on you push to your fork and rebase against upstream:
 
 ```bash
 git push --set-upstream origin feat/your-change
@@ -154,7 +166,7 @@ Fill in the template:
 
 Open it as a **draft** while you are still working, and mark it ready when you want eyes on it.
 
-Two status checks must pass: **Test** and **Build**.
+Two status checks must pass: **Test** and **Build**. Other jobs also run (workflow pin checks, vulnerability scanning) and show up alongside these, but they are not merge-blocking.
 
 ## Review
 
@@ -185,7 +197,7 @@ Closing is not destructive. The branch is kept and the pull request can be reope
 
 ## Architectural changes
 
-Decisions that change how NIC is structured get recorded as an Architectural Decision Record in [docs/adr/](docs/adr/). Follow the process in [docs/adr/README.md](docs/adr/README.md) rather than a summary here, because it includes updating the index table, which is easy to forget. Open the ADR as its own pull request so the decision can be discussed separately from the code implementing it. Before you pick a number, check the open pull requests for in-flight ADRs: collisions between concurrent ADR branches have happened more than once here.
+Decisions that change how NIC is structured get recorded as an Architectural Decision Record in [docs/adr/](docs/adr/). Follow the process in [docs/adr/README.md](docs/adr/README.md) rather than a summary here, because it includes updating the index table, which is easy to forget. Open the ADR as its own pull request so the decision can be discussed separately from the code implementing it. Before you pick a number, check the open pull requests for in-flight ADRs: collisions between concurrent ADR branches have happened more than once here. Worth an ADR: adding a provider category, changing a public interface, adopting a foundational dependency, or changing how state or secrets are handled. Not worth one: bug fixes, behavior-preserving refactors, or dependency bumps.
 
 ## Where the docs live
 
@@ -200,4 +212,4 @@ Decisions that change how NIC is structured get recorded as an Architectural Dec
 
 ## Getting help
 
-Open an issue, or ask on a relevant open issue or pull request. Broader Nebari community resources are at [nebari.dev/docs/community](https://nebari.dev/docs/community).
+Open an issue, or ask on a relevant open issue or pull request. Broader Nebari community resources are at [nebari.dev/community](https://nebari.dev/community/introduction).
