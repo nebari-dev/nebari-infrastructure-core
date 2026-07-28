@@ -419,6 +419,7 @@ References:
 - **`docs/cli-reference.md`** - CLI command reference
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - The human-facing contribution process
 
 ## Dependencies
 
