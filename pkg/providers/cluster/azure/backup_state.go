@@ -26,10 +26,9 @@ func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
 	// If either ever moves to `for_each`, these addresses (e.g. [0] ->
 	// ["<key>"]) must be updated to match.
 	//
-	// Verified against terraform-azurerm-aks-cluster
-	// feat/longhorn-backup-container, the ref pinned in templates/main.tf.
-	// Re-check on every module bump — a mismatch here is silent (see
-	// cluster.RetainBackupResources).
+	// Verified against terraform-azurerm-aks-cluster v0.2.0, the version pinned
+	// in templates/main.tf. Re-check on every module bump — a mismatch here is
+	// silent (see cluster.RetainBackupResources).
 	return []string{
 		"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_container.this",
 		"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_account.this",
