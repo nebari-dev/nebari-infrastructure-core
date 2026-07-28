@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"strings"
 
 	tfjson "github.com/hashicorp/terraform-json"
 	"go.opentelemetry.io/otel/trace"
@@ -33,6 +34,10 @@ type stateEditor interface {
 // reported as a warning and skipped rather than aborting teardown. Orphaning a
 // bucket that should have been retained is preferable to failing the whole
 // destroy.
+//
+// When none of addrs is present, that is reported as a warning too: it is the
+// signature of an address list that has drifted from the Terraform module, and
+// staying quiet there means destroying backups the user asked to retain.
 func RetainBackupResources(ctx context.Context, span trace.Span, tf stateEditor, spec *BackupBucketSpec, addrs []string) {
 	if spec == nil || spec.ForceDestroy || len(addrs) == 0 {
 		return
@@ -50,6 +55,20 @@ func RetainBackupResources(ctx context.Context, span trace.Span, tf stateEditor,
 	}
 
 	present := PresentStateAddresses(state)
+
+	// If the caller asked to retain something but not one of its addresses is
+	// in state, the address list has almost certainly drifted from the module
+	// (a refactor that renamed or re-nested the resources). Say so: the
+	// alternative is destroying the very backups the user asked to keep,
+	// silently. A genuinely absent bucket is indistinguishable from drift here,
+	// so this is a warning rather than an error.
+	if !anyPresent(present, addrs) {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "No Longhorn backup resources found at the expected Terraform state addresses; if they exist they will be destroyed. The provider's address list may be out of date with the Terraform module.").
+			WithResource("backup-bucket").WithAction("retain").
+			WithMetadata("expected_addresses", strings.Join(addrs, ", ")))
+		return
+	}
+
 	for _, addr := range addrs {
 		if !present[addr] {
 			continue
@@ -67,10 +86,20 @@ func RetainBackupResources(ctx context.Context, span trace.Span, tf stateEditor,
 	}
 }
 
+// anyPresent reports whether at least one of addrs is in present.
+func anyPresent(present map[string]bool, addrs []string) bool {
+	for _, addr := range addrs {
+		if present[addr] {
+			return true
+		}
+	}
+	return false
+}
+
 // PresentStateAddresses collects the absolute addresses of every resource in
 // the state's root module and any child modules. The Longhorn backup resources
-// live in the root module, but walking child modules keeps the helper correct
-// if the module layout changes.
+// sit two module levels down (the provider shim's module call, then the
+// module's own longhorn-backup submodule), so the recursive walk is load-bearing.
 func PresentStateAddresses(state *tfjson.State) map[string]bool {
 	out := make(map[string]bool)
 	if state == nil || state.Values == nil || state.Values.RootModule == nil {
