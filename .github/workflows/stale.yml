@@ -1,0 +1,73 @@
+name: Stale pull requests
+
+on:
+  # Enabled in a follow-up commit once a dry run has been verified on main.
+  # workflow_dispatch cannot run from a file that is not on the default branch,
+  # so the workflow has to land here first, and scheduled runs are always live.
+  # schedule:
+  #   # Daily at 01:30 UTC.
+  #   - cron: '30 1 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only: log what would happen without labeling, commenting, or closing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      # Labels and comments on pull requests go through the issues API, so
+      # issues: write is required even though this workflow ignores issues.
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
+        with:
+          # Manual runs preview by default; scheduled runs are always live
+          # (on a schedule event `inputs.dry_run` is null, so `|| false` wins).
+          # Use the typed `inputs` context, not `github.event.inputs`, which
+          # yields strings: the string "false" is truthy in GitHub expressions,
+          # so that variant is a trap waiting for the next person to edit it.
+          debug-only: ${{ inputs.dry_run || false }}
+
+          # Pull requests only. Issue triage is handled by humans.
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+
+          days-before-pr-stale: 30
+          days-before-pr-close: 7
+
+          # Distinct from the existing "status: stale" label, which means
+          # "not up to date with the default branch".
+          stale-pr-label: 'status: inactive 💤'
+          exempt-pr-labels: 'status: keep open 📌'
+
+          # Any comment, push, or review clears the label and resets the clock.
+          remove-stale-when-updated: true
+
+          # Closes must stay reversible: keep the branch so the PR can be reopened.
+          delete-branch: false
+
+          # Default is 30 operations, which is thin against 24+ open PRs; running
+          # out silently skips PRs. Oldest first so the most stale cannot starve.
+          operations-per-run: 100
+          ascending: true
+
+          stale-pr-message: |
+            This pull request has had no activity for 30 days, so it has been labeled `status: inactive 💤`.
+
+            It will close automatically in 7 days unless something happens. A comment, a push, or a review all reset the clock.
+
+            If this pull request should stay open regardless, for example long-running design work or something blocked upstream, add the `status: keep open 📌` label and this bot will skip it permanently.
+
+            Closing is not final. The branch is kept, and the pull request can be reopened.
+
+          close-pr-message: |
+            Closing this pull request after 37 days with no activity.
+
+            The branch has not been deleted, so this can be reopened if the work is picked back up. If it was closed in error, reopen it and add the `status: keep open 📌` label to prevent it happening again.
