@@ -249,7 +249,7 @@ implementation; this ADR records a recommended default for each:
 2. **Is a hand-curated IAM permission list worth the maintenance,** given SCP
    false negatives? Recommendation: yes, but only as an advisory tier-2 and as
    the `--gen-perms` source; revisit if drift becomes painful.
-3. **Confirm the always-on-vs-opt-in split.** Verbal discussion in JATIC syncs
+3. **Confirm the always-on-vs-opt-in split.** Verbal discussion in internal syncs
    reportedly favored pre-command credential validation; that has not been
    recorded in the tracker and should be confirmed by the maintainers who were
    in the room, not treated as settled.
