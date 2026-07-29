@@ -45,6 +45,21 @@ func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string)
 		// Reuse the existing webhook TLS secret across upgrades instead of
 		// regenerating it.
 		"keepTLSSecret": true,
+
+		// LBC starts before Envoy Gateway, so its one-shot CRD detection
+		// disables Gateway API support on a fresh cluster but can enable it
+		// after Envoy installs its CRDs and LBC later restarts. NIC does not
+		// provide LBC's restart-gated Gateway API controllers; Envoy Gateway is
+		// Nebari's Gateway API implementation. Set the complete gate set
+		// explicitly so startup ordering and later CRD changes cannot alter
+		// which controllers run (#383).
+		"controllerConfig": map[string]any{
+			"featureGates": map[string]any{
+				"ALBGatewayAPI":      false,
+				"GatewayListenerSet": false,
+				"NLBGatewayAPI":      false,
+			},
+		},
 	}
 }
 

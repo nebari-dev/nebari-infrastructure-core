@@ -25,6 +25,17 @@ func TestAWSLoadBalancerControllerHelmValues(t *testing.T) {
 			},
 		},
 		{
+			name:        "disables the Gateway API feature gates",
+			cfg:         &Config{Region: "us-west-2"},
+			clusterName: "my-cluster",
+			vpcID:       "vpc-abc123",
+			checkValues: map[string]any{
+				"controllerConfig.featureGates.ALBGatewayAPI":      false,
+				"controllerConfig.featureGates.GatewayListenerSet": false,
+				"controllerConfig.featureGates.NLBGatewayAPI":      false,
+			},
+		},
+		{
 			name:        "different region and cluster",
 			cfg:         &Config{Region: "eu-central-1"},
 			clusterName: "prod-eks",

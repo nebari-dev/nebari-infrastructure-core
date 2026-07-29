@@ -65,8 +65,15 @@ type AWSLoadBalancerControllerConfig struct {
 }
 
 // defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
-// Bump to track the latest v3.x line; v2/chart-v1 is EOL.
-const defaultLBCChartVersion = "3.2.1"
+// Chart 3.2.2 is the minimum safe version: upstream PR #4689 made the
+// ListenerSet loader honor CRD detection, preventing the restart-triggered
+// crash loop tracked in #383. Chart 3.4.2 also includes fixes for
+// CVE-2026-39822 and CVE-2026-42505.
+//
+// Keep this at 3.2.2 or later even though NIC explicitly disables the Gateway
+// API feature gates; those gates mask the older controller bug and could hide
+// an unsafe rollback.
+const defaultLBCChartVersion = "3.4.2"
 
 // defaultLBCDestroyTimeout is the maximum time the graceful Kubernetes-side
 // cleanup will wait for LBC's finalizer to drain load balancers before falling
