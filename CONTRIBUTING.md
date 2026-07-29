@@ -191,7 +191,9 @@ A pull request with no activity for **30 days** is labeled `status: inactive �
 
 Any activity resets the clock. A comment, a push, or a review all remove the label and start the 30 days over.
 
-**Changing a label also counts as activity.** The bot decides from GitHub's `updated_at` timestamp, which a label change bumps just like a comment does. So adding or removing any label on an inactive pull request clears `status: inactive 💤` on the next run and restarts the 30 days. Worth knowing if you triage by label: it is easy to reset a countdown without meaning to.
+**Label changes count as activity too, with one exception.** The bot measures from GitHub's `updated_at`, which a label change bumps just like a comment does. So adding or removing a label on a pull request that is already marked `status: inactive 💤` clears the label and restarts the 30 days. Worth knowing if you triage by label, because it is easy to reset a countdown without meaning to.
+
+The exception is the bot's own label. It recognises when the only change since it marked a pull request was that labelling, and does not treat it as activity, so the 7-day countdown to closing is not self-defeating.
 
 Nothing is exempt by default, including drafts. If a pull request should stay open regardless, add **`status: keep open 📌`** and the bot skips it permanently. Use it for long-running design work, or when the delay is on the maintainers' side rather than yours.
 

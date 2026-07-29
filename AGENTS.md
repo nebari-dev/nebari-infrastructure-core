@@ -445,7 +445,7 @@ Open pull requests expire. After **30 days** with no activity a pull request is 
 
 To keep a pull request open indefinitely, add the **`status: keep open 📌`** label. Use it for long-running design work, or when the hold-up is on the maintainers' side.
 
-Staleness is derived from GitHub's `updated_at`, and **a label change bumps it**. Adding or removing any label therefore resets the 30-day counter and clears `status: inactive 💤` on the next run. Do not rely on labelling to be a read-only triage action.
+Staleness is derived from GitHub's `updated_at`, which is bumped by comments, pushes, reviews, and **label changes**. Adding or removing a label on an already-inactive pull request therefore resets the 30-day counter and clears `status: inactive 💤`, so labelling is not a read-only triage action. The bot excludes its own stale label from this, so applying it does not reset the countdown it starts.
 
 Closes are reversible: branches are preserved and the pull request can be reopened.
 
