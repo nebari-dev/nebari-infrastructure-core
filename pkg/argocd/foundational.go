@@ -474,6 +474,12 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 // Longhorn credential Secret into the longhorn-system namespace. The Secret is
 // referenced by the BackupTarget that ArgoCD syncs from git, so it must exist
 // before the root App-of-Apps is applied.
+//
+// For a keyless target (iamRoleARN set) the Secret carries only
+// AWS_IAM_ROLE_ARN; the usable credentials are injected into longhorn-manager
+// pods by the EKS Pod Identity webhook, and repairing pods that predate the
+// association is the AWS provider's job (see
+// aws.repairLonghornBackupPodIdentity, #500).
 func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig, iamRoleARN string) error {
 	if err := createNamespace(ctx, client, longhorn.Namespace); err != nil {
 		return fmt.Errorf("ensure longhorn namespace: %w", err)
