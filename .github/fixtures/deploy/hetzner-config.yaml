@@ -31,4 +31,4 @@ cluster:
 
       workers:
         instance_type: cpx32
-        count: 2
+        count: 1

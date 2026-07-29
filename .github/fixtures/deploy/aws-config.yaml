@@ -31,13 +31,13 @@ cluster:
 
     node_groups:
       general:
-        instance: m5.2xlarge
-        min_nodes: 1
-        max_nodes: 1
-
-      user:
         instance: m5.xlarge
-        min_nodes: 0
+        min_nodes: 1
+        max_nodes: 3
+
+      worker:
+        instance: m5.xlarge
+        min_nodes: 1
         max_nodes: 3
 
     tags:
