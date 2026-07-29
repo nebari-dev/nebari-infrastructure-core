@@ -9,3 +9,7 @@ metadata:
 spec:
   addresses:
     - {{ .MetalLBAddressRange }}
+  # default-pool exists so LoadBalancer Services get an address without needing
+  # a pool annotation. Automatic assignment is the whole point of it, so state it
+  # rather than inherit whatever MetalLB defaults to.
+  autoAssign: true

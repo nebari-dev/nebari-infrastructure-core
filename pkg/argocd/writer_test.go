@@ -263,6 +263,28 @@ func TestGatewayTemplate_WithoutAnnotations(t *testing.T) {
 	}
 }
 
+// default-pool must hand out addresses without a per-Service pool annotation,
+// so autoAssign is a value we own rather than inherit.
+func TestMetalLBIPAddressPool_AutoAssigns(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/metallb/ipaddresspool.yaml")
+	if err != nil {
+		t.Fatalf("failed to read MetalLB IPAddressPool template: %v", err)
+	}
+
+	processed, err := processTemplate(
+		"manifests/metallb/ipaddresspool.yaml",
+		content,
+		TemplateData{MetalLBAddressRange: "172.18.255.100-172.18.255.110"},
+	)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	if output := string(processed); !strings.Contains(output, "autoAssign: true") {
+		t.Errorf("MetalLB IPAddressPool template missing %q, got:\n%s", "autoAssign: true", output)
+	}
+}
+
 func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -524,6 +546,7 @@ func TestHTTPToHTTPSRedirectRoute(t *testing.T) {
 			}{
 				{"kind", "kind: HTTPRoute"},
 				{"targets http listener", "sectionName: http"},
+				{"explicit catch-all path match", "type: PathPrefix\n            value: /"},
 				{"redirect filter type", "type: RequestRedirect"},
 				{"redirect to https", "scheme: https"},
 				{"301 status code", "statusCode: 301"},
@@ -629,6 +652,7 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 		Domain:              "test.example.com",
 		HTTPSPort:           443,
 		KeycloakServiceName: "keycloak-keycloakx-http",
+		LonghornEnabled:     true,
 	}
 
 	for _, entry := range entries {
@@ -657,14 +681,11 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 
 			output := string(processed)
 
-			// This skips ANY route that renders empty with the zero-value test
-			// data, not just longhorn-httproute.yaml — so a conditionally
-			// rendered route silently drops out of this generic https check.
-			// Each such route needs its own test pinning the https-listener
-			// property with its gate enabled (see
-			// TestWriteAllToGit_LonghornHTTPRoute for the Longhorn one).
+			// Conditional routes must have their gates enabled in data above.
+			// Keep the empty-render guard so a future conditional route cannot
+			// produce misleading assertion failures without naming the cause.
 			if strings.TrimSpace(output) == "" {
-				t.Skipf("skipping %s: empty render with default test data", name)
+				t.Fatalf("%s rendered empty; enable its template gate in the test data", name)
 			}
 
 			if !strings.Contains(output, "sectionName: https") {
@@ -907,10 +928,14 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"name: longhorn-oidc-client-secret",
 			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
 			`logoutPath: "/oauth2/logout"`,
+			// Values we own rather than inherit from Envoy Gateway's defaults:
+			// session renewal behaviour and the JWKS staleness window.
+			"refreshToken: true",
 			"forwardAccessToken: true",
 			"jwt:",
 			"name: keycloak",
 			"/realms/nebari/protocol/openid-connect/certs",
+			"cacheDuration: 300s",
 			"authorization:",
 			"defaultAction: Deny",
 			"name: allow-longhorn-admins",
