@@ -100,14 +100,16 @@ NIC creates three `AppProject`s (`pkg/argocd/project.go`), applied directly to t
 | Project | Purpose | Source repos | Destinations |
 |---------|---------|--------------|--------------|
 | `foundational` | The NIC-owned stack in §10.2. Every foundational `Application` sets `project: foundational`. | Derived from the embedded templates | Derived from the embedded templates |
-| `nebari-apps` | Software packs (`NebariApp`-based user applications) | The Nebari Helm repository plus the cluster's own GitOps repo | `namespace: '*'` |
+| `nebari-apps` | Software packs (`NebariApp`-based user applications) | `'*'` (any chart source) | `namespace: '*'` |
 | `default` | Deny-all. Exists so ArgoCD's built-in project cannot be used as a project-escape hatch. | `[]` | `[]` |
 
 `foundational`'s scopes are **derived, not hardcoded**: `deriveProjectScopes` renders the embedded app and manifest templates and collects the distinct `repoURL` and namespace values they use. Adding an app therefore widens the project automatically, with no second list to keep in sync.
 
 That derivation only recognizes specific shapes: namespaces from `metadata.namespace` and `spec.destination.namespace`, source repos from `spec.source.repoURL` and `spec.sources[].repoURL`. A template that declares a namespace or repo *only* some other way (a deeply-nested field, or a Kustomize top-level `namespace:`) is invisible to the scan and must also declare it via a recognized shape, or the app will be refused by its own project at sync time.
 
-`foundational` and `nebari-apps` both keep wildcard `clusterResourceWhitelist` / `namespaceResourceWhitelist` entries. That is deliberate for now: repo-and-namespace scoping is the boundary these projects enforce, and kind-level restriction is tracked as admission-controller follow-up work in [#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480).
+`nebari-apps`, by contrast, is **not** scoped: its `sourceRepos` is `'*'`. Packs legitimately ship from several places (the Nebari Helm index, that index's `oci://quay.io/nebari/charts` mirror, and third-party git repos), and NIC has no configuration surface for declaring which are trusted, so any fixed list refuses valid packs. Replacing the wildcard with an operator-declared allow-list is tracked in [#530](https://github.com/nebari-dev/nebari-infrastructure-core/issues/530) and is the `hardened` posture in [ADR-0010](../../adr/0010-high-security-mode.md).
+
+`foundational` and `nebari-apps` both keep wildcard `clusterResourceWhitelist` / `namespaceResourceWhitelist` entries. That is deliberate for now: repo-and-namespace scoping is the boundary `foundational` enforces, and kind-level restriction is tracked as admission-controller follow-up work in [#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480).
 
 ## 10.6 InfraSettings Drives Conditional Deployment
 
