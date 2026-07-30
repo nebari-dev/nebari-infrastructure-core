@@ -278,7 +278,7 @@ func TestControllerGoMemLimit(t *testing.T) {
 			name: "uses the Go runtime byte suffix",
 			got:  strings.HasSuffix(goMemLimit, "MiB"),
 			want: true,
-			why:  "the Go runtime rejects Kubernetes' Mi and ignores the whole value",
+			why:  "the Go runtime throws on a malformed value, so Kubernetes' Mi crash-loops the controller at startup",
 		},
 		{
 			name: "stays below the memory limit",

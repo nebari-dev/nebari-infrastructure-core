@@ -158,7 +158,10 @@ func DefaultConfig() Config {
 // GOMEMLIMIT follows automatically.
 func controllerValues() map[string]any {
 	v := helmResources("100m", "512Mi", "500m", fmt.Sprintf("%dMi", controllerMemLimitMiB))
-	// The Go runtime spells its byte suffixes MiB, not Kubernetes' Mi.
+	// The Go runtime spells its byte suffixes MiB, not Kubernetes' Mi, and it
+	// throws on a malformed value during gcinit rather than falling back to no
+	// limit. Getting this wrong crash-loops the controller before it serves a
+	// single request, so the suffix is asserted in TestControllerGoMemLimit.
 	v["env"] = []map[string]any{
 		{"name": "GOMEMLIMIT", "value": fmt.Sprintf("%dMiB", controllerMemLimitMiB*goMemLimitPercent/100)},
 	}
