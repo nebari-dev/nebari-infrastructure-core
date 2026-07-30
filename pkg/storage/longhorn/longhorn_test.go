@@ -620,7 +620,7 @@ func TestBuildHelmValuesResourceDefaults(t *testing.T) {
 	}
 	// csi-plugin is the per-node mount path; capping it risks slow mounts.
 	if strings.Contains(csi, "csi-plugin") {
-		t.Error("csi-plugin must not be resource-limited (see docs/resource-sizing.md)")
+		t.Error("csi-plugin must not be resource-limited: it is the per-node mount path (#456)")
 	}
 }
 

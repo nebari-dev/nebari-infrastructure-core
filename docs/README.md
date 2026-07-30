@@ -21,13 +21,6 @@ Comprehensive design documentation covering:
 - **Operations**: Testing, deployment, and operational procedures
 - **Appendix**: Additional resources and reference materials
 
-### Guides
-
-- [CLI reference](cli-reference.md)
-- [Local development with kind](local-kind-development.md)
-- [Custom TLS certificates](custom-tls-certificate.md)
-- [Resource sizing](resource-sizing.md) - default requests/limits for foundational software, what each component scales with, and how to tune them
-
 ## When to Use Which
 
 | Document Type | Use When |

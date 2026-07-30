@@ -240,7 +240,7 @@ func buildHelmValues(cfg *Config) map[string]any {
 
 	// The chart ships no resources for the CSI sidecars, leaving them
 	// BestEffort (#456). csi-plugin (the per-node mount path) is deliberately
-	// left alone: capping it risks slow mounts; see docs/resource-sizing.md.
+	// left alone: capping it risks slow mounts.
 	settings["systemManagedCSIComponentsResourceLimits"] = `{` +
 		`"csi-attacher":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}},` +
 		`"csi-provisioner":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}},` +
