@@ -98,12 +98,14 @@ spec:
             enabled: false
           postgresql:
             enabled: false
+          # CPU deliberately uncapped: logins are bursty and throttling hurts
+          # exactly when users pile in. The memory limit sizes the JVM heap
+          # (MaxRAMPercentage=70), so it must stay set. See #456/#457.
           resources:
             requests:
-              cpu: 500m
+              cpu: 250m
               memory: 1Gi
             limits:
-              cpu: 2000m
               memory: 2Gi
 {{- if .TrustManagerEnabled }}
           extraVolumes: |

@@ -52,12 +52,19 @@ spec:
             - apiGroups: [""]
               resources: ["nodes/proxy"]
               verbs: ["get"]
+        # The memory limit is load-bearing: the chart derives GOMEMLIMIT
+        # from it (useGOMEMLIMIT), so removing it drops OOM protection.
+        #
+        # The memory request is 256Mi rather than the 128Mi the #456 kind
+        # audit measured: on EKS the agent settles at ~231Mi, since scrape
+        # volume tracks how many pods and nodes each agent sees. Requesting
+        # below steady-state usage makes the scheduler overcommit nodes.
         resources:
           requests:
-            cpu: 100m
-            memory: 128Mi
+            cpu: 50m
+            memory: 256Mi
           limits:
-            cpu: 500m
+            cpu: 250m
             memory: 512Mi
         service:
           enabled: true

@@ -105,6 +105,14 @@ type Config struct {
 	// controls which nodes are labeled as the storage (replica) pool.
 	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
 
+	// InstanceManagerCPUPercent overrides Longhorn's "Guaranteed Instance
+	// Manager CPU" setting: the percentage (0-40) of each node's allocatable
+	// CPU reserved for every instance-manager pod, per node. Longhorn's
+	// default is 12, which on a 4 vCPU node silently reserves ~480m per node
+	// before any volume exists (#456). Applied to both v1 and v2 data engines.
+	// Nil keeps Longhorn's default; 0 removes the reservation entirely.
+	InstanceManagerCPUPercent *int `yaml:"instance_manager_cpu_percent,omitempty"`
+
 	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the
 	// Kubernetes Cluster Autoscaler. It is not user-facing so providers set it
 	// from their own autoscaler config (e.g. the AWS provider derives it from
