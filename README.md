@@ -393,31 +393,13 @@ contributions to help shape the future of the project!
 
 ## Contributing
 
-Contributions are welcome! To get started:
-
-```bash
-# Clone the repo
-git clone https://github.com/nebari-dev/nebari-infrastructure-core.git
-cd nebari-infrastructure-core
-
-# Install dependencies and build
-make build
-
-# Run tests
-go test ./... -v
-
-# Run all checks (fmt, vet, lint, test)
-make check
-
-# Install pre-commit hooks
-pre-commit install
-```
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full process: getting set up, the development loop, and how a change travels from your clone to `main`.
 
 See our [issue tracker](https://github.com/nebari-dev/nebari-infrastructure-core/issues) for open issues.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 ## OpenTofu lockfile updates
 
