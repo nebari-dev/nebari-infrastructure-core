@@ -34,10 +34,12 @@ Bucket and key are not hard-coded; they are populated via `-backend-config` flag
 The bucket name is deterministic and not user-configurable today:
 
 ```
-nic-tfstate-<project_name>-<region>-<8-hex-chars-of-sha256(account_id)>
+nic-tfstate-<normalized_project_name>-<region>-<8-hex-chars-of-sha256(account_id)>
 ```
 
 For example, `nic-tfstate-my-nebari-us-west-2-1a2b3c4d`. The account ID is hashed rather than embedded directly. The total length is checked against the 63-character S3 bucket name limit; project names that would overflow it return an error.
+
+The project name segment is lowercased and underscores are replaced with hyphens to satisfy S3 bucket naming rules. The configured `project_name`, the state object key, and the cluster name are unaffected.
 
 The state object key is `<project_name>/terraform.tfstate`.
 
