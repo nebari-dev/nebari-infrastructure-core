@@ -137,6 +137,7 @@ jobs:
         with:
           config: .github/fixtures/deploy/aws-config.yaml
           nic-binary: nic
+          wait-timeout: '1800'
 
   azure:
     name: Deploy (Azure)
@@ -194,6 +195,7 @@ jobs:
         with:
           config: .github/fixtures/deploy/azure-config.yaml
           nic-binary: nic
+          wait-timeout: '1800'
 
   hetzner:
     name: Deploy (Hetzner)
@@ -238,6 +240,7 @@ jobs:
         with:
           config: .github/fixtures/deploy/hetzner-config.yaml
           nic-binary: nic
+          wait-timeout: '1800'
 
   existing:
     name: Deploy (Existing)
