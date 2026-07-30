@@ -18,6 +18,16 @@ const (
 	// make that mechanism fail silently rather than error.
 	defaultChartVersion = "9.7.1"
 	defaultNamespace    = "argocd"
+
+	// controllerMemLimitMiB is the application-controller's memory limit (1024
+	// MiB, which the API server canonicalises to the 1Gi kubectl reports), and
+	// goMemLimitPercent the share of it handed to GOMEMLIMIT as a soft ceiling.
+	// GOMEMLIMIT is derived rather than written out separately so the two
+	// cannot drift: raising the limit on its own would just move the OOM
+	// threshold without giving the Go runtime a reason to collect sooner.
+	// See controllerValues for why these numbers are what they are.
+	controllerMemLimitMiB = 1024
+	goMemLimitPercent     = 90
 )
 
 // Config holds configuration for Argo CD installation
@@ -115,7 +125,7 @@ func DefaultConfig() Config {
 			// #456 audit (idle usage plus chart-suggested values with headroom).
 			// NOTE: Values changes only reach existing installs on the next
 			// chart Version bump (see the Version field's doc comment).
-			"controller":     helmResources("100m", "256Mi", "500m", "512Mi"),
+			"controller":     controllerValues(),
 			"repoServer":     helmResources("25m", "128Mi", "500m", "512Mi"),
 			"server":         helmResources("25m", "64Mi", "200m", "128Mi"),
 			"applicationSet": helmResources("25m", "64Mi", "200m", "128Mi"),
@@ -126,6 +136,33 @@ func DefaultConfig() Config {
 			"dex": map[string]any{"enabled": false},
 		},
 	}
+}
+
+// controllerValues sizes the application-controller, which needs more headroom
+// than the rest of the chart's components because its working set tracks the
+// number of Kubernetes objects it caches rather than the number of Applications
+// NIC creates. The #456 audit measured it on a single-node kind cluster, where
+// a 512Mi limit was ample; on EKS the same pod idles at 232-287Mi but spikes
+// past 512Mi during reconciliation and was OOMKilled repeatedly, because a
+// managed cluster carries far more API objects (cloud controllers, Longhorn
+// CRDs and CRs) and the controller watches all of them.
+//
+// GOMEMLIMIT is Argo CD's documented mitigation for exactly this: a soft
+// ceiling that makes the Go runtime collect before the kubelet's hard limit
+// kills the pod. Argo CD's HA guide recommends 80-90% of the container limit
+// and warns that setting it near the live working set causes GC thrashing,
+// which 921MiB against a ~290Mi working set stays well clear of. See
+// https://argo-cd.readthedocs.io/en/latest/operator-manual/high_availability/
+//
+// Installs managing many more resources should raise controllerMemLimitMiB;
+// GOMEMLIMIT follows automatically.
+func controllerValues() map[string]any {
+	v := helmResources("100m", "512Mi", "500m", fmt.Sprintf("%dMi", controllerMemLimitMiB))
+	// The Go runtime spells its byte suffixes MiB, not Kubernetes' Mi.
+	v["env"] = []map[string]any{
+		{"name": "GOMEMLIMIT", "value": fmt.Sprintf("%dMiB", controllerMemLimitMiB*goMemLimitPercent/100)},
+	}
+	return v
 }
 
 // helmResources builds a chart component's resources block. cpuLim may be

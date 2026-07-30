@@ -1248,7 +1248,9 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 			name:     "opentelemetry collector",
 			template: "templates/apps/opentelemetry-collector.yaml",
 			want: []string{
-				"        resources:\n          requests:\n            cpu: 50m\n            memory: 128Mi\n          limits:\n            cpu: 250m\n            memory: 512Mi",
+				// 256Mi request, not the 128Mi the kind audit measured: the
+				// agent settles at ~231Mi on EKS.
+				"        resources:\n          requests:\n            cpu: 50m\n            memory: 256Mi\n          limits:\n            cpu: 250m\n            memory: 512Mi",
 			},
 		},
 		{

@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -200,7 +201,9 @@ func TestDefaultConfigResources(t *testing.T) {
 		cpuLim    string
 		memLim    string
 	}{
-		{"controller", "100m", "256Mi", "500m", "512Mi"},
+		// The controller carries more headroom than the rest on purpose; a
+		// 512Mi limit OOMKilled it on EKS. See controllerValues.
+		{"controller", "100m", "512Mi", "500m", "1024Mi"},
 		{"repoServer", "25m", "128Mi", "500m", "512Mi"},
 		{"server", "25m", "64Mi", "200m", "128Mi"},
 		{"applicationSet", "25m", "64Mi", "200m", "128Mi"},
@@ -231,6 +234,70 @@ func TestDefaultConfigResources(t *testing.T) {
 			}
 			if lim["cpu"] != tt.cpuLim || lim["memory"] != tt.memLim {
 				t.Errorf("limits = %v/%v, want %s/%s", lim["cpu"], lim["memory"], tt.cpuLim, tt.memLim)
+			}
+		})
+	}
+}
+
+// TestControllerGoMemLimit guards the second half of the OOMKill fix. Raising
+// the application-controller's memory limit alone only moves the threshold; the
+// soft ceiling is what makes the Go runtime collect before the kubelet kills the
+// pod. Each case fails on a distinct way that protection can be lost.
+func TestControllerGoMemLimit(t *testing.T) {
+	comp, ok := DefaultConfig().Values["controller"].(map[string]any)
+	if !ok {
+		t.Fatal("Values[controller] missing or not a map")
+	}
+	env, ok := comp["env"].([]map[string]any)
+	if !ok {
+		t.Fatalf("Values[controller][env] missing or not []map[string]any, got %T", comp["env"])
+	}
+	var goMemLimit string
+	for _, e := range env {
+		if e["name"] == "GOMEMLIMIT" {
+			goMemLimit, _ = e["value"].(string)
+		}
+	}
+	// Parsed rather than recomputed from the constants, so the assertions below
+	// describe the rendered value instead of restating how it was built.
+	goMemLimitMiB, _ := strconv.Atoi(strings.TrimSuffix(goMemLimit, "MiB"))
+
+	tests := []struct {
+		name string
+		got  any
+		want any
+		why  string
+	}{
+		{
+			name: "GOMEMLIMIT is set",
+			got:  goMemLimit != "",
+			want: true,
+			why:  "without it a reconcile spike is OOMKilled instead of collected",
+		},
+		{
+			name: "uses the Go runtime byte suffix",
+			got:  strings.HasSuffix(goMemLimit, "MiB"),
+			want: true,
+			why:  "the Go runtime rejects Kubernetes' Mi and ignores the whole value",
+		},
+		{
+			name: "stays below the memory limit",
+			got:  goMemLimitMiB > 0 && goMemLimitMiB < controllerMemLimitMiB,
+			want: true,
+			why:  "a soft ceiling at or above the hard limit collects too late to help",
+		},
+		{
+			name: "percentage matches Argo CD's guidance",
+			got:  goMemLimitPercent >= 80 && goMemLimitPercent <= 90,
+			want: true,
+			why:  "Argo CD's HA guide recommends 80-90%; higher risks OOM, lower risks GC thrashing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("got %v, want %v: %s", tt.got, tt.want, tt.why)
 			}
 		})
 	}
