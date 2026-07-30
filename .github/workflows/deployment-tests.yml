@@ -267,7 +267,6 @@ jobs:
           branch: existing
           token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
 
-
       # Disable Traefik as NIC will deploy its own Envoy gateway LoadBalancer.
       # Also, pass --no-lb to drop k3d's external proxy container, which is 
       # unnecessary on a Linux runner where the node IP is directly routable.
