@@ -131,6 +131,8 @@ jobs:
 
       - name: Deploy
         uses: ./.github/actions/deploy
+        # Leave around 30 minutes for the post hook to destroy the cluster
+        timeout-minutes: 90
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
@@ -185,6 +187,8 @@ jobs:
 
       - name: Deploy
         uses: ./.github/actions/deploy
+        # Leave around 30 minutes for the post hook to destroy the cluster
+        timeout-minutes: 90
         env:
           ARM_USE_OIDC: 'true'
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -233,6 +237,8 @@ jobs:
 
       - name: Deploy
         uses: ./.github/actions/deploy
+        # Leave around 15 minutes for the post hook to destroy the cluster
+        timeout-minutes: 45
         env:
           HETZNER_TOKEN: ${{ secrets.HETZNER_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
