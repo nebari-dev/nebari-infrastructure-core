@@ -20,6 +20,37 @@ const (
 	defaultNamespace    = "argocd"
 )
 
+// cnpgClusterHealthLua teaches Argo CD how to read the health of a
+// postgresql.cnpg.io Cluster. Without it Argo CD has no health check for the
+// CRD and reports every Cluster as Healthy the moment it is created, which
+// makes the UI and `argocd app get` useless for diagnosing a database that is
+// still bootstrapping or stuck.
+//
+// Keyed on .status.phase, whose values are string constants in CNPG's
+// api/v1/cluster_types.go (PhaseHealthy, PhaseUnrecoverable, ...). Anything
+// not explicitly terminal is Progressing, so a phase added by a future
+// operator release degrades to "still working" rather than a false Healthy.
+const cnpgClusterHealthLua = `local hs = {}
+if obj.status == nil or obj.status.phase == nil or obj.status.phase == "" then
+  hs.status = "Progressing"
+  hs.message = "Waiting for the CloudNativePG operator to report a phase"
+  return hs
+end
+hs.message = obj.status.phase
+if obj.status.phase == "Cluster in healthy state" then
+  hs.status = "Healthy"
+elseif obj.status.phase == "Cluster is unrecoverable and needs manual intervention"
+    or obj.status.phase == "Invalid cluster definition"
+    or obj.status.phase == "Unable to create required cluster objects"
+    or obj.status.phase == "Cluster has incomplete or invalid image catalog"
+    or obj.status.phase == "Waiting for user action" then
+  hs.status = "Degraded"
+else
+  hs.status = "Progressing"
+end
+return hs
+`
+
 // Config holds configuration for Argo CD installation
 type Config struct {
 	// Version is the Argo CD chart version to install.
@@ -77,10 +108,11 @@ g, argocd-viewers, role:readonly
 g, /argocd-viewers, role:readonly`
 
 	configs := cfg.Values["configs"].(map[string]any)
-	configs["cm"] = map[string]any{
-		"url":         argocdURL,
-		"oidc.config": oidcConfig,
-	}
+	// Merge into the cm map from DefaultConfig rather than replacing it, so the
+	// resource health customizations set there survive the OIDC path.
+	cm := configs["cm"].(map[string]any)
+	cm["url"] = argocdURL
+	cm["oidc.config"] = oidcConfig
 	configs["rbac"] = map[string]any{
 		"policy.default": "",
 		"scopes":         "[groups]",
@@ -108,6 +140,9 @@ func DefaultConfig() Config {
 			"configs": map[string]any{
 				"params": map[string]any{
 					"server.insecure": true,
+				},
+				"cm": map[string]any{
+					"resource.customizations.health.postgresql.cnpg.io_Cluster": cnpgClusterHealthLua,
 				},
 			},
 		},

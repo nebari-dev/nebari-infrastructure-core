@@ -27,10 +27,12 @@ func TestDeriveProjectScopes(t *testing.T) {
 		t.Errorf("namespaces not sorted: %v", namespaces)
 	}
 
+	// No Bitnami repo: the postgresql app that pulled from it is retired, and
+	// Keycloak's database now comes from the cloudnative-pg operator instead.
 	wantRepos := []string{
 		"https://git.example.com/org/repo",
-		"https://charts.bitnami.com/bitnami",
 		"https://charts.jetstack.io",
+		"https://cloudnative-pg.github.io/charts",
 		"https://codecentric.github.io/helm-charts",
 		"https://github.com/nebari-dev/nebari-landing",
 		"https://metallb.github.io/metallb",
@@ -47,8 +49,8 @@ func TestDeriveProjectScopes(t *testing.T) {
 	}
 
 	wantNamespaces := []string{
-		"argocd", "cert-manager", "envoy-gateway-system", "keycloak",
-		"monitoring", "nebari-operator-system", "nebari-system",
+		"argocd", "cert-manager", "cnpg-system", "envoy-gateway-system",
+		"keycloak", "monitoring", "nebari-operator-system", "nebari-system",
 	}
 	for _, ns := range wantNamespaces {
 		if !slices.Contains(namespaces, ns) {
