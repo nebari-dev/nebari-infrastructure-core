@@ -201,10 +201,10 @@ func TestDefaultConfigResources(t *testing.T) {
 		cpuLim    string
 		memLim    string
 	}{
-		// The controller carries more headroom than the rest on purpose; a
-		// 512Mi limit OOMKilled it on EKS. See controllerValues.
+		// The controller and repo-server carry more headroom than the rest on
+		// purpose: a 512Mi limit OOMKilled both on EKS. See goMemLimited.
 		{"controller", "100m", "512Mi", "500m", "1024Mi"},
-		{"repoServer", "25m", "128Mi", "500m", "512Mi"},
+		{"repoServer", "25m", "128Mi", "500m", "1024Mi"},
 		{"server", "25m", "64Mi", "200m", "128Mi"},
 		{"applicationSet", "25m", "64Mi", "200m", "128Mi"},
 		{"redis", "25m", "64Mi", "200m", "128Mi"},
@@ -239,65 +239,87 @@ func TestDefaultConfigResources(t *testing.T) {
 	}
 }
 
-// TestControllerGoMemLimit guards the second half of the OOMKill fix. Raising
-// the application-controller's memory limit alone only moves the threshold; the
-// soft ceiling is what makes the Go runtime collect before the kubelet kills the
-// pod. Each case fails on a distinct way that protection can be lost.
-func TestControllerGoMemLimit(t *testing.T) {
-	comp, ok := DefaultConfig().Values["controller"].(map[string]any)
-	if !ok {
-		t.Fatal("Values[controller] missing or not a map")
-	}
-	env, ok := comp["env"].([]map[string]any)
-	if !ok {
-		t.Fatalf("Values[controller][env] missing or not []map[string]any, got %T", comp["env"])
-	}
-	var goMemLimit string
-	for _, e := range env {
-		if e["name"] == "GOMEMLIMIT" {
-			goMemLimit, _ = e["value"].(string)
-		}
-	}
-	// Parsed rather than recomputed from the constants, so the assertions below
-	// describe the rendered value instead of restating how it was built.
-	goMemLimitMiB, _ := strconv.Atoi(strings.TrimSuffix(goMemLimit, "MiB"))
-
-	tests := []struct {
-		name string
-		got  any
-		want any
-		why  string
+// TestGoMemLimitComponents guards the second half of the OOMKill fix for both
+// components that carry it. Raising a memory limit alone only moves the
+// threshold; the soft ceiling is what makes the Go runtime collect before the
+// kubelet kills the pod. Each case fails on a distinct way that protection can
+// be lost, and a component missing from this table means it silently lost its
+// GOMEMLIMIT.
+func TestGoMemLimitComponents(t *testing.T) {
+	components := []struct {
+		name        string
+		memLimitMiB int
 	}{
-		{
-			name: "GOMEMLIMIT is set",
-			got:  goMemLimit != "",
-			want: true,
-			why:  "without it a reconcile spike is OOMKilled instead of collected",
-		},
-		{
-			name: "uses the Go runtime byte suffix",
-			got:  strings.HasSuffix(goMemLimit, "MiB"),
-			want: true,
-			why:  "the Go runtime throws on a malformed value, so Kubernetes' Mi crash-loops the controller at startup",
-		},
-		{
-			name: "stays below the memory limit",
-			got:  goMemLimitMiB > 0 && goMemLimitMiB < controllerMemLimitMiB,
-			want: true,
-			why:  "a soft ceiling at or above the hard limit collects too late to help",
-		},
-		{
-			name: "percentage matches Argo CD's guidance",
-			got:  goMemLimitPercent >= 80 && goMemLimitPercent <= 90,
-			want: true,
-			why:  "Argo CD's HA guide recommends 80-90%; higher risks OOM, lower risks GC thrashing",
-		},
+		{"controller", controllerMemLimitMiB},
+		{"repoServer", repoServerMemLimitMiB},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Errorf("got %v, want %v: %s", tt.got, tt.want, tt.why)
+	for _, c := range components {
+		t.Run(c.name, func(t *testing.T) {
+			comp, ok := DefaultConfig().Values[c.name].(map[string]any)
+			if !ok {
+				t.Fatalf("Values[%s] missing or not a map", c.name)
+			}
+			env, ok := comp["env"].([]map[string]any)
+			if !ok {
+				t.Fatalf("Values[%s][env] missing or not []map[string]any, got %T", c.name, comp["env"])
+			}
+			var goMemLimit string
+			for _, e := range env {
+				if e["name"] == "GOMEMLIMIT" {
+					goMemLimit, _ = e["value"].(string)
+				}
+			}
+			// Parsed rather than recomputed from the constants, so the assertions
+			// describe the rendered value instead of restating how it was built.
+			goMemLimitMiB, _ := strconv.Atoi(strings.TrimSuffix(goMemLimit, "MiB"))
+
+			tests := []struct {
+				name string
+				got  any
+				want any
+				why  string
+			}{
+				{
+					name: "GOMEMLIMIT is set",
+					got:  goMemLimit != "",
+					want: true,
+					why:  "without it a memory spike is OOMKilled instead of collected",
+				},
+				{
+					name: "uses the Go runtime byte suffix",
+					got:  strings.HasSuffix(goMemLimit, "MiB"),
+					want: true,
+					why:  "the Go runtime throws on a malformed value, so Kubernetes' Mi crash-loops the container at startup",
+				},
+				{
+					name: "stays below the memory limit",
+					got:  goMemLimitMiB > 0 && goMemLimitMiB < c.memLimitMiB,
+					want: true,
+					why:  "a soft ceiling at or above the hard limit collects too late to help",
+				},
+				{
+					name: "clears the measured EKS peak",
+					// Measured cold-render/reconcile peaks were 600MiB and 661MiB.
+					// A ceiling below that guarantees GC thrashing at best.
+					got:  goMemLimitMiB > 700,
+					want: true,
+					why:  "the ceiling must sit above the measured peak or GC fights the limit on every spike",
+				},
+				{
+					name: "percentage matches Argo CD's guidance",
+					got:  goMemLimitPercent >= 80 && goMemLimitPercent <= 90,
+					want: true,
+					why:  "Argo CD's HA guide recommends 80-90%; higher risks OOM, lower risks GC thrashing",
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					if tt.got != tt.want {
+						t.Errorf("got %v, want %v: %s", tt.got, tt.want, tt.why)
+					}
+				})
 			}
 		})
 	}

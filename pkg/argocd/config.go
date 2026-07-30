@@ -19,15 +19,16 @@ const (
 	defaultChartVersion = "9.7.1"
 	defaultNamespace    = "argocd"
 
-	// controllerMemLimitMiB is the application-controller's memory limit (1024
-	// MiB, which the API server canonicalises to the 1Gi kubectl reports), and
-	// goMemLimitPercent the share of it handed to GOMEMLIMIT as a soft ceiling.
-	// GOMEMLIMIT is derived rather than written out separately so the two
-	// cannot drift: raising the limit on its own would just move the OOM
-	// threshold without giving the Go runtime a reason to collect sooner.
-	// See controllerValues for why these numbers are what they are.
+	// Memory limits for the two components whose usage spikes far above idle,
+	// in MiB. 1024 MiB is what the API server canonicalises to the 1Gi that
+	// kubectl reports. Both were measured on a 14-app EKS cluster: see
+	// goMemLimited for why each is what it is.
 	controllerMemLimitMiB = 1024
-	goMemLimitPercent     = 90
+	repoServerMemLimitMiB = 1024
+
+	// goMemLimitPercent is the share of a component's memory limit handed to
+	// GOMEMLIMIT as a soft ceiling. Argo CD's HA guide recommends 80-90%.
+	goMemLimitPercent = 90
 )
 
 // Config holds configuration for Argo CD installation
@@ -125,8 +126,8 @@ func DefaultConfig() Config {
 			// #456 audit (idle usage plus chart-suggested values with headroom).
 			// NOTE: Values changes only reach existing installs on the next
 			// chart Version bump (see the Version field's doc comment).
-			"controller":     controllerValues(),
-			"repoServer":     helmResources("25m", "128Mi", "500m", "512Mi"),
+			"controller":     goMemLimited("100m", "512Mi", "500m", controllerMemLimitMiB),
+			"repoServer":     goMemLimited("25m", "128Mi", "500m", repoServerMemLimitMiB),
 			"server":         helmResources("25m", "64Mi", "200m", "128Mi"),
 			"applicationSet": helmResources("25m", "64Mi", "200m", "128Mi"),
 			"redis":          helmResources("25m", "64Mi", "200m", "128Mi"),
@@ -138,32 +139,45 @@ func DefaultConfig() Config {
 	}
 }
 
-// controllerValues sizes the application-controller, which needs more headroom
-// than the rest of the chart's components because its working set tracks the
-// number of Kubernetes objects it caches rather than the number of Applications
-// NIC creates. The #456 audit measured it on a single-node kind cluster, where
-// a 512Mi limit was ample; on EKS the same pod idles at 232-287Mi but spikes
-// past 512Mi during reconciliation and was OOMKilled repeatedly, because a
-// managed cluster carries far more API objects (cloud controllers, Longhorn
-// CRDs and CRs) and the controller watches all of them.
+// goMemLimited sizes a component that needs a hard memory limit plus a
+// GOMEMLIMIT soft ceiling derived from it, and it applies to the two Argo CD
+// components whose memory spikes far above idle rather than tracking it.
 //
-// GOMEMLIMIT is Argo CD's documented mitigation for exactly this: a soft
-// ceiling that makes the Go runtime collect before the kubelet's hard limit
-// kills the pod. Argo CD's HA guide recommends 80-90% of the container limit
-// and warns that setting it near the live working set causes GC thrashing,
-// which 921MiB against a ~290Mi working set stays well clear of. See
-// https://argo-cd.readthedocs.io/en/latest/operator-manual/high_availability/
+// The #456 audit measured both on a single-node kind cluster, where a 512Mi
+// limit looked generous. On a 14-app EKS cluster both blew through it and were
+// OOMKilled, because what drives each of them is absent from a kind cluster:
 //
-// Installs managing many more resources should raise controllerMemLimitMiB;
-// GOMEMLIMIT follows automatically.
-func controllerValues() map[string]any {
-	v := helmResources("100m", "512Mi", "500m", fmt.Sprintf("%dMi", controllerMemLimitMiB))
+//   - application-controller: its working set follows the number of Kubernetes
+//     objects it caches, not the number of Applications NIC creates. A managed
+//     cluster carries far more API objects (cloud controllers, storage CRDs and
+//     their CRs) and it watches all of them. Measured peak 600MiB, idling at
+//     ~320MiB.
+//   - repo-server: renders every app's manifests when its cache is cold, which
+//     on a fresh deploy means all of them at once. Measured peak 661MiB against
+//     an idle of ~45MiB, so idle measurements say nothing about what it needs.
+//
+// GOMEMLIMIT is Argo CD's documented mitigation for exactly this: a soft ceiling
+// that makes the Go runtime collect before the kubelet's hard limit kills the
+// pod. Their HA guide recommends 80-90% of the container limit and warns that
+// setting it near the live working set causes GC thrashing. At 1024MiB the
+// ceiling lands at 921MiB, above both measured peaks, so GC has room to work
+// instead of fighting the limit. Confirmed against the alternative: the
+// repo-server also survives a 512Mi limit with GOMEMLIMIT at 460MiB, but only
+// by holding its peak 156KiB under the limit, which is no margin at all.
+// See https://argo-cd.readthedocs.io/en/latest/operator-manual/high_availability/
+//
+// Installs that manage many more resources should raise the relevant
+// <component>MemLimitMiB; GOMEMLIMIT follows automatically. If the repo-server
+// still runs out, Argo CD's other lever is --parallelismlimit, which bounds how
+// many manifest generations run at once.
+func goMemLimited(cpuReq, memReq, cpuLim string, memLimitMiB int) map[string]any {
+	v := helmResources(cpuReq, memReq, cpuLim, fmt.Sprintf("%dMi", memLimitMiB))
 	// The Go runtime spells its byte suffixes MiB, not Kubernetes' Mi, and it
 	// throws on a malformed value during gcinit rather than falling back to no
-	// limit. Getting this wrong crash-loops the controller before it serves a
-	// single request, so the suffix is asserted in TestControllerGoMemLimit.
+	// limit. Getting this wrong crash-loops the container before it serves a
+	// single request, so the suffix is asserted in TestGoMemLimitComponents.
 	v["env"] = []map[string]any{
-		{"name": "GOMEMLIMIT", "value": fmt.Sprintf("%dMiB", controllerMemLimitMiB*goMemLimitPercent/100)},
+		{"name": "GOMEMLIMIT", "value": fmt.Sprintf("%dMiB", memLimitMiB*goMemLimitPercent/100)},
 	}
 	return v
 }
