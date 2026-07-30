@@ -15,4 +15,3 @@ cluster:
   existing:
     context: k3d-existing-ci
     storage_class: local-path
-  
