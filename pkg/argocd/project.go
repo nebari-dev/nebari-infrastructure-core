@@ -164,13 +164,15 @@ func mapKeysSorted(m map[string]struct{}) []string {
 	return out
 }
 
-// packHelmRepository is the documented source for software-pack Helm charts.
-const packHelmRepository = "https://nebari-dev.github.io/helm-repository"
-
-// projectsTemplate renders the three AppProjects. foundational and nebari-apps
-// keep wildcard resource whitelists on purpose (kind-level restriction is the
-// admission-controller follow-up, #480). default is deny-all so it cannot be a
-// project-escape hatch.
+// projectsTemplate renders the three AppProjects. foundational stays scoped to
+// the repos and namespaces derived from NIC's own templates. nebari-apps is
+// deliberately wildcard on sourceRepos: a pack may ship from the Nebari Helm
+// index, the quay.io OCI mirror of that same index, or a third-party git repo,
+// and NIC has no config surface to declare those, so any fixed list rejects
+// legitimate packs. Replacing '*' with an operator-declared allow-list is
+// tracked in #530. Both projects keep wildcard resource whitelists on purpose
+// (kind-level restriction is the admission-controller follow-up, #480). default
+// is deny-all so it cannot be a project-escape hatch.
 const projectsTemplate = `
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -203,8 +205,7 @@ metadata:
 spec:
   description: Software packs (NebariApp-based user applications).
   sourceRepos:
-    - '{{ .PackHelmRepository }}'
-    - '{{ .GitRepoURL }}'
+    - '*'
   destinations:
     - namespace: '*'
       server: https://kubernetes.default.svc
@@ -242,11 +243,9 @@ func RenderProjects(ctx context.Context, data TemplateData) ([]*unstructured.Uns
 	}
 
 	tmplData := struct {
-		SourceRepos        []string
-		Namespaces         []string
-		GitRepoURL         string
-		PackHelmRepository string
-	}{repos, namespaces, data.GitRepoURL, packHelmRepository}
+		SourceRepos []string
+		Namespaces  []string
+	}{repos, namespaces}
 
 	tmpl, err := template.New("projects").Parse(projectsTemplate)
 	if err != nil {

@@ -91,14 +91,16 @@ func TestRenderProjects(t *testing.T) {
 		t.Errorf("foundational sourceRepos missing GitRepoURL: %v", fRepos)
 	}
 
-	// nebari-apps: distinct, pack-source list, no wildcard repos
+	// nebari-apps: wildcard sourceRepos, so a pack can be installed from any
+	// chart source (Helm index, OCI registry, or git) without reconfiguring the
+	// project. Deliberately open; see the security note in
+	// docs/operations/argocd-project-scoping.md.
 	n := byName["nebari-apps"]
 	if n == nil {
 		t.Fatal("nebari-apps project not rendered")
 	}
-	nRepos := toStringSlice(n["sourceRepos"])
-	if !slices.Contains(nRepos, "https://nebari-dev.github.io/helm-repository") || slices.Contains(nRepos, "*") {
-		t.Errorf("nebari-apps sourceRepos wrong: %v", nRepos)
+	if nRepos := toStringSlice(n["sourceRepos"]); !slices.Equal(nRepos, []string{"*"}) {
+		t.Errorf("nebari-apps sourceRepos = %v, want exactly [*]", nRepos)
 	}
 
 	// default: deny-all
