@@ -25991,17 +25991,29 @@ function dumpDiagnostics(env) {
     ], { stdio: "inherit", env });
     core.endGroup();
 }
+// Number of consecutive polls the fully converged state must hold before the
+// wait succeeds. Argo health is momentary: an Application mid-sync can read
+// Healthy before its later-wave resources exist, so a single all-green
+// snapshot is not trusted.
+const REQUIRED_STABLE_POLLS = 3;
 /**
- * Poll Argo CD Applications until every one is Healthy (and at least one
- * exists); dump diagnostics and throw when the timeout elapses.
+ * Poll Argo CD Applications until the deployment has converged: nebari-root
+ * is Synced (so every child Application manifest in apps/ has been applied),
+ * every Application is Healthy, and that state holds for
+ * REQUIRED_STABLE_POLLS consecutive polls with an unchanged Application set.
+ * Dumps diagnostics and throws when the timeout elapses or a pod exceeds its
+ * restart budget before convergence.
  *
- * TODO(#484, #513): gate on Synced too once gateway-config listener
- * co-ownership (#484) and Server-Side Diff adoption (#513) are fixed; until
- * then Healthy-but-OutOfSync Applications only produce a warning.
+ * TODO(#484, #513): gate on Synced for every Application once gateway-config
+ * listener co-ownership (#484) and Server-Side Diff adoption (#513) are
+ * fixed; until then Healthy-but-OutOfSync Applications only produce a
+ * warning.
  */
 function waitForApplications(kubeconfig, timeoutSeconds) {
     const env = { ...process.env, KUBECONFIG: kubeconfig };
     const deadline = Date.now() + timeoutSeconds * 1000;
+    let stablePolls = 0;
+    let prevNames = "";
     for (;;) {
         let apps = [];
         const res = (0, child_process_1.spawnSync)("kubectl", [
@@ -26028,7 +26040,14 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
             });
         }
         const notReady = apps.filter((a) => a.health !== "Healthy");
-        const healthy = apps.length > 0 && notReady.length === 0;
+        const root = apps.find((a) => a.name === "nebari-root");
+        // nebari-root Synced means every child Application manifest in apps/ has
+        // been applied; without it an early poll can see only the root app (Argo
+        // excludes children from parent health) and pass vacuously.
+        const converged = apps.length > 0 &&
+            notReady.length === 0 &&
+            root !== undefined &&
+            root.sync === "Synced";
         // A crashlooping component fails the wait immediately: waiting out the
         // timeout adds no information, and Application health alone can miss a
         // component that reports Healthy between restarts. argocd is always
@@ -26038,7 +26057,7 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
         // produces a warning, not a failure.
         const namespaces = new Set(["argocd", ...apps.map((a) => a.namespace)].filter(Boolean));
         const breach = findRestartBreach(namespaces, env);
-        if (breach && !healthy) {
+        if (breach && !converged) {
             core.startGroup(`Previous logs: ${breach.namespace}/${breach.pod}`);
             (0, child_process_1.spawnSync)("kubectl", [
                 "logs",
@@ -26054,12 +26073,23 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
             throw new Error(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
                 `(budget for ${breach.namespace}: ${breach.budget}); giving up on the wait`);
         }
-        if (healthy) {
+        const names = apps
+            .map((a) => a.name)
+            .sort()
+            .join(",");
+        if (converged && names === prevNames) {
+            stablePolls++;
+        }
+        else {
+            stablePolls = converged ? 1 : 0;
+        }
+        prevNames = names;
+        if (stablePolls >= REQUIRED_STABLE_POLLS) {
             if (breach) {
                 core.warning(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
                     `(budget for ${breach.namespace}: ${breach.budget}) but the deployment converged`);
             }
-            core.info(`All ${apps.length} Applications are Healthy`);
+            core.info(`All ${apps.length} Applications are Healthy and nebari-root is Synced`);
             const outOfSync = apps.filter((a) => a.sync !== "Synced");
             if (outOfSync.length > 0) {
                 core.warning(`${outOfSync.length} Application(s) are Healthy but not Synced: ` +
@@ -26068,11 +26098,17 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
             return;
         }
         if (Date.now() >= deadline) {
-            core.startGroup("Applications not Healthy");
+            core.startGroup("Applications not converged");
             if (apps.length === 0) {
                 core.info("<no Applications found>");
             }
             else {
+                if (root === undefined) {
+                    core.info("nebari-root: <not found>");
+                }
+                else if (root.sync !== "Synced") {
+                    core.info(`nebari-root: sync=${root.sync} (must be Synced)`);
+                }
                 for (const a of notReady)
                     core.info(`${a.name}: sync=${a.sync} health=${a.health}`);
             }
