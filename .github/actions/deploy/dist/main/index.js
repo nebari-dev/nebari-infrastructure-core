@@ -25919,6 +25919,78 @@ function acquireNic({ binary, version, token }) {
     }
     throw new Error("no nic binary specified. Set nic-binary (a prebuilt binary) or nic-version (a release or git ref to acquire).");
 }
+// Maximum container restarts tolerated in the namespaces the Applications
+// deploy into before the wait fails fast instead of burning the remaining
+// timeout on a crashloop. The namespaces are derived from each Application's
+// destination, so the check tracks the app set instead of a hardcoded list.
+// Overrides are defined for specific namespaces whose components restart
+// legitimately during bootstrap. For example, metallb speakers restart while
+// waiting for the memberlist Secret, keycloak while its database comes up.
+const DEFAULT_RESTART_BUDGET = 3;
+const RESTART_BUDGET_OVERRIDES = {
+    keycloak: 5,
+    "metallb-system": 10,
+};
+// Return the first pod in the given namespaces whose container restarts
+// exceed the namespace's budget, or null. Transient kubectl failures return
+// null: the budget check must never be the thing that fails an otherwise
+// converging wait.
+function findRestartBreach(namespaces, env) {
+    const res = (0, child_process_1.spawnSync)("kubectl", ["get", "pods", "-A", "-o", "json"], {
+        encoding: "utf8",
+        env,
+        maxBuffer: 64 * 1024 * 1024,
+    });
+    if (res.status !== 0 || !res.stdout)
+        return null;
+    let pods;
+    try {
+        pods = JSON.parse(res.stdout.toString());
+    }
+    catch {
+        return null;
+    }
+    for (const pod of pods.items) {
+        if (!namespaces.has(pod.metadata.namespace))
+            continue;
+        const budget = RESTART_BUDGET_OVERRIDES[pod.metadata.namespace] ??
+            DEFAULT_RESTART_BUDGET;
+        // Completed hook/job pods legitimately accumulate restarts; skip them.
+        if (pod.status?.phase === "Succeeded")
+            continue;
+        const restarts = Math.max(0, ...(pod.status?.containerStatuses ?? []).map((c) => c.restartCount ?? 0), ...(pod.status?.initContainerStatuses ?? []).map((c) => c.restartCount ?? 0));
+        if (restarts > budget) {
+            return {
+                namespace: pod.metadata.namespace,
+                pod: pod.metadata.name,
+                restarts,
+                budget,
+            };
+        }
+    }
+    return null;
+}
+// Dump the cluster state that is actually useful when a deploy fails to
+// converge: Application statuses, pods, and Warning events in time order.
+function dumpDiagnostics(env) {
+    core.startGroup("kubectl get applications -o wide");
+    (0, child_process_1.spawnSync)("kubectl", ["get", "applications.argoproj.io", "-n", "argocd", "-o", "wide"], { stdio: "inherit", env });
+    core.endGroup();
+    core.startGroup("kubectl get pods -A");
+    (0, child_process_1.spawnSync)("kubectl", ["get", "pods", "-A"], { stdio: "inherit", env });
+    core.endGroup();
+    core.startGroup("Warning events (oldest first)");
+    (0, child_process_1.spawnSync)("kubectl", [
+        "get",
+        "events",
+        "-A",
+        "--field-selector",
+        "type=Warning",
+        "--sort-by",
+        ".lastTimestamp",
+    ], { stdio: "inherit", env });
+    core.endGroup();
+}
 /**
  * Poll Argo CD Applications until every one is Healthy (and at least one
  * exists); dump diagnostics and throw when the timeout elapses.
@@ -25937,7 +26009,7 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
             "-n",
             "argocd",
             "-o",
-            'jsonpath={range .items[*]}{.metadata.name}{" "}{.status.sync.status}{" "}{.status.health.status}{"\\n"}{end}',
+            'jsonpath={range .items[*]}{.metadata.name}{" "}{.status.sync.status}{" "}{.status.health.status}{" "}{.spec.destination.namespace}{"\\n"}{end}',
         ], { encoding: "utf8", env });
         if (res.status === 0) {
             apps = res.stdout
@@ -25945,12 +26017,47 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
                 .split("\n")
                 .filter(Boolean)
                 .map((line) => {
-                const [name, sync, health] = line.split(" ");
-                return { name, sync: sync || "Unknown", health: health || "Unknown" };
+                const [name, sync, health, namespace] = line.split(" ");
+                return {
+                    name,
+                    sync: sync || "Unknown",
+                    health: health || "Unknown",
+                    namespace: namespace || "",
+                };
             });
         }
         const notReady = apps.filter((a) => a.health !== "Healthy");
-        if (apps.length > 0 && notReady.length === 0) {
+        const healthy = apps.length > 0 && notReady.length === 0;
+        // A crashlooping component fails the wait immediately: waiting out the
+        // timeout adds no information, and Application health alone can miss a
+        // component that reports Healthy between restarts. argocd is always
+        // watched; the rest of the namespaces come from the Applications'
+        // destinations. Restart counts are monotonic, though, so a component
+        // that restarted during a bumpy convergence but ended Healthy only
+        // produces a warning, not a failure.
+        const namespaces = new Set(["argocd", ...apps.map((a) => a.namespace)].filter(Boolean));
+        const breach = findRestartBreach(namespaces, env);
+        if (breach && !healthy) {
+            core.startGroup(`Previous logs: ${breach.namespace}/${breach.pod}`);
+            (0, child_process_1.spawnSync)("kubectl", [
+                "logs",
+                "--previous",
+                "--tail=50",
+                "--all-containers",
+                "-n",
+                breach.namespace,
+                breach.pod,
+            ], { stdio: "inherit", env });
+            core.endGroup();
+            dumpDiagnostics(env);
+            throw new Error(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
+                `(budget for ${breach.namespace}: ${breach.budget}); giving up on the wait`);
+        }
+        if (healthy) {
+            if (breach) {
+                core.warning(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
+                    `(budget for ${breach.namespace}: ${breach.budget}) but the deployment converged`);
+            }
             core.info(`All ${apps.length} Applications are Healthy`);
             return;
         }
@@ -25964,8 +26071,7 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
                     core.info(`${a.name}: sync=${a.sync} health=${a.health}`);
             }
             core.endGroup();
-            (0, child_process_1.spawnSync)("kubectl", ["get", "applications.argoproj.io", "-n", "argocd", "-o", "wide"], { stdio: "inherit", env });
-            (0, child_process_1.spawnSync)("kubectl", ["get", "pods", "-A"], { stdio: "inherit", env });
+            dumpDiagnostics(env);
             throw new Error(`Applications did not converge within ${timeoutSeconds}s`);
         }
         sleep(10);
