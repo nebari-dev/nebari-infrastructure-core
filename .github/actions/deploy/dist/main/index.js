@@ -25995,8 +25995,9 @@ function dumpDiagnostics(env) {
  * Poll Argo CD Applications until every one is Healthy (and at least one
  * exists); dump diagnostics and throw when the timeout elapses.
  *
- * TODO: gate on Synced too once the fix for Applications reporting OutOfSync
- * lands; until then sync status is logged but not required.
+ * TODO(#484, #513): gate on Synced too once gateway-config listener
+ * co-ownership (#484) and Server-Side Diff adoption (#513) are fixed; until
+ * then Healthy-but-OutOfSync Applications only produce a warning.
  */
 function waitForApplications(kubeconfig, timeoutSeconds) {
     const env = { ...process.env, KUBECONFIG: kubeconfig };
@@ -26059,6 +26060,11 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
                     `(budget for ${breach.namespace}: ${breach.budget}) but the deployment converged`);
             }
             core.info(`All ${apps.length} Applications are Healthy`);
+            const outOfSync = apps.filter((a) => a.sync !== "Synced");
+            if (outOfSync.length > 0) {
+                core.warning(`${outOfSync.length} Application(s) are Healthy but not Synced: ` +
+                    outOfSync.map((a) => `${a.name} (${a.sync})`).join(", "));
+            }
             return;
         }
         if (Date.now() >= deadline) {
