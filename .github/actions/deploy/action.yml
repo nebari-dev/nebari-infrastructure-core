@@ -13,8 +13,8 @@ inputs:
       Path to the NIC config file, relative to the workspace. When unset, the
       action deploys its built-in default: a local kind cluster with an
       auto-created local gitops repository (see default-config.yaml in the
-      action directory. Copy it into your repo as a starting point for a
-      custom config).
+      action directory). Copy it into your repo as a starting point for a
+      custom config.
     required: false
     default: ''
   nic-binary:
