@@ -7,6 +7,7 @@ There is no durable `spin:` config field. Generated pack Applications use `prune
 ## Boundaries
 
 - **Spin and pack.** A spin selects and wires packs; once installed, each is an ordinary pack that operators upgrade or remove individually.
+- **Spin and per-pack integration ([ADR-0003](../../adr/0003-software-pack-codegen.md)).** ADR-0003 defines how an individual pack publishes its integration surface: conventions plus `nebari-integration.yaml` plus user overrides. A spin's `wiring` and `outputs` are composition metadata layered on top of that per-pack interface, not a replacement for it. The GitOps layout and ArgoCD project in this document record the shipped posture; ADR-0003's original `software_packs:` config key and `software-packs` project are superseded by its Update section.
 - **Spin and infrastructure.** A spin may add the first-deployment node groups its packs require. The generated config is operator-owned; later scaling is an ordinary `nic deploy`.
 - **Spin and `nic`.** `nic` resolves and materializes the spin during generation, then forgets it. No reconcile path reads a spin.
 - **Spin and GitOps.** After generation, the files under `user-apps/` are the desired state for packs.
@@ -36,7 +37,7 @@ There is no durable `spin:` config field. Generated pack Applications use `prune
 
 **Provenance and releases.**
 
-- Deploy records spin provenance in `.bootstrapped`: the name, immutable version or digest, and generation timestamp. This is metadata only; no reconcile path reads it. Generation-only must not write the marker because the marker controls the existing bootstrap skip path, and updates must preserve existing fields.
+- Deploy records spin provenance in `.bootstrapped`: the name, immutable version or digest, and generation timestamp. This is metadata only; no reconcile path reads it. This deliberately extends the marker beyond its skip-path role ([ADR-0001](../../adr/0001-git-provider-for-gitops-bootstrap.md)) rather than adding a second metadata file, so writers must preserve existing fields, and generation-only must not write the file at all because its presence controls the bootstrap skip path.
 - CI validates each spin as an immutable pack composition. Reusing the same spin, pack references, and provider mappings in staging and production gives the same composition and wiring; provider configuration and credentials may differ. There is no spin upgrade: every new release must be revalidated, then applied deliberately.
 
 ## Provider translation
@@ -44,9 +45,9 @@ There is no durable `spin:` config field. Generated pack Applications use `prune
 - A spin's infrastructure requirements materialize as declared node-group definitions under `cluster.<provider>.node_groups` in the generated config. Spins emit explicitly named pools.
 - Spins use fixed node groups. Cluster autoscaling and node auto-provisioning are deferred.
 - Node-group schemas are provider-specific: AWS declares instance type, GPU, disk, labels, structured taints, and spot; Azure uses string-form taints, zones, and a mode; GCP uses guest accelerators; Hetzner uses `instance_type`, `count`, `master`, and optional autoscaling.
-- The spin schema expresses requirements through provider-neutral capabilities and named size tiers. A data-only table in the spin layer maps `(provider, requirement, tier)` to a node-group definition. It needs no credentials or API calls, so adding a size tier does not expand the provider plugin interface.
+- The spin schema expresses requirements through provider-neutral capabilities and named size tiers. A data-only table maps `(provider, requirement, tier)` to a node-group definition. The table lives in the spin source as versioned data alongside the spin manifests, not in NIC Go code, so NIC core carries no provider-keyed logic and out-of-tree providers ([ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md)) work the same way: a spin ships mappings only for the providers it lists in `providers.supported`. Spin CI validates each mapping against the target provider's node-group config schema. The table needs no credentials or API calls, so adding a size tier does not expand the provider plugin interface.
 - Requirements are per pack, while `--size` selects one tier for the whole spin. One spin can therefore emit separate CPU and accelerator pools from a single size selection; per-pack size flags are deliberately avoided.
-- Emitting this config is new surface. The deployment-config schema is established and the committed examples are hand-authored; NIC does not write config files today. [ADR-0005](../../adr/0005-nic-config-cli-surface.md) proposes `nic config init` as that writer, so a spin uses the same generation path rather than a separate config format.
+- Emitting this config is new surface. The deployment-config schema is established and the committed examples are hand-authored; NIC does not write config files today. [ADR-0005](../../adr/0005-nic-config-cli-surface.md) proposes `nic config init` as that writer, so a spin uses the same generation path rather than a separate config format. This design does not gate on that decision: `nic config init` remains deferred in ADR-0005, and if it stays deferred, spin generation ships its own writer for the same config format, which `nic config init` can absorb later.
 - Flag names are illustrative. Deployment-context flags are omitted below:
 
   Generate and deploy in one step:
@@ -81,9 +82,9 @@ There is no durable `spin:` config field. Generated pack Applications use `prune
 
 ## Validation and composition
 
-- A spin uses the same checks as an individual install: catalog membership, source policy where configured, pinned versions or digests, namespace, values schema, and no inline secrets. It is a preset batch of install requests, not a bypass.
+- A spin uses the same checks as an individual install: catalog membership, source policy where configured, pinned versions or digests, namespace, values schema, and no inline secrets. It is a preset batch of install requests, not a bypass. That shared per-pack validation path does not exist in NIC today; the list above is the target contract for both individual installs and spins, and building it is a prerequisite for spins.
 - Cross-pack integration is primarily value wiring. Wiring is a distinct schema key rather than inline output references in pack values: the initial design only sets consumer values, but integration between two packs may eventually need artifacts that belong to neither pack alone—a shared service account or an RBAC grant—and the declared producer-to-consumer edge is where those would attach. A spin may also assign sync waves to the Applications it generates for initial deployment, but that is not a general pack dependency mechanism ([#428](https://github.com/nebari-dev/nebari-infrastructure-core/issues/428)): it does not order packs added later or re-impose order during upgrades.
-- Singleton capabilities are declared in the spin and validated at generation. For example, only one pack may own the foundational OpenTelemetry Collector override ([ADR-0008](../../adr/0008-otel-collector-software-pack-override-point.md)). Duplicate claims within a spin fail; conflicts with existing packs remain part of per-pack validation.
+- Singleton capabilities are declared in the spin and validated at generation. For example, only one pack may own the foundational OpenTelemetry Collector override ([ADR-0008](../../adr/0008-otel-collector-software-pack-override-point.md)). Duplicate claims within a spin fail; conflicts with already-installed packs remain part of per-pack validation, which does not exist yet — until it does, a conflicting claim surfaces only at sync time in ArgoCD.
 
 ## Spin sources
 
