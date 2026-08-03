@@ -41,25 +41,27 @@ spec:
         maxConcurrentChallenges: 1
         prometheus:
           enabled: true
+        # Defaults from the #456 audit: controller and cainjector memory
+        # scales with cached Secrets; the webhook has no cache by design.
         resources:
           requests:
-            cpu: 100m
-            memory: 128Mi
+            cpu: 25m
+            memory: 64Mi
           limits:
-            cpu: 500m
-            memory: 512Mi
+            cpu: 200m
+            memory: 256Mi
         webhook:
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 10m
+              memory: 32Mi
             limits:
-              cpu: 200m
-              memory: 256Mi
+              cpu: 100m
+              memory: 128Mi
         cainjector:
           resources:
             requests:
-              cpu: 50m
+              cpu: 10m
               memory: 64Mi
             limits:
               cpu: 200m

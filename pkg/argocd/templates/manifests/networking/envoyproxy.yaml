@@ -1,0 +1,25 @@
+# Sizing for the provisioned Envoy data-plane pods. Without this, Envoy
+# Gateway defaults every proxy pod to a 100m CPU / 512Mi memory request
+# (api/v1alpha1/shared_types.go DefaultDeployment*ResourceRequests) while
+# idle usage is ~40Mi. CPU is deliberately uncapped: this is the data path
+# and throttling adds tail latency exactly under load. See #456/#457.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: nebari-proxy-config
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/name: envoy-gateway
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        container:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
