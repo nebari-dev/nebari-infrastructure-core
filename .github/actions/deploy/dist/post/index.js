@@ -25744,7 +25744,7 @@ function downloadRelease(tag, token, destDir) {
     core.info(`Downloading ${tarball}`);
     curl(`${base}/${tarball}`, tarPath, token);
     // The checksum below only proves the tarball matches checksums.txt, which
-    // travels with it; provenance proves the release workflow of this repo
+    // travels with it. Provenance proves the release workflow of this repo
     // built it. The attestation lives in GitHub's store, so a tampered asset
     // cannot bring its own proof. gh ships preinstalled on GitHub-hosted
     // runners.

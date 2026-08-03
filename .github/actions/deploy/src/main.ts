@@ -40,8 +40,11 @@ function main(): void {
   // partially created deployment even when `nic deploy` fails mid-way.
   core.saveState("nicBinary", nic);
   core.saveState("config", config);
-  core.saveState("destroy", core.getInput("destroy"));
-  core.saveState("force", core.getInput("force"));
+  // getBooleanInput throws on malformed values. Validate here, before the
+  // deploy: destroy is the input that leaks infrastructure when misread, so
+  // it must fail closed. The post step then only ever sees normalized values.
+  core.saveState("destroy", core.getBooleanInput("destroy") ? "true" : "false");
+  core.saveState("force", core.getBooleanInput("force") ? "true" : "false");
   core.saveState("deployStarted", "true");
 
   core.startGroup("nic deploy");
