@@ -37,6 +37,13 @@ const (
 // makes the UI and `argocd app get` useless for diagnosing a database that is
 // still bootstrapping or stuck.
 //
+// This check is also load-bearing for sync ordering: the keycloak-db Cluster
+// sits at sync-wave -1 inside the keycloak Application so that the wave-0
+// StatefulSet is only applied once the database is Healthy and its generated
+// keycloak-db-app Secret exists (issue #537). Removing this customization
+// would make every Cluster Healthy-on-create again and silently disable that
+// gate.
+//
 // Keyed on .status.phase, whose values are string constants in CNPG's
 // api/v1/cluster_types.go (PhaseHealthy, PhaseUnrecoverable, ...). Anything
 // not explicitly terminal is Progressing, so a phase added by a future
