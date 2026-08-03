@@ -25934,6 +25934,7 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
     const deadline = Date.now() + timeoutSeconds * 1000;
     let stablePolls = 0;
     let prevNames = "";
+    let warnedPollFailure = false;
     for (;;) {
         let apps = [];
         const res = (0, child_process_1.spawnSync)("kubectl", [
@@ -25958,6 +25959,23 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
                     namespace: namespace || "",
                 };
             });
+        }
+        else {
+            // Surface the first failure loudly: a bad kubeconfig or unreachable API
+            // server would otherwise be indistinguishable from "no apps yet" until
+            // the timeout. Transient blips during bootstrap are normal, so keep
+            // retrying rather than failing.
+            const msg = res.error?.message ||
+                (res.stderr || "").toString().trim() ||
+                `exit status ${res.status}`;
+            if (warnedPollFailure) {
+                core.info(`kubectl get applications failed again: ${msg}`);
+            }
+            else {
+                warnedPollFailure = true;
+                core.warning(`kubectl get applications failed: ${msg}. Retrying until the ` +
+                    "timeout; if this persists, the kubeconfig or API server is the problem.");
+            }
         }
         const notReady = apps.filter((a) => a.health !== "Healthy");
         const root = apps.find((a) => a.name === "nebari-root");
