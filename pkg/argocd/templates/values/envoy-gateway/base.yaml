@@ -4,10 +4,12 @@ config:
       controllerName: gateway.envoyproxy.io/gatewayclass-controller
 deployment:
   envoyGateway:
+    # Control plane only (xDS); the data-plane proxy pods are sized
+    # by the EnvoyProxy CR in manifests/networking (#457).
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 50m
+        memory: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi

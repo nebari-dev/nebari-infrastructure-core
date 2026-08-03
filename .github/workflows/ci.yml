@@ -75,6 +75,16 @@ jobs:
       - name: Check action pins
         run: ./scripts/check-action-pins.sh
 
+      - name: Lint workflow files
+        uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
+        with:
+          # Print findings to the job log instead of posting anywhere; this
+          # step's job is to fail the build, not to comment on commits or
+          # pull requests, so no extra GitHub API permissions are needed.
+          reporter: local
+          filter_mode: nofilter
+          fail_level: error
+
       - name: Validate GoReleaser config
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:

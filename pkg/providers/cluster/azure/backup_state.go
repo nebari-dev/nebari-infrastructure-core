@@ -18,13 +18,19 @@ func backupStateAddrs(spec *cluster.BackupBucketSpec) []string {
 	if spec == nil || !spec.Create || spec.ForceDestroy {
 		return nil
 	}
-	// These resources live inside the aks_cluster module (see the module's
-	// longhorn_backup.tf), so addresses are prefixed with module.aks_cluster.
-	// The [0] indices correspond to the `count = ... ? 1 : 0` form the module
-	// uses; if it ever moves to `for_each`, these addresses (e.g. [0] ->
+	// These resources live in the aks_cluster module's own longhorn-backup
+	// submodule, so the address is nested twice: module.aks_cluster (the shim's
+	// call) then module.longhorn_backup (the module's call). Only the submodule
+	// call is count-gated — the resources inside it are unconditional — so the
+	// single [0] sits on module.longhorn_backup and the resources take no index.
+	// If either ever moves to `for_each`, these addresses (e.g. [0] ->
 	// ["<key>"]) must be updated to match.
+	//
+	// Verified against terraform-azurerm-aks-cluster v0.2.0, the version pinned
+	// in templates/main.tf. Re-check on every module bump — a mismatch here is
+	// silent (see cluster.RetainBackupResources).
 	return []string{
-		"module.aks_cluster.azurerm_storage_container.longhorn_backup[0]",
-		"module.aks_cluster.azurerm_storage_account.longhorn_backup[0]",
+		"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_container.this",
+		"module.aks_cluster.module.longhorn_backup[0].azurerm_storage_account.this",
 	}
 }

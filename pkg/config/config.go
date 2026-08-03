@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
@@ -233,7 +234,12 @@ func (c *CertificateConfig) Validate() error {
 		return nil
 	}
 	switch c.Type {
-	case "", CertificateTypeSelfSigned, CertificateTypeLetsEncrypt:
+	case "", CertificateTypeSelfSigned:
+		return nil
+	case CertificateTypeLetsEncrypt:
+		if c.ACME == nil || strings.TrimSpace(c.ACME.Email) == "" {
+			return fmt.Errorf("certificate type=letsencrypt requires acme.email")
+		}
 		return nil
 	case CertificateTypeExisting:
 		return c.validateExisting()

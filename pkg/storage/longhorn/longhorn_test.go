@@ -56,12 +56,16 @@ func TestBuildHelmValues(t *testing.T) {
 			wantAbsentNested: []string{"defaultSettings.systemManagedComponentsNodeSelector"},
 		},
 		{
+			// longhornManager is always present now (it carries the #457
+			// resource defaults); only the tolerate-all tolerations and the
+			// driver override are dedicated-nodes specific.
 			name:   "non-dedicated nodes omits nodeSelector and tolerations",
 			config: &Config{DedicatedNodes: false, ReplicaCount: 2},
 			checkValues: map[string]any{
 				"persistence.defaultClassReplicaCount": 2,
 			},
-			wantAbsent: []string{"longhornManager", "longhornDriver"},
+			wantAbsent:       []string{"longhornDriver"},
+			wantAbsentNested: []string{"longhornManager.tolerations"},
 		},
 		{
 			name:   "cluster autoscaler enabled renders setting true",
@@ -571,3 +575,84 @@ func splitDotPath(path string) []string {
 	parts = append(parts, path[start:])
 	return parts
 }
+
+// TestBuildHelmValuesResourceDefaults pins the #457 resource defaults: the
+// chart ships no requests/limits for the manager or the CSI sidecars, so
+// they run BestEffort unless set here.
+func TestBuildHelmValuesResourceDefaults(t *testing.T) {
+	values := buildHelmValues(&Config{})
+
+	manager, ok := values["longhornManager"].(map[string]any)
+	if !ok {
+		t.Fatal("longhornManager values missing")
+	}
+	res, ok := manager["resources"].(map[string]any)
+	if !ok {
+		t.Fatal("longhornManager.resources missing")
+	}
+	req, ok := res["requests"].(map[string]any)
+	if !ok {
+		t.Fatal("longhornManager.resources.requests missing")
+	}
+	if req["cpu"] != "50m" || req["memory"] != "128Mi" {
+		t.Errorf("manager requests = %v, want 50m/128Mi", req)
+	}
+	lim, ok := res["limits"].(map[string]any)
+	if !ok {
+		t.Fatal("longhornManager.resources.limits missing")
+	}
+	if lim["cpu"] != "500m" || lim["memory"] != "512Mi" {
+		t.Errorf("manager limits = %v, want 500m/512Mi", lim)
+	}
+
+	settings, ok := values["defaultSettings"].(map[string]any)
+	if !ok {
+		t.Fatal("defaultSettings not found or not a map")
+	}
+	csi, ok := settings["systemManagedCSIComponentsResourceLimits"].(string)
+	if !ok || csi == "" {
+		t.Fatal("systemManagedCSIComponentsResourceLimits missing")
+	}
+	for _, comp := range []string{"csi-attacher", "csi-provisioner", "csi-resizer", "csi-snapshotter"} {
+		if !strings.Contains(csi, comp) {
+			t.Errorf("CSI resource limits missing component %s", comp)
+		}
+	}
+	// csi-plugin is the per-node mount path; capping it risks slow mounts.
+	if strings.Contains(csi, "csi-plugin") {
+		t.Error("csi-plugin must not be resource-limited: it is the per-node mount path (#456)")
+	}
+}
+
+// TestBuildHelmValuesInstanceManagerCPU covers the instance_manager_cpu_percent
+// knob: Longhorn's default reserves 12% of every node's allocatable CPU per
+// instance-manager pod, which is the largest hidden cost in the install (#456).
+func TestBuildHelmValuesInstanceManagerCPU(t *testing.T) {
+	tests := []struct {
+		name    string
+		percent *int
+		want    string // empty = key must be absent
+	}{
+		{"unset keeps Longhorn default", nil, ""},
+		{"set renders both engines", intPtr(8), `{"v1":"8","v2":"8"}`},
+		{"zero removes the reservation", intPtr(0), `{"v1":"0","v2":"0"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := buildHelmValues(&Config{InstanceManagerCPUPercent: tt.percent})
+			settings := values["defaultSettings"].(map[string]any)
+			got, present := settings["guaranteedInstanceManagerCPU"]
+			if tt.want == "" {
+				if present {
+					t.Errorf("guaranteedInstanceManagerCPU should be absent, got %v", got)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("guaranteedInstanceManagerCPU = %v, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func intPtr(i int) *int { return &i }

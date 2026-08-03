@@ -39,12 +39,11 @@ Keeping any part of the values inline alongside an external file was also consid
 
 Chosen option: **Option 3, ArgoCD multi-source `$values` refs**.
 
-All 9 Helm-based foundational apps now source their Helm values from files in the gitops repo instead of an inline block:
+All 8 Helm-based foundational apps now source their Helm values from files in the gitops repo instead of an inline block:
 
 - envoy-gateway
 - cert-manager
 - cloudnative-pg
-- postgresql
 - metallb
 - trust-manager
 - opentelemetry-collector

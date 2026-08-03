@@ -1,6 +1,6 @@
 # Overriding foundational Helm values
 
-The foundational Helm apps, that is, those with a `values/<app>/` directory in your gitops repo (currently: envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, postgresql, metallb, trust-manager, nebari-landingpage), read their Helm values from the GitOps repo:
+The foundational Helm apps, that is, those with a `values/<app>/` directory in your gitops repo (currently: envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, metallb, trust-manager, nebari-landingpage), read their Helm values from the GitOps repo:
 
 ```
 values/<app>/base.yaml          # NIC-owned; --regen-apps rewrites it

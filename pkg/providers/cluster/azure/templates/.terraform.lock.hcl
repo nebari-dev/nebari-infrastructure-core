@@ -34,7 +34,7 @@ provider "registry.opentofu.org/azure/azapi" {
 
 provider "registry.opentofu.org/hashicorp/azurerm" {
   version     = "4.81.0"
-  constraints = ">= 4.0.0"
+  constraints = ">= 4.9.0"
   hashes = [
     "h1:+SK0igaGkoHG872vP6Q8Haqfn6bb9f93bpwwtfXQYjo=",
     "h1:/BPm6F9H7OA+0YUbYFLzo/11O9JwKyQF9xtqGysP4fM=",

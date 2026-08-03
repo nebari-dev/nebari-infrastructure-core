@@ -14,15 +14,21 @@ extraEnv: |
   - name: KC_DB
     value: postgres
   - name: KC_DB_URL_HOST
-    value: postgresql.{{ .KeycloakNamespace }}.svc.cluster.local
+    value: keycloak-db-rw.{{ .KeycloakNamespace }}.svc.cluster.local
   - name: KC_DB_URL_DATABASE
     value: keycloak
+  # Both credentials come from the CNPG-generated keycloak-db-app
+  # Secret so they cannot drift from initdb.owner in
+  # manifests/keycloak/keycloak-db-cluster.yaml.
   - name: KC_DB_USERNAME
-    value: keycloak
+    valueFrom:
+      secretKeyRef:
+        name: keycloak-db-app
+        key: username
   - name: KC_DB_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: keycloak-postgresql-credentials
+        name: keycloak-db-app
         key: password
   - name: KC_HOSTNAME
     value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
@@ -69,12 +75,14 @@ ingress:
   enabled: false
 postgresql:
   enabled: false
+# CPU deliberately uncapped: logins are bursty and throttling hurts
+# exactly when users pile in. The memory limit sizes the JVM heap
+# (MaxRAMPercentage=70), so it must stay set. See #456/#457.
 resources:
   requests:
-    cpu: 500m
+    cpu: 250m
     memory: 1Gi
   limits:
-    cpu: 2000m
     memory: 2Gi
 {{- if .TrustManagerEnabled }}
 extraVolumes: |

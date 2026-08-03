@@ -1196,7 +1196,6 @@ var helmValueFilesApps = []struct {
 	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
 	{"cert-manager", "installCRDs: true"},
 	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
-	{"postgresql", "username: postgres"},
 	{"metallb", "speaker:"},
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
@@ -1620,6 +1619,130 @@ func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
 	for _, want := range []string{"overlays/", "base.yaml", "lexical"} {
 		if !strings.Contains(string(content), want) {
 			t.Errorf("values/README.md missing %q", want)
+		}
+	}
+}
+
+// TestFoundationalResourceDefaults pins the audited resource defaults from
+// issue #457 so regressions in the embedded templates fail loudly. Each
+// wanted block is matched verbatim, indentation included. Helm-app values
+// live in templates/values/<app>/base.yaml (the #406 overlay seam), so the
+// blocks are pinned there; the nebari-operator entry stays in its manifest.
+func TestFoundationalResourceDefaults(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		want     []string
+	}{
+		{
+			name:     "cert-manager controller, webhook, cainjector",
+			template: "templates/values/cert-manager/base.yaml",
+			want: []string{
+				"resources:\n  requests:\n    cpu: 25m\n    memory: 64Mi\n  limits:\n    cpu: 200m\n    memory: 256Mi",
+				"webhook:\n  resources:\n    requests:\n      cpu: 10m\n      memory: 32Mi\n    limits:\n      cpu: 100m\n      memory: 128Mi",
+				"cainjector:\n  resources:\n    requests:\n      cpu: 10m\n      memory: 64Mi\n    limits:\n      cpu: 200m\n      memory: 256Mi",
+			},
+		},
+		{
+			name:     "keycloak has no CPU limit",
+			template: "templates/values/keycloak/base.yaml",
+			want: []string{
+				"resources:\n  requests:\n    cpu: 250m\n    memory: 1Gi\n  limits:\n    memory: 2Gi",
+			},
+		},
+		{
+			name:     "envoy gateway controller",
+			template: "templates/values/envoy-gateway/base.yaml",
+			want: []string{
+				"    resources:\n      requests:\n        cpu: 50m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 512Mi",
+			},
+		},
+		{
+			name:     "metallb controller, speaker, and frr sidecar",
+			template: "templates/values/metallb/base.yaml",
+			want: []string{
+				"controller:\n  replicas: 1\n  resources:\n    requests:\n      cpu: 25m\n      memory: 64Mi\n    limits:\n      cpu: 100m\n      memory: 128Mi",
+				"speaker:\n  enabled: true\n  resources:\n    requests:\n      cpu: 50m\n      memory: 128Mi\n    limits:\n      cpu: 200m\n      memory: 256Mi",
+				"  frr:\n    resources:\n      requests:\n        cpu: 25m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 256Mi",
+			},
+		},
+		{
+			name:     "opentelemetry collector",
+			template: "templates/values/opentelemetry-collector/base.yaml",
+			want: []string{
+				// 256Mi request, not the 128Mi the kind audit measured: the
+				// agent settles at ~231Mi on EKS.
+				"resources:\n  requests:\n    cpu: 50m\n    memory: 256Mi\n  limits:\n    cpu: 250m\n    memory: 512Mi",
+			},
+		},
+		{
+			name:     "nebari-operator manager",
+			template: "templates/manifests/nebari-operator/deployment-patch.yaml",
+			want: []string{
+				"          resources:\n            requests:\n              cpu: 10m\n              memory: 64Mi\n            limits:\n              cpu: 200m\n              memory: 128Mi",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.template)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.template, err)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(string(content), w) {
+					t.Errorf("%s missing expected block:\n%s", tt.template, w)
+				}
+			}
+		})
+	}
+}
+
+// TestKeycloakNoCPULimit guards the deliberate absence of a Keycloak CPU
+// limit: logins are bursty and throttling hurts exactly when users pile in.
+func TestKeycloakNoCPULimit(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/keycloak/base.yaml")
+	if err != nil {
+		t.Fatalf("read keycloak base values template: %v", err)
+	}
+	if strings.Contains(string(content), "cpu: 2000m") {
+		t.Error("keycloak still has a CPU limit; #457 removes it so login bursts are not throttled")
+	}
+}
+
+// TestEnvoyProxyDataPlaneResources pins the data-plane proxy sizing. Without
+// an EnvoyProxy resource, Envoy Gateway defaults every provisioned proxy pod
+// to a silent 512Mi memory request (#456 finding 4).
+func TestEnvoyProxyDataPlaneResources(t *testing.T) {
+	content, err := templates.ReadFile("templates/manifests/networking/envoyproxy.yaml")
+	if err != nil {
+		t.Fatalf("read envoyproxy manifest: %v", err)
+	}
+	s := string(content)
+	for _, w := range []string{
+		"kind: EnvoyProxy",
+		"name: nebari-proxy-config",
+		"namespace: envoy-gateway-system",
+		"cpu: 100m",
+		"memory: 128Mi",
+		"memory: 512Mi",
+	} {
+		if !strings.Contains(s, w) {
+			t.Errorf("envoyproxy.yaml missing %q", w)
+		}
+	}
+	if strings.Contains(s, "limits:\n              cpu:") {
+		t.Error("data-plane proxy must not have a CPU limit (#457 policy)")
+	}
+
+	gc, err := templates.ReadFile("templates/manifests/networking/gatewayclass.yaml")
+	if err != nil {
+		t.Fatalf("read gatewayclass manifest: %v", err)
+	}
+	for _, w := range []string{"parametersRef:", "kind: EnvoyProxy", "name: nebari-proxy-config"} {
+		if !strings.Contains(string(gc), w) {
+			t.Errorf("gatewayclass.yaml missing %q", w)
 		}
 	}
 }

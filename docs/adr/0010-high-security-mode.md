@@ -61,7 +61,7 @@ In `hardened` mode, NIC enforces the following controls. Each maps to an audit f
 | Area | Standard (default) | Hardened | Audit finding |
 |------|--------------------|----------|---------------|
 | ArgoCD foundational project | resource kinds `*` | enumerated resource-kind whitelist (no `*`) | H-02 (#458) |
-| ArgoCD `nebari-apps` project | namespaces `*`, default pack repos | operator-declared pack namespaces and repos only | H-02 (#458) |
+| ArgoCD `nebari-apps` project | namespaces `*`, `sourceRepos` `*` | operator-declared pack namespaces and repos only | H-02 (#458) |
 | Workload admission | none | admission policy required (block privileged pods, hostPath, host namespaces, unapproved cluster RBAC) | #480 |
 | Deploy semantics | fail-open (warns, continues) | fail-closed (any required-service failure aborts non-zero) | M-02 |
 | Config decoding | lenient (unknown fields dropped) | strict (unknown/misplaced fields rejected) | M-04 |
@@ -74,10 +74,11 @@ The last row reflects the central truth from #458's security model: because repo
 
 ### Permissive mode (development and testing only)
 
-`permissive` exists because the "explicitly whitelist everything" principle creates real friction for a developer iterating on a pack from an arbitrary or throwaway repository, which standard mode's pack-source allow-list would reject. It is defined as a deliberately small, well-bounded relaxation of `standard`:
+`permissive` exists because the "explicitly whitelist everything" principle creates real friction for a developer iterating on a pack from an arbitrary or throwaway repository. It is defined as a deliberately small, well-bounded relaxation of `standard`:
 
-- `nebari-apps.sourceRepos` becomes `*` (packs may come from any repository).
 - The built-in `default` project is left usable rather than deny-all, so an Application that omits `project:` still syncs.
+
+Note that the other relaxation originally listed here, opening `nebari-apps.sourceRepos` to `*`, is now the *standard* posture rather than a permissive-only delta. It was widened because packs ship from several legitimate locations and NIC has no configuration surface for declaring which are trusted, so the fixed two-entry list refused valid packs ([#530](https://github.com/nebari-dev/nebari-infrastructure-core/issues/530)). That leaves `permissive` thinner than described here and weakens its rationale correspondingly: restoring a scoped `nebari-apps` in `standard` is a precondition for `permissive` being a meaningful distinction.
 
 Everything else stays at the standard posture. In particular, **`foundational` remains scoped in permissive mode** (its derived repos/namespaces are unchanged), because nothing about development requires loosening NIC's own control plane. Permissive is a user/pack-side convenience, not a revert to the pre-#458 wildcard posture.
 
@@ -87,7 +88,7 @@ Guardrails, because a permissive cluster is exactly the exposure the audit flagg
 - Selecting it emits a prominent, repeated warning that the cluster is insecure and for development/testing only.
 - On cloud providers it is refused (or, at minimum, gated behind an explicit "I understand this is insecure" acknowledgement), since a permissive cloud deployment reintroduces the H-02 hole on an internet-reachable cluster.
 
-Much of the deliberate case (a known additional pack repository) is better served by the planned multi-repo pack configuration, which adds a specific repo to `nebari-apps.sourceRepos` without opening it to `*`. Permissive is for the throwaway/iterate case where configuring anything is not worth it.
+Much of the deliberate case (a known additional pack repository) is better served by the planned multi-repo pack configuration (#530), which names a specific repo in `nebari-apps.sourceRepos` instead of leaving it at `*`. Permissive is for the throwaway/iterate case where configuring anything is not worth it.
 
 ### Consequences
 
@@ -109,7 +110,7 @@ Much of the deliberate case (a known additional pack repository) is better serve
 
 This ADR records the decision and the target shape; it is deliberately not a single pull request.
 
-- **Step one (shipping now):** the standard posture, delivered by #458 (ArgoCD project scoping) plus the honest security-model documentation.
+- **Step one (shipping now):** the standard posture, delivered by #458 (ArgoCD project scoping) plus the honest security-model documentation. The `nebari-apps` half of that scoping was subsequently reverted to `sourceRepos: '*'`, because #458 shipped the allow-list without the configuration surface needed to extend it; #530 restores the scoping properly.
 - **Incremental hardened controls:** the admission policy (#480), digest pinning (M-08), cloud control-plane strictness (M-05), telemetry hardening (M-06), strict config decoding (M-04), and fail-closed deploy (M-02) each land as their own scoped work, on the hardened side of the switch.
 - **The `security_level` knob is introduced only once `hardened` genuinely ratchets at least one control.** Shipping the flag while `hardened` is indistinguishable from `standard` would be a hollow abstraction. Until the first hardened control exists, a written hardening guide documents the manual path.
 

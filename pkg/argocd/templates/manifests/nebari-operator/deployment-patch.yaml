@@ -26,10 +26,11 @@ spec:
               value: "{{ .KeycloakBasePath }}"
             - name: KEYCLOAK_EXTERNAL_URL
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+          # kubebuilder scaffold defaults; idle usage is ~2m/15Mi (#456).
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 10m
+              memory: 64Mi
             limits:
-              cpu: 500m
-              memory: 256Mi
+              cpu: 200m
+              memory: 128Mi
