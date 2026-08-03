@@ -12,10 +12,11 @@ const (
 	// (critical), GHSA-h98r-wv3h-fr38 (high) and GHSA-rg3g-4rw9-gqrp
 	// (medium); v3.4.4 is past the highest patch floor of those three (3.4.2).
 	//
-	// Keep this at v3.4 or later. Planned work (#499) needs glob expansion of
-	// helm.valueFiles, which Argo CD gained in 3.4 (argoproj/argo-cd#26768,
-	// cherry-picked to release-3.4 as #26919). Downgrading below 3.4 would
-	// make that mechanism fail silently rather than error.
+	// Keep this at v3.4 or later. The valueFiles overlay seam (#499,
+	// ADR-0014) needs glob expansion of helm.valueFiles, which Argo CD
+	// gained in 3.4 (argoproj/argo-cd#26768, cherry-picked to release-3.4
+	// as #26919). Downgrading below 3.4 would make overlays fail silently
+	// rather than error.
 	defaultChartVersion = "9.7.1"
 	defaultNamespace    = "argocd"
 

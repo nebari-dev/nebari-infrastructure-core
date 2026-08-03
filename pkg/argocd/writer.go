@@ -471,7 +471,11 @@ const valuesDirPrefix = "values/"
 // than silent data loss.
 func removeStaleTemplate(relPath, destPath string, d fs.DirEntry) error {
 	if d.IsDir() {
-		if strings.HasPrefix(relPath, valuesDirPrefix) {
+		// The bare "values" root has no trailing slash, so the prefix test
+		// alone misses it; a predicate matching the whole tree
+		// (relPath == "values" || HasPrefix...) would otherwise RemoveAll
+		// every app's base.yaml and every overlay in the repo.
+		if relPath == "values" || strings.HasPrefix(relPath, valuesDirPrefix) {
 			// Do not RemoveAll, and do not SkipDir: descending lets the
 			// base.yaml file be matched and removed on its own.
 			return nil

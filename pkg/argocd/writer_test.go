@@ -1448,8 +1448,11 @@ func lookupDirEntry(t *testing.T, parent, name string) fs.DirEntry {
 // DIRECTORY as well as its base.yaml, which previously routed the directory
 // into the recursive branch and deleted user overlays alongside it. The guard
 // must refuse recursion under values/ and descend instead, so the per-file gate
-// still removes base.yaml. Mutation check: dropping the valuesDirPrefix branch
-// in removeStaleTemplate turns the overlay assertion below red.
+// still removes base.yaml. Mutation check: dropping the guard branch in
+// removeStaleTemplate silently destroys the overlay via os.RemoveAll and then
+// returns fs.SkipDir, so the t.Fatalf on the removeStaleTemplate() call fires
+// first and reports the failure; the overlay-survival assertion after it is
+// the second, unreached witness of the same loss.
 func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -1473,6 +1476,18 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 	}
 	if _, err := os.Stat(overlayPath); err != nil {
 		t.Errorf("user overlay was destroyed by the recursive branch: %v", err)
+	}
+
+	// The subtree root itself: "values" has no trailing slash, so it is not
+	// covered by the values/ prefix test alone. A whole-tree predicate match
+	// routed through RemoveAll here would delete every base.yaml and overlay
+	// in the repo at once.
+	rootEntry := lookupDirEntry(t, tmpDir, "values")
+	if err := removeStaleTemplate("values", filepath.Join(tmpDir, "values"), rootEntry); err != nil {
+		t.Fatalf("removeStaleTemplate() on the values root error = %v, want nil", err)
+	}
+	if _, err := os.Stat(overlayPath); err != nil {
+		t.Errorf("user overlay was destroyed via the bare values root: %v", err)
 	}
 
 	// A directory outside values/ is still removed recursively.

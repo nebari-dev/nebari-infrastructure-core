@@ -40,14 +40,16 @@ Note that git does not track empty directories, so `overlays/` only exists in th
    kubectl -n argocd logs deploy/argocd-repo-server -c repo-server | grep -c "resolved value files"
    ```
 
-   That log statement is `log.Infof` at `reposerver/repository/repository.go:1488` in v3.4.4 and does not exist in v3.3.0 at all. A count of **zero proves you are pre-3.4**. A non-zero count is also the diagnostic for the next question, because the line lists the files that were actually passed to Helm:
+   That log statement is `log.Infof` at `reposerver/repository/repository.go:1488` in v3.4.4 and does not exist in v3.3.0 at all, so a **non-zero count proves 3.4+**. A count of zero is inconclusive, not proof of pre-3.4: the line is emitted only when the repo-server actually renders a Helm app with `valueFiles`, and on a manifest-cache hit nothing is rendered at all. As the cache section below explains, serving from cache is the common state, not a corner case. A zero also follows a pod restart or reschedule (`kubectl logs` sees only the current container) or, with multiple repo-server replicas, reading a pod that did not serve the render. To disambiguate a zero, force a render with a hard refresh or a trivial gitops commit and re-run the count; if it is still zero after a forced render, fall back to the image-tag check below as the tiebreaker.
+
+   A non-zero count is also the diagnostic for the next question, because the line lists the files that were actually passed to Helm:
 
    ```bash
    kubectl -n argocd logs deploy/argocd-repo-server -c repo-server \
-     | grep "resolved value files" | grep <app> | tail -2
+     | grep "resolved value files" | grep <app> | tail -1
    ```
 
-   Two paths, `base.yaml` then your overlay, means expansion worked. Only `base.yaml` on a 3.4+ repo-server means the glob matched nothing, which an image tag cannot tell you. The image tag remains a useful cross-check, and also reveals pods from two different ReplicaSets serving at once:
+   The line should list two paths, `base.yaml` then your overlay; that means expansion worked. Only `base.yaml` on a 3.4+ repo-server means the glob matched nothing, which an image tag cannot tell you. The image tag is the tiebreaker for the zero-count case above, and also reveals pods from two different ReplicaSets serving at once:
 
    ```bash
    kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-repo-server \
@@ -70,10 +72,10 @@ Use this when you suspect overlays are not being applied, or when validating the
 
 ```bash
 kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[0].helm.valueFiles}{"\n"}'
-kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[1]}{"\n"}'
+kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[?(@.ref=="values")]}{"\n"}'
 ```
 
-Expect both `valueFiles` entries carrying your `git_repository.path` prefix, and a second source with `ref: values` pointing at your GitOps repo. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
+Expect both `valueFiles` entries carrying your `git_repository.path` prefix, and a source with `ref: values` pointing at your GitOps repo. The chart source is always `sources[0]` (the tests pin that), but the `ref: values` source is selected by its `ref` field rather than by position, so the filter form keeps working if an app carries additional sources. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
 
 **3. Confirm `base.yaml` applies before testing overlays.** Assert specific values, not just that the app is Healthy. Because `ignoreMissingValueFiles: true` also covers the `base.yaml` entry, a typo in `git_repository.path` silently falls back to the chart's own defaults instead of erroring. If you see chart defaults here, fix that before going further; step 4 would be meaningless.
 
@@ -102,7 +104,14 @@ kubectl -n argocd exec deploy/argocd-repo-server -c repo-server -- \
   sh -c 'ls -la /tmp/_argocd-repo/*/<path>/values/<app>/overlays/ 2>&1'
 ```
 
-An absent or empty `overlays/` alongside a present `base.yaml` is a stale checkout rather than a glob problem; delete the repo-server pod and hard refresh. If the overlay is present at the right size and the glob still resolves to one file, that is an upstream bug worth reporting, and `ARGOCD_LOG_LEVEL=debug` on the repo-server will give the skip reason, which is debug-only.
+An absent or empty `overlays/` alongside a present `base.yaml` is a stale checkout rather than a glob problem; delete the repo-server pod and hard refresh. If the overlay is present at the right size and the glob still resolves to one file, that is an upstream bug worth reporting, and the repo-server's debug log will give the skip reason. The knob is `reposerver.log.level` in `argocd-cmd-params-cm` (chart value `configs.params."reposerver.log.level"`), which the chart wires to `ARGOCD_REPO_SERVER_LOGLEVEL`; do not use `ARGOCD_LOG_LEVEL`, which the repo-server overwrites at startup rather than reads, so setting it silently does nothing:
+
+```bash
+kubectl -n argocd patch cm argocd-cmd-params-cm --type merge -p '{"data":{"reposerver.log.level":"debug"}}'
+kubectl -n argocd rollout restart deploy/argocd-repo-server
+```
+
+The restart is required either way: the flag default is read at process start.
 
 ## Migration from hand-edited manifests
 
