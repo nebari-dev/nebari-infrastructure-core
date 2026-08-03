@@ -57,9 +57,23 @@ function curl(url: string, dest: string | null, token: string): string {
   return capture("curl", args);
 }
 
+// Map the runner to a release-archive name, rejecting combinations that have
+// no matching asset (or a .zip one, i.e. windows): a wrong guess here either
+// 404s or, worse, downloads an x86_64 tarball that passes the checksum and
+// then fails cryptically at exec.
 function releaseArchName(): string {
   const os = process.platform;
-  const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+  if (os !== "linux" && os !== "darwin") {
+    throw new Error(
+      `no release archive for platform '${os}'; use nic-binary with a prebuilt binary instead`,
+    );
+  }
+  const arch = { arm64: "arm64", x64: "x86_64" }[process.arch as string];
+  if (!arch) {
+    throw new Error(
+      `no release archive for architecture '${process.arch}'; use nic-binary with a prebuilt binary instead`,
+    );
+  }
   return `${os}_${arch}`;
 }
 
@@ -163,6 +177,10 @@ export interface AcquireOptions {
  * binary) or the nic-version input (a release download or source build).
  */
 export function acquireNic({ binary, version, token }: AcquireOptions): string {
+  // Register the token for log masking ourselves instead of relying on the
+  // caller having passed an already-registered secret.
+  if (token) core.setSecret(token);
+
   if (binary && version) {
     throw new Error(
       "nic-binary and nic-version are mutually exclusive; set exactly one.",

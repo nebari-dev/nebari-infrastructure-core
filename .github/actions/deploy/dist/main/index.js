@@ -25720,15 +25720,28 @@ function main() {
     core.saveState("destroy", core.getBooleanInput("destroy") ? "true" : "false");
     core.saveState("force", core.getBooleanInput("force") ? "true" : "false");
     core.saveState("deployStarted", "true");
+    // endGroup in finally: run() throws on failure, and a failed deploy's
+    // output is exactly what must not end up inside a collapsed group.
     core.startGroup("nic deploy");
-    (0, nic_1.run)(nic, ["deploy", "-f", config]);
-    core.endGroup();
+    try {
+        (0, nic_1.run)(nic, ["deploy", "-f", config]);
+    }
+    finally {
+        core.endGroup();
+    }
     const kubeconfig = path.join(process.env.RUNNER_TEMP || "/tmp", `nic-kubeconfig-${process.env.GITHUB_ACTION || "deploy"}`);
     (0, nic_1.run)(nic, ["kubeconfig", "-f", config, "-o", kubeconfig]);
     core.exportVariable("KUBECONFIG", kubeconfig);
     core.setOutput("kubeconfig", kubeconfig);
     if (core.getBooleanInput("wait")) {
-        const timeout = parseInt(core.getInput("wait-timeout"), 10) || 600;
+        // Strict parse: `parseInt(...) || 600` would turn an explicit 0 into 600,
+        // truncate '300s' to 300, and accept negatives.
+        const raw = core.getInput("wait-timeout");
+        if (!/^[0-9]+$/.test(raw) || parseInt(raw, 10) <= 0) {
+            throw new Error(`wait-timeout must be a positive integer number of seconds, got '${raw}'. ` +
+                "Set wait: false to skip waiting.");
+        }
+        const timeout = parseInt(raw, 10);
         core.info(`Waiting up to ${timeout}s for Argo CD Applications to converge`);
         (0, nic_1.waitForApplications)(kubeconfig, timeout);
     }
@@ -25829,9 +25842,19 @@ function curl(url, dest, token) {
         args.push("-o", dest);
     return capture("curl", args);
 }
+// Map the runner to a release-archive name, rejecting combinations that have
+// no matching asset (or a .zip one, i.e. windows): a wrong guess here either
+// 404s or, worse, downloads an x86_64 tarball that passes the checksum and
+// then fails cryptically at exec.
 function releaseArchName() {
     const os = process.platform;
-    const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+    if (os !== "linux" && os !== "darwin") {
+        throw new Error(`no release archive for platform '${os}'; use nic-binary with a prebuilt binary instead`);
+    }
+    const arch = { arm64: "arm64", x64: "x86_64" }[process.arch];
+    if (!arch) {
+        throw new Error(`no release archive for architecture '${process.arch}'; use nic-binary with a prebuilt binary instead`);
+    }
     return `${os}_${arch}`;
 }
 // Download a release tarball, verify it against the release's checksums.txt,
@@ -25913,6 +25936,10 @@ function buildFromRef(ref, destDir) {
  * binary) or the nic-version input (a release download or source build).
  */
 function acquireNic({ binary, version, token }) {
+    // Register the token for log masking ourselves instead of relying on the
+    // caller having passed an already-registered secret.
+    if (token)
+        core.setSecret(token);
     if (binary && version) {
         throw new Error("nic-binary and nic-version are mutually exclusive; set exactly one.");
     }

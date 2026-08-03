@@ -47,9 +47,14 @@ function main(): void {
   core.saveState("force", core.getBooleanInput("force") ? "true" : "false");
   core.saveState("deployStarted", "true");
 
+  // endGroup in finally: run() throws on failure, and a failed deploy's
+  // output is exactly what must not end up inside a collapsed group.
   core.startGroup("nic deploy");
-  run(nic, ["deploy", "-f", config]);
-  core.endGroup();
+  try {
+    run(nic, ["deploy", "-f", config]);
+  } finally {
+    core.endGroup();
+  }
 
   const kubeconfig = path.join(
     process.env.RUNNER_TEMP || "/tmp",
@@ -60,7 +65,16 @@ function main(): void {
   core.setOutput("kubeconfig", kubeconfig);
 
   if (core.getBooleanInput("wait")) {
-    const timeout = parseInt(core.getInput("wait-timeout"), 10) || 600;
+    // Strict parse: `parseInt(...) || 600` would turn an explicit 0 into 600,
+    // truncate '300s' to 300, and accept negatives.
+    const raw = core.getInput("wait-timeout");
+    if (!/^[0-9]+$/.test(raw) || parseInt(raw, 10) <= 0) {
+      throw new Error(
+        `wait-timeout must be a positive integer number of seconds, got '${raw}'. ` +
+          "Set wait: false to skip waiting.",
+      );
+    }
+    const timeout = parseInt(raw, 10);
     core.info(`Waiting up to ${timeout}s for Argo CD Applications to converge`);
     waitForApplications(kubeconfig, timeout);
   }

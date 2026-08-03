@@ -25729,9 +25729,19 @@ function curl(url, dest, token) {
         args.push("-o", dest);
     return capture("curl", args);
 }
+// Map the runner to a release-archive name, rejecting combinations that have
+// no matching asset (or a .zip one, i.e. windows): a wrong guess here either
+// 404s or, worse, downloads an x86_64 tarball that passes the checksum and
+// then fails cryptically at exec.
 function releaseArchName() {
     const os = process.platform;
-    const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+    if (os !== "linux" && os !== "darwin") {
+        throw new Error(`no release archive for platform '${os}'; use nic-binary with a prebuilt binary instead`);
+    }
+    const arch = { arm64: "arm64", x64: "x86_64" }[process.arch];
+    if (!arch) {
+        throw new Error(`no release archive for architecture '${process.arch}'; use nic-binary with a prebuilt binary instead`);
+    }
     return `${os}_${arch}`;
 }
 // Download a release tarball, verify it against the release's checksums.txt,
@@ -25813,6 +25823,10 @@ function buildFromRef(ref, destDir) {
  * binary) or the nic-version input (a release download or source build).
  */
 function acquireNic({ binary, version, token }) {
+    // Register the token for log masking ourselves instead of relying on the
+    // caller having passed an already-registered secret.
+    if (token)
+        core.setSecret(token);
     if (binary && version) {
         throw new Error("nic-binary and nic-version are mutually exclusive; set exactly one.");
     }
@@ -26119,9 +26133,14 @@ function post() {
     const args = ["destroy", "-f", config, "--auto-approve"];
     if (core.getState("force") === "true")
         args.push("--force");
+    // endGroup in finally: a failed destroy's output must not render collapsed.
     core.startGroup("nic destroy");
-    (0, nic_1.run)(nic, args);
-    core.endGroup();
+    try {
+        (0, nic_1.run)(nic, args);
+    }
+    finally {
+        core.endGroup();
+    }
 }
 try {
     post();

@@ -21,9 +21,13 @@ function post(): void {
   const args = ["destroy", "-f", config, "--auto-approve"];
   if (core.getState("force") === "true") args.push("--force");
 
+  // endGroup in finally: a failed destroy's output must not render collapsed.
   core.startGroup("nic destroy");
-  run(nic, args);
-  core.endGroup();
+  try {
+    run(nic, args);
+  } finally {
+    core.endGroup();
+  }
 }
 
 try {
