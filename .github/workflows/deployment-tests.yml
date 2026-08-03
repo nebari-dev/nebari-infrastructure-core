@@ -281,9 +281,10 @@ jobs:
       # unnecessary on a Linux runner where the node IP is directly routable.
       - name: Create k3d cluster
         run: |
-          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
+          # Install script pinned to the v5.9.0 tag commit. TAG pins the binary it fetches
+          curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/15dd1e2dbd62c53ed990fce9b7332335e8cb053c/install.sh | TAG=v5.9.0 bash
           k3d cluster create existing-ci \
-            --image rancher/k3s:v1.36.2-k3s1 \
+            --image rancher/k3s:v1.36.2-k3s1@sha256:6a47cea22c4b834d4ba72c89d291696b79ebe406251f90b446e4dff03513dd87 \
             --no-lb \
             --k3s-arg "--disable=traefik@server:0" \
             --wait --timeout 120s
