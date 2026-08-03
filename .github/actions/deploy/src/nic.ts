@@ -73,6 +73,26 @@ function downloadRelease(tag: string, token: string, destDir: string): string {
 
   core.info(`Downloading ${tarball}`);
   curl(`${base}/${tarball}`, tarPath, token);
+
+  // The checksum below only proves the tarball matches checksums.txt, which
+  // travels with it. Provenance proves the release workflow of this repo
+  // built it. The attestation lives in GitHub's store, so a tampered asset
+  // cannot bring its own proof. gh ships preinstalled on GitHub-hosted
+  // runners.
+  core.info("Verifying build provenance");
+  try {
+    run("gh", ["attestation", "verify", tarPath, "--repo", NIC_REPO], {
+      env: { ...process.env, GH_TOKEN: token },
+    });
+  } catch (err) {
+    throw new Error(
+      `build provenance verification failed for ${tarball}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        "This requires the GitHub CLI (preinstalled on GitHub-hosted runners) " +
+        "and a token able to read attestations on the repository.",
+    );
+  }
+
   const checksums = curl(`${base}/checksums.txt`, null, token);
 
   const entry = checksums.split("\n").find((l) => l.trim().endsWith(tarball));
