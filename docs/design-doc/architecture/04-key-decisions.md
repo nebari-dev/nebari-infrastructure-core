@@ -81,7 +81,7 @@ terraform {
 }
 ```
 
-Bucket and key are populated dynamically at `tofu init` time. The bucket name is deterministic: `nic-tfstate-<project>-<region>-<8-hex-of-account-id-hash>`. NIC auto-creates the bucket (`pkg/providers/cluster/aws/state.go:ensureStateBucket`) with versioning and public-access-block enabled.
+Bucket and key are populated dynamically at `tofu init` time. The bucket name is deterministic: `nic-tfstate-<normalized-project>-<region>-<8-hex-of-account-id-hash>`. Only the bucket-name segment is lowercased with underscores replaced by hyphens; the configured project name and state key remain unchanged. NIC auto-creates the bucket (`pkg/providers/cluster/aws/state.go:ensureStateBucket`) with versioning and public-access-block enabled.
 
 **Non-AWS providers manage state in tool-specific ways:**
 

@@ -372,6 +372,23 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
 		}
+
+		// Keyless backup target: repair longhorn-manager pods that predate the
+		// Pod Identity association (#500). Gated on the spec rather than an EKS
+		// API lookup: opts.BackupBucket.PodIdentity drove the association's
+		// count in the tf.Apply above, so a successful apply proves the
+		// association exists.
+		if opts.BackupBucket != nil && opts.BackupBucket.PodIdentity {
+			client, err := newK8sClient(kubeconfigBytes)
+			if err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Kubernetes client for Longhorn backup repair: %w", err)
+			}
+			if err := repairLonghornBackupPodIdentity(ctx, client); err != nil {
+				span.RecordError(err)
+				return err
+			}
+		}
 	}
 
 	// Install AWS Load Balancer Controller if enabled.
