@@ -49,7 +49,7 @@ jobs:
           retention-days: 1
 
   local:
-    name: Deploy (Local)
+    name: Local
     needs: build
     if: >-
       github.event_name == 'release' || github.event_name == 'pull_request' ||
@@ -92,7 +92,7 @@ jobs:
           nic-binary: nic
 
   aws:
-    name: Deploy (AWS)
+    name: AWS
     needs: build
     if: >-
       github.event_name == 'release' || github.event_name == 'pull_request' ||
@@ -150,7 +150,7 @@ jobs:
           wait-timeout: '1800'
 
   azure:
-    name: Deploy (Azure)
+    name: Azure
     needs: build
     if: >-
       github.event_name == 'release' || github.event_name == 'pull_request' ||
@@ -210,7 +210,7 @@ jobs:
           wait-timeout: '1800'
 
   hetzner:
-    name: Deploy (Hetzner)
+    name: Hetzner
     needs: build
     if: >-
       github.event_name == 'release' || github.event_name == 'pull_request' ||
@@ -257,7 +257,7 @@ jobs:
           wait-timeout: '1800'
 
   existing:
-    name: Deploy (Existing)
+    name: Existing
     needs: build
     if: >-
       github.event_name == 'release' || github.event_name == 'pull_request' ||
