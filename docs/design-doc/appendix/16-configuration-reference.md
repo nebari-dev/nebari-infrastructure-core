@@ -139,7 +139,7 @@ cluster:
     # Optional: AWS Load Balancer Controller (default: enabled)
     # aws_load_balancer_controller:
     #   enabled: true
-    #   chart_version: "3.4.2"
+    #   chart_version: "3.4.3"
     #   destroy_timeout: 5m
 
     # Optional: Kubernetes Cluster Autoscaler (default: enabled)
