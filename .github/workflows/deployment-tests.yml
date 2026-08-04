@@ -52,7 +52,7 @@ jobs:
     name: Local
     needs: build
     if: >-
-      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      github.event_name == 'release' ||
       inputs.provider == 'local' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     # Serialize runs so every job resets its own gitops branch at start. An
@@ -95,7 +95,7 @@ jobs:
     name: AWS
     needs: build
     if: >-
-      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      github.event_name == 'release' ||
       inputs.provider == 'aws' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     environment: aws
@@ -275,7 +275,7 @@ jobs:
     name: Existing
     needs: build
     if: >-
-      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      github.event_name == 'release' ||
       inputs.provider == 'existing' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     # See the local job for the concurrency rationale.
