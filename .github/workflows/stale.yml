@@ -1,12 +1,9 @@
 name: Stale pull requests
 
 on:
-  # Enabled in a follow-up commit once a dry run has been verified on main.
-  # workflow_dispatch cannot run from a file that is not on the default branch,
-  # so the workflow has to land here first, and scheduled runs are always live.
-  # schedule:
-  #   # Daily at 01:30 UTC.
-  #   - cron: '30 1 * * *'
+  schedule:
+    # Daily at 01:30 UTC.
+    - cron: '30 1 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

@@ -1241,7 +1241,7 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 			want: []string{
 				"        controller:\n          replicas: 1\n          resources:\n            requests:\n              cpu: 25m\n              memory: 64Mi\n            limits:\n              cpu: 100m\n              memory: 128Mi",
 				"        speaker:\n          enabled: true\n          resources:\n            requests:\n              cpu: 50m\n              memory: 128Mi\n            limits:\n              cpu: 200m\n              memory: 256Mi",
-				"          frr:\n            resources:\n              requests:\n                cpu: 25m\n                memory: 64Mi\n              limits:\n                cpu: 100m\n                memory: 128Mi",
+				"          frr:\n            resources:\n              requests:\n                cpu: 25m\n                memory: 128Mi\n              limits:\n                cpu: 500m\n                memory: 256Mi",
 			},
 		},
 		{

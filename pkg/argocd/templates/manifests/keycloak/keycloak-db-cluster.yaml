@@ -1,6 +1,6 @@
 # PostgreSQL for Keycloak, managed by the CloudNativePG operator (installed
 # as foundational infrastructure at sync-wave 3; this manifest is applied by
-# the keycloak Application at wave 4, so the CRDs exist by then).
+# the keycloak Application at wave 4).
 # CNPG's initdb bootstrap creates the "keycloak" database and owner and
 # publishes the generated credentials in the Secret "keycloak-db-app"
 # (keys: username, password, dbname, host, port, uri). The keycloak app
@@ -14,6 +14,21 @@ metadata:
   labels:
     app.kubernetes.io/part-of: nebari-foundational
     app.kubernetes.io/managed-by: nebari-infrastructure-core
+  annotations:
+    # Wave -1 within the keycloak Application (the Helm chart's resources are
+    # all wave 0) so this Cluster is applied, and reaches Healthy, before the
+    # StatefulSet exists. On a fresh install the app-of-apps waves do not wait
+    # for the CNPG operator's webhook to be serving, so this apply can fail
+    # ("failed calling webhook mcluster.cnpg.io"). In its own wave that failure
+    # fails the whole sync operation, which retry + selfHeal converge once the
+    # webhook is up. Sharing wave 0 with the StatefulSet instead wedges the
+    # operation: server-side apply lands the StatefulSet first, the sync moves
+    # on to waiting for its health, and it can never become healthy because its
+    # credentials come from the keycloak-db-app Secret only this Cluster
+    # generates (issue #537). Wave gating on this Cluster's *health* (not just
+    # apply success) relies on the postgresql.cnpg.io_Cluster health
+    # customization NIC sets in argocd-cm (pkg/argocd/config.go).
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   instances: 1
   # Pin the PostgreSQL image explicitly. The operator's implicit default is

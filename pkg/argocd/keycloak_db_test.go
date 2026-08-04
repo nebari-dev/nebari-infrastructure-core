@@ -58,6 +58,15 @@ func TestKeycloakDBClusterTemplate_PinsShape(t *testing.T) {
 	if !strings.Contains(string(content), "app.kubernetes.io/part-of: nebari-foundational") {
 		t.Error("keycloak-db-cluster missing nebari-foundational label")
 	}
+	// The Cluster must sync in an earlier wave than the keycloakx chart's
+	// wave-0 resources. In a shared wave, a webhook-not-ready apply failure
+	// leaves a server-side-applied StatefulSet that the sync then waits on
+	// forever, because its keycloak-db-app Secret only this Cluster can
+	// generate (issue #537).
+	annotations, _ := meta["annotations"].(map[string]any)
+	if wave, _ := annotations["argocd.argoproj.io/sync-wave"].(string); wave != "-1" {
+		t.Errorf("sync-wave annotation = %q, want \"-1\" (must apply before the wave-0 StatefulSet)", wave)
+	}
 	resources, _ := spec["resources"].(map[string]any)
 	requests, _ := resources["requests"].(map[string]any)
 	limits, _ := resources["limits"].(map[string]any)
