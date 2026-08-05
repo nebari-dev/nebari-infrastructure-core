@@ -13,32 +13,19 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    chart: gateway-helm
-    repoURL: docker.io/envoyproxy
-    targetRevision: v1.6.2
-    helm:
-      releaseName: envoy-gateway
-      values: |
-        config:
-          envoyGateway:
-            gateway:
-              controllerName: gateway.envoyproxy.io/gatewayclass-controller
-        deployment:
-          envoyGateway:
-            # Control plane only (xDS); the data-plane proxy pods are sized
-            # by the EnvoyProxy CR in manifests/networking (#457).
-            resources:
-              requests:
-                cpu: 50m
-                memory: 128Mi
-              limits:
-                cpu: 500m
-                memory: 512Mi
-          replicas: 1
-        service:
-          type: ClusterIP
-          annotations: {}
+  sources:
+    - chart: gateway-helm
+      repoURL: docker.io/envoyproxy
+      targetRevision: v1.6.2
+      helm:
+        releaseName: envoy-gateway
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/envoy-gateway/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/envoy-gateway/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

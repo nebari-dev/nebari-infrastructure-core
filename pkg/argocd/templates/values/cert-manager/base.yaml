@@ -1,0 +1,46 @@
+installCRDs: true
+# The leader-election lease and its Role/RoleBinding default to
+# kube-system, which the scoped foundational ArgoCD project does not
+# allow (its destinations are derived from NIC's own templates and do
+# not include kube-system). Keep leader election in the cert-manager
+# namespace, which is an allowed destination and avoids granting
+# cert-manager RBAC in kube-system.
+global:
+  leaderElection:
+    namespace: cert-manager
+config:
+  enableGatewayAPI: true
+# Serialize ACME HTTP-01 challenges to avoid a race when two Certificates
+# share a SAN (e.g. nebari-gateway-cert and nebari-landing-nebari-system-cert
+# both list <baseDomain>). Concurrent challenges for the same hostname
+# collide on Let's Encrypt's authorization record and one fails with
+# "No such authorization", leaving the cert stuck on failedIssuanceAttempts.
+# See nebari-dev/nebari-infrastructure-core#267.
+maxConcurrentChallenges: 1
+prometheus:
+  enabled: true
+# Defaults from the #456 audit: controller and cainjector memory
+# scales with cached Secrets; the webhook has no cache by design.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+webhook:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+cainjector:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
