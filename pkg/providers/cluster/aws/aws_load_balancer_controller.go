@@ -46,18 +46,23 @@ func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string)
 		// regenerating it.
 		"keepTLSSecret": true,
 
-		// LBC starts before Envoy Gateway, so its one-shot CRD detection
-		// disables Gateway API support on a fresh cluster but can enable it
-		// after Envoy installs its CRDs and LBC later restarts. NIC does not
-		// provide LBC's restart-gated Gateway API controllers; Envoy Gateway is
-		// Nebari's Gateway API implementation. Set the complete gate set
-		// explicitly so startup ordering and later CRD changes cannot alter
-		// which controllers run (#383).
+		// LBC detects Gateway API CRDs at startup and can disable these gates when
+		// the CRDs are absent, but it does not reliably keep them disabled across
+		// restarts. Once Envoy Gateway installs the CRDs, a later LBC restart can
+		// therefore enable LBC's Gateway API controllers again. Envoy Gateway is
+		// Nebari's Gateway API implementation, so keep those controllers disabled
+		// while leaving LBC's Service, Ingress, and TargetGroupBinding controllers
+		// enabled (#383).
+		//
+		// Do not set GatewayListenerSet: upstream reads it only when ALBGatewayAPI
+		// or NLBGatewayAPI is enabled, and older chart versions reject the flag as
+		// unknown (before chart 3.2.2). The two gates below have the same floor at
+		// chart 1.13.0, where they were introduced; both defaulted to false until
+		// 3.2.1 flipped them to true, which is what made #383 reachable.
 		"controllerConfig": map[string]any{
 			"featureGates": map[string]any{
-				"ALBGatewayAPI":      false,
-				"GatewayListenerSet": false,
-				"NLBGatewayAPI":      false,
+				"ALBGatewayAPI": false,
+				"NLBGatewayAPI": false,
 			},
 		},
 	}
