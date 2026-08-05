@@ -59,6 +59,9 @@ func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string)
 		// unknown (before chart 3.2.2). The two gates below have the same floor at
 		// chart 1.13.0, where they were introduced; both defaulted to false until
 		// 3.2.1 flipped them to true, which is what made #383 reachable.
+		//
+		// Sole upstream read site, behind the ALB/NLB guard:
+		// https://github.com/kubernetes-sigs/aws-load-balancer-controller/blob/v3.4.3/main.go#L266-L273
 		"controllerConfig": map[string]any{
 			"featureGates": map[string]any{
 				"ALBGatewayAPI": false,
