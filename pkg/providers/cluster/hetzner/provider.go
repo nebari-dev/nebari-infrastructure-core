@@ -244,8 +244,8 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 }
 
 // Destroy tears down the Hetzner k3s cluster. When running it with opts.Force,
-// failures like Longhorn uninstall errors or volume cleanup errors are logged 
-// and returned joined at the end, so a teardown that leaked resources still 
+// failures like Longhorn uninstall errors or volume cleanup errors are logged
+// and returned joined at the end, so a teardown that leaked resources still
 // exits non-zero.
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
