@@ -25,8 +25,11 @@ inputs:
   nic-version:
     description: >-
       NIC version to acquire. Mutually exclusive with nic-binary.
-      - 'latest': download the latest release binary (checksum-verified).
-      - 'vX.Y.Z': download that release binary (checksum-verified).
+      - 'latest': download the latest release binary (checksum- and
+        provenance-verified).
+      - 'vX.Y.Z': download that release binary (checksum- and
+        provenance-verified). Must be v0.10.0 or newer; earlier releases
+        have no provenance attestation and are refused.
       - any other string: fetch that git ref (branch, tag, or commit SHA) of
         nebari-dev/nebari-infrastructure-core and build from source
         (requires Go, e.g. via actions/setup-go).

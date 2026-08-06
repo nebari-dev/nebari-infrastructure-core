@@ -77,9 +77,36 @@ function releaseArchName(): string {
   return `${os}_${arch}`;
 }
 
-// Download a release tarball, verify it against the release's checksums.txt,
-// and extract the nic binary into destDir.
+// First release that ships a build-provenance attestation. Earlier tags
+// cannot have their authenticity verified and are refused rather than
+// silently downgraded to checksum-only verification.
+const MIN_ATTESTED_VERSION = "v0.10.0";
+
+// Compare semver triples, ignoring prerelease suffixes.
+function semverBelow(a: string, b: string): boolean {
+  const parse = (v: string) =>
+    v.replace(/^v/, "").split("-")[0].split(".").map(Number);
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  }
+  return false;
+}
+
+// Download a release tarball, verify its build-provenance attestation and
+// its entry in the release's checksums.txt, and extract the nic binary into
+// destDir.
 function downloadRelease(tag: string, token: string, destDir: string): string {
+  if (semverBelow(tag, MIN_ATTESTED_VERSION)) {
+    throw new Error(
+      `nic ${tag} predates build-provenance attestations (first attested ` +
+        `release: ${MIN_ATTESTED_VERSION}), so its authenticity cannot be ` +
+        "verified. Use a newer release, or nic-binary with a binary you " +
+        "verified yourself.",
+    );
+  }
+
   const version = tag.replace(/^v/, "");
   const tarball = `nebari-infrastructure-core_${version}_${releaseArchName()}.tar.gz`;
   const base = `https://github.com/${NIC_REPO}/releases/download/${tag}`;
@@ -95,9 +122,22 @@ function downloadRelease(tag: string, token: string, destDir: string): string {
   // runners.
   core.info("Verifying build provenance");
   try {
-    run("gh", ["attestation", "verify", tarPath, "--repo", NIC_REPO], {
-      env: { ...process.env, GH_TOKEN: token },
-    });
+    // --signer-workflow pins the attestation to the release workflow
+    run(
+      "gh",
+      [
+        "attestation",
+        "verify",
+        tarPath,
+        "--repo",
+        NIC_REPO,
+        "--signer-workflow",
+        `${NIC_REPO}/.github/workflows/release.yml`,
+      ],
+      {
+        env: { ...process.env, GH_TOKEN: token },
+      },
+    );
   } catch (err) {
     throw new Error(
       `build provenance verification failed for ${tarball}: ` +
