@@ -25978,11 +25978,13 @@ const RESTART_BUDGET_OVERRIDES = {
     keycloak: 5,
     "metallb-system": 10,
 };
-// Return the first pod in the given namespaces whose container restarts
-// exceed the namespace's budget, or null. Transient kubectl failures return
-// null: the budget check must never be the thing that fails an otherwise
-// converging wait.
-function findRestartBreach(namespaces, env) {
+// List container statuses (init containers included) for pods in the given
+// namespaces. Skips pods that already finished (Succeeded/Failed) and pods
+// owned by Jobs: Job retries increment restart counts by design, and Argo
+// reports failed hooks through Application health. Transient kubectl
+// failures return null: this check must never be the thing that fails an
+// otherwise converging wait.
+function listWatchedContainers(namespaces, env) {
     const res = (0, child_process_1.spawnSync)("kubectl", ["get", "pods", "-A", "-o", "json"], {
         encoding: "utf8",
         env,
@@ -25997,25 +25999,30 @@ function findRestartBreach(namespaces, env) {
     catch {
         return null;
     }
+    const out = [];
     for (const pod of pods.items) {
         if (!namespaces.has(pod.metadata.namespace))
             continue;
-        const budget = RESTART_BUDGET_OVERRIDES[pod.metadata.namespace] ??
-            DEFAULT_RESTART_BUDGET;
-        // Completed hook/job pods legitimately accumulate restarts; skip them.
-        if (pod.status?.phase === "Succeeded")
+        if (pod.status?.phase === "Succeeded" || pod.status?.phase === "Failed") {
             continue;
-        const restarts = Math.max(0, ...(pod.status?.containerStatuses ?? []).map((c) => c.restartCount ?? 0), ...(pod.status?.initContainerStatuses ?? []).map((c) => c.restartCount ?? 0));
-        if (restarts > budget) {
-            return {
+        }
+        if (pod.metadata.ownerReferences?.some((r) => r.kind === "Job"))
+            continue;
+        const statuses = [
+            ...(pod.status?.containerStatuses ?? []),
+            ...(pod.status?.initContainerStatuses ?? []),
+        ];
+        for (const cs of statuses) {
+            out.push({
                 namespace: pod.metadata.namespace,
                 pod: pod.metadata.name,
-                restarts,
-                budget,
-            };
+                container: cs.name ?? "",
+                restarts: cs.restartCount ?? 0,
+                crashLooping: cs.state?.waiting?.reason === "CrashLoopBackOff",
+            });
         }
     }
-    return null;
+    return out;
 }
 // Dump the cluster state that is actually useful when a deploy fails to
 // converge: Application statuses, pods, and Warning events in time order.
@@ -26048,8 +26055,9 @@ const REQUIRED_STABLE_POLLS = 3;
  * is Synced (so every child Application manifest in apps/ has been applied),
  * every Application is Healthy, and that state holds for
  * REQUIRED_STABLE_POLLS consecutive polls with an unchanged Application set.
- * Dumps diagnostics and throws when the timeout elapses or a pod exceeds its
- * restart budget before convergence.
+ * Dumps diagnostics and throws when the timeout elapses, or when a container
+ * is in CrashLoopBackOff having exceeded its restart budget during the wait,
+ * before convergence.
  *
  * TODO(#484, #513): gate on Synced for every Application once gateway-config
  * listener co-ownership (#484) and Server-Side Diff adoption (#513) are
@@ -26062,6 +26070,12 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
     let stablePolls = 0;
     let prevNames = "";
     let warnedPollFailure = false;
+    // restartCount is a lifetime counter, so budgets are measured against a
+    // baseline captured on the first poll: restarts that predate the wait
+    // (bootstrap flaps that already resolved) never count against it.
+    // Containers first seen on later polls baseline at 0, because their whole
+    // life happened during the wait.
+    let restartBaseline = null;
     for (;;) {
         let apps = [];
         const res = (0, child_process_1.spawnSync)("kubectl", [
@@ -26113,29 +26127,54 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
             notReady.length === 0 &&
             root !== undefined &&
             root.sync === "Synced";
-        // A crashlooping component fails the wait immediately: waiting out the
-        // timeout adds no information, and Application health alone can miss a
-        // component that reports Healthy between restarts. argocd is always
-        // watched; the rest of the namespaces come from the Applications'
-        // destinations. Restart counts are monotonic, though, so a component
-        // that restarted during a bumpy convergence but ended Healthy only
-        // produces a warning, not a failure.
+        // A component crashlooping through its restart budget fails the wait
+        // immediately: waiting out the timeout adds no information, and
+        // Application health alone can miss a component that reports Healthy
+        // between restarts. argocd is always watched; the rest of the namespaces
+        // come from the Applications' destinations. Failing requires both budget
+        // exhaustion during this wait and CrashLoopBackOff right now, so a
+        // component that flapped mid-wait and recovered only produces a warning
+        // at success.
         const namespaces = new Set(["argocd", ...apps.map((a) => a.namespace)].filter(Boolean));
-        const breach = findRestartBreach(namespaces, env);
+        const containers = listWatchedContainers(namespaces, env);
+        const restartedDuringWait = [];
+        let breach = null;
+        if (containers) {
+            if (restartBaseline === null) {
+                restartBaseline = new Map(containers.map((c) => [
+                    `${c.namespace}/${c.pod}/${c.container}`,
+                    c.restarts,
+                ]));
+            }
+            for (const c of containers) {
+                const delta = c.restarts -
+                    (restartBaseline.get(`${c.namespace}/${c.pod}/${c.container}`) ?? 0);
+                if (delta <= 0)
+                    continue;
+                const budget = RESTART_BUDGET_OVERRIDES[c.namespace] ?? DEFAULT_RESTART_BUDGET;
+                const entry = { ...c, delta, budget };
+                restartedDuringWait.push(entry);
+                if (breach === null && delta > budget && c.crashLooping) {
+                    breach = entry;
+                }
+            }
+        }
         if (breach && !converged) {
-            core.startGroup(`Previous logs: ${breach.namespace}/${breach.pod}`);
+            core.startGroup(`Previous logs: ${breach.namespace}/${breach.pod}/${breach.container}`);
             (0, child_process_1.spawnSync)("kubectl", [
                 "logs",
                 "--previous",
                 "--tail=50",
-                "--all-containers",
+                "-c",
+                breach.container,
                 "-n",
                 breach.namespace,
                 breach.pod,
             ], { stdio: "inherit", env });
             core.endGroup();
             dumpDiagnostics(env);
-            throw new Error(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
+            throw new Error(`container ${breach.namespace}/${breach.pod}/${breach.container} is in ` +
+                `CrashLoopBackOff after ${breach.delta} restarts during the wait ` +
                 `(budget for ${breach.namespace}: ${breach.budget}); giving up on the wait`);
         }
         const names = apps
@@ -26150,9 +26189,11 @@ function waitForApplications(kubeconfig, timeoutSeconds) {
         }
         prevNames = names;
         if (stablePolls >= REQUIRED_STABLE_POLLS) {
-            if (breach) {
-                core.warning(`pod ${breach.namespace}/${breach.pod} restarted ${breach.restarts} times ` +
-                    `(budget for ${breach.namespace}: ${breach.budget}) but the deployment converged`);
+            if (restartedDuringWait.length > 0) {
+                core.warning("Containers restarted during the wait but the deployment converged: " +
+                    restartedDuringWait
+                        .map((c) => `${c.namespace}/${c.pod}/${c.container} (${c.delta})`)
+                        .join(", "));
             }
             core.info(`All ${apps.length} Applications are Healthy and nebari-root is Synced`);
             const outOfSync = apps.filter((a) => a.sync !== "Synced");
