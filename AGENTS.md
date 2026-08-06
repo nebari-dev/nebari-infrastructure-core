@@ -329,6 +329,8 @@ func SomeFunction(ctx context.Context, ...) error {
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
 6. Add an `examples/<name>-config.yaml`.
 7. Cover the provider with table-driven unit tests; integration tests gated on credentials.
+8. Wire the provider into the deployment tests: a `.github/fixtures/deploy/<name>-config.yaml` (validated by `TestExampleConfigsValidate`), a job in `.github/workflows/deployment-tests.yml` (plus its `workflow_dispatch` provider option and `if:` condition), a `<name>` branch in the `nic-ci-gitops` scratch repo, and an `environment:` with credentials if the provider needs real cloud access.
+9. Update the deployment-tests table in `docs/design-doc/operations/12-testing-strategy.md`.
 
 ### Adding a New DNS Provider
 
