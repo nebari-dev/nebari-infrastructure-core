@@ -252,10 +252,20 @@ jobs:
       - name: Seed hetzner-k3s releases cache
         env:
           GH_TOKEN: ${{ github.token }}
+        # Set bash explicitly as the shell because it turns on pipefail, 
+        # so a gh api failure mid-pagination fails this step instead of
+        # leaving a truncated file that hetzner-k3s trusts (its cache check
+        # is mtime-based, not content-based).
+        shell: bash
         run: |
           mkdir -p ~/.hetzner-k3s
           gh api repos/k3s-io/k3s/tags --paginate --jq '.[].name' \
             | tac | sed 's/^/- /' > ~/.hetzner-k3s/k3s-releases.yaml
+          # The seeded cache must be able to satisfy whatever version the
+          # fixture pins
+          minor=$(grep -Eo 'kubernetes_version: "[0-9]+\.[0-9]+"' \
+            .github/fixtures/deploy/hetzner-config.yaml | grep -Eo '[0-9]+\.[0-9]+')
+          grep -q "^- v${minor//./\\.}\." ~/.hetzner-k3s/k3s-releases.yaml
           echo "seeded $(wc -l < ~/.hetzner-k3s/k3s-releases.yaml) k3s release tags"
 
       - name: Deploy
