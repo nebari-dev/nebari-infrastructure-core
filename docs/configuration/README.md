@@ -23,4 +23,5 @@ This directory contains auto-generated documentation for Nebari Infrastructure C
 ### Additional Configuration
 
 - [Git Repository Configuration](git.md) - Configuration options for GitOps repository integration with ArgoCD.
+- [Trust Bundle Configuration](trust-bundle.md) - Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.
 - [Cloudflare DNS Configuration](cloudflare.md) - Configuration options for Cloudflare DNS provider.

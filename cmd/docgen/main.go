@@ -81,6 +81,17 @@ var configFiles = []configFile{
 		docTitle: "Git Repository Configuration",
 		docDesc:  "Configuration options for GitOps repository integration with ArgoCD.",
 	},
+	{
+		// TrustBundleConfig is a top-level NebariConfig field that lives in its
+		// own file, so config.go's allowlist above does not cover it; without
+		// this entry core.md references *TrustBundleConfig with no page defining it.
+		path: "pkg/config/trust_bundle.go",
+		structs: []string{
+			"TrustBundleConfig",
+		},
+		docTitle: "Trust Bundle Configuration",
+		docDesc:  "Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.",
+	},
 }
 
 // discoverProviderConfigFiles globs pkg/providers/{cluster,dns}/*/config.go
@@ -108,7 +119,8 @@ func discoverProviderConfigFiles(rootDir string) ([]configFile, error) {
 			title, desc := providerDocMeta[providerDir].title, providerDocMeta[providerDir].desc
 			if title == "" {
 				name := filepath.Base(providerDir)
-				title = strings.ToUpper(name[:1]) + name[1:] + " Provider Configuration"
+				r := []rune(name)
+				title = strings.ToUpper(string(r[0])) + string(r[1:]) + " Provider Configuration"
 				desc = fmt.Sprintf("Configuration options for the %s provider.", name)
 			}
 
@@ -255,7 +267,14 @@ func generateOutputName(sourcePath string) string {
 
 	switch base {
 	case "config":
-		return "core.md"
+		// pkg/config/ holds more than one documented file (config.go plus
+		// e.g. trust_bundle.go), so page names must key on the file, not just
+		// the directory, or the second file silently overwrites core.md.
+		file := strings.TrimSuffix(filepath.Base(sourcePath), ".go")
+		if file == "config" {
+			return "core.md"
+		}
+		return strings.ReplaceAll(file, "_", "-") + ".md"
 	default:
 		return base + ".md"
 	}

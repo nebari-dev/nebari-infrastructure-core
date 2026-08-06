@@ -84,7 +84,7 @@ See `docs/local-kind-development.md` for the full workflow.
 
 ### Running NIC
 
-NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `cmd/nic/config_discovery.go`.
+NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `internal/cli/config_discovery.go`.
 
 ```bash
 ./nic version
@@ -321,7 +321,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
 
-**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler` and remains the only layer that emits logs. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
+**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler`, and the application layer (`cmd/nic` and the `internal/cli` handlers) is the only place that emits logs, never `pkg/`. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
 
 ## Key Development Patterns
 
@@ -451,7 +451,7 @@ Run before every commit:
 3. **Formatting:** `make fmt`
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
-6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
+6. **Logging convention:** `slog` usage only in the application layer (`cmd/nic` / `internal/cli`), not in `pkg/`
 7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.
