@@ -13,7 +13,7 @@ import (
 const allCIDRs = "0.0.0.0/0"
 
 // Config holds Hetzner-specific provider configuration.
-// Parsed from the "hetzner_cloud" key in nebari-config.yaml.
+// Parsed from the "cluster.hetzner" key in nebari-config.yaml.
 type Config struct {
 	Location          string               `yaml:"location"`
 	KubernetesVersion string               `yaml:"kubernetes_version"`
@@ -171,19 +171,19 @@ var safeK8sVersion = regexp.MustCompile(`^v?\d+\.\d+(\.\d+)?(\+k3s\d+)?$`)
 // Validate checks that all required fields are present and valid.
 func (c *Config) Validate() error {
 	if c.Location == "" {
-		return fmt.Errorf("hetzner_cloud.location is required")
+		return fmt.Errorf("cluster.hetzner.location is required")
 	}
 	if !safeIdentifier.MatchString(c.Location) {
-		return fmt.Errorf("hetzner_cloud.location %q contains invalid characters (must match %s)", c.Location, safeIdentifier.String())
+		return fmt.Errorf("cluster.hetzner.location %q contains invalid characters (must match %s)", c.Location, safeIdentifier.String())
 	}
 	if c.KubernetesVersion == "" {
-		return fmt.Errorf("hetzner_cloud.kubernetes_version is required")
+		return fmt.Errorf("cluster.hetzner.kubernetes_version is required")
 	}
 	if !safeK8sVersion.MatchString(c.KubernetesVersion) {
-		return fmt.Errorf("hetzner_cloud.kubernetes_version %q is invalid (expected MAJOR.MINOR, MAJOR.MINOR.PATCH, or vMAJOR.MINOR.PATCH+k3sN)", c.KubernetesVersion)
+		return fmt.Errorf("cluster.hetzner.kubernetes_version %q is invalid (expected MAJOR.MINOR, MAJOR.MINOR.PATCH, or vMAJOR.MINOR.PATCH+k3sN)", c.KubernetesVersion)
 	}
 	if len(c.NodeGroups) == 0 {
-		return fmt.Errorf("hetzner_cloud.node_groups must have at least one group")
+		return fmt.Errorf("cluster.hetzner.node_groups must have at least one group")
 	}
 	if err := c.validateNodeGroups(); err != nil {
 		return err
@@ -201,60 +201,60 @@ func (c *Config) validateNodeGroups() error {
 
 	for name, ng := range c.NodeGroups {
 		if !safeIdentifier.MatchString(name) {
-			return fmt.Errorf("hetzner_cloud.node_groups[%q]: name contains invalid characters (must match %s)", name, safeIdentifier.String())
+			return fmt.Errorf("cluster.hetzner.node_groups[%q]: name contains invalid characters (must match %s)", name, safeIdentifier.String())
 		}
 		if ng.InstanceType == "" {
-			return fmt.Errorf("hetzner_cloud.node_groups[%q].instance_type is required", name)
+			return fmt.Errorf("cluster.hetzner.node_groups[%q].instance_type is required", name)
 		}
 		if !safeIdentifier.MatchString(ng.InstanceType) {
-			return fmt.Errorf("hetzner_cloud.node_groups[%q].instance_type %q contains invalid characters", name, ng.InstanceType)
+			return fmt.Errorf("cluster.hetzner.node_groups[%q].instance_type %q contains invalid characters", name, ng.InstanceType)
 		}
 		if ng.Count < 1 && (ng.Autoscaling == nil || !ng.Autoscaling.Enabled) {
-			return fmt.Errorf("hetzner_cloud.node_groups[%q].count must be at least 1 (or enable autoscaling)", name)
+			return fmt.Errorf("cluster.hetzner.node_groups[%q].count must be at least 1 (or enable autoscaling)", name)
 		}
 		if ng.Location != "" && !safeIdentifier.MatchString(ng.Location) {
-			return fmt.Errorf("hetzner_cloud.node_groups[%q].location %q contains invalid characters", name, ng.Location)
+			return fmt.Errorf("cluster.hetzner.node_groups[%q].location %q contains invalid characters", name, ng.Location)
 		}
 		if ng.Master {
 			masterCount++
 			masterName = name
 			if ng.Location != "" {
-				return fmt.Errorf("hetzner_cloud.node_groups[%q]: master node group uses the top-level location, remove the location override", name)
+				return fmt.Errorf("cluster.hetzner.node_groups[%q]: master node group uses the top-level location, remove the location override", name)
 			}
 			if ng.Autoscaling != nil && ng.Autoscaling.Enabled {
-				return fmt.Errorf("hetzner_cloud.node_groups[%q]: master node group does not support autoscaling", name)
+				return fmt.Errorf("cluster.hetzner.node_groups[%q]: master node group does not support autoscaling", name)
 			}
 		} else {
 			workerCount++
 		}
 		if ng.Autoscaling != nil && ng.Autoscaling.Enabled {
 			if ng.Autoscaling.MinInstances < 0 {
-				return fmt.Errorf("hetzner_cloud.node_groups[%q].autoscaling.min_instances must not be negative", name)
+				return fmt.Errorf("cluster.hetzner.node_groups[%q].autoscaling.min_instances must not be negative", name)
 			}
 			if ng.Autoscaling.MaxInstances < 1 {
-				return fmt.Errorf("hetzner_cloud.node_groups[%q].autoscaling.max_instances must be at least 1", name)
+				return fmt.Errorf("cluster.hetzner.node_groups[%q].autoscaling.max_instances must be at least 1", name)
 			}
 			if ng.Autoscaling.MinInstances > ng.Autoscaling.MaxInstances {
-				return fmt.Errorf("hetzner_cloud.node_groups[%q].autoscaling.min_instances (%d) must not exceed max_instances (%d)",
+				return fmt.Errorf("cluster.hetzner.node_groups[%q].autoscaling.min_instances (%d) must not exceed max_instances (%d)",
 					name, ng.Autoscaling.MinInstances, ng.Autoscaling.MaxInstances)
 			}
 		}
 	}
 
 	if masterCount == 0 {
-		return fmt.Errorf("hetzner_cloud.node_groups: exactly one node group must have master: true")
+		return fmt.Errorf("cluster.hetzner.node_groups: exactly one node group must have master: true")
 	}
 	if masterCount > 1 {
-		return fmt.Errorf("hetzner_cloud.node_groups: only one node group can have master: true, found %d", masterCount)
+		return fmt.Errorf("cluster.hetzner.node_groups: only one node group can have master: true, found %d", masterCount)
 	}
 
 	_, master := c.MasterGroup()
 	if master.Count > 1 && master.Count%2 == 0 {
-		return fmt.Errorf("hetzner_cloud.node_groups[%q].count should be odd (1, 3, 5) for k3s HA with embedded etcd; got %d", masterName, master.Count)
+		return fmt.Errorf("cluster.hetzner.node_groups[%q].count should be odd (1, 3, 5) for k3s HA with embedded etcd; got %d", masterName, master.Count)
 	}
 
 	if workerCount == 0 && !c.ScheduleOnMasters() {
-		return fmt.Errorf("hetzner_cloud.node_groups must include at least one non-master group when schedule_workloads_on_masters is false")
+		return fmt.Errorf("cluster.hetzner.node_groups must include at least one non-master group when schedule_workloads_on_masters is false")
 	}
 
 	return nil
@@ -267,12 +267,12 @@ func (c *Config) validateNetworkCIDRs() error {
 	}
 	for i, cidr := range c.Network.SSHAllowedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			return fmt.Errorf("hetzner_cloud.network.ssh_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
+			return fmt.Errorf("cluster.hetzner.network.ssh_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
 		}
 	}
 	for i, cidr := range c.Network.APIAllowedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			return fmt.Errorf("hetzner_cloud.network.api_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
+			return fmt.Errorf("cluster.hetzner.network.api_allowed_cidrs[%d]: invalid CIDR %q: %w", i, cidr, err)
 		}
 	}
 	return nil
@@ -283,10 +283,10 @@ func (c *Config) validateNetworkCIDRs() error {
 func (c *Config) NetworkWarnings() []string {
 	var warnings []string
 	if c.Network == nil || len(c.Network.SSHAllowedCIDRs) == 0 {
-		warnings = append(warnings, "SSH access defaults to 0.0.0.0/0 (open to all) - restrict with hetzner_cloud.network.ssh_allowed_cidrs for production")
+		warnings = append(warnings, "SSH access defaults to 0.0.0.0/0 (open to all) - restrict with cluster.hetzner.network.ssh_allowed_cidrs for production")
 	}
 	if c.Network == nil || len(c.Network.APIAllowedCIDRs) == 0 {
-		warnings = append(warnings, "Kubernetes API access defaults to 0.0.0.0/0 (open to all) - restrict with hetzner_cloud.network.api_allowed_cidrs for production")
+		warnings = append(warnings, "Kubernetes API access defaults to 0.0.0.0/0 (open to all) - restrict with cluster.hetzner.network.api_allowed_cidrs for production")
 	}
 	return warnings
 }

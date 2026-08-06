@@ -24,7 +24,7 @@ More categories (certificate issuers, git hosting, software installers) are plan
 | `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
 | `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
-| `local` | Validates an existing kubeconfig context for a Kind cluster. **The Kind cluster itself is brought up by `make localkind-up`**, not by `nic deploy` (the provider's `Deploy` is currently a stub) | Working for the Makefile-driven flow |
+| `local` | Kind. `nic deploy` creates the Kind cluster (reusing it if one already exists) and bootstraps it; `nic destroy` deletes it | Working |
 | `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
 | `gcp` | Stub implementation only | Not implemented |
 
@@ -70,14 +70,16 @@ go test ./pkg/providers/cluster/aws -v # single package
 make fmt                      # gofmt -s -w
 make vet                      # go vet
 make lint                     # golangci-lint run
-make pre-commit               # run pre-commit checks
+make pre-commit               # install the pre-commit hooks
+make pre-commit-run           # run the hooks across all files
 ```
 
 ### Local Kind Cluster
 
 ```bash
-make localkind-up             # Build nic + create Kind cluster + deploy Nebari
-make localkind-down           # Tear down the Kind cluster
+make build                                     # build the nic binary
+./nic deploy -f examples/local-config.yaml     # create the Kind cluster + deploy Nebari
+./nic destroy -f examples/local-config.yaml    # tear the Kind cluster down
 ```
 
 See `docs/local-kind-development.md` for the full workflow.
@@ -425,6 +427,7 @@ References:
 - **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make docs`)
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - The human-facing contribution process
 
 ## Dependencies
 
@@ -439,8 +442,22 @@ Core libraries (see `go.mod`):
 Runtime dependencies (per cluster provider):
 - **AWS:** OpenTofu binary in `PATH` (NIC will also download into a cache if needed)
 - **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
-- **Local:** Kind (and Docker) in `PATH`, driven through `make localkind-up`
+- **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
+
+## Pull Request Lifecycle
+
+Merging to `main` requires **one approving review from a `CODEOWNERS` owner**. Admin enforcement is on, so `gh pr merge --admin` does not bypass it, and GitHub never lets an author approve their own pull request. Approvals are **dismissed on every push**, so re-request review after pushing a fixup. `main` requires linear history: rebase, do not merge.
+
+Open pull requests expire. After **30 days** with no activity a pull request is labeled `status: inactive 💤` and warned; after **37 days** total it closes automatically. Any comment, push, or review resets the clock. Nothing is exempt by default, including drafts.
+
+To keep a pull request open indefinitely, add the **`status: keep open 📌`** label. Use it for long-running design work, or when the hold-up is on the maintainers' side.
+
+Staleness is derived from GitHub's `updated_at`, which is bumped by comments, pushes, reviews, and **label changes**. Adding or removing a label on an already-inactive pull request therefore resets the 30-day counter and clears `status: inactive 💤`, so labelling is not a read-only triage action. The bot excludes its own stale label from this, so applying it does not reset the countdown it starts.
+
+Closes are reversible: branches are preserved and the pull request can be reopened.
+
+The full human-facing process is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Pre-Commit Checklist
 

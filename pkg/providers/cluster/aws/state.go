@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -55,7 +56,11 @@ func newSTSClient(ctx context.Context, region string) (STSClient, error) {
 func generateBucketName(accountID, region, projectName string) (string, error) {
 	hash := sha256.Sum256([]byte(accountID))
 	suffix := fmt.Sprintf("%x", hash[:4]) // 8 hex chars
-	name := fmt.Sprintf("nic-tfstate-%s-%s-%s", projectName, region, suffix)
+	// config.safeProjectName permits only letters, digits, hyphens, and
+	// underscores, so case folding and underscore replacement cover every
+	// S3-incompatible character that can reach this function.
+	bucketProjectName := strings.ReplaceAll(strings.ToLower(projectName), "_", "-")
+	name := fmt.Sprintf("nic-tfstate-%s-%s-%s", bucketProjectName, region, suffix)
 	if len(name) > maxBucketNameLength {
 		return "", fmt.Errorf("bucket name %q exceeds %d chars: consider a shorter project name", name, maxBucketNameLength)
 	}
@@ -119,6 +124,8 @@ func ensureStateBucket(ctx context.Context, client S3Client, region, bucketName 
 	createInput := &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	}
+	// us-east-1 is special-cased in S3: CreateBucket rejects a LocationConstraint
+	// of "us-east-1" because that region is the default.
 	if region != "us-east-1" {
 		createInput.CreateBucketConfiguration = &types.CreateBucketConfiguration{
 			LocationConstraint: types.BucketLocationConstraint(region),

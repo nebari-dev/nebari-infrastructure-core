@@ -10,11 +10,16 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
-// EKSClient defines the EKS operations needed to fetch cluster connection details.
+// EKSClient defines the EKS operations needed to fetch cluster connection
+// details and the Longhorn backup Pod Identity role.
 type EKSClient interface {
 	DescribeCluster(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	ListPodIdentityAssociations(ctx context.Context, params *eks.ListPodIdentityAssociationsInput, optFns ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error)
+	DescribePodIdentityAssociation(ctx context.Context, params *eks.DescribePodIdentityAssociationInput, optFns ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error)
 }
 
 func newEKSClient(ctx context.Context, region string) (EKSClient, error) {
@@ -69,4 +74,44 @@ func fetchEKSKubeconfig(ctx context.Context, client EKSClient, clusterName, regi
 		return nil, err
 	}
 	return kubeconfigBytes, nil
+}
+
+// fetchBackupPodIdentityRoleARN returns the IAM role ARN of the Pod Identity
+// association bound to Longhorn's service account, or "" when none exists (the
+// cluster was deployed without keyless backups). It lists associations filtered
+// by namespace + service account, then describes the match to read its RoleArn
+// (the list summary omits it).
+func fetchBackupPodIdentityRoleARN(ctx context.Context, client EKSClient, clusterName string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.fetchBackupPodIdentityRoleARN")
+	defer span.End()
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	namespace := longhorn.Namespace
+	serviceAccount := longhorn.ServiceAccountName
+	list, err := client.ListPodIdentityAssociations(ctx, &eks.ListPodIdentityAssociationsInput{
+		ClusterName:    &clusterName,
+		Namespace:      &namespace,
+		ServiceAccount: &serviceAccount,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("list pod identity associations: %w", err)
+	}
+	if len(list.Associations) == 0 || list.Associations[0].AssociationId == nil {
+		return "", nil
+	}
+
+	desc, err := client.DescribePodIdentityAssociation(ctx, &eks.DescribePodIdentityAssociationInput{
+		ClusterName:   &clusterName,
+		AssociationId: list.Associations[0].AssociationId,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("describe pod identity association: %w", err)
+	}
+	if desc.Association == nil || desc.Association.RoleArn == nil {
+		return "", nil
+	}
+	return *desc.Association.RoleArn, nil
 }

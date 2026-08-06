@@ -17,7 +17,7 @@ Configuration options specific to Hetzner Cloud.
 ## Config
 
 Config holds Hetzner-specific provider configuration.
-Parsed from the "hetzner_cloud" key in nebari-config.yaml.
+Parsed from the "cluster.hetzner" key in nebari-config.yaml.
 
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|

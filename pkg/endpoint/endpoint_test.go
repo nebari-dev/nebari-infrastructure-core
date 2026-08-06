@@ -98,7 +98,7 @@ func TestGetLoadBalancerEndpoint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.objects...) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+			client := fake.NewSimpleClientset(tt.objects...)
 			ep, err := GetLoadBalancerEndpoint(context.Background(), client, tt.opts...)
 
 			if tt.errContains != "" {
@@ -135,7 +135,7 @@ func TestGetLoadBalancerEndpoint_ContextCancelled(t *testing.T) {
 		},
 		Status: corev1.ServiceStatus{},
 	}
-	client := fake.NewSimpleClientset(svc) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+	client := fake.NewSimpleClientset(svc)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

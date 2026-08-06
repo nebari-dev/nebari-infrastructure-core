@@ -33,7 +33,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -78,7 +78,7 @@ func TestConfigureOCIAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		err := ConfigureOCIAccess(ctx, client, namespace)
 		if err != nil {
@@ -103,7 +103,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 	namespace := "argocd"
 
 	t.Run("returns nil when no git repository configured", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 
 		err := ConfigureGitRepoAccess(ctx, client, nil, namespace)
 		if err != nil {
@@ -121,7 +121,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		gitConfig := &git.Config{
 			URL: "https://github.com/example/repo.git",
@@ -166,7 +166,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		gitConfig := &git.Config{
 			URL:  "https://github.com/example/repo.git",
@@ -198,7 +198,7 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 				"old-key": []byte("old-value"),
 			},
 		}
-		client := fake.NewSimpleClientset(ns, existingSecret) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns, existingSecret)
 
 		gitConfig := &git.Config{
 			URL: "https://github.com/example/new-repo.git",
@@ -236,7 +236,7 @@ test-ssh-key-content
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		client := fake.NewSimpleClientset(ns) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(ns)
 
 		gitConfig := &git.Config{
 			URL: "git@github.com:example/repo.git",

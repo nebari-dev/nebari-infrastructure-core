@@ -68,3 +68,8 @@ output "node_subnet_id" {
   description = "Resource ID of the subnet hosting the cluster nodes."
   value       = module.aks_cluster.node_subnet_id
 }
+
+output "longhorn_backup_container" {
+  description = "Name of the Longhorn backup container; empty when not created by NIC"
+  value       = module.aks_cluster.longhorn_backup_container
+}

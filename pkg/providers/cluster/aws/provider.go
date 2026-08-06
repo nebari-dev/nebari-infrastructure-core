@@ -305,7 +305,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, opts.BackupBucket)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -371,6 +371,23 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		if err := longhorn.Install(ctx, kubeconfigBytes, longhornCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install Longhorn: %w", err)
+		}
+
+		// Keyless backup target: repair longhorn-manager pods that predate the
+		// Pod Identity association (#500). Gated on the spec rather than an EKS
+		// API lookup: opts.BackupBucket.PodIdentity drove the association's
+		// count in the tf.Apply above, so a successful apply proves the
+		// association exists.
+		if opts.BackupBucket != nil && opts.BackupBucket.PodIdentity {
+			client, err := newK8sClient(kubeconfigBytes)
+			if err != nil {
+				span.RecordError(err)
+				return fmt.Errorf("failed to create Kubernetes client for Longhorn backup repair: %w", err)
+			}
+			if err := repairLonghornBackupPodIdentity(ctx, client); err != nil {
+				span.RecordError(err)
+				return err
+			}
 		}
 	}
 
@@ -541,7 +558,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
-	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle)
+	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, nil)
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
@@ -649,6 +666,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Preserve a retained Longhorn backup bucket: drop it (and its dependent
+	// resources) from Terraform state so `tofu destroy` leaves it — and its
+	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
+	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
+	// fails teardown, even if the bucket was never created.
+	cluster.RetainBackupResources(ctx, span, tf, opts.BackupBucket, backupStateAddrs(opts.BackupBucket))
+
 	// Uninstall the GPU Operator before tofu destroy, gated on the GPU config
 	// flag to mirror the Longhorn block above. The operator has no cloud
 	// resources that can block teardown, so an uninstall failure is never fatal
@@ -742,6 +766,32 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	return kubeconfigBytes, nil
 }
 
+// BackupPodIdentityRoleARN returns the IAM role ARN of the EKS Pod Identity
+// association bound to Longhorn's service account for keyless S3 backups, or ""
+// when the cluster has none. NIC writes this into the Longhorn credential Secret
+// as AWS_IAM_ROLE_ARN so Longhorn accepts the secret without static keys (the
+// Pod Identity association supplies the actual credentials). Reads live cluster
+// state via the EKS API, mirroring GetKubeconfig, so it works after Deploy
+// without re-running Terraform. Satisfies the nic.backupRoleARNResolver
+// optional capability.
+func (p *Provider) BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.BackupPodIdentityRoleARN")
+	defer span.End()
+
+	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
+	if err != nil {
+		span.RecordError(err)
+		return "", err
+	}
+	eksClient, err := newEKSClient(ctx, awsCfg.Region)
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to create EKS client: %w", err)
+	}
+	return fetchBackupPodIdentityRoleARN(ctx, eksClient, projectName)
+}
+
 // Summary returns key configuration details for display purposes
 func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]string {
 	result := make(map[string]string)
@@ -771,6 +821,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	sc := longhorn.StorageClassName
+	longhornEnabled := true // AWS default — see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
 
@@ -778,7 +829,8 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 	if rawCfg != nil {
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
-			if !awsCfg.LonghornEnabled() {
+			longhornEnabled = awsCfg.LonghornEnabled()
+			if !longhornEnabled {
 				sc = storageClassGP2
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
@@ -792,6 +844,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		StorageClass:    sc,
 		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
+		LonghornEnabled: longhornEnabled,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

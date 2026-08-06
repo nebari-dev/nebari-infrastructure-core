@@ -143,7 +143,7 @@ func TestCreateOrUpdateConfigMap(t *testing.T) {
 	}
 
 	t.Run("creates when absent", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 		if err := createOrUpdateConfigMap(context.Background(), client, newCM("CA-A")); err != nil {
 			t.Fatalf("createOrUpdateConfigMap: %v", err)
 		}
@@ -158,7 +158,7 @@ func TestCreateOrUpdateConfigMap(t *testing.T) {
 
 	t.Run("updates when data changed (rotation)", func(t *testing.T) {
 		existing := newCM("OLD-CA")
-		client := fake.NewSimpleClientset(existing) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(existing)
 		if err := createOrUpdateConfigMap(context.Background(), client, newCM("NEW-CA")); err != nil {
 			t.Fatalf("createOrUpdateConfigMap: %v", err)
 		}
@@ -170,7 +170,7 @@ func TestCreateOrUpdateConfigMap(t *testing.T) {
 
 	t.Run("no-op when data unchanged issues no update", func(t *testing.T) {
 		existing := newCM("CA-A")
-		client := fake.NewSimpleClientset(existing) //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset(existing)
 		if err := createOrUpdateConfigMap(context.Background(), client, newCM("CA-A")); err != nil {
 			t.Fatalf("createOrUpdateConfigMap: %v", err)
 		}
@@ -187,7 +187,7 @@ func TestConfigureRepoServerCATrust(t *testing.T) {
 	const ns = "argocd"
 
 	t.Run("no-op when bundle empty", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 		values := map[string]any{}
 		if err := configureRepoServerCATrust(context.Background(), client, ns, "", values); err != nil {
 			t.Fatalf("configureRepoServerCATrust: %v", err)
@@ -201,7 +201,7 @@ func TestConfigureRepoServerCATrust(t *testing.T) {
 	})
 
 	t.Run("creates labeled ConfigMap and wires values", func(t *testing.T) {
-		client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: NewSimpleClientset is deprecated but still functional for tests
+		client := fake.NewSimpleClientset()
 		values := map[string]any{}
 		if err := configureRepoServerCATrust(context.Background(), client, ns, "ORG-CA-PEM", values); err != nil {
 			t.Fatalf("configureRepoServerCATrust: %v", err)

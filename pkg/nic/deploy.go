@@ -88,6 +88,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	// Offline DNS provider validation (zone consistency), so a missing
+	// domain/zone_name or a domain outside the zone fails before any
+	// infrastructure is provisioned.
+	if err := validateDNSProvider(ctx, cfg, reg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration parsed successfully").
 		WithResource("config").
 		WithAction("validated").
@@ -122,6 +130,22 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Get provider infrastructure settings up front. InfraSettings is a pure
+	// getter, so it is safe to compute before Deploy and lets us fail fast on
+	// misconfiguration before provisioning anything.
+	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
+
+	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
+	// (e.g. Azure, or AWS with longhorn disabled). Without Longhorn installed the
+	// longhorn.io CRDs are absent and the backups ArgoCD app would never sync.
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Backups configuration is invalid for this provider").
+			WithMetadata("provider", cfg.Cluster.ProviderName()).
+			WithMetadata("error", err.Error()))
+		return nil, fmt.Errorf("validate backups configuration: %w", err)
+	}
+
 	// Resolve the top-level trust bundle once, here at the orchestration layer.
 	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
@@ -138,7 +162,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
+		DryRun:       opts.DryRun,
+		Timeout:      opts.Timeout,
+		TrustBundle:  caBundle,
+		BackupBucket: backupBucketSpec(cfg),
+	}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -148,9 +177,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
-
-	// Get provider infrastructure settings for GitOps and foundational services
-	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Resolve the effective GitOps configuration. This may auto-create a
 	// local directory for providers that support it, or fall back to the
@@ -214,20 +240,34 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				return nil, fmt.Errorf("generate foundational secrets: %w", err)
 			}
 
+			// Generate a Longhorn OIDC client secret only when the provider installs
+			// Longhorn. When Longhorn is disabled, longhornClientSecret stays "" and
+			// InstallFoundationalServices no-ops on the empty string.
+			var longhornClientSecret string
+			if infraSettings.LonghornEnabled {
+				longhornClientSecret, err = generateSecurePassword(rand.Reader)
+				if err != nil {
+					span.RecordError(err)
+					status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate Longhorn client secret").
+						WithMetadata("error", err.Error()))
+					return nil, fmt.Errorf("generate Longhorn client secret: %w", err)
+				}
+			}
+
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
-					Enabled:               true,
-					AdminUsername:         "admin",
-					AdminPassword:         secrets.KeycloakAdmin,
-					DBPassword:            secrets.KeycloakDB,
-					PostgresAdminPassword: secrets.PostgresAdmin,
-					PostgresUserPassword:  secrets.PostgresUser,
-					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    secrets.RealmAdmin,
-					Hostname:              "", // Will be auto-generated from domain
+					Enabled:            true,
+					AdminUsername:      "admin",
+					AdminPassword:      secrets.KeycloakAdmin,
+					RealmAdminUsername: "admin",
+					RealmAdminPassword: secrets.RealmAdmin,
+					Hostname:           "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
+				},
+				Longhorn: argocd.LonghornSSOConfig{
+					ClientSecret: longhornClientSecret,
 				},
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
@@ -237,6 +277,8 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
+				Backups:       cfg.Backups.LonghornConfig(),
+				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
 
 			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
@@ -273,7 +315,7 @@ func defaultGitConfig(projectName string) *git.Config {
 
 // getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
 // For providers that support local gitops without explicit git_repository config, this auto-creates
-// /tmp/nebari-gitops-{project_name}. For other providers, explicit git_repository config is required.
+// ~/.nic/gitops/{project_name}. For other providers, explicit git_repository config is required.
 // The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
 func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
 	if cfg.GitRepository != nil {
@@ -297,8 +339,8 @@ func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariCon
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
 		WithMetadata("path", localPath))
 
-	if err := os.MkdirAll(localPath, 0750); err != nil {
-		return nil, fmt.Errorf("failed to create auto-generated directory %s: %w", localPath, err)
+	if err := git.EnsureLocalGitOpsDir(ctx, localPath); err != nil {
+		return nil, err
 	}
 
 	return gitCfg, nil
@@ -506,10 +548,10 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
-	if err := os.MkdirAll(filepath.Dir(configDest), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configDest), git.GitOpsDirMode); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.WriteFile(configDest, configBytes, 0600); err != nil {
+	if err := os.WriteFile(configDest, configBytes, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
@@ -547,10 +589,81 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundle
 	return &out
 }
 
+// backupRoleARNResolver is an optional capability: providers that provision a
+// keyless Longhorn backup role (EKS Pod Identity) implement it to report that
+// role's ARN, which NIC writes into the credential Secret as AWS_IAM_ROLE_ARN.
+// Only the AWS provider implements it; the type assertion in Deploy yields ok
+// == false for others, and no role ARN is set.
+type backupRoleARNResolver interface {
+	BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error)
+}
+
+// resolveBackupRoleARN returns the Pod Identity role ARN for a keyless S3 backup
+// target, or "" when backups are disabled, not keyless, or the provider doesn't
+// support it. A resolution error is surfaced as a warning and returns "" — the
+// credential Secret is then built without AWS_IAM_ROLE_ARN, which Longhorn
+// rejects, so the user sees a clear backup-target error rather than a silent
+// half-configured state.
+func resolveBackupRoleARN(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) string {
+	lh := cfg.Backups.LonghornConfig()
+	if lh == nil || !lh.S3.PodIdentityAuth(cfg.Cluster.ProviderName()) {
+		return ""
+	}
+	resolver, ok := clusterProvider.(backupRoleARNResolver)
+	if !ok {
+		return ""
+	}
+	arn, err := resolver.BackupPodIdentityRoleARN(ctx, cfg.ProjectName, cfg.Cluster)
+	if err != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not resolve Longhorn backup IAM role; keyless backups will not authenticate").
+			WithMetadata("error", err.Error()))
+		return ""
+	}
+	if arn == "" {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Longhorn backup Pod Identity role not found; keyless backups will not authenticate"))
+	}
+	return arn
+}
+
+// backupBucketSpec derives the provider bucket-provisioning request from config.
+// Returns nil unless the module has work to do: creating a cloud-native
+// bucket/container (create_bucket/create_container set and no external endpoint)
+// or provisioning a keyless Pod Identity association for an AWS S3 target.
+func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
+	if !cfg.Backups.LonghornEnabled() {
+		return nil
+	}
+	provider := cfg.Cluster.ProviderName()
+	lh := cfg.Backups.LonghornConfig()
+	if s3 := lh.S3; s3 != nil {
+		create := s3.CreateBucket && s3.Endpoint == ""
+		podIdentity := s3.PodIdentityAuth(provider)
+		if !create && !podIdentity {
+			// External/pre-existing bucket with static keys: nothing for the module.
+			return nil
+		}
+		return &cluster.BackupBucketSpec{
+			Name:         s3.Bucket,
+			Create:       create,
+			PodIdentity:  podIdentity,
+			ForceDestroy: !s3.RetainOnDestroyEnabled(),
+		}
+	}
+	if az := lh.Azure; az != nil && az.CreateContainer && az.Endpoint == "" {
+		return &cluster.BackupBucketSpec{
+			Name:           az.Container,
+			StorageAccount: az.StorageAccount,
+			Create:         true,
+			ForceDestroy:   !az.RetainOnDestroyEnabled(),
+		}
+	}
+	return nil
+}
+
 // generateSecurePassword generates a cryptographically secure random password.
 // It accepts an io.Reader to allow for deterministic testing with known bytes.
 // Callers must propagate the error rather than substituting a weaker fallback:
-// these strings end up as Keycloak admin / Postgres / Redis credentials on the
+// these strings end up as Keycloak admin / Redis credentials on the
 // installed cluster.
 func generateSecurePassword(r io.Reader) (string, error) {
 	b := make([]byte, 32)
@@ -562,12 +675,10 @@ func generateSecurePassword(r io.Reader) (string, error) {
 }
 
 // foundationalSecrets bundles the random secrets required to install the
-// foundational services (Keycloak, Postgres, Redis).
+// foundational services (Keycloak, Redis). Postgres credentials are not
+// generated here: CNPG creates them in-cluster.
 type foundationalSecrets struct {
 	KeycloakAdmin string
-	KeycloakDB    string
-	PostgresAdmin string
-	PostgresUser  string
 	RealmAdmin    string
 	Redis         string
 }
@@ -578,9 +689,6 @@ func generateFoundationalSecrets(r io.Reader) (foundationalSecrets, error) {
 	var s foundationalSecrets
 	for _, dst := range []*string{
 		&s.KeycloakAdmin,
-		&s.KeycloakDB,
-		&s.PostgresAdmin,
-		&s.PostgresUser,
 		&s.RealmAdmin,
 		&s.Redis,
 	} {

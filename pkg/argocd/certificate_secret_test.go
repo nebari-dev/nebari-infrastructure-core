@@ -132,7 +132,7 @@ func TestConfigureGatewayTLS_FilesSource(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset()
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err != nil {
 		t.Fatalf("ConfigureGatewayTLS() error: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestConfigureGatewayTLS_EnvSource_CustomName(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset()
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err != nil {
 		t.Fatalf("ConfigureGatewayTLS() error: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestConfigureGatewayTLS_Idempotent(t *testing.T) {
 			Env:  &config.CertEnv{CertEnv: "TEST_TLS_CERT", KeyEnv: "TEST_TLS_KEY"},
 		},
 	}
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset()
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestConfigureGatewayTLS_MissingFile(t *testing.T) {
 			Files: &config.CertFiles{CertFile: "/nonexistent/tls.crt", KeyFile: "/nonexistent/tls.key"},
 		},
 	}
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset()
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err == nil {
 		t.Fatal("expected error for missing cert file, got nil")
 	}
@@ -219,7 +219,7 @@ func TestConfigureGatewayTLS_MissingFile(t *testing.T) {
 func TestConfigureGatewayTLS_NonExistingTypeIsNoop(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.NebariConfig{Domain: "example.com", Certificate: &config.CertificateConfig{Type: "selfsigned"}}
-	client := fake.NewSimpleClientset() //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset()
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err != nil {
 		t.Fatalf("ConfigureGatewayTLS() should be a no-op for selfsigned, got: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestConfigureGatewayTLS_ExistingSecretSANCheck(t *testing.T) {
 			ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
 		},
 	}
-	client := fake.NewSimpleClientset(existing) //nolint:staticcheck // SA1019: fine for tests
+	client := fake.NewSimpleClientset(existing)
 	// existing_secret path must not error and must not create/overwrite a secret.
 	if err := ConfigureGatewayTLS(ctx, client, cfg); err != nil {
 		t.Fatalf("ConfigureGatewayTLS() error: %v", err)

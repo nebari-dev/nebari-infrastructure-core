@@ -20,7 +20,13 @@ spec:
       namespace: envoy-gateway-system
       sectionName: http
   rules:
-    - filters:
+    # Catch-all path match, spelled out because a rule with no `matches` reads
+    # as "matches nothing" rather than "matches everything".
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
         - type: RequestRedirect
           requestRedirect:
             scheme: https

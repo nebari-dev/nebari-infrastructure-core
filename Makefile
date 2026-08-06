@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint install pre-commit release-snapshot docs
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs
 
 # Variables
 BINARY_NAME=nic
@@ -64,6 +64,10 @@ lint: ## Run golangci-lint
 	@which golangci-lint > /dev/null || (echo "Error: golangci-lint is not installed. See https://golangci-lint.run/welcome/install/" && exit 1)
 	golangci-lint run
 	@echo "Lint passed successfully"
+
+vuln: ## Run govulncheck security gate (fails on reachable, fixable vulnerabilities)
+	@echo "Running govulncheck gate..."
+	@./scripts/govulncheck-gate.sh
 
 test: test-unit ## Run unit tests (default)
 

@@ -36,4 +36,5 @@ AuthConfig implements CredentialProvider.
 |-------|----------|------|----------|-------------|
 | SSHKeyEnv | `ssh_key_env` | string | Yes | SSHKeyEnv is the name of the environment variable containing the SSH private key The key should be in PEM format (e.g., contents of ~/.ssh/id_ed25519) |
 | TokenEnv | `token_env` | string | Yes | TokenEnv is the name of the environment variable containing the personal access token Used for HTTPS authentication |
+| InsecureSkipHostKeyVerification | `insecure_skip_host_key_verification` | bool | No | InsecureSkipHostKeyVerification disables SSH host key verification, removing protection against man-in-the-middle attacks. Only intended for ephemeral environments (e.g. CI) where maintaining a kno... |
 

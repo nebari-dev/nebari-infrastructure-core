@@ -34,7 +34,7 @@ omitted entirely (nil), in which case the cluster is created with defaults.
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | NodeImage | `node_image` | string | No | NodeImage is the kindest/node image to use (e.g. "kindest/node:v1.32.2"). Empty means the default image of the bundled kind version. |
-| ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are additional host directories mounted into the cluster node container. The local file:// gitops repository (explicit or auto-created) is mounted automatically and does not need to be ... |
+| ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are additional host directories mounted into the cluster node container. NIC mounts its auto-created local GitOps repository automatically; an explicit file:// repository needs a matchi... |
 
 ---
 

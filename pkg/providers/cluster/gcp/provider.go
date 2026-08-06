@@ -137,9 +137,11 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns GCP-specific Kubernetes infrastructure settings.
+// LonghornEnabled is false: Longhorn is not yet wired for GCP.
 func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings {
 	return cluster.InfraSettings{
-		StorageClass: "standard-rwo",
-		NeedsMetalLB: false,
+		StorageClass:    "standard-rwo",
+		NeedsMetalLB:    false,
+		LonghornEnabled: false,
 	}
 }

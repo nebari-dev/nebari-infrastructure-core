@@ -13,31 +13,19 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    chart: metallb
-    repoURL: https://metallb.github.io/metallb
-    targetRevision: 0.14.8
-    helm:
-      releaseName: metallb
-      values: |
-        controller:
-          replicas: 1
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
-        speaker:
-          enabled: true
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
+  sources:
+    - chart: metallb
+      repoURL: https://metallb.github.io/metallb
+      targetRevision: 0.14.8
+      helm:
+        releaseName: metallb
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/metallb/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/metallb/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

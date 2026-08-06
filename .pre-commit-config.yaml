@@ -29,8 +29,11 @@ repos:
 
       - id: golangci-lint
         name: golangci-lint
+        # No --fix: keep this a report-and-block gate that matches CI and
+        # `make lint`. Auto-fix (notably nolintlint deleting "unused" directives)
+        # silently rewrites committed files and can leak unrelated edits into a
+        # commit. Run `golangci-lint run --fix` by hand if you want fixes applied.
         entry: golangci-lint run
-        args: [--fix]
         language: system
         types: [go]
         pass_filenames: false

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,6 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	longhorn "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 //go:embed templates
@@ -30,6 +32,9 @@ const (
 	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
 	// not configured a real ACME provider.
 	certificateIssuerSelfSigned = "selfsigned-issuer"
+	// certificateIssuerLetsEncrypt is the cert-manager ACME Issuer used when the
+	// user explicitly selects Let's Encrypt.
+	certificateIssuerLetsEncrypt = "letsencrypt-issuer"
 )
 
 // TemplateData holds the dynamic values for template processing
@@ -90,6 +95,30 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+
+	// Longhorn backup configuration (rendered into manifests/storage/longhorn-backup)
+	LonghornBackupEnabled          bool
+	LonghornBackupTargetURL        string
+	LonghornBackupCredentialSecret string
+	LonghornSnapshotCron           string
+	LonghornSnapshotRetain         int
+	LonghornSnapshotConcurrency    int
+	LonghornBackupCron             string
+	LonghornBackupRetain           int
+	LonghornBackupConcurrency      int
+	LonghornAllowDetached          string // "true" | "false"
+
+	// LonghornEnabled mirrors InfraSettings.LonghornEnabled. When false, no Longhorn
+	// HTTPRoute, SecurityPolicy, cert dnsName entry, or realm-setup snippet is
+	// rendered. Keycloak is mandatory infrastructure in this codebase (always
+	// provisioned during foundational install), so a separate Keycloak-enabled
+	// gate is not part of the conditional.
+	LonghornEnabled bool
+
+	// LonghornOIDCSecretName is the name of the Kubernetes secret holding the
+	// Longhorn UI OIDC client secret, threaded from LonghornOIDCClientSecretName
+	// so the Go constant and the rendered manifests cannot drift.
+	LonghornOIDCSecretName string
 }
 
 // NewTemplateData creates TemplateData from NebariConfig, the effective git
@@ -110,6 +139,8 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 		MetalLBAddressRange:     settings.MetalLBAddressPool,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
+		LonghornEnabled:         settings.LonghornEnabled,
+		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -129,7 +160,9 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 
 	// Set certificate configuration
 	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
-		data.CertificateIssuer = "letsencrypt-issuer"
+		data.CertificateIssuer = certificateIssuerLetsEncrypt
+		// Precondition: Validate() requires ACME configuration for letsencrypt.
+		// Keep the nil guard because WriteAllToGit can also be called directly.
 		if cfg.Certificate.ACME != nil {
 			data.ACMEEmail = cfg.Certificate.ACME.Email
 			data.ACMEServer = cfg.Certificate.ACME.Server
@@ -169,6 +202,25 @@ func NewTemplateData(cfg *config.NebariConfig, gitConfig *git.Config, settings c
 	// template will need a guard or a separate value for the OIDC issuer URL.
 	if cfg.Domain != "" {
 		data.KeycloakIssuerURL = fmt.Sprintf("https://keycloak.%s%s", data.Domain, settings.KeycloakBasePath)
+	}
+
+	// Longhorn backup configuration.
+	if cfg.Backups.LonghornEnabled() {
+		lh := cfg.Backups.Longhorn
+		data.LonghornBackupEnabled = true
+		data.LonghornBackupTargetURL = lh.BackupTargetURL()
+		data.LonghornBackupCredentialSecret = longhorn.BackupCredentialSecretName
+		data.LonghornSnapshotCron = lh.Schedules.Snapshot.Cron
+		data.LonghornSnapshotRetain = lh.Schedules.Snapshot.Retain
+		data.LonghornSnapshotConcurrency = lh.Schedules.Snapshot.Concurrency
+		data.LonghornBackupCron = lh.Schedules.Backup.Cron
+		data.LonghornBackupRetain = lh.Schedules.Backup.Retain
+		data.LonghornBackupConcurrency = lh.Schedules.Backup.Concurrency
+		if lh.AllowDetached() {
+			data.LonghornAllowDetached = "true"
+		} else {
+			data.LonghornAllowDetached = "false"
+		}
 	}
 
 	return data
@@ -314,32 +366,44 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 			return nil
 		}
 
-		// Skip MetalLB templates for providers that don't need it
-		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		// Skip trust-manager templates unless a trust bundle is configured
-		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		// Skip certificate templates that don't apply to the configured cert source.
-		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
-			return nil
-		}
-
 		destPath := filepath.Join(workDir, relPath)
 
+		// Gated templates are removed (not just skipped) when their gate is
+		// off, so toggling a feature off on an already-bootstrapped repo
+		// deletes its manifests and lets ArgoCD prune the resources, instead
+		// of leaving them orphaned in git.
+
+		// MetalLB templates only apply to providers that need it
+		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
+			return removeStaleTemplate(relPath, destPath, d)
+		}
+
+		// Longhorn-only templates are gated on LonghornEnabled. The
+		// securitypolicies Application targets manifests/networking/policies,
+		// whose only content is the Longhorn SecurityPolicy; writing the app
+		// without its manifest would create an Application with zero resources
+		// (rejected by allowEmpty: false).
+		if isLonghornOnlyPath(relPath) && !settings.LonghornEnabled {
+			return removeStaleTemplate(relPath, destPath, d)
+		}
+
+		// Longhorn backup templates are gated on backups being enabled.
+		if isBackupPath(relPath) && !data.LonghornBackupEnabled {
+			return removeStaleTemplate(relPath, destPath, d)
+		}
+
+		// trust-manager templates only apply when a trust bundle is configured
+		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
+			return removeStaleTemplate(relPath, destPath, d)
+		}
+
+		// Certificate templates that don't apply to the configured cert source.
+		if !d.IsDir() && skipCertificateTemplate(relPath, data) {
+			return removeStaleTemplate(relPath, destPath, d)
+		}
+
 		if d.IsDir() {
-			// Create directory
-			return os.MkdirAll(destPath, 0750)
+			return os.MkdirAll(destPath, git.GitOpsDirMode)
 		}
 
 		// Read template content
@@ -355,12 +419,12 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 		}
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), git.GitOpsDirMode); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", destPath, err)
 		}
 
 		// Write processed content
-		if err := os.WriteFile(destPath, processed, 0600); err != nil {
+		if err := os.WriteFile(destPath, processed, git.GitOpsFileMode); err != nil {
 			return fmt.Errorf("failed to write %s: %w", destPath, err)
 		}
 
@@ -375,18 +439,87 @@ func WriteAllToGit(ctx context.Context, gitClient git.Client, cfg *config.Nebari
 	return nil
 }
 
+// isBackupPath reports whether relPath is part of the Longhorn backup app or its
+// rendered manifests, so it can be removed when backups are disabled.
+func isBackupPath(relPath string) bool {
+	return relPath == "apps/longhorn-backup.yaml" ||
+		relPath == "manifests/storage/longhorn-backup" ||
+		strings.HasPrefix(relPath, "manifests/storage/longhorn-backup/")
+}
+
+// valuesDirPrefix is the gitops-repo subtree that holds NIC-owned base values
+// alongside user- and pack-owned overlays. removeStaleTemplate refuses to
+// recursively delete anything under it.
+const valuesDirPrefix = "values/"
+
+// removeStaleTemplate deletes the previously written output of a template
+// whose gate is now off, so a feature toggled from enabled to disabled has its
+// files removed from the gitops repo rather than skipped-but-retained. Missing
+// files are a no-op (the common case: the feature was never enabled). For
+// directories it removes the tree and returns fs.SkipDir so the walk does not
+// descend, EXCEPT under values/, where recursive deletion is refused and the
+// walk descends instead (see below).
+//
+// The recursive branch is the only irreversible operation in this package, and
+// under values/ it would delete user overlays that NIC does not own and cannot
+// reconstruct. Rather than relying on every gate predicate to match
+// values/<app>/base.yaml as a FILE and never as a directory, this refuses the
+// RemoveAll branch for the values/ subtree outright: a directory there is
+// descended into instead, so the per-file gate still removes base.yaml while
+// overlays are left alone. A future contributor who writes the natural
+// strings.HasPrefix(relPath, "values/<app>") gets correct behaviour rather
+// than silent data loss.
+func removeStaleTemplate(relPath, destPath string, d fs.DirEntry) error {
+	if d.IsDir() {
+		// The bare "values" root has no trailing slash, so the prefix test
+		// alone misses it; a predicate matching the whole tree
+		// (relPath == "values" || HasPrefix...) would otherwise RemoveAll
+		// every app's base.yaml and every overlay in the repo.
+		if relPath == "values" || strings.HasPrefix(relPath, valuesDirPrefix) {
+			// Do not RemoveAll, and do not SkipDir: descending lets the
+			// base.yaml file be matched and removed on its own.
+			return nil
+		}
+		if err := os.RemoveAll(destPath); err != nil {
+			return fmt.Errorf("failed to remove stale directory %s: %w", destPath, err)
+		}
+		return fs.SkipDir
+	}
+	if err := os.Remove(destPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove stale file %s: %w", destPath, err)
+	}
+	return nil
+}
+
 // isMetalLBPath returns true if the relative path is a MetalLB-related template.
+// values/metallb is matched at its base.yaml FILE rather than at the directory,
+// so the gate removes only the file NIC owns. Overlay safety does not rest on
+// that choice: removeStaleTemplate refuses recursive deletion under values/
+// outright, so the broader directory-matching form would also be safe.
 func isMetalLBPath(relPath string) bool {
 	return relPath == "apps/metallb.yaml" ||
 		relPath == "apps/metallb-config.yaml" ||
+		relPath == "values/metallb/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/metallb")
 }
 
+// isLonghornOnlyPath returns true if the relative path is a template that only
+// produces Longhorn resources and must be skipped entirely when Longhorn is
+// disabled.
+func isLonghornOnlyPath(relPath string) bool {
+	return relPath == "apps/securitypolicies.yaml" ||
+		strings.HasPrefix(relPath, "manifests/networking/policies")
+}
+
 // isTrustBundlePath returns true if the relative path is a trust-manager-related
-// template (the chart Application, the Bundle Application, or the Bundle manifest).
+// template (the chart Application, the Bundle Application, the Bundle manifest,
+// or the chart's base values). values/trust-manager is matched at its base.yaml
+// FILE rather than at the directory, for the same reason as isMetalLBPath, and
+// with the same removeStaleTemplate guard underneath it.
 func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||
+		relPath == "values/trust-manager/base.yaml" ||
 		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
 }
 
@@ -394,6 +527,8 @@ const (
 	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
 	certificatesAppPath       = "apps/certificates.yaml"
 	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
+	letsencryptIssuerPath     = "manifests/security/issuers/letsencrypt-clusterissuer.yaml"
+	selfSignedIssuerPath      = "manifests/security/issuers/selfsigned-clusterissuer.yaml"
 )
 
 // skipCertificateTemplate reports whether a cert-related template should be
@@ -405,13 +540,20 @@ const (
 // The certificates Application is skipped alongside the Certificate because the
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
-// it would report as failed.
+// it would report as failed. Issuer manifests are selected independently:
+// letsencrypt uses the ACME issuer, while selfsigned and existing use the
+// self-signed issuer (the latter remains available for operator-managed
+// per-application certificates).
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
 		return data.UseExistingCertificate
 	case gatewayReferenceGrantPath:
 		return !data.GatewayTLSCrossNamespace
+	case letsencryptIssuerPath:
+		return data.CertificateIssuer != certificateIssuerLetsEncrypt
+	case selfSignedIssuerPath:
+		return data.CertificateIssuer != certificateIssuerSelfSigned
 	default:
 		return false
 	}

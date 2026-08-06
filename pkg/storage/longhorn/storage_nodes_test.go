@@ -78,7 +78,7 @@ func TestWarnIfMissingStorageDiskLabel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.nodes...) //nolint:staticcheck
+			client := fake.NewSimpleClientset(tt.nodes...)
 
 			var mu sync.Mutex
 			var warned bool

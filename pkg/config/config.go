@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
@@ -39,6 +40,9 @@ type NebariConfig struct {
 	// OS trust stores (via the cluster provider) and into the cluster via
 	// trust-manager. Required when egress is TLS-inspected by a corporate proxy.
 	TrustBundle *TrustBundleConfig `yaml:"trust_bundle,omitempty"`
+
+	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
+	Backups *BackupsConfig `yaml:"backups,omitempty"`
 }
 
 // DNSConfig holds typed DNS provider configuration.
@@ -230,7 +234,12 @@ func (c *CertificateConfig) Validate() error {
 		return nil
 	}
 	switch c.Type {
-	case "", CertificateTypeSelfSigned, CertificateTypeLetsEncrypt:
+	case "", CertificateTypeSelfSigned:
+		return nil
+	case CertificateTypeLetsEncrypt:
+		if c.ACME == nil || strings.TrimSpace(c.ACME.Email) == "" {
+			return fmt.Errorf("certificate type=letsencrypt requires acme.email")
+		}
 		return nil
 	case CertificateTypeExisting:
 		return c.validateExisting()
@@ -362,6 +371,10 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 
 	if err := c.Certificate.Validate(); err != nil {
 		return fmt.Errorf("invalid certificate: %w", err)
+	}
+
+	if err := c.Backups.Validate(c.Cluster.ProviderName()); err != nil {
+		return fmt.Errorf("invalid backups: %w", err)
 	}
 
 	return nil

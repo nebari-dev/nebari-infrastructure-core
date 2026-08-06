@@ -28,7 +28,7 @@ builds:
 
 archives:
   - id: nic-archive
-    format: tar.gz
+    formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -39,7 +39,7 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
       - LICENSE*
@@ -49,6 +49,36 @@ archives:
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
+
+# Homebrew cask (GoReleaser's native, non-deprecated brew support). Casks
+# install on macOS only; Linux users download the release archives directly
+# (the archive naming is documented in the release notes below).
+homebrew_casks:
+  - name: nic
+    binaries:
+      - nic
+    ids:
+      - nic-archive
+    repository:
+      owner: nebari-dev
+      name: homebrew-tap
+      branch: main
+      # Cross-repo push: the default GITHUB_TOKEN only grants write to this repo.
+      # HOMEBREW_TAP_TOKEN is an org-level secret (write access to the tap),
+      # passed through by the release workflow.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    description: "Nebari Infrastructure Core - cloud infrastructure management for Nebari"
+    homepage: "https://github.com/nebari-dev/nebari-infrastructure-core"
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    hooks:
+      post:
+        # Published binaries are not code-signed or notarized, so macOS Gatekeeper
+        # quarantines them and `nic` fails to launch. Strip the quarantine xattr on
+        # install so the CLI runs without the "developer cannot be verified" prompt.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/nic"]
+          end
 
 changelog:
   sort: asc
@@ -88,29 +118,48 @@ release:
 
     ### Installation
 
-    Download the appropriate binary for your platform from the assets below.
-
-    #### Linux/macOS
+    #### Homebrew (macOS)
     ```bash
-    # Download and extract
-    tar -xzf nic_{{ .Tag }}_linux_x86_64.tar.gz
+    brew install nebari-dev/tap/nic
+    ```
+
+    #### Manual download (all platforms)
+    Download the appropriate archive for your platform from the assets below, then extract and install.
+
+    ##### Linux/macOS
+    ```bash
+    # Download and extract (adjust os/arch to match your platform)
+    tar -xzf {{ .ProjectName }}_{{ .Version }}_linux_x86_64.tar.gz
 
     # Move to PATH
     sudo mv nic /usr/local/bin/
 
     # Verify installation
-    nic --help
+    nic version
     ```
 
-    #### Windows
-    Extract the zip file and add the `nic.exe` to your PATH.
+    ##### Windows
+    Extract the zip file and add `nic.exe` to your PATH.
 
   footer: |
     **Full Changelog**: https://github.com/nebari-dev/nebari-infrastructure-core/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 source:
   enabled: true
   name_template: '{{ .ProjectName }}-{{ .Version }}-source'
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
+sboms:
+  - artifacts: archive

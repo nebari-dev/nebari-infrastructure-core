@@ -89,6 +89,36 @@ func TestProvider_InfraSettings(t *testing.T) {
 	}
 }
 
+func TestProvider_InfraSettings_LonghornEnabled(t *testing.T) {
+	p := NewProvider()
+
+	t.Run("default config reports Longhorn enabled", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{"hetzner": map[string]any{}},
+		}
+		s := p.InfraSettings(cfg)
+		if !s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = false, want true (Hetzner default)")
+		}
+	})
+
+	t.Run("explicit Longhorn disabled reports false", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{
+				"hetzner": map[string]any{
+					"longhorn": map[string]any{
+						"enabled": false,
+					},
+				},
+			},
+		}
+		s := p.InfraSettings(cfg)
+		if s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = true, want false")
+		}
+	})
+}
+
 // Compile-time check that Provider implements the interface
 var _ cluster.Provider = (*Provider)(nil)
 
@@ -165,10 +195,16 @@ func TestProvider_Validate_MissingConfigBlock(t *testing.T) {
 
 	err := p.Validate(context.Background(), "test", cfg)
 	if err == nil {
-		t.Fatal("expected error for missing hetzner_cloud block")
+		t.Fatal("expected error for empty cluster.hetzner block")
 	}
-	if !strings.Contains(err.Error(), "hetzner_cloud") {
-		t.Errorf("error should mention hetzner_cloud, got: %v", err)
+	// The error must name the current config path. "hetzner_cloud" was the
+	// pre-cluster-block key; pointing a user at it sends them to a key that no
+	// longer validates.
+	if !strings.Contains(err.Error(), "cluster.hetzner") {
+		t.Errorf("error should mention cluster.hetzner, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "hetzner_cloud") {
+		t.Errorf("error names the removed hetzner_cloud key: %v", err)
 	}
 }
 

@@ -1,5 +1,12 @@
 # Future Enhancements
 
+> **Status**: this document describes future/aspirational features. Config snippets here use a hypothetical schema and **do not** match the current NIC config format. See [`16-configuration-reference.md`](16-configuration-reference.md) for the current schema (`cluster.<provider>:` / `dns.<provider>:` discriminator pattern; no top-level `provider:` field; no `version:`, `kubernetes:`, `node_pools:`, `tls:`, `foundational_software:`, `images:`, or `features:` blocks). CLI commands like `nic plan`, `nic status`, `nic state`, `nic unlock`, `nic init`, `nic stack`, `nic marketplace` do not exist today; only `deploy`, `destroy`, `validate`, `kubeconfig`, and `version` are implemented.
+>
+> Some items below have shipped in part:
+>
+> - **§2 Git Repository Provisioning & CI/CD**: the **consumption** side is done (`pkg/git`, `git_repository:` config block, env-var auth, `file://` local repos). The **provisioning** side (`nic init` creating a new repo, auto-generated workflows) is still future work.
+> - **Secrets management** via `.env` + env-var indirection is shipped for MVP (see [`14-open-questions.md`](14-open-questions.md) §14.2).
+
 This document provides detailed specifications for future enhancements planned for NIC.
 
 ## 1. Configuration Overlays for Multi-Environment Support
