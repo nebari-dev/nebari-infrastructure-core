@@ -153,8 +153,41 @@ NIC automatically downloads and manages its own OpenTofu binary — no manual in
 
 ### Install
 
+**Install script (Linux/macOS)** — downloads the release binary for your
+OS/arch, verifies it against the release `checksums.txt` (and, when `cosign` is
+installed and a signature is published, against the release workflow's signing
+identity), and installs it:
+
 ```bash
-# From source
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | sh
+```
+
+Pin a version or change the install location with environment variables:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | NIC_VERSION=v0.11.0 sh
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+`NIC_VERSION` defaults to `latest`; `INSTALL_DIR` defaults to `/usr/local/bin`
+(falling back to `sudo` when it is not writable). For the strongest guarantee,
+verify the release yourself first — see
+[docs/operations/verifying-releases.md](docs/operations/verifying-releases.md).
+
+> The installer URL is pinned to `main`, so `scripts/install.sh` is a stable
+> published entry point: it must not be renamed or moved, and `main` must keep
+> the installer working, or every in-flight `curl | sh` breaks.
+
+**Homebrew (macOS):**
+
+```bash
+brew install nebari-dev/tap/nic
+```
+
+**From source:**
+
+```bash
+# Build the binary
 make build
 
 # Or install to $GOPATH/bin
