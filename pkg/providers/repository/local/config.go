@@ -8,7 +8,9 @@ import (
 // Config holds the configuration for the local repository provider.
 type Config struct {
 	// Path is the directory of the repository. When empty, the provider
-	// defaults to a per-project directory under the OS temp dir.
+	// defaults to ~/.nic/gitops/<project_name>, falling back to a per-project
+	// directory under the OS temp dir only when the home directory cannot be
+	// resolved.
 	Path string `yaml:"path" json:"path"`
 
 	// Branch is the git branch to use (default: "main").

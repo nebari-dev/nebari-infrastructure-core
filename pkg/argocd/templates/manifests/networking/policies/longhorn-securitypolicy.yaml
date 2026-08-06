@@ -24,6 +24,9 @@ spec:
       - profile
       - email
       - groups
+    # Renew the session from the refresh token when the access token expires,
+    # rather than bouncing the user back through Keycloak mid-session.
+    refreshToken: true
     forwardAccessToken: true
   jwt:
     providers:
@@ -31,6 +34,9 @@ spec:
         issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
         remoteJWKS:
           uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+          # JWKS staleness window: how long Envoy Gateway keeps serving a cached
+          # key set after Keycloak rotates the realm signing keys.
+          cacheDuration: 300s
   authorization:
     defaultAction: Deny
     rules:

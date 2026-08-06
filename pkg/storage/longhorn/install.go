@@ -230,9 +230,37 @@ func buildHelmValues(cfg *Config) map[string]any {
 		settings["kubernetesClusterAutoscalerEnabled"] = *cfg.ClusterAutoscalerEnabled
 	}
 
+	// Longhorn setting values are strings; this one is a per-engine JSON map.
+	// Only render it when a provider or user sets the knob, so the Longhorn
+	// default (12% of node CPU per instance-manager pod) stays untouched.
+	if cfg != nil && cfg.InstanceManagerCPUPercent != nil {
+		settings["guaranteedInstanceManagerCPU"] = fmt.Sprintf(
+			`{"v1":"%d","v2":"%d"}`, *cfg.InstanceManagerCPUPercent, *cfg.InstanceManagerCPUPercent)
+	}
+
+	// The chart ships no resources for the CSI sidecars, leaving them
+	// BestEffort (#456). csi-plugin (the per-node mount path) is deliberately
+	// left alone: capping it risks slow mounts.
+	settings["systemManagedCSIComponentsResourceLimits"] = `{` +
+		`"csi-attacher":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}},` +
+		`"csi-provisioner":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}},` +
+		`"csi-resizer":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}},` +
+		`"csi-snapshotter":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"100m","memory":"128Mi"}}}`
+
+	// The chart ships no resources for longhorn-manager either (#456). The
+	// manager coordinates rebuilds but does not carry volume data, so a CPU
+	// limit is safe.
+	longhornManager := map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{"cpu": "50m", "memory": "128Mi"},
+			"limits":   map[string]any{"cpu": "500m", "memory": "512Mi"},
+		},
+	}
+
 	values := map[string]any{
 		"persistence":     persistence,
 		"defaultSettings": settings,
+		"longhornManager": longhornManager,
 	}
 
 	if cfg != nil && cfg.DedicatedNodes {
@@ -260,7 +288,7 @@ func buildHelmValues(cfg *Config) map[string]any {
 		// rationale as the embedded iSCSI prerequisite DaemonSet) and carry no
 		// nodeSelector (#366).
 		tolerateAll := []map[string]any{{"operator": "Exists"}}
-		values["longhornManager"] = map[string]any{"tolerations": tolerateAll}
+		longhornManager["tolerations"] = tolerateAll
 		values["longhornDriver"] = map[string]any{"tolerations": tolerateAll}
 	}
 

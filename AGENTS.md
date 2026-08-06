@@ -70,7 +70,8 @@ go test ./pkg/providers/cluster/aws -v # single package
 make fmt                      # gofmt -s -w
 make vet                      # go vet
 make lint                     # golangci-lint run
-make pre-commit               # run pre-commit checks
+make pre-commit               # install the pre-commit hooks
+make pre-commit-run           # run the hooks across all files
 ```
 
 ### Local Kind Cluster
@@ -230,7 +231,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`
     DNS           *DNSConfig         `yaml:"dns,omitempty"`
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
 }
 ```
@@ -418,6 +419,7 @@ References:
 - **`docs/cli-reference.md`** - CLI command reference
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - The human-facing contribution process
 
 ## Dependencies
 
@@ -434,6 +436,20 @@ Runtime dependencies (per cluster provider):
 - **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
+
+## Pull Request Lifecycle
+
+Merging to `main` requires **one approving review from a `CODEOWNERS` owner**. Admin enforcement is on, so `gh pr merge --admin` does not bypass it, and GitHub never lets an author approve their own pull request. Approvals are **dismissed on every push**, so re-request review after pushing a fixup. `main` requires linear history: rebase, do not merge.
+
+Open pull requests expire. After **30 days** with no activity a pull request is labeled `status: inactive 💤` and warned; after **37 days** total it closes automatically. Any comment, push, or review resets the clock. Nothing is exempt by default, including drafts.
+
+To keep a pull request open indefinitely, add the **`status: keep open 📌`** label. Use it for long-running design work, or when the hold-up is on the maintainers' side.
+
+Staleness is derived from GitHub's `updated_at`, which is bumped by comments, pushes, reviews, and **label changes**. Adding or removing a label on an already-inactive pull request therefore resets the 30-day counter and clears `status: inactive 💤`, so labelling is not a read-only triage action. The bot excludes its own stale label from this, so applying it does not reset the countdown it starts.
+
+Closes are reversible: branches are preserved and the pull request can be reopened.
+
+The full human-facing process is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Pre-Commit Checklist
 

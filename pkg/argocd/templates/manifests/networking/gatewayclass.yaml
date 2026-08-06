@@ -7,3 +7,9 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  # Data-plane proxy sizing lives in the EnvoyProxy resource (same directory).
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: nebari-proxy-config
+    namespace: envoy-gateway-system

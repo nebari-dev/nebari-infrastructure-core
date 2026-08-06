@@ -22,17 +22,25 @@ func TestCloudNativePGTemplate_PinsChartAndTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cloudnative-pg template: %v", err)
 	}
+	processed, err := processTemplate("apps/cloudnative-pg.yaml", content, seamTemplateData())
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
 
 	var doc map[string]any
-	if err := yaml.Unmarshal(content, &doc); err != nil {
-		t.Fatalf("cloudnative-pg app is not valid YAML: %v\n%s", err, content)
+	if err := yaml.Unmarshal(processed, &doc); err != nil {
+		t.Fatalf("cloudnative-pg app is not valid YAML: %v\n%s", err, processed)
 	}
 
 	spec, ok := doc["spec"].(map[string]any)
 	if !ok {
-		t.Fatalf("spec missing or wrong type in:\n%s", content)
+		t.Fatalf("spec missing or wrong type in:\n%s", processed)
 	}
-	source, _ := spec["source"].(map[string]any)
+	sources, _ := spec["sources"].([]any)
+	if len(sources) == 0 {
+		t.Fatalf("spec.sources missing or empty in:\n%s", processed)
+	}
+	source, _ := sources[0].(map[string]any)
 	if source["chart"] != "cloudnative-pg" {
 		t.Errorf("chart = %v, want cloudnative-pg", source["chart"])
 	}
@@ -46,18 +54,17 @@ func TestCloudNativePGTemplate_PinsChartAndTarget(t *testing.T) {
 	if dest["namespace"] != "cnpg-system" {
 		t.Errorf("destination namespace = %v, want cnpg-system", dest["namespace"])
 	}
-	if !strings.Contains(string(content), "ServerSideApply=true") {
+	if !strings.Contains(string(processed), "ServerSideApply=true") {
 		t.Error("cloudnative-pg app must sync with ServerSideApply=true (CNPG CRDs overflow client-side apply)")
 	}
-	if !strings.Contains(string(content), "app.kubernetes.io/part-of: nebari-foundational") {
+	if !strings.Contains(string(processed), "app.kubernetes.io/part-of: nebari-foundational") {
 		t.Error("cloudnative-pg app missing nebari-foundational label")
 	}
 }
 
 // TestWriteAllToGit_CloudNativePGAlwaysWritten pins that the CNPG operator is
 // unconditional foundational infrastructure: the app file is emitted for every
-// GitOps bootstrap, with no config gating, like postgresql.yaml and
-// keycloak.yaml.
+// GitOps bootstrap, with no config gating, like keycloak.yaml.
 func TestWriteAllToGit_CloudNativePGAlwaysWritten(t *testing.T) {
 	appPath := func(dir string) string {
 		return filepath.Join(dir, "apps", "cloudnative-pg.yaml")
@@ -74,5 +81,72 @@ func TestWriteAllToGit_CloudNativePGAlwaysWritten(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "chart: cloudnative-pg") {
 		t.Errorf("rendered app missing chart reference, got:\n%s", got)
+	}
+}
+
+// cnpgHealthKey is the argocd-cm key that registers a custom health check for
+// the CNPG Cluster CRD.
+const cnpgHealthKey = "resource.customizations.health.postgresql.cnpg.io_Cluster"
+
+// TestArgoCDConfig_CNPGClusterHealthCheck pins the custom health check for
+// postgresql.cnpg.io Clusters. Without it Argo CD has no health assessment for
+// the CRD and calls a Cluster Healthy the instant it is created, so the UI
+// cannot distinguish a bootstrapping database from a working one.
+func TestArgoCDConfig_CNPGClusterHealthCheck(t *testing.T) {
+	// ConfigWithOIDC is the production path and used to replace configs.cm
+	// wholesale; both constructors must carry the health check.
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"DefaultConfig", DefaultConfig()},
+		{"ConfigWithOIDC", ConfigWithOIDC("test.example.com", "/auth", "secret")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configs, ok := tc.cfg.Values["configs"].(map[string]any)
+			if !ok {
+				t.Fatal(`Values["configs"] should be a map`)
+			}
+			cm, ok := configs["cm"].(map[string]any)
+			if !ok {
+				t.Fatal(`Values["configs"]["cm"] should be a map`)
+			}
+			lua, ok := cm[cnpgHealthKey].(string)
+			if !ok || lua == "" {
+				t.Fatalf("argocd-cm missing %s", cnpgHealthKey)
+			}
+			// Phase strings are CNPG API constants (api/v1/cluster_types.go);
+			// mistyping one silently makes every Cluster Progressing forever.
+			for _, phase := range []string{
+				"Cluster in healthy state",
+				"Cluster is unrecoverable and needs manual intervention",
+			} {
+				if !strings.Contains(lua, phase) {
+					t.Errorf("health check does not handle CNPG phase %q", phase)
+				}
+			}
+			for _, status := range []string{"Healthy", "Degraded", "Progressing"} {
+				if !strings.Contains(lua, status) {
+					t.Errorf("health check never reports %s", status)
+				}
+			}
+		})
+	}
+}
+
+// TestConfigWithOIDC_PreservesDefaultCM guards the merge in ConfigWithOIDC: it
+// must add url/oidc.config to the cm map from DefaultConfig, not overwrite it.
+func TestConfigWithOIDC_PreservesDefaultCM(t *testing.T) {
+	defaultCM := DefaultConfig().Values["configs"].(map[string]any)["cm"].(map[string]any)
+	oidcCM := ConfigWithOIDC("test.example.com", "/auth", "secret").
+		Values["configs"].(map[string]any)["cm"].(map[string]any)
+
+	for key := range defaultCM {
+		if _, ok := oidcCM[key]; !ok {
+			t.Errorf("ConfigWithOIDC dropped argocd-cm key %q from DefaultConfig", key)
+		}
+	}
+	if oidcCM["url"] == nil || oidcCM["oidc.config"] == nil {
+		t.Error("ConfigWithOIDC should still set url and oidc.config")
 	}
 }

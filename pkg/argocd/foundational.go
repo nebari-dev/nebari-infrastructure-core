@@ -17,6 +17,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
 const (
@@ -70,19 +71,24 @@ type FoundationalConfig struct {
 
 	// MetalLB configuration (local deployments only)
 	MetalLB MetalLBConfig
+
+	// Backups configures Longhorn backup credentials (nil when disabled).
+	Backups *config.LonghornBackupConfig
+
+	// BackupRoleARN is the EKS Pod Identity role ARN for a keyless S3 backup
+	// target. Written to the credential Secret as AWS_IAM_ROLE_ARN so Longhorn
+	// accepts it without static keys. Empty for static-key / Azure targets.
+	BackupRoleARN string
 }
 
 // KeycloakConfig holds Keycloak-specific configuration
 type KeycloakConfig struct {
-	Enabled               bool
-	AdminPassword         string
-	AdminUsername         string
-	DBPassword            string // Password for keycloak DB user
-	PostgresAdminPassword string // Password for postgres superuser
-	PostgresUserPassword  string // Password for postgres regular user
-	Hostname              string
-	RealmAdminUsername    string // Username for the admin user in the nebari realm
-	RealmAdminPassword    string // Password for the admin user in the nebari realm
+	Enabled            bool
+	AdminPassword      string
+	AdminUsername      string
+	Hostname           string
+	RealmAdminUsername string // Username for the admin user in the nebari realm
+	RealmAdminPassword string // Password for the admin user in the nebari realm
 }
 
 // LandingPageConfig holds landing page-specific configuration
@@ -112,7 +118,7 @@ type LonghornSSOConfig struct {
 // InstallFoundationalServices installs foundational services via GitOps.
 // This function handles the bootstrap phase:
 // 1. Creates the ArgoCD Project for foundational services
-// 2. Creates required secrets (Keycloak, PostgreSQL credentials)
+// 2. Creates required secrets (Keycloak)
 // 3. Applies the root App-of-Apps which triggers ArgoCD to sync all other resources
 //
 // All other resources (cert-manager, envoy-gateway, keycloak, etc.) are managed
@@ -166,7 +172,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 			return fmt.Errorf("failed to create Keycloak namespace: %w", err)
 		}
 
-		// Create secrets for Keycloak and PostgreSQL
+		// Create secrets for Keycloak
 		if err := createKeycloakSecrets(ctx, k8sClient, foundationalCfg.Keycloak, foundationalCfg.ArgoCD); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to create Keycloak secrets: %w", err)
@@ -195,6 +201,21 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 				span.RecordError(err)
 				return fmt.Errorf("failed to create Longhorn secrets: %w", err)
 			}
+		}
+	}
+
+	// Create the Longhorn backup credential Secret if backups are enabled. Not
+	// gated on Keycloak — backups can be enabled independently. Must run before
+	// ApplyRootAppOfApps so the BackupTarget (synced from git) can bind it.
+	if foundationalCfg.Backups.IsEnabled() {
+		k8sClient, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Kubernetes client: %w", err)
+		}
+		if err := createLonghornBackupSecret(ctx, k8sClient, foundationalCfg.Backups, foundationalCfg.BackupRoleARN); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create Longhorn backup secret: %w", err)
 		}
 	}
 
@@ -353,7 +374,9 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 	return nil
 }
 
-// createKeycloakSecrets creates the required secrets for Keycloak and PostgreSQL
+// createKeycloakSecrets creates the required secrets for Keycloak. Database
+// credentials are not created here: CNPG generates them in-cluster (Secret
+// "keycloak-db-app").
 func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, keycloakCfg KeycloakConfig, argocdSSO ArgoCDSSOConfig) error {
 	namespace := KeycloakDefaultNamespace
 
@@ -372,36 +395,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		return err
 	}
 
-	// 2. Create Keycloak PostgreSQL user credentials secret
-	if err := createSecret(ctx, client, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "keycloak-postgresql-credentials",
-			Namespace: namespace,
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"password": keycloakCfg.DBPassword,
-		},
-	}); err != nil {
-		return err
-	}
-
-	// 3. Create PostgreSQL main credentials secret (for PostgreSQL deployment)
-	if err := createSecret(ctx, client, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "postgresql-credentials",
-			Namespace: namespace,
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"postgres-password": keycloakCfg.PostgresAdminPassword,
-			"user-password":     keycloakCfg.PostgresUserPassword,
-		},
-	}); err != nil {
-		return err
-	}
-
-	// 4. Create Nebari realm admin credentials secret
+	// 2. Create Nebari realm admin credentials secret
 	if keycloakCfg.RealmAdminPassword != "" {
 		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -422,7 +416,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		}
 	}
 
-	// 5. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
+	// 3. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
 	if argocdSSO.ClientSecret != "" {
 		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -443,6 +437,27 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	}
 
 	return nil
+}
+
+// createLonghornBackupSecret resolves backup credentials and applies the
+// Longhorn credential Secret into the longhorn-system namespace. The Secret is
+// referenced by the BackupTarget that ArgoCD syncs from git, so it must exist
+// before the root App-of-Apps is applied.
+//
+// For a keyless target (iamRoleARN set) the Secret carries only
+// AWS_IAM_ROLE_ARN; the usable credentials are injected into longhorn-manager
+// pods by the EKS Pod Identity webhook, and repairing pods that predate the
+// association is the AWS provider's job (see
+// aws.repairLonghornBackupPodIdentity, #500).
+func createLonghornBackupSecret(ctx context.Context, client kubernetes.Interface, backupCfg *config.LonghornBackupConfig, iamRoleARN string) error {
+	if err := createNamespace(ctx, client, longhorn.Namespace); err != nil {
+		return fmt.Errorf("ensure longhorn namespace: %w", err)
+	}
+	secret, err := longhorn.BuildCredentialSecret(ctx, client, backupCfg, iamRoleARN)
+	if err != nil {
+		return fmt.Errorf("build longhorn backup secret: %w", err)
+	}
+	return createSecret(ctx, client, secret)
 }
 
 // createLonghornSecrets ensures the OIDC client secret used to protect the

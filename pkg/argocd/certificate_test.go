@@ -222,6 +222,114 @@ func TestWriteAllToGit_RendersCertManagerForSelfSigned(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
+	tests := []struct {
+		name             string
+		certificate      *config.CertificateConfig
+		wantSelfSigned   bool
+		wantLetsEncrypt  bool
+		wantOperatorName string
+		wantACMEEmail    string
+		wantACMEServer   string
+	}{
+		{
+			name:             "default uses selfsigned",
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+		{
+			name:             "selfsigned uses only selfsigned",
+			certificate:      &config.CertificateConfig{Type: config.CertificateTypeSelfSigned},
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+		{
+			name: "letsencrypt uses only letsencrypt",
+			certificate: &config.CertificateConfig{
+				Type: config.CertificateTypeLetsEncrypt,
+				ACME: &config.ACMEConfig{Email: "admin@example.com"},
+			},
+			wantLetsEncrypt:  true,
+			wantOperatorName: certificateIssuerLetsEncrypt,
+			wantACMEEmail:    "admin@example.com",
+			wantACMEServer:   "https://acme-v02.api.letsencrypt.org/directory",
+		},
+		{
+			name: "existing keeps selfsigned for operator managed certificates",
+			certificate: &config.CertificateConfig{
+				Type:           config.CertificateTypeExisting,
+				ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
+			},
+			wantSelfSigned:   true,
+			wantOperatorName: certificateIssuerSelfSigned,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			for _, path := range []string{selfSignedIssuerPath, letsencryptIssuerPath} {
+				fullPath := filepath.Join(tmpDir, path)
+				if err := os.MkdirAll(filepath.Dir(fullPath), 0750); err != nil {
+					t.Fatalf("create stale issuer directory: %v", err)
+				}
+				if err := os.WriteFile(fullPath, []byte("stale"), 0600); err != nil {
+					t.Fatalf("create stale issuer manifest: %v", err)
+				}
+			}
+			cfg := &config.NebariConfig{Domain: "example.com", Certificate: tt.certificate}
+			if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
+
+			paths := []struct {
+				name string
+				path string
+				want bool
+			}{
+				{name: "selfsigned issuer", path: selfSignedIssuerPath, want: tt.wantSelfSigned},
+				{name: "letsencrypt issuer", path: letsencryptIssuerPath, want: tt.wantLetsEncrypt},
+				{name: "cluster issuers application", path: "apps/cluster-issuers.yaml", want: true},
+			}
+			for _, path := range paths {
+				_, err := os.Stat(filepath.Join(tmpDir, path.path))
+				if path.want && err != nil {
+					t.Errorf("expected %s to be rendered: %v", path.name, err)
+				}
+				if !path.want && !os.IsNotExist(err) {
+					t.Errorf("expected %s to be skipped, stat error = %v", path.name, err)
+				}
+			}
+
+			if tt.wantLetsEncrypt {
+				// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+				issuer, err := os.ReadFile(filepath.Join(tmpDir, letsencryptIssuerPath))
+				if err != nil {
+					t.Fatalf("read letsencrypt issuer: %v", err)
+				}
+				for _, want := range []string{
+					"email: " + tt.wantACMEEmail,
+					"server: " + tt.wantACMEServer,
+				} {
+					if !strings.Contains(string(issuer), want) {
+						t.Errorf("letsencrypt issuer missing %q:\n%s", want, issuer)
+					}
+				}
+			}
+
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			operatorPatch, err := os.ReadFile(filepath.Join(tmpDir, "manifests", "nebari-operator", "deployment-patch.yaml"))
+			if err != nil {
+				t.Fatalf("read operator deployment patch: %v", err)
+			}
+			wantIssuerValue := `value: "` + tt.wantOperatorName + `"`
+			if !strings.Contains(string(operatorPatch), wantIssuerValue) {
+				t.Errorf("operator deployment patch missing %q", wantIssuerValue)
+			}
+		})
+	}
+}
+
 func TestWriteAllToGit_RendersReferenceGrantCrossNamespace(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

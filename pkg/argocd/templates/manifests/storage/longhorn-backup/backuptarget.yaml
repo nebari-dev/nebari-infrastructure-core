@@ -1,0 +1,11 @@
+apiVersion: longhorn.io/v1beta2
+kind: BackupTarget
+metadata:
+  name: default
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  backupTargetURL: {{ .LonghornBackupTargetURL }}
+  credentialSecret: {{ .LonghornBackupCredentialSecret }}
+  pollInterval: 5m0s

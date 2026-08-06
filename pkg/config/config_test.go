@@ -433,6 +433,32 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr:     true,
 			errContains: "repository field is required",
 		},
+		{
+			name: "invalid backups - bad cron",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
+				Backups: &BackupsConfig{
+					Longhorn: &LonghornBackupConfig{
+						S3: &S3BackupTarget{
+							Bucket: "b", Region: "us-east-1",
+							AccessKeyIDEnv: "K", SecretAccessKeyEnv: "S",
+						},
+						Schedules: BackupSchedules{
+							Snapshot: ScheduleConfig{Cron: "not a cron", Retain: 24, Concurrency: 5},
+							Backup:   ScheduleConfig{Cron: "0 3 * * *", Retain: 30, Concurrency: 3},
+						},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "invalid backups",
+		},
 	}
 
 	opts := ValidateOptions{
