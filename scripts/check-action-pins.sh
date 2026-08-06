@@ -45,6 +45,16 @@ for wf in "${workflows[@]}"; do
     fi
   done < <(grep -oE "https://raw\.githubusercontent\.com/[^\"'[:space:]]+" "$wf")
 
+  # github.com/<owner>/<repo>/raw/<ref>/<path> serves the same bytes. Apply
+  # the same rule to the segment after /raw/.
+  while IFS= read -r url; do
+    ref="$(sed -E 's#https://github\.com/[^/]+/[^/]+/raw/([^/]+)/.*#\1#' <<<"$url")"
+    if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "UNPINNED: $wf -> $url (github.com /raw/ ref must be a commit SHA)"
+      status=1
+    fi
+  done < <(grep -oE "https://github\.com/[^/\"'[:space:]]+/[^/\"'[:space:]]+/raw/[^\"'[:space:]]+" "$wf")
+
   # Container images passed with --image must be digest-pinned.
   while IFS= read -r img; do
     if [[ "$img" != *"@sha256:"* ]]; then
