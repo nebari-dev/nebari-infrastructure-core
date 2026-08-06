@@ -47,6 +47,20 @@ function main(): void {
   core.saveState("force", core.getBooleanInput("force") ? "true" : "false");
   core.saveState("deployStarted", "true");
 
+  // Validate the wait inputs before deploying too: a malformed wait-timeout
+  // should cost seconds, not a completed cloud deploy. Strict parse:
+  // `parseInt(...) || 600` would turn an explicit 0 into 600, truncate
+  // '300s' to 300, and accept negatives.
+  const wait = core.getBooleanInput("wait");
+  const rawTimeout = core.getInput("wait-timeout");
+  if (wait && (!/^[0-9]+$/.test(rawTimeout) || parseInt(rawTimeout, 10) <= 0)) {
+    throw new Error(
+      `wait-timeout must be a positive integer number of seconds, got '${rawTimeout}'. ` +
+        "Set wait: false to skip waiting.",
+    );
+  }
+  const waitTimeout = parseInt(rawTimeout, 10);
+
   // endGroup in finally: run() throws on failure, and a failed deploy's
   // output is exactly what must not end up inside a collapsed group.
   core.startGroup("nic deploy");
@@ -64,19 +78,11 @@ function main(): void {
   core.exportVariable("KUBECONFIG", kubeconfig);
   core.setOutput("kubeconfig", kubeconfig);
 
-  if (core.getBooleanInput("wait")) {
-    // Strict parse: `parseInt(...) || 600` would turn an explicit 0 into 600,
-    // truncate '300s' to 300, and accept negatives.
-    const raw = core.getInput("wait-timeout");
-    if (!/^[0-9]+$/.test(raw) || parseInt(raw, 10) <= 0) {
-      throw new Error(
-        `wait-timeout must be a positive integer number of seconds, got '${raw}'. ` +
-          "Set wait: false to skip waiting.",
-      );
-    }
-    const timeout = parseInt(raw, 10);
-    core.info(`Waiting up to ${timeout}s for Argo CD Applications to converge`);
-    waitForApplications(kubeconfig, timeout);
+  if (wait) {
+    core.info(
+      `Waiting up to ${waitTimeout}s for Argo CD Applications to converge`,
+    );
+    waitForApplications(kubeconfig, waitTimeout);
   }
 }
 
