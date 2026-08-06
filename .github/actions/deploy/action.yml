@@ -4,8 +4,9 @@ description: >-
   automatically when the job ends (post step), even on failure or
   cancellation. Acquires nic from a prebuilt binary (nic-binary) or a release
   or git ref (nic-version). Exports KUBECONFIG so the steps after this action
-  run against the deployed cluster, and by default waits for all Argo CD
-  Applications to become Healthy.
+  run against the deployed cluster, and by default waits for the deployment
+  to converge: nebari-root Synced, every Argo CD Application Healthy, and
+  that state stable across consecutive polls.
 
 inputs:
   config:
@@ -36,7 +37,9 @@ inputs:
     required: false
     default: ''
   wait:
-    description: Wait for all Argo CD Applications to be Healthy after deploy.
+    description: >-
+      Wait for the deployment to converge after deploy (nebari-root Synced,
+      all Argo CD Applications Healthy, stable across consecutive polls).
     required: false
     default: 'true'
   wait-timeout:
