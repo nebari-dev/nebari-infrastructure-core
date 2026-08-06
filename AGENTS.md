@@ -231,7 +231,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`
     DNS           *DNSConfig         `yaml:"dns,omitempty"`
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
 }
 ```

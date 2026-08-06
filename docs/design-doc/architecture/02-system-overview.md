@@ -10,7 +10,7 @@
 │    - cluster.<provider>: ...     (aws | azure | hetzner |   │
 │                                   local | existing)         │
 │    - dns.<provider>: ...         (optional, cloudflare)     │
-│    - git_repository: ...         (optional on local)        │
+│    - repository.<provider>: ... (existing | local)          │
 │    - certificate: ...    (selfsigned|letsencrypt|existing)  │
 │    - trust_bundle: / backups: ...          (both optional)  │
 └─────────────────────────────────────────────────────────────┘
@@ -38,13 +38,14 @@
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. GitOps Bootstrap (pkg/argocd, pkg/git)                   │
-│    - Renders ArgoCD app manifests into a Git repository     │
-│      (remote or file://) configured via git_repository      │
-│    - For providers with InfraSettings.SupportsLocalGitOps=  │
-│      true (local/Kind), auto-creates a local repo if none   │
-│      is configured                                          │
-│    - Commits and pushes (or commits locally for file://)    │
+│ 4. GitOps Bootstrap (pkg/argocd, pkg/git,                   │
+│    pkg/providers/repository)                                │
+│    - The repository provider resolves the GitOps repo:      │
+│      existing = remote (SSH/HTTPS), local = host directory  │
+│    - local requires a cluster provider with                 │
+│      InfraSettings.SupportsLocalGitOps=true (local/Kind)    │
+│    - Renders ArgoCD app manifests, commits, and pushes      │
+│      (remote) or commits in place (local)                   │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -125,8 +126,8 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`pkg/config/` (Config parsing)**
 
-- `pkg/config/config.go` defines `NebariConfig` with fields `ProjectName`, `Domain`, `Cluster *ClusterConfig`, `DNS *DNSConfig`, `GitRepository *git.Config`, `Certificate *CertificateConfig`.
-- `ClusterConfig` and `DNSConfig` both use the discriminator pattern: a single inline map keyed by provider name. Provider-specific config is opaque to the config package and is decoded by the provider itself.
+- `pkg/config/config.go` defines `NebariConfig` with fields `ProjectName`, `Domain`, `Cluster *ClusterConfig`, `DNS *DNSConfig`, `Repository *RepositoryConfig`, `Certificate *CertificateConfig`.
+- `ClusterConfig`, `DNSConfig`, and `RepositoryConfig` all use the discriminator pattern: a single inline map keyed by provider name. Provider-specific config is opaque to the config package and is decoded by the provider itself.
 
 **`pkg/argocd/` (ArgoCD orchestration)**
 

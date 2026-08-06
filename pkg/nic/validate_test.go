@@ -19,6 +19,9 @@ func testConfig(domain string, dnsProviders map[string]any) *config.NebariConfig
 		Cluster: &config.ClusterConfig{
 			Providers: map[string]any{"aws": map[string]any{}},
 		},
+		Repository: &config.RepositoryConfig{
+			Providers: map[string]any{"existing": map[string]any{}},
+		},
 	}
 	if dnsProviders != nil {
 		cfg.DNS = &config.DNSConfig{Providers: dnsProviders}

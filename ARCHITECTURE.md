@@ -8,6 +8,7 @@ This document provides a comprehensive map of the nebari-infrastructure-core cod
 - [Command Line Interface (cmd/nic/)](#command-line-interface-cmdnic)
 - [Cluster Provider System (pkg/providers/cluster/)](#cluster-provider-system-pkgproviderscluster)
 - [DNS Provider System (pkg/providers/dns/)](#dns-provider-system-pkgprovidersdns)
+- [Repository Provider System (pkg/providers/repository/)](#repository-provider-system-pkgprovidersrepository)
 - [Configuration System (pkg/config/)](#configuration-system-pkgconfig)
 - [Observability (pkg/telemetry/, pkg/status/)](#observability-pkgtelemetry-pkgstatus)
 - [Supporting Files](#supporting-files)
@@ -20,7 +21,9 @@ nebari-infrastructure-core/
 ├── pkg/                  # Reusable library packages
 │   ├── providers/        # Provider implementations
 │   │   ├── cluster/      # Cloud/cluster provider implementations
-│   │   └── dns/          # DNS provider implementations
+│   │   ├── dns/          # DNS provider implementations
+│   │   └── repository/   # GitOps repository provider implementations
+│   ├── git/              # Concrete go-git client (used by pkg/nic)
 │   ├── config/           # Configuration parsing and types
 │   ├── telemetry/        # OpenTelemetry setup
 │   └── status/           # Status reporting system
@@ -49,7 +52,7 @@ nebari-infrastructure-core/
 
 ### Key Patterns:
 
-- **Provider Registration:** `main.go` explicitly registers all cloud and DNS providers using registry pattern
+- **Provider Registration:** `main.go` explicitly registers all cloud, DNS, and repository providers using registry pattern
 - **Telemetry Setup:** OpenTelemetry initialized in `main.go` based on environment variables
 - **Logging:** Structured JSON logging via `slog` - only at this application layer
 - **Signal Handling:** Context cancellation for graceful shutdown on SIGINT/SIGTERM
@@ -247,6 +250,53 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 **Known limitation:** Changing the `domain` in config and redeploying creates new records but does not clean up the old domain's records. See [DNS Provider Architecture](docs/design-doc/implementation/09-dns-provider-architecture.md#orphaned-records-on-domain-change).
 
+## Repository Provider System (pkg/providers/repository/)
+
+**Location:** `pkg/providers/repository/`
+
+**Purpose:** GitOps repository provider abstraction. Providers resolve (or create) the repository that ArgoCD syncs foundational software from, and return a typed `Source` describing how to reach it. The `repository:` config block is required and follows the same provider-name-as-key pattern as `cluster:` and `dns:`. See [ADR-0007](docs/adr/0007-repository-provider-abstraction.md) for the design rationale.
+
+### Core Repository Infrastructure
+
+| File | Purpose |
+|------|---------|
+| `provider.go` | Defines the `Provider` interface (`Name()`, `Validate()`, `Provision()`) and the sealed `Source` (`LocalSource`, `RemoteSource`) and `Auth` (`TokenAuth`, `SSHKeyAuth`) contracts |
+| `provider_test.go` | Source accessor contracts and the `ArgoCDAuth()` read/push fallback |
+
+The package imports only `pkg/config`: it is free of go-git and Kubernetes so out-of-tree providers stay lightweight. Credentials inside a `Source` are already resolved from their environment variables and exist only in memory; they are never serialized.
+
+### Existing Provider (pkg/providers/repository/existing/)
+
+**Location:** `pkg/providers/repository/existing/`
+
+Resolves a pre-existing remote repository (SSH or HTTPS) into a `RemoteSource`. The repository must already exist; this provider does not create one.
+
+| File | Purpose |
+|------|---------|
+| `provider.go` | `Provision` resolves push (and optional ArgoCD read) credentials from env vars into a `RemoteSource` |
+| `config.go` | `Config` with `url`, `branch`, `path`, and tagged-union `auth`/`argocd_auth` blocks validated as exactly-one-of token/ssh |
+| `config_test.go`, `provider_test.go` | Validation table tests, env resolution, and Provision paths |
+
+**Environment Variables:** names are user-configured (`auth: token: {env: GIT_TOKEN}` or `auth: ssh: {env: GIT_SSH_PRIVATE_KEY}`); the config carries only the names, never the secrets.
+
+### Local Provider (pkg/providers/repository/local/)
+
+**Location:** `pkg/providers/repository/local/`
+
+Provisions a directory on disk as a `LocalSource` - the zero-dependency, no-network option for local/dev clusters. NIC commits to it in place and ArgoCD's repo-server reads it via a hostPath mount, so it requires a cluster provider with `SupportsLocalGitOps` (e.g. kind); `pkg/nic` rejects incompatible pairings before the GitOps bootstrap runs.
+
+| File | Purpose |
+|------|---------|
+| `provider.go` | `Provision` creates the directory (default: per-project dir under the OS temp dir) and returns a `LocalSource` |
+| `config.go` | `Config` with optional absolute `path` and `branch` |
+| `provider_test.go` | Default-path derivation, directory creation, and validation |
+
+### Git Client (pkg/git/)
+
+**Location:** `pkg/git/`
+
+Not a provider: a concrete go-git-backed `Client` that `pkg/nic` drives after type-switching the `Source`. Acquisition is explicit - `Init(ctx, dir)` opens or initializes a local repository in place, while `ValidateAuth`/`Clone` authenticate and clone a remote into a managed temp dir - and `Commit`/`Push` are separate so local repositories never push. go-git stays sealed inside this package; `git.Auth` values are built via `NewAuthToken`/`NewSSHKeyAuth` and the zero value means anonymous.
+
 ## Configuration System (pkg/config/)
 
 **Location:** `pkg/config/`
@@ -263,10 +313,11 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 **Central Config (pkg/config/config.go):**
 ```go
 type NebariConfig struct {
-    ProjectName string          `yaml:"project_name"`     // Required: cluster name
-    Domain      string          `yaml:"domain,omitempty"` // Optional: domain for ingress
-    Cluster     *ClusterConfig  `yaml:"cluster,omitempty"` // Nested: cluster.aws.region
-    DNS         *DNSConfig      `yaml:"dns,omitempty"`    // Nested: dns.cloudflare.zone_name
+    ProjectName string            `yaml:"project_name"`         // Required: cluster name
+    Domain      string            `yaml:"domain,omitempty"`     // Optional: domain for ingress
+    Cluster     *ClusterConfig    `yaml:"cluster,omitempty"`    // Nested: cluster.aws.region
+    DNS         *DNSConfig        `yaml:"dns,omitempty"`        // Nested: dns.cloudflare.zone_name
+    Repository  *RepositoryConfig `yaml:"repository,omitempty"` // Required: repository.existing.url
 
     // Runtime options (not from YAML)
     DryRun  bool          `yaml:"-"`
@@ -274,7 +325,7 @@ type NebariConfig struct {
     Timeout time.Duration `yaml:"-"`
 }
 
-// ClusterConfig uses the same nested-key pattern as DNSConfig.
+// ClusterConfig, DNSConfig, and RepositoryConfig share the nested-key pattern.
 // Access via: cfg.Cluster.ProviderName(), cfg.Cluster.ProviderConfig()
 type ClusterConfig struct {
     Providers map[string]any `yaml:",inline"`

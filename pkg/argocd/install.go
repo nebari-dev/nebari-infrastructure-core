@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -65,11 +65,11 @@ const (
 
 // Install installs Argo CD on a Kubernetes cluster
 // This is the main entry point called from cmd/nic/deploy.go
-// If gitConfig is a local file:// path, the directory is mounted into the repo-server pod.
-// gitConfig may be nil when no GitOps repository is configured.
+// If src is a LocalSource, its directory is mounted into the repo-server pod.
+// If it is a RemoteSource, a repository-credentials Secret is created.
 // orgCABundlePEM, when non-empty, is the operator's org CA: it is written to the
 // argocd-org-ca ConfigMap and the repo-server is wired to trust it (see addOrgCAMount).
-func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, gitConfig *git.Config, orgCABundlePEM string, argoCDCfg Config) error {
+func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, src repository.Source, orgCABundlePEM string, argoCDCfg Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "argocd.Install")
 	defer span.End()
@@ -124,15 +124,11 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 		return fmt.Errorf("cluster not ready: %w", err)
 	}
 
-	// If using a local file:// git repo, mount it into the repo-server pod
-	if gitConfig != nil && gitConfig.IsLocalPath() {
-		localPath, err := gitConfig.GetLocalPath()
-		if err != nil {
-			return fmt.Errorf("invalid local git path: %w", err)
-		}
-		addLocalGitopsMount(ctx, argoCDCfg.Values, localPath)
+	// If using a local repository, mount its directory into the repo-server pod
+	if local, ok := src.(repository.LocalSource); ok {
+		addLocalGitopsMount(ctx, argoCDCfg.Values, local.Dir)
 
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", localPath)).
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Mounting local gitops repo into repo-server: %s", local.Dir)).
 			WithResource("argocd").
 			WithAction("configuring"))
 	}
@@ -190,9 +186,9 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 		// Don't fail - user can configure this manually if needed
 	}
 
-	// Configure Git repository access if GitOps is configured
-	if gitConfig != nil {
-		if err := ConfigureGitRepoAccess(ctx, k8sClient, gitConfig, argoCDCfg.Namespace); err != nil {
+	// Configure Git repository access for a remote repository
+	if remote, ok := src.(repository.RemoteSource); ok {
+		if err := ConfigureGitRepoAccess(ctx, k8sClient, remote, argoCDCfg.Namespace); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to configure Git repository access").
 				WithResource("argocd").

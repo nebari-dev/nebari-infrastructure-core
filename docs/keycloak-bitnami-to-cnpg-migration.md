@@ -133,7 +133,7 @@ Once you are confident (suggested: days, not minutes), retire the old stack.
 Each step below is irreversible.
 
 ```bash
-# In the GitOps repo: delete apps/postgresql.yaml (under git_repository.path,
+# In the GitOps repo: delete apps/postgresql.yaml (under the repository path,
 # if set), commit, push. ArgoCD prunes the Bitnami chart.
 
 # The StatefulSet's PVC survives pruning and still holds the old data:

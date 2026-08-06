@@ -16,7 +16,7 @@ This is the authoritative reference for `nebari-config.yaml`.
 4. [Certificate](#4-certificate)
 5. [Trust Bundle](#5-trust-bundle)
 6. [Backups](#6-backups)
-7. [Git Repository](#7-git-repository)
+7. [GitOps Repository](#7-gitops-repository)
 8. [Environment Variables](#8-environment-variables)
 
 ---
@@ -37,9 +37,9 @@ dns:                           # optional, exactly one provider
   <provider-name>:
     ...
 
-git_repository:                # required on cloud providers; optional on local
-  url: ...
-  ...
+repository:                    # required, exactly one provider
+  <provider-name>:
+    ...
 
 certificate:                   # optional, defaults to selfsigned
   type: ...
@@ -60,7 +60,7 @@ Anti-pattern: there is no top-level `provider:`, `version:`, `name:`, `kubernete
 | `domain` | string | optional | `NebariConfig.Domain` |
 | `cluster` | map | ✅ | `NebariConfig.Cluster` (`ClusterConfig`) |
 | `dns` | map | optional | `NebariConfig.DNS` (`DNSConfig`) |
-| `git_repository` | object | conditional | `NebariConfig.GitRepository` (`git.Config`) |
+| `repository` | map | ✅ | `NebariConfig.Repository` (`RepositoryConfig`) |
 | `certificate` | object | optional | `NebariConfig.Certificate` (`CertificateConfig`) |
 | `trust_bundle` | object | optional | `NebariConfig.TrustBundle` (`TrustBundleConfig`) |
 | `backups` | object | optional | `NebariConfig.Backups` (`BackupsConfig`) |
@@ -263,7 +263,7 @@ cluster:
 
 The kube context name is derived from `project_name` (`kindContextName` in `pkg/providers/cluster/local/provider.go`); there is no `kube_context:` field. There is likewise no `storage_class:` field on the local provider. `local.Config` carries an inline `AdditionalFields map[string]any`, so unrecognized keys parse **silently** rather than erroring - do not assume a key works because `nic validate` passes.
 
-The local provider sets `InfraSettings.SupportsLocalGitOps = true`, which lets NIC auto-create a GitOps repo when `git_repository:` is not specified. See [§7](#7-git-repository) for the path.
+The local provider sets `InfraSettings.SupportsLocalGitOps = true`, which is what permits the `repository.local` provider (a GitOps repo in a host directory, auto-created when no explicit path is given). See [§7](#7-gitops-repository) for the path.
 
 ### 2.4 `cluster.existing` (adopt a pre-provisioned cluster)
 
@@ -524,32 +524,44 @@ What NIC provisions: the `longhorn-backup-credentials` Secret in `longhorn-syste
 
 ---
 
-## 7. Git Repository
+## 7. GitOps Repository
+
+The `repository:` block follows the same provider pattern as `cluster:` and `dns:`: exactly one provider, keyed by name (`RepositoryConfig` in `pkg/config/config.go`, backed by `pkg/providers/repository`). Two providers exist: `existing` (a remote repo NIC clones and pushes to) and `local` (a directory on the host, for dev clusters).
 
 ```yaml
-git_repository:
-  url: "git@github.com:my-org/my-gitops-repo.git"   # SSH, HTTPS, or file:// path
-  branch: main                                       # default: "main"
-  path: "clusters/my-nebari"                         # optional subdirectory
+repository:
+  existing:
+    url: "git@github.com:my-org/my-gitops-repo.git"  # SSH or HTTPS
+    branch: main                                      # default: "main"
+    path: "clusters/my-nebari"                        # optional subdirectory
 
-  auth:                                              # NIC's write credentials
-    ssh_key_env: GIT_SSH_PRIVATE_KEY                 # name of env var holding the PEM-encoded key
-    # OR for HTTPS:
-    # token_env: GIT_TOKEN
-    # insecure_skip_host_key_verification: false     # SSH host-key check; leave false outside dev
+    auth:                                             # NIC's write credentials
+      ssh:
+        env: GIT_SSH_PRIVATE_KEY                      # name of env var holding the PEM-encoded key
+      # OR for HTTPS:
+      # token:
+      #   env: GIT_TOKEN
+      # insecure_skip_host_key_verification: false    # SSH host-key check; leave false outside dev
 
-  # Optional: separate read-only credentials for ArgoCD (falls back to `auth` when unset)
-  # argocd_auth:
-  #   ssh_key_env: ARGOCD_SSH_KEY
+    # Optional: separate read-only credentials for ArgoCD (falls back to `auth` when unset)
+    # argocd_auth:
+    #   token:
+    #     env: ARGOCD_GIT_TOKEN
+
+# OR, for development clusters:
+# repository:
+#   local:
+#     path: /abs/path/to/gitops   # optional; defaults to ~/.nic/gitops/<project_name>
+#     branch: main                # default: "main"
 ```
 
 Notes:
 
-- `file://` URLs are valid. Combined with `InfraSettings.SupportsLocalGitOps = true` (currently only the local provider), this enables a zero-credential GitOps workflow for development.
-- When `git_repository:` is omitted on a provider that supports local GitOps, NIC auto-creates **`~/.nic/gitops/<project_name>`** and points ArgoCD at it (`git.DefaultLocalPath`). It falls back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved. The home-directory location is deliberate: it is a host path kind and Docker Desktop can mount reliably.
-- On the local (kind) provider, NIC auto-mounts that default path into the node container. A **custom** `file://` path needs a matching `cluster.local.kind.extra_mounts` entry with identical `host_path` and `container_path`, or the in-cluster ArgoCD repo-server cannot see it.
-- When `git_repository:` is omitted on a provider that does **not** support local GitOps (e.g., AWS), the deploy continues but the GitOps bootstrap is skipped.
-- NIC scrubs the `auth:` / `argocd_auth:` blocks and the resolved trust bundle from the copy of the config it writes into the repo (`scrubbedConfig` in `pkg/nic/deploy.go`).
+- The `repository:` block is required on every provider; `nic validate` rejects a config without one.
+- The `local` provider is only valid on a cluster provider with `InfraSettings.SupportsLocalGitOps = true` (currently only the local provider); it enables a zero-credential GitOps workflow for development. Deploy fails with an incompatibility error on any other cluster provider.
+- When `repository.local.path` is omitted, NIC auto-creates **`~/.nic/gitops/<project_name>`** and points ArgoCD at it (`config.DefaultLocalRepositoryPath`). It falls back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved. The home-directory location is deliberate: it is a host path kind and Docker Desktop can mount reliably.
+- On the local (kind) provider, NIC auto-mounts that default path into the node container. A **custom** `repository.local.path` needs a matching `cluster.local.kind.extra_mounts` entry with identical `host_path` and `container_path`, or the in-cluster ArgoCD repo-server cannot see it.
+- The copy of the config NIC commits into the repo (`nic-config.yaml`) carries only env-var names for credentials, never resolved secrets; a `path:`-based trust bundle is rewritten to its resolved inline form (`committedConfig` in `pkg/nic/deploy.go`).
 
 ---
 
@@ -564,8 +576,8 @@ Loaded by `godotenv` from `.env` (gitignored) at startup. Used for credentials a
 | `AZURE_SUBSCRIPTION_ID` | Azure provider | Required; mapped to `ARM_SUBSCRIPTION_ID` for the child OpenTofu process |
 | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET` | Azure provider | Optional service-principal auth. Otherwise `DefaultAzureCredential` falls through to workload identity, managed identity, then `az login` |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare DNS | Zone:Read + DNS:Edit on the configured zone |
-| `GIT_SSH_PRIVATE_KEY` (or whatever you point `git_repository.auth.ssh_key_env` at) | `pkg/git` | SSH private key in PEM form |
-| `GIT_TOKEN` (or whatever you point `git_repository.auth.token_env` at) | `pkg/git` | Personal access token for HTTPS git URLs |
+| `GIT_SSH_PRIVATE_KEY` (or whatever you point `repository.existing.auth.ssh.env` at) | `pkg/providers/repository/existing` | SSH private key in PEM form |
+| `GIT_TOKEN` (or whatever you point `repository.existing.auth.token.env` at) | `pkg/providers/repository/existing` | Personal access token for HTTPS git URLs |
 | whatever you point `backups.longhorn.s3.access_key_id_env` / `secret_access_key_env` at | `pkg/storage/longhorn` | Backup target credentials. Omit both for keyless IAM-role auth on AWS |
 | whatever you point `backups.longhorn.azure.account_name_env` / `account_key_env` at | `pkg/storage/longhorn` | azblob backup target credentials |
 | whatever you point `certificate.env.cert_env` / `key_env` at | `pkg/argocd` | Raw (non-base64) PEM for `certificate.type: existing` |
