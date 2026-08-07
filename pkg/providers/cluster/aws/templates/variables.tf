@@ -138,6 +138,11 @@ variable "enable_irsa" {
   default = true
 }
 
+variable "crossplane_capabilities" {
+  type    = list(string)
+  default = []
+}
+
 variable "backup_bucket_create" {
   type    = bool
   default = false

@@ -51,6 +51,14 @@ cluster:
     endpoint_private_access: true
     endpoint_public_access: true
 
+    # Opt-in Crossplane capabilities for software-pack cloud infrastructure.
+    # Empty by default: Crossplane and its cloud permissions are not installed.
+    # Enabling s3 also installs the IAM and EKS providers so each ObjectStore
+    # can receive its own bounded EKS Pod Identity role. All Crossplane providers
+    # share one broad account-local role (ADR-0012 dedicated-account model).
+    # crossplane_capabilities:
+    #   - s3
+
     node_groups:
       # general:
       #   instance: m7i.2xlarge

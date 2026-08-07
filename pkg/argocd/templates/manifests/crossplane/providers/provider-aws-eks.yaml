@@ -1,0 +1,38 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws-eks-runtime
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  serviceAccountTemplate:
+    metadata:
+      # This name is part of the EKS Pod Identity trust contract. It must
+      # match the service account in the aws_eks_pod_identity_association.
+      name: provider-aws-eks
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          serviceAccountName: provider-aws-eks
+          containers:
+            - name: package-runtime
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-eks
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-eks:v2.6.1
+  runtimeConfigRef:
+    name: provider-aws-eks-runtime

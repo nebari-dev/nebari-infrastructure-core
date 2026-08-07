@@ -3,6 +3,7 @@ package aws
 import (
 	"embed"
 	"maps"
+	"slices"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
@@ -64,6 +65,11 @@ type TFVars struct {
 	// BackupPodIdentityEnable provisions a keyless IAM-role (EKS Pod Identity)
 	// association for Longhorn's service account, scoped to the backup bucket.
 	BackupPodIdentityEnable bool `json:"backup_pod_identity_enable"`
+	// CrossplaneCapabilities lists the bare capability keys (e.g. "s3", "rds")
+	// the cluster opted into. crossplane-iam.tf expands capability dependencies
+	// and binds all AWS provider controllers to one shared account-local role
+	// (ADR-0012 dedicated-account model). Sorted for deterministic tfvars output.
+	CrossplaneCapabilities []string `json:"crossplane_capabilities,omitempty"`
 }
 
 // resolveNodeGroupDefaults derives per-node-group defaults from the parsed
@@ -208,6 +214,12 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 	}
 	if c.EnableIRSA != nil {
 		vars.EnableIRSA = c.EnableIRSA
+	}
+
+	if len(c.CrossplaneCapabilities) > 0 {
+		caps := slices.Clone(c.CrossplaneCapabilities)
+		slices.Sort(caps)
+		vars.CrossplaneCapabilities = caps
 	}
 
 	if c.LonghornEnabled() {
