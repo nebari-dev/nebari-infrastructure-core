@@ -47,7 +47,7 @@ type NodeGroup struct {
 	Instance     string            `yaml:"instance"`
 	MinNodes     int               `yaml:"min_nodes"`
 	MaxNodes     int               `yaml:"max_nodes"`
-	Mode         string            `yaml:"mode,omitempty"` // "System" | "User"; defaults to "User"
+	Mode         string            `yaml:"mode,omitempty" jsonschema:"enum=System,enum=User,default=User"` // defaults to "User"
 	OSDiskSizeGB int               `yaml:"os_disk_size_gb,omitempty"`
 	Labels       map[string]string `yaml:"labels,omitempty"`
 	// Taints in "key=value:Effect" form, e.g. "dedicated=gpu:NoSchedule".

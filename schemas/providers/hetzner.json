@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/hetzner.Config",
+  "$defs": {
+    "hetzner.Autoscaling": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "min_instances": {
+          "type": "integer"
+        },
+        "max_instances": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "enabled",
+        "min_instances",
+        "max_instances"
+      ],
+      "description": "Autoscaling configures automatic node pool scaling."
+    },
+    "hetzner.Config": {
+      "properties": {
+        "location": {
+          "type": "string"
+        },
+        "kubernetes_version": {
+          "type": "string"
+        },
+        "node_groups": {
+          "additionalProperties": {
+            "$ref": "#/$defs/hetzner.NodeGroup"
+          },
+          "type": "object"
+        },
+        "schedule_workloads_on_masters": {
+          "type": "boolean",
+          "description": "ScheduleWorkloadsOnMasters controls whether application pods can be\nscheduled on control-plane nodes. Defaults to true, which enables\nsingle-node clusters and makes better use of small Hetzner instances.\nSet to false for production clusters where you want dedicated masters\nthat only run etcd and the Kubernetes control plane. When false, at\nleast one non-master node group is required."
+        },
+        "persist_data": {
+          "type": "boolean",
+          "description": "PersistData controls whether CSI volumes survive cluster destruction.\nWhen true, volumes are labeled persist=true during deploy, and destroy\nskips them. When false (the default), destroy deletes all CSI volumes\nthat are not attached to a running server."
+        },
+        "ssh": {
+          "$ref": "#/$defs/hetzner.SSHConfig"
+        },
+        "network": {
+          "$ref": "#/$defs/hetzner.NetworkConfig"
+        },
+        "longhorn": {
+          "$ref": "#/$defs/longhorn.Config",
+          "description": "Longhorn configures the Longhorn distributed block storage install.\nHetzner's hcloud-volumes CSI is RWO-only; charts that need RWX (e.g.\njupyterhub shared-storage for group dirs) require Longhorn — or another\nRWX provider — to avoid the in-cluster NFS-on-RWO workaround.\nDefaults to enabled when the block is omitted; set `enabled: false` to\nopt out."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "location",
+        "kubernetes_version",
+        "node_groups"
+      ],
+      "description": "Config holds Hetzner-specific provider configuration."
+    },
+    "hetzner.NetworkConfig": {
+      "properties": {
+        "ssh_allowed_cidrs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "api_allowed_cidrs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "NetworkConfig controls firewall rules for SSH and Kubernetes API access."
+    },
+    "hetzner.NodeGroup": {
+      "properties": {
+        "instance_type": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "master": {
+          "type": "boolean",
+          "description": "Master marks this node group as the k3s control plane. Exactly one\nnode group must have this set to true. Master nodes run etcd and the\nKubernetes API server. Whether they also run application workloads is\ncontrolled by Config.ScheduleWorkloadsOnMasters."
+        },
+        "location": {
+          "type": "string",
+          "description": "Location overrides the top-level location for this node group.\nOnly valid for worker (non-master) node groups."
+        },
+        "autoscaling": {
+          "$ref": "#/$defs/hetzner.Autoscaling"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "instance_type",
+        "count"
+      ],
+      "description": "NodeGroup defines a pool of Hetzner Cloud instances."
+    },
+    "hetzner.SSHConfig": {
+      "properties": {
+        "public_key_path": {
+          "type": "string"
+        },
+        "private_key_path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "public_key_path",
+        "private_key_path"
+      ],
+      "description": "SSHConfig allows users to provide their own SSH keys instead of auto-generated ones."
+    },
+    "longhorn.Config": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replica_count": {
+          "type": "integer"
+        },
+        "dedicated_nodes": {
+          "type": "boolean",
+          "description": "DedicatedNodes confines Longhorn replica data to a dedicated, tainted\nstorage node group (disks are created only there; see NodeSelector and\nCreateDefaultDiskLabel).\n\nWARNING — toggling this is a MANUAL migration, not a hands-off switch.\nThe setting only governs FUTURE default-disk creation; it never moves or\nre-syncs replicas that already exist, and neither NIC nor Longhorn migrates\nthem for you:\n  - false -\u003e true: existing replicas stay on the colocated (general/user)\n    node disks — Longhorn does not delete those disks on a setting change.\n    Those nodes then cannot scale down (they still hold replicas) and the\n    data is NOT auto-moved to the storage nodes. To finish the migration,\n    manually evict the old disks/nodes in Longhorn (allowScheduling:false\n    or evictionRequested) so replicas rebuild onto the storage nodes first.\n  - true -\u003e false while also removing the storage node group: terraform\n    tears down the nodes holding the only replicas before they are rebuilt\n    elsewhere -\u003e DATA LOSS (this is the #354 node-removal hazard). Migrate\n    replicas off the storage nodes (evict, wait for rebuild) BEFORE removing\n    the group.\n\nBefore switching modes, take a fresh OFF-CLUSTER backup (NIC's\n`backups.longhorn` config provisions scheduled S3 backups; trigger an\non-demand one right before the switch). In-cluster snapshots do not survive\nthe destructive true-\u003efalse case since they live on the disks being removed;\nonly the S3 backup does, and you can restore onto the new topology."
+        },
+        "node_selector": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "NodeSelector is the label set that identifies the dedicated storage nodes\nwhen DedicatedNodes is true (defaults to {node.longhorn.io/storage: \"true\"},\ni.e. NodeStorageLabel). It no longer pins Longhorn's system components by\nnode selector — pinning broke PVC mounts on workload nodes (#366). Instead\nit tells the provider which node group is the storage pool, so the provider\ncan add CreateDefaultDiskLabel to it; Longhorn then provisions disks only\nthere, which is what confines replicas to storage nodes.\n\nMatching is an exact key/value comparison: a storage node group labeled\nnode.longhorn.io/storage=\"yes\" (any value other than the configured one)\nwill not match, so it gets no disk label and its volumes fault. Use the\nexact values set here.\n\nConstraint: the taint toleration is NOT derived from this field. Longhorn's\nsystem components tolerate every taint (see tolerateAllTaints in install.go),\nso the storage nodes' taint - and any taint on a workload pool where a PVC\nmust mount - is covered regardless of what you set here. This selector only\ncontrols which nodes are labeled as the storage (replica) pool."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Config carries the user-tunable Longhorn settings shared across providers."
+    }
+  },
+  "title": "hetzner cluster provider configuration"
+}

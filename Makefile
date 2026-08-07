@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot schemas
 
 # Variables
 BINARY_NAME=nic
@@ -127,5 +127,10 @@ deps-update: ## Update Go dependencies
 	go get -u ./...
 	go mod tidy
 	@echo "Dependencies updated successfully"
+
+schemas: ## Regenerate JSON Schema documents under schemas/ from the Go config types
+	@echo "Regenerating schemas/..."
+	go run ./cmd/schemagen -out ./schemas
+	@echo "Schemas regenerated. Run 'git diff schemas/' to review."
 
 .DEFAULT_GOAL := help

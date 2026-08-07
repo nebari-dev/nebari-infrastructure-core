@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/config.NebariConfig",
+  "$defs": {
+    "config.ACMEConfig": {
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email is the email address for Let's Encrypt registration"
+        },
+        "server": {
+          "type": "string",
+          "description": "Server is the ACME server URL (defaults to Let's Encrypt production)\nUse \"https://acme-staging-v02.api.letsencrypt.org/directory\" for testing"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "email"
+      ],
+      "description": "ACMEConfig holds ACME (Let's Encrypt) configuration"
+    },
+    "config.AzureBackupTarget": {
+      "properties": {
+        "container": {
+          "type": "string"
+        },
+        "storage_account": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "create_container": {
+          "type": "boolean"
+        },
+        "retain_on_destroy": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "account_name_env": {
+          "type": "string"
+        },
+        "account_key_env": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "container",
+        "storage_account",
+        "account_name_env",
+        "account_key_env"
+      ],
+      "description": "AzureBackupTarget configures a Longhorn-native azblob:// backup target."
+    },
+    "config.BackupSchedules": {
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/config.ScheduleConfig"
+        },
+        "backup": {
+          "$ref": "#/$defs/config.ScheduleConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "snapshot",
+        "backup"
+      ],
+      "description": "BackupSchedules holds the two RecurringJob schedules."
+    },
+    "config.BackupsConfig": {
+      "properties": {
+        "longhorn": {
+          "$ref": "#/$defs/config.LonghornBackupConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BackupsConfig is the top-level `backups:` block."
+    },
+    "config.CACertRef": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "\"secret\" | \"configmap\""
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "name",
+        "key"
+      ],
+      "description": "CACertRef references a pre-existing Secret or ConfigMap key holding a PEM CA bundle."
+    },
+    "config.CertEnv": {
+      "properties": {
+        "cert_env": {
+          "type": "string"
+        },
+        "key_env": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cert_env",
+        "key_env"
+      ],
+      "description": "CertEnv names environment variables holding raw (non-base64) PEM material."
+    },
+    "config.CertFiles": {
+      "properties": {
+        "cert_file": {
+          "type": "string"
+        },
+        "key_file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cert_file",
+        "key_file"
+      ],
+      "description": "CertFiles points at PEM cert/key files on disk."
+    },
+    "config.CertificateConfig": {
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "selfsigned",
+            "letsencrypt",
+            "existing"
+          ],
+          "description": "Type is the certificate type: \"selfsigned\", \"letsencrypt\", or \"existing\""
+        },
+        "acme": {
+          "$ref": "#/$defs/config.ACMEConfig",
+          "description": "ACME configuration for Let's Encrypt"
+        },
+        "secret_name": {
+          "type": "string",
+          "description": "SecretName overrides the name of the TLS secret the gateway references.\nDefaults to \"nebari-gateway-tls\". For type=existing with existing_secret,\nthe gateway references ExistingSecret.Name instead."
+        },
+        "existing_secret": {
+          "$ref": "#/$defs/config.ExistingSecretRef",
+          "description": "ExistingSecret references a kubernetes.io/tls secret the user already created.\nMutually exclusive with Files and Env. Only valid when Type=existing."
+        },
+        "files": {
+          "$ref": "#/$defs/config.CertFiles",
+          "description": "Files reads PEM material from disk; NIC creates the secret directly.\nMutually exclusive with ExistingSecret and Env. Only valid when Type=existing."
+        },
+        "env": {
+          "$ref": "#/$defs/config.CertEnv",
+          "description": "Env reads raw PEM material from environment variables; NIC creates the secret directly.\nMutually exclusive with ExistingSecret and Files. Only valid when Type=existing."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "CertificateConfig holds TLS certificate configuration"
+    },
+    "config.ClusterConfig": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ClusterConfig holds typed cloud provider configuration."
+    },
+    "config.DNSConfig": {
+      "properties": {},
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DNSConfig holds typed DNS provider configuration."
+    },
+    "config.ExistingSecretRef": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the secret name (required)."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace is the secret's namespace. Defaults to envoy-gateway-system."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "ExistingSecretRef references a pre-existing TLS secret."
+    },
+    "config.LonghornBackupConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "s3": {
+          "$ref": "#/$defs/config.S3BackupTarget"
+        },
+        "azure": {
+          "$ref": "#/$defs/config.AzureBackupTarget"
+        },
+        "allow_recurring_job_while_volume_detached": {
+          "type": "boolean",
+          "description": "AllowRecurringJobWhileVolumeDetached maps to the cluster-wide Longhorn\nSetting. nil defaults to true (the pack's behaviour): JupyterHub user PVCs\ndetach when servers idle out, and Longhorn's stock default of false would\nsilently skip them at the cron tick."
+        },
+        "schedules": {
+          "$ref": "#/$defs/config.BackupSchedules"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "LonghornBackupConfig drives the Longhorn snapshot/backup schedules, the cluster Setting, and the S3/azblob BackupTarget + credential Secret."
+    },
+    "config.NebariConfig": {
+      "properties": {
+        "project_name": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "cluster": {
+          "$ref": "#/$defs/config.ClusterConfig",
+          "description": "Cluster Provider configuration.\nOnly one provider can be configured at a time."
+        },
+        "dns": {
+          "$ref": "#/$defs/config.DNSConfig",
+          "description": "DNS provider configuration (optional).\nOnly one provider can be configured at a time."
+        },
+        "git_repository": {
+          "$ref": "#/$defs/git.Config",
+          "description": "GitRepository configures the GitOps repository for ArgoCD bootstrap (optional)"
+        },
+        "certificate": {
+          "$ref": "#/$defs/config.CertificateConfig",
+          "description": "Certificate configuration (optional)"
+        },
+        "trust_bundle": {
+          "$ref": "#/$defs/config.TrustBundleConfig",
+          "description": "TrustBundle, when set, propagates an enterprise CA bundle both to worker-node\nOS trust stores (via the cluster provider) and into the cluster via\ntrust-manager. Required when egress is TLS-inspected by a corporate proxy."
+        },
+        "backups": {
+          "$ref": "#/$defs/config.BackupsConfig",
+          "description": "Backups configures off-cluster backup scheduling (Longhorn). Optional."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "project_name"
+      ],
+      "description": "NebariConfig represents the parsed nebari-config.yaml structure"
+    },
+    "config.S3BackupTarget": {
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "create_bucket": {
+          "type": "boolean"
+        },
+        "retain_on_destroy": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "virtual_hosted_style": {
+          "type": "boolean"
+        },
+        "access_key_id_env": {
+          "type": "string"
+        },
+        "secret_access_key_env": {
+          "type": "string"
+        },
+        "ca_cert": {
+          "$ref": "#/$defs/config.CACertRef"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "bucket",
+        "region",
+        "access_key_id_env",
+        "secret_access_key_env"
+      ],
+      "description": "S3BackupTarget configures an AWS-native or S3-compatible backup target."
+    },
+    "config.ScheduleConfig": {
+      "properties": {
+        "cron": {
+          "type": "string"
+        },
+        "retain": {
+          "type": "integer"
+        },
+        "concurrency": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cron",
+        "retain",
+        "concurrency"
+      ],
+      "description": "ScheduleConfig is one RecurringJob's cron/retain/concurrency."
+    },
+    "config.TrustBundleConfig": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "inline": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "TrustBundleConfig specifies the source of an extra CA bundle."
+    },
+    "git.AuthConfig": {
+      "properties": {
+        "ssh_key_env": {
+          "type": "string",
+          "description": "SSHKeyEnv is the name of the environment variable containing the SSH private key\nThe key should be in PEM format (e.g., contents of ~/.ssh/id_ed25519)"
+        },
+        "token_env": {
+          "type": "string",
+          "description": "TokenEnv is the name of the environment variable containing the personal access token\nUsed for HTTPS authentication"
+        },
+        "insecure_skip_host_key_verification": {
+          "type": "boolean",
+          "description": "InsecureSkipHostKeyVerification disables SSH host key verification,\nremoving protection against man-in-the-middle attacks. Only intended\nfor ephemeral environments (e.g. CI) where maintaining a known_hosts\nfile is impractical. Has no effect on token (HTTPS) authentication."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "ssh_key_env",
+        "token_env"
+      ],
+      "description": "AuthConfig specifies authentication credentials for git operations."
+    },
+    "git.Config": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL is the repository URL (SSH or HTTPS format)\nExamples: \"git@github.com:org/repo.git\" or \"https://github.com/org/repo.git\""
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch is the git branch to use (default: \"main\")"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is an optional subdirectory within the repository\nIf specified, all operations are scoped to this path"
+        },
+        "auth": {
+          "$ref": "#/$defs/git.AuthConfig",
+          "description": "Auth specifies credentials for NIC to push to the repository (requires write access)"
+        },
+        "argocd_auth": {
+          "$ref": "#/$defs/git.AuthConfig",
+          "description": "ArgoCDAuth specifies optional separate credentials for ArgoCD (read-only access)\nIf not specified, falls back to Auth"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "branch",
+        "path",
+        "auth"
+      ],
+      "description": "Config represents git repository configuration for GitOps bootstrap."
+    }
+  },
+  "title": "Nebari config"
+}

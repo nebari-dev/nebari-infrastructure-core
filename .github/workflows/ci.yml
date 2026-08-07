@@ -103,6 +103,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
       - name: Run vulnerability gate
         run: ./scripts/govulncheck-gate.sh

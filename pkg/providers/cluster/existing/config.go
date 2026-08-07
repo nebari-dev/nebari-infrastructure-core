@@ -19,7 +19,7 @@ type Config struct {
 	// StorageClass is the default Kubernetes StorageClass for persistent volumes.
 	// Defaults to "standard" when empty, or to "longhorn" when Longhorn is
 	// enabled below and StorageClass is left unset.
-	StorageClass string `yaml:"storage_class,omitempty"`
+	StorageClass string `yaml:"storage_class,omitempty" jsonschema:"default=standard"`
 
 	// LoadBalancerAnnotations are added to the Gateway's LoadBalancer Service.
 	// Use this to pass cloud-specific annotations the Cloud Controller Manager may require for

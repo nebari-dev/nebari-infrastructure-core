@@ -29,7 +29,7 @@ type Config struct {
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 	ClusterAutoscaler         *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
-	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
+	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty" jsonschema:"enum=internet-facing,enum=internal,default=internet-facing"`
 	// EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for
 	// Service Accounts. When unset, the upstream module default (true) applies.
 	// Set false when the cluster relies exclusively on EKS Pod Identity, or
@@ -60,7 +60,7 @@ func (c *Config) LoadBalancerSchemeOrDefault() string {
 
 type AWSLoadBalancerControllerConfig struct {
 	Enabled        *bool          `yaml:"enabled,omitempty"`
-	ChartVersion   string         `yaml:"chart_version,omitempty"`
+	ChartVersion   string         `yaml:"chart_version,omitempty" jsonschema:"default=3.2.1"`
 	DestroyTimeout *time.Duration `yaml:"destroy_timeout,omitempty"`
 }
 
@@ -164,7 +164,7 @@ type NodeGroup struct {
 type Taint struct {
 	Key    string `yaml:"key" json:"key"`
 	Value  string `yaml:"value" json:"value"`
-	Effect string `yaml:"effect" json:"effect"` // NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE
+	Effect string `yaml:"effect" json:"effect" jsonschema:"enum=NO_SCHEDULE,enum=NO_EXECUTE,enum=PREFER_NO_SCHEDULE"`
 }
 
 // HasGPUNodeGroups reports whether any node group is tagged gpu: true. This is
