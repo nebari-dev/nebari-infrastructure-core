@@ -12,7 +12,7 @@
 | **OTLP**          | OpenTelemetry Protocol - telemetry data format        |
 | **ArgoCD**        | GitOps continuous deployment tool                     |
 | **cert-manager**  | Kubernetes certificate management                     |
-| **Envoy Gateway** | Kubernetes Gateway API implementation                 |
+| **Envoy Gateway** | Kubernetes Gateway API implementation - the only one NIC ships |
 | **Keycloak**      | Open-source identity and access management            |
 | **NebariApp**     | CRD reconciled by the Nebari Operator (developed out-of-tree at `nebari-dev/nebari-operator`) |
 | **InfraSettings** | Provider-shaped capability struct returned by `provider.InfraSettings(cfg)`; the seam that lets CLI / `pkg/argocd` avoid branching on provider name |
@@ -29,6 +29,7 @@
 | 2026-?? | `provider.InfraSettings` for provider-shaped capabilities | Avoid `switch` on provider name in CLI/library code; new providers don't require edits elsewhere |
 | 2026-?? | Hetzner provider via `hetzner-k3s` binary (no tofu) | The `Provider` interface is the contract; each provider picks the right tool |
 | 2026-04-15 | [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md): Out-of-tree provider plugins | Smaller core binary, supported path for private (e.g., ASCOT DNS) integrations |
+| 2026-08-05 | Envoy Gateway is NIC's **only** Gateway API implementation | One owner of the Gateway API CRDs, so their version is NIC's to control and there is a single supported ingress path. Any other controller NIC installs has its Gateway API support explicitly disabled rather than left at its default |
 
 The specific commit dates for the 2026 entries can be reconstructed from git history; the entries above are placeholders for the decisions themselves.
 
