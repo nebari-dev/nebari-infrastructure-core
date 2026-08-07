@@ -1,0 +1,41 @@
+name: Reset gitops branch
+description: >-
+  Point a branch of the scratch gitops repository at a fresh, empty orphan
+  commit (creating the branch if it does not exist). Deployment tests reset
+  their provider branch before every run. Reusing the previous run's branch
+  would skip manifest generation (NIC's bootstrap marker) and deploy stale
+  manifests. Alternatively, running every deploy with the --regen-apps might
+  leave stranded manifests that were removed in newer versions.
+
+inputs:
+  branch:
+    description: Branch to reset.
+    required: true
+  token:
+    description: Token with Contents read/write on the gitops repository.
+    required: true
+  repository:
+    description: The gitops repository to reset.
+    required: false
+    default: nebari-dev/nic-ci-gitops
+
+runs:
+  using: composite
+  steps:
+    - name: Reset branch to an empty orphan commit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repository }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        # The empty tree is a well-known git object present in every
+        # repository; an orphan commit on it is a fully empty branch state.
+        tree=$(git hash-object -t tree /dev/null)
+        sha=$(gh api "repos/${REPO}/git/commits" \
+          -f message="Reset ${BRANCH} for deployment test run ${GITHUB_RUN_ID}" \
+          -f tree="$tree" --jq .sha)
+        # PATCH force-updates an existing branch; fall back to creating the
+        # ref when the branch does not exist yet (first run).
+        gh api -X PATCH "repos/${REPO}/git/refs/heads/${BRANCH}" -f sha="$sha" -F force=true \
+          || gh api "repos/${REPO}/git/refs" -f ref="refs/heads/${BRANCH}" -f sha="$sha"
