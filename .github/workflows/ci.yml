@@ -101,7 +101,7 @@ jobs:
         run: chmod +x nic
 
       - name: Deploy
-        uses: ./.github/actions/deploy
+        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
         with:
           nic-binary: nic
 

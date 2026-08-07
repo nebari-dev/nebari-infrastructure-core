@@ -21,7 +21,7 @@ NIC has three testing levels today, plus one (health) that is planned but not ye
 ### Deployment tests (real infrastructure)
 
 - **Scope**: End-to-end `nic deploy` / `nic destroy` for every implemented provider: local (Kind), existing cluster (k3d on the runner), AWS, Azure, and Hetzner.
-- **Runner**: `.github/workflows/deployment-tests.yml`, which builds `nic`, then runs the deploy action at `.github/actions/deploy` with the per-provider configs in `.github/fixtures/deploy/`. The action deploys, waits for the platform to converge, and destroys in a post step that runs even on failure or cancellation.
+- **Runner**: `.github/workflows/deployment-tests.yml`, which builds `nic`, then runs the [`nebari-dev/deploy-nebari-action`](https://github.com/nebari-dev/deploy-nebari-action) (pinned by commit SHA) with the per-provider configs in `.github/fixtures/deploy/`. The action deploys, waits for the platform to converge, and destroys in a post step that runs even on failure or cancellation.
 - **Where they run**: On demand via `workflow_dispatch` (pick one provider or `all`) and on every published release. The local provider also runs on PRs marked ready for review.
 - **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget.
 
