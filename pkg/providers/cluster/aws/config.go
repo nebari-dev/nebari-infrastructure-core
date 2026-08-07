@@ -59,9 +59,10 @@ func (c *Config) LoadBalancerSchemeOrDefault() string {
 }
 
 type AWSLoadBalancerControllerConfig struct {
-	Enabled        *bool          `yaml:"enabled,omitempty"`
-	ChartVersion   string         `yaml:"chart_version,omitempty"`
-	DestroyTimeout *time.Duration `yaml:"destroy_timeout,omitempty"`
+	Enabled           *bool          `yaml:"enabled,omitempty"`
+	ChartVersion      string         `yaml:"chart_version,omitempty"`
+	DestroyTimeout    *time.Duration `yaml:"destroy_timeout,omitempty"`
+	ENIReleaseTimeout *time.Duration `yaml:"eni_release_timeout,omitempty"`
 }
 
 // defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
@@ -72,6 +73,12 @@ const defaultLBCChartVersion = "3.2.1"
 // cleanup will wait for LBC's finalizer to drain load balancers before falling
 // through to the SDK sweep.
 const defaultLBCDestroyTimeout = 5 * time.Minute
+
+// defaultENIReleaseTimeout is the maximum time the destroy flow will wait for
+// amazon-elb-owned network interfaces to be released before handing off to
+// tofu destroy. NLB ENIs routinely take 20-40 minutes to release after their
+// load balancer is deleted.
+const defaultENIReleaseTimeout = 30 * time.Minute
 
 // LoadBalancerControllerEnabled returns whether the AWS Load Balancer Controller
 // should be installed. Defaults to true.
@@ -99,6 +106,17 @@ func (c *Config) LoadBalancerControllerDestroyTimeout() time.Duration {
 		return defaultLBCDestroyTimeout
 	}
 	return *c.AWSLoadBalancerController.DestroyTimeout
+}
+
+// LoadBalancerENIReleaseTimeout returns the maximum time the destroy flow will
+// wait for amazon-elb-owned network interfaces to be released before handing
+// off to tofu destroy, which cannot delete the VPC's subnets and internet
+// gateway while those ENIs linger.
+func (c *Config) LoadBalancerENIReleaseTimeout() time.Duration {
+	if c.AWSLoadBalancerController == nil || c.AWSLoadBalancerController.ENIReleaseTimeout == nil {
+		return defaultENIReleaseTimeout
+	}
+	return *c.AWSLoadBalancerController.ENIReleaseTimeout
 }
 
 type ClusterAutoscalerConfig struct {

@@ -115,3 +115,23 @@ func fetchBackupPodIdentityRoleARN(ctx context.Context, client EKSClient, cluste
 	}
 	return *desc.Association.RoleArn, nil
 }
+
+// lookupClusterVPCID returns the ID of the VPC the EKS cluster runs in.
+func lookupClusterVPCID(ctx context.Context, client EKSClient, clusterName string) (string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.lookupClusterVPCID")
+	defer span.End()
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
+
+	out, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{
+		Name: &clusterName,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return "", fmt.Errorf("failed to describe EKS cluster: %w", err)
+	}
+	if out.Cluster == nil || out.Cluster.ResourcesVpcConfig == nil || out.Cluster.ResourcesVpcConfig.VpcId == nil {
+		return "", fmt.Errorf("cluster %q has no VPC ID", clusterName)
+	}
+	return *out.Cluster.ResourcesVpcConfig.VpcId, nil
+}

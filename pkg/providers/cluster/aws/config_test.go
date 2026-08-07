@@ -187,6 +187,39 @@ func TestLoadBalancerControllerDestroyTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadBalancerENIReleaseTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected time.Duration
+	}{
+		{
+			name:     "nil AWSLoadBalancerController defaults to 30m",
+			config:   Config{AWSLoadBalancerController: nil},
+			expected: 30 * time.Minute,
+		},
+		{
+			name:     "nil ENIReleaseTimeout defaults to 30m",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{}},
+			expected: 30 * time.Minute,
+		},
+		{
+			name:     "explicitly set to 10m",
+			config:   Config{AWSLoadBalancerController: &AWSLoadBalancerControllerConfig{ENIReleaseTimeout: durPtr(10 * time.Minute)}},
+			expected: 10 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.LoadBalancerENIReleaseTimeout()
+			if got != tt.expected {
+				t.Errorf("LoadBalancerENIReleaseTimeout() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestClusterAutoscalerEnabled(t *testing.T) {
 	tests := []struct {
 		name     string
