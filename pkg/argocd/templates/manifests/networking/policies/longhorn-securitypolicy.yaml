@@ -12,8 +12,40 @@ spec:
       kind: HTTPRoute
       name: longhorn
   oidc:
+    # Split-horizon OIDC. Keycloak with `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`
+    # exposes two faces for URLs but one identity for tokens: back-channel
+    # endpoints (token, jwks) adapt to the request URL, front-channel endpoints
+    # (authorization, end_session) stay pinned to the public hostname, and the
+    # `iss` claim in tokens always points at the public hostname (KC_HOSTNAME).
+    #
+    # Envoy Gateway lives in the cluster and cannot always resolve the public
+    # Keycloak FQDN (private-domain / air-gapped deployments). We set the four
+    # OIDC provider fields explicitly rather than let EG fetch the well-known
+    # discovery doc:
+    #
+    #   - issuer + tokenEndpoint use the in-cluster URL — server-side calls
+    #     the gateway pod makes to exchange codes for tokens.
+    #   - authorizationEndpoint + endSessionEndpoint use the public URL —
+    #     browser redirects that must resolve on the user's machine.
+    #
+    # Setting both authorizationEndpoint and tokenEndpoint suppresses EG's
+    # discovery fetch entirely (see envoyproxy/gateway api/v1alpha1/
+    # oidc_types.go), so the gateway pod never has to resolve the public
+    # hostname. With discovery suppressed, EG also stops discovering the
+    # end-session endpoint, so we must set that explicitly too — otherwise
+    # the logout flow silently can't reach Keycloak's end-session URL.
+    #
+    # `jwt.providers[].issuer` below stays on the public URL because it has to
+    # match the `iss` claim in tokens, which Keycloak always stamps with
+    # KC_HOSTNAME regardless of which endpoint minted the token.
+    #
+    # Design confirmation + reference implementation:
+    # https://github.com/nebari-dev/nebari-operator/blob/main/internal/controller/reconcilers/auth/providers/keycloak.go#L73-L143
     provider:
-      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+      issuer: "{{ .KeycloakServiceURL }}/realms/nebari"
+      tokenEndpoint: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/token"
+      authorizationEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari/protocol/openid-connect/auth"
+      endSessionEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari/protocol/openid-connect/logout"
     clientID: longhorn
     clientSecret:
       name: {{ .LonghornOIDCSecretName }}
