@@ -17,6 +17,7 @@ The codebase currently has two provider categories in tree:
 
 More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
+
 ### Cluster Providers
 
 | Provider | Backing tool | Status |
