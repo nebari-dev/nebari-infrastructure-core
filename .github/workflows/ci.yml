@@ -65,6 +65,12 @@ jobs:
       - name: Test binary
         run: ./nic --help || true
 
+      - name: Verify docs are up-to-date
+        run: |
+          make docs
+          git add -N docs/reference/cli docs/configuration
+          git diff --exit-code -- docs/reference/cli docs/configuration
+
   workflow-pins:
     name: Workflow pins & release config
     runs-on: ubuntu-latest
