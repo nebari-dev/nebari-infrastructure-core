@@ -17,6 +17,7 @@ The codebase currently has two provider categories in tree:
 
 More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
+
 ### Cluster Providers
 
 | Provider | Backing tool | Status |
@@ -355,6 +356,16 @@ if err != nil {
     return fmt.Errorf("descriptive context: %w", err)
 }
 ```
+
+### Destroy Error Contract
+
+`--force` controls whether a failed step stops the teardown. When adding a step to a provider's `Destroy`, pick one of three behaviors deliberately:
+
+1. A step failure **before or during teardown** aborts the destroy unless `Force` is set. With `Force`, it is warned, appended to the accumulated error slice, and returned via `errors.Join` at the end of `Destroy`.
+2. A failure in a **post-teardown sweep** (the cluster is already gone, there is nothing left to abort) always accumulates and joins, whether force is set or not.
+3. Warn-and-continue without accumulating is reserved for steps that must never fail teardown and cannot leak billable resources (DNS cleanup, GPU-operator uninstall, retained-backup handling, the Azure orphan report). Each such step carries a comment explaining why.
+
+Either way, a failure that can leave resources behind must surface in the exit code: `pkg/nic.Destroy` re-wraps the provider error with `%w` and emits `LevelWarning` instead of `LevelSuccess`, so a partial teardown never looks clean (#534).
 
 ## Testing Strategy
 
