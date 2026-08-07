@@ -903,14 +903,28 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			"namespace: longhorn-system",
 			"kind: HTTPRoute",
 			"name: longhorn",
-			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
+			// OIDC provider — in-cluster URLs for server-side back-channel
+			// (issuer + tokenEndpoint), public URLs for browser-facing
+			// front-channel (authorizationEndpoint + endSessionEndpoint).
+			// Setting both authorizationEndpoint and tokenEndpoint suppresses
+			// EG's discovery fetch entirely, so the gateway pod never has to
+			// resolve the public Keycloak hostname.
+			`issuer: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari"`,
+			`tokenEndpoint: "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari/protocol/openid-connect/token"`,
+			`authorizationEndpoint: "https://keycloak.test.example.com/realms/nebari/protocol/openid-connect/auth"`,
+			`endSessionEndpoint: "https://keycloak.test.example.com/realms/nebari/protocol/openid-connect/logout"`,
 			"clientID: longhorn",
 			"name: longhorn-oidc-client-secret",
 			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
 			`logoutPath: "/oauth2/logout"`,
 			"forwardAccessToken: true",
+			// JWT validation — issuer stays on the public URL because it
+			// must match the `iss` claim in tokens, which Keycloak stamps
+			// with KC_HOSTNAME (public) regardless of which endpoint minted
+			// the token.
 			"jwt:",
 			"name: keycloak",
+			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
 			"/realms/nebari/protocol/openid-connect/certs",
 			"authorization:",
 			"defaultAction: Deny",
