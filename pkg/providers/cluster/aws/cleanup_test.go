@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -29,9 +30,17 @@ func (e *mockAPIError) ErrorFault() smithy.ErrorFault { return smithy.FaultUnkno
 
 // mockEC2Client implements EC2Client for testing.
 type mockEC2Client struct {
+	DescribeNetworkInterfacesFunc  func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error)
 	DescribeSecurityGroupsFunc     func(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
 	DeleteSecurityGroupFunc        func(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
 	RevokeSecurityGroupIngressFunc func(ctx context.Context, params *ec2.RevokeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error)
+}
+
+func (m *mockEC2Client) DescribeNetworkInterfaces(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+	if m.DescribeNetworkInterfacesFunc != nil {
+		return m.DescribeNetworkInterfacesFunc(ctx, params, optFns...)
+	}
+	return &ec2.DescribeNetworkInterfacesOutput{}, nil
 }
 
 func (m *mockEC2Client) DescribeSecurityGroups(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
@@ -812,6 +821,90 @@ func TestDeleteSecurityGroupWithRetry(t *testing.T) {
 		}
 
 		err := deleteSecurityGroupWithRetry(ctx, mock, "sg-111")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if attempts != 1 {
+			t.Errorf("expected 1 attempt before cancellation, got %d", attempts)
+		}
+	})
+}
+
+func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
+	vpcID := "vpc-0123456789abcdef0"
+	elbENI := ec2types.NetworkInterface{
+		NetworkInterfaceId: aws.String("eni-111"),
+		RequesterId:        aws.String(elbENIRequesterID),
+	}
+
+	t.Run("returns nil when no ELB ENIs remain and passes expected filters", func(t *testing.T) {
+		var capturedFilters []ec2types.Filter
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				capturedFilters = params.Filters
+				return &ec2.DescribeNetworkInterfacesOutput{}, nil
+			},
+		}
+
+		if err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wantFilters := map[string]string{
+			"vpc-id":       vpcID,
+			"requester-id": elbENIRequesterID,
+		}
+		gotFilters := map[string]string{}
+		for _, f := range capturedFilters {
+			if f.Name != nil && len(f.Values) == 1 {
+				gotFilters[*f.Name] = f.Values[0]
+			}
+		}
+		for k, v := range wantFilters {
+			if gotFilters[k] != v {
+				t.Errorf("filter %q = %q, want %q", k, gotFilters[k], v)
+			}
+		}
+	})
+
+	t.Run("returns error on timeout when ENIs persist", func(t *testing.T) {
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{elbENI}}, nil
+			},
+		}
+
+		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, 0)
+		if err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+	})
+
+	t.Run("returns error when describe fails", func(t *testing.T) {
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				return nil, fmt.Errorf("api down")
+			},
+		}
+
+		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("respects context cancellation while waiting", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		attempts := 0
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				attempts++
+				cancel() // Cancel after first poll so the wait exits instead of sleeping.
+				return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{elbENI}}, nil
+			},
+		}
+
+		err := waitForELBNetworkInterfacesRelease(ctx, mock, vpcID, time.Minute)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

@@ -141,9 +141,71 @@ func cleanupAWSLoadBalancers(
 
 // EC2Client defines the EC2 operations needed for cleanup.
 type EC2Client interface {
+	DescribeNetworkInterfaces(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error)
 	DescribeSecurityGroups(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
 	DeleteSecurityGroup(ctx context.Context, params *ec2.DeleteSecurityGroupInput, optFns ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
 	RevokeSecurityGroupIngress(ctx context.Context, params *ec2.RevokeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error)
+}
+
+// elbENIRequesterID is the requester-id AWS stamps on network interfaces it
+// provisions for the ELB family (Classic, ALB, NLB). Those ENIs are owned by
+// the amazon-elb service principal and cannot be deleted or force-detached
+// from the account; the only option is to wait for AWS to release them.
+const elbENIRequesterID = "amazon-elb"
+
+// waitForELBNetworkInterfacesRelease polls until no amazon-elb-requested ENIs
+// remain in the VPC, or timeout elapses. Deleting a load balancer (whether via
+// its Kubernetes Service or the ELB API) only removes it from the API; its
+// ENIs are released lazily — for NLBs often tens of minutes later — and while
+// they linger they hold public IPs that make subnet and internet-gateway
+// deletion fail with DependencyViolation.
+func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, vpcID string, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.waitForELBNetworkInterfacesRelease")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("vpc_id", vpcID),
+		attribute.String("timeout", timeout.String()),
+	)
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking for lingering ELB network interfaces in VPC %s", vpcID)).
+		WithResource("network-interface").WithAction("waiting"))
+
+	deadline := time.Now().Add(timeout)
+	const pollInterval = 15 * time.Second
+
+	for {
+		out, err := client.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
+			Filters: []ec2types.Filter{
+				{Name: aws.String("vpc-id"), Values: []string{vpcID}},
+				{Name: aws.String("requester-id"), Values: []string{elbENIRequesterID}},
+			},
+		})
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to describe ELB network interfaces in VPC %s: %w", vpcID, err)
+		}
+
+		remaining := len(out.NetworkInterfaces)
+		if remaining == 0 {
+			span.SetAttributes(attribute.Int("elb_network_interface_stragglers", 0))
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			span.SetAttributes(attribute.Int("elb_network_interface_stragglers", remaining))
+			return fmt.Errorf("%d ELB network interface(s) still present in VPC %s after %s", remaining, vpcID, timeout)
+		}
+
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Waiting for %d ELB network interface(s) to be released", remaining)).
+			WithResource("network-interface").WithAction("waiting"))
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // ELBv2Client defines the Application/Network Load Balancer operations needed

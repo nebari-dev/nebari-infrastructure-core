@@ -674,6 +674,33 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Stage 3: wait for ELB-owned network interfaces to be released before
+	// tofu destroy touches the VPC. Stages 1 and 2 only guarantee the load
+	// balancers are gone from the ELB API; their ENIs are released lazily and
+	// hold public IPs that block subnet and internet-gateway deletion while
+	// they linger. Skipped for user-provided VPCs, which tofu does not delete
+	// (and which may host other clusters' load balancers).
+	if awsCfg.ExistingVPCID == "" {
+		eksClientForCleanup, err := newEKSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create EKS client: %w", err)
+		}
+		vpcID, vpcErr := lookupClusterVPCID(ctx, eksClientForCleanup, projectName)
+		if vpcErr != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping ELB network interface wait — cluster VPC unknown: %v", vpcErr)).
+				WithResource("network-interface").WithAction("waiting"))
+		} else if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, awsCfg.LoadBalancerENIReleaseTimeout()); err != nil {
+			span.RecordError(err)
+			if !opts.Force {
+				return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
+			}
+			forcedErrs = append(forcedErrs, fmt.Errorf("wait for ELB network interface release: %w", err))
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("ELB network interfaces still present, continuing with --force: %v", err)).
+				WithResource("network-interface").WithAction("waiting"))
+		}
+	}
+
 	// Preserve a retained Longhorn backup bucket: drop it (and its dependent
 	// resources) from Terraform state so `tofu destroy` leaves it — and its
 	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
