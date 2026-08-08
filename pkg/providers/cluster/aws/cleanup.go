@@ -168,6 +168,9 @@ func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, v
 		attribute.String("timeout", timeout.String()),
 	)
 
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Checking for lingering ELB network interfaces in VPC %s", vpcID)).
+		WithResource("network-interface").WithAction("waiting"))
+
 	deadline := time.Now().Add(timeout)
 	const pollInterval = 15 * time.Second
 
