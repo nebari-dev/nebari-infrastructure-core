@@ -48,6 +48,16 @@ var validLoadBalancerSchemes = []string{
 	loadBalancerSchemeInternal,
 }
 
+// CreatesVPC reports whether NIC provisions the VPC itself, as opposed to
+// adopting a user-provided one. This is the single source of truth for VPC
+// ownership: it feeds the module's create_vpc variable and gates VPC-scoped
+// destroy work. The upstream eks-cluster module requires existing_vpc_id and
+// existing_private_subnet_ids together whenever create_vpc is false, so
+// configs setting only one of them never deploy.
+func (c *Config) CreatesVPC() bool {
+	return c.ExistingVPCID == "" && len(c.ExistingPrivateSubnetIDs) == 0
+}
+
 // LoadBalancerSchemeOrDefault returns the configured AWS load balancer scheme,
 // defaulting to "internet-facing" when unset. Values are validated at config
 // load time, so callers can trust the result is one of the supported schemes.

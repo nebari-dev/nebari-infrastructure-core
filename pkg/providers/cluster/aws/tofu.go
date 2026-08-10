@@ -167,7 +167,7 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 		ProjectName:            projectName,
 		Tags:                   c.Tags,
 		AvailabilityZones:      c.AvailabilityZones,
-		CreateVPC:              c.ExistingVPCID == "" && len(c.ExistingPrivateSubnetIDs) == 0,
+		CreateVPC:              c.CreatesVPC(),
 		CreateSecurityGroup:    c.ExistingSecurityGroupID == "",
 		KubernetesVersion:      c.KubernetesVersion,
 		EndpointPrivateAccess:  c.EndpointPrivateAccess,

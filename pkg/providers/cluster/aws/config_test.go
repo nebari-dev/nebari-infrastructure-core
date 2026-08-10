@@ -187,6 +187,44 @@ func TestLoadBalancerControllerDestroyTimeout(t *testing.T) {
 	}
 }
 
+func TestCreatesVPC(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "no existing VPC or subnets means NIC creates the VPC",
+			config:   Config{},
+			expected: true,
+		},
+		{
+			name:     "existing VPC ID adopts the VPC",
+			config:   Config{ExistingVPCID: "vpc-123"},
+			expected: false,
+		},
+		{
+			name:     "existing subnets alone also disable creation",
+			config:   Config{ExistingPrivateSubnetIDs: []string{"subnet-1"}},
+			expected: false,
+		},
+		{
+			name:     "existing VPC and subnets adopt the VPC",
+			config:   Config{ExistingVPCID: "vpc-123", ExistingPrivateSubnetIDs: []string{"subnet-1"}},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.CreatesVPC()
+			if got != tt.expected {
+				t.Errorf("CreatesVPC() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestLoadBalancerENIReleaseTimeout(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -682,7 +682,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	// (and which may host other clusters' load balancers). The VPC ID comes
 	// from the terraform state rather than EKS so the gate still runs when
 	// retrying a destroy that already deleted the cluster.
-	if awsCfg.ExistingVPCID == "" {
+	if awsCfg.CreatesVPC() {
 		vpcID, vpcErr := vpcIDFromState(ctx, tf)
 		switch {
 		case vpcErr != nil:
