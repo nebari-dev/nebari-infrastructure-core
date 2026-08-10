@@ -17,8 +17,6 @@ on:
   release:
     # published covers both stable and pre-releases
     types: [published]
-  pull_request:
-    types: [ready_for_review]
 
 permissions:
   contents: read
@@ -153,7 +151,7 @@ jobs:
     name: Azure
     needs: build
     if: >-
-      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      github.event_name == 'release' ||
       inputs.provider == 'azure' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     environment: azure
@@ -213,7 +211,7 @@ jobs:
     name: Hetzner
     needs: build
     if: >-
-      github.event_name == 'release' || github.event_name == 'pull_request' ||
+      github.event_name == 'release' ||
       inputs.provider == 'hetzner' || inputs.provider == 'all'
     runs-on: ubuntu-latest
     environment: hetzner
@@ -252,7 +250,7 @@ jobs:
       - name: Seed hetzner-k3s releases cache
         env:
           GH_TOKEN: ${{ github.token }}
-        # Set bash explicitly as the shell because it turns on pipefail, 
+        # Set bash explicitly as the shell because it turns on pipefail,
         # so a gh api failure mid-pagination fails this step instead of
         # leaving a truncated file that hetzner-k3s trusts (its cache check
         # is mtime-based, not content-based).
