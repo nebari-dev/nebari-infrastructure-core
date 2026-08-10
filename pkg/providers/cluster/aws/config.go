@@ -76,9 +76,9 @@ const defaultLBCChartVersion = "3.4.3"
 const defaultLBCDestroyTimeout = 5 * time.Minute
 
 // defaultENIReleaseTimeout is the maximum time the destroy flow will wait for
-// amazon-elb-owned network interfaces to be released before handing off to
-// tofu destroy. NLB ENIs routinely take 20-40 minutes to release after their
-// load balancer is deleted.
+// ELB-owned network interfaces to be released before handing off to tofu
+// destroy. AWS releases them lazily, sometimes long after the load balancer
+// is gone from the API.
 const defaultENIReleaseTimeout = 30 * time.Minute
 
 // LoadBalancerControllerEnabled returns whether the AWS Load Balancer Controller
