@@ -38,7 +38,9 @@ type DestroyOptions struct {
 	DryRun bool
 
 	// Force continues destruction even when the provider reports errors on
-	// individual resources. Partial failures are logged rather than returned.
+	// individual resources. Partial failures are logged as they happen, and
+	// Destroy still returns a non-nil error at the end so callers can tell a
+	// forced teardown that leaked resources apart from a clean one.
 	Force bool
 
 	// Timeout overrides the provider's default destroy timeout. Zero means
@@ -62,7 +64,8 @@ type DestroyOptions struct {
 // torn down. DNS cleanup failures are logged but do not abort the destroy,
 // since orphaned DNS records are cheaper to fix manually than a
 // half-destroyed cluster. Provider errors abort the run unless Force is
-// true, in which case they are logged and execution continues.
+// true, in which case they are logged, execution continues, and the error
+// is still returned at the end so a partial teardown never looks clean.
 func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.Destroy")
@@ -140,6 +143,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		return fmt.Errorf("resolve trust_bundle: %w", err)
 	}
 
+	var destroyErr error
 	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{
 		DryRun:       opts.DryRun,
 		Force:        opts.Force,
@@ -148,21 +152,29 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		BackupBucket: backupBucketSpec(cfg),
 	}); err != nil {
 		span.RecordError(err)
-		if opts.Force {
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Continuing despite errors due to Force=true").
-				WithMetadata("error", err.Error()))
-		} else {
+		if !opts.Force {
 			return fmt.Errorf("provider destroy: %w", err)
 		}
+		destroyErr = err
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Continuing despite errors due to Force=true").
+			WithMetadata("error", err.Error()))
 	}
 
-	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
-		WithMetadata("provider", clusterProvider.Name()))
+	if destroyErr == nil {
+		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Destruction completed successfully").
+			WithMetadata("provider", clusterProvider.Name()))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Destruction finished with errors; some resources may not have been deleted").
+			WithMetadata("provider", clusterProvider.Name()))
+	}
 
 	if !opts.DryRun {
 		reportRetainedGitOpsDir(ctx, cfg, clusterProvider)
 	}
 
+	if destroyErr != nil {
+		return fmt.Errorf("provider destroy (continued with Force): %w", destroyErr)
+	}
 	return nil
 }
 

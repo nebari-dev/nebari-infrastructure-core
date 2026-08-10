@@ -99,23 +99,20 @@ func TestWriteAllToGit_KeycloakDBCluster(t *testing.T) {
 	}
 }
 
-// TestWriteAllToGit_KeycloakUsesCNPG verifies the rendered keycloak app
-// connects to the CNPG cluster: host keycloak-db-rw, password from the
-// CNPG-generated keycloak-db-app Secret (a secretKeyRef, never a literal),
-// and no residue of the retired Bitnami wiring.
+// TestWriteAllToGit_KeycloakUsesCNPG verifies the rendered keycloak values
+// (values/keycloak/base.yaml under the #406 overlay seam) connect to the CNPG
+// cluster: host keycloak-db-rw, password from the CNPG-generated
+// keycloak-db-app Secret (a secretKeyRef, never a literal), and no residue of
+// the retired Bitnami wiring.
 func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
-	keycloakPath := func(dir string) string {
-		return filepath.Join(dir, "apps", "keycloak.yaml")
-	}
-
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
 	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
-	raw, err := os.ReadFile(keycloakPath(dir))
+	raw, err := os.ReadFile(keycloakBaseValuesPath(dir))
 	if err != nil {
-		t.Fatalf("read rendered keycloak app: %v", err)
+		t.Fatalf("read rendered keycloak base values: %v", err)
 	}
 	got := string(raw)
 
@@ -126,10 +123,10 @@ func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 		t.Error("KC_DB_PASSWORD does not reference the CNPG-generated keycloak-db-app Secret")
 	}
 	if strings.Contains(got, "keycloak-postgresql-credentials") {
-		t.Error("rendered keycloak app still references the retired keycloak-postgresql-credentials Secret")
+		t.Error("rendered keycloak values still reference the retired keycloak-postgresql-credentials Secret")
 	}
 	if strings.Contains(got, "postgresql.keycloak.svc") {
-		t.Error("rendered keycloak app still points at the retired Bitnami postgresql service")
+		t.Error("rendered keycloak values still point at the retired Bitnami postgresql service")
 	}
 }
 
@@ -140,18 +137,14 @@ func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 // authenticate with an opaque Postgres error that points nowhere near the
 // cause. CNPG owns the credential material, so both keys are read from it.
 func TestWriteAllToGit_KeycloakDBCredentialsFromSecret(t *testing.T) {
-	keycloakPath := func(dir string) string {
-		return filepath.Join(dir, "apps", "keycloak.yaml")
-	}
-
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
 	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
-	raw, err := os.ReadFile(keycloakPath(dir))
+	raw, err := os.ReadFile(keycloakBaseValuesPath(dir))
 	if err != nil {
-		t.Fatalf("read rendered keycloak app: %v", err)
+		t.Fatalf("read rendered keycloak base values: %v", err)
 	}
 
 	env := keycloakExtraEnv(t, raw)
@@ -176,46 +169,32 @@ func TestWriteAllToGit_KeycloakDBCredentialsFromSecret(t *testing.T) {
 	}
 }
 
-// keycloakExtraEnv digs the Keycloak chart's extraEnv out of a rendered
-// Application and returns it keyed by variable name, so assertions can tell a
-// literal apart from a secretKeyRef instead of matching indented substrings.
+// keycloakBaseValuesPath is where the keycloak chart values land in a rendered
+// gitops repo under the #406 overlay seam (the Application carries only
+// valueFiles refs, never inline values).
+func keycloakBaseValuesPath(dir string) string {
+	return filepath.Join(dir, "values", "keycloak", "base.yaml")
+}
+
+// keycloakExtraEnv digs extraEnv out of rendered keycloak chart values and
+// returns it keyed by variable name, so assertions can tell a literal apart
+// from a secretKeyRef instead of matching indented substrings.
 func keycloakExtraEnv(t *testing.T, rendered []byte) map[string]map[string]any {
 	t.Helper()
-
-	var app struct {
-		Spec struct {
-			Sources []struct {
-				Chart string `yaml:"chart"`
-				Helm  struct {
-					Values string `yaml:"values"`
-				} `yaml:"helm"`
-			} `yaml:"sources"`
-		} `yaml:"spec"`
-	}
-	if err := yaml.Unmarshal(rendered, &app); err != nil {
-		t.Fatalf("rendered keycloak app is not valid YAML: %v", err)
-	}
-
-	var values string
-	for _, s := range app.Spec.Sources {
-		if s.Chart == "keycloakx" {
-			values = s.Helm.Values
-		}
-	}
-	if values == "" {
-		t.Fatal("rendered keycloak app has no keycloakx source with helm values")
-	}
 
 	var helmValues struct {
 		ExtraEnv string `yaml:"extraEnv"`
 	}
-	if err := yaml.Unmarshal([]byte(values), &helmValues); err != nil {
-		t.Fatalf("keycloakx helm values are not valid YAML: %v\n%s", err, values)
+	if err := yaml.Unmarshal(rendered, &helmValues); err != nil {
+		t.Fatalf("keycloak base values are not valid YAML: %v\n%s", err, rendered)
+	}
+	if helmValues.ExtraEnv == "" {
+		t.Fatal("keycloak base values have no extraEnv")
 	}
 
 	var envList []map[string]any
 	if err := yaml.Unmarshal([]byte(helmValues.ExtraEnv), &envList); err != nil {
-		t.Fatalf("keycloakx extraEnv is not a valid env list: %v\n%s", err, helmValues.ExtraEnv)
+		t.Fatalf("keycloak extraEnv is not a valid env list: %v\n%s", err, helmValues.ExtraEnv)
 	}
 
 	env := make(map[string]map[string]any, len(envList))

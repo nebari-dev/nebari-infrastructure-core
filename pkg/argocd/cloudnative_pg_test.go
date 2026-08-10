@@ -22,17 +22,25 @@ func TestCloudNativePGTemplate_PinsChartAndTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cloudnative-pg template: %v", err)
 	}
+	processed, err := processTemplate("apps/cloudnative-pg.yaml", content, seamTemplateData())
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
 
 	var doc map[string]any
-	if err := yaml.Unmarshal(content, &doc); err != nil {
-		t.Fatalf("cloudnative-pg app is not valid YAML: %v\n%s", err, content)
+	if err := yaml.Unmarshal(processed, &doc); err != nil {
+		t.Fatalf("cloudnative-pg app is not valid YAML: %v\n%s", err, processed)
 	}
 
 	spec, ok := doc["spec"].(map[string]any)
 	if !ok {
-		t.Fatalf("spec missing or wrong type in:\n%s", content)
+		t.Fatalf("spec missing or wrong type in:\n%s", processed)
 	}
-	source, _ := spec["source"].(map[string]any)
+	sources, _ := spec["sources"].([]any)
+	if len(sources) == 0 {
+		t.Fatalf("spec.sources missing or empty in:\n%s", processed)
+	}
+	source, _ := sources[0].(map[string]any)
 	if source["chart"] != "cloudnative-pg" {
 		t.Errorf("chart = %v, want cloudnative-pg", source["chart"])
 	}
@@ -46,10 +54,10 @@ func TestCloudNativePGTemplate_PinsChartAndTarget(t *testing.T) {
 	if dest["namespace"] != "cnpg-system" {
 		t.Errorf("destination namespace = %v, want cnpg-system", dest["namespace"])
 	}
-	if !strings.Contains(string(content), "ServerSideApply=true") {
+	if !strings.Contains(string(processed), "ServerSideApply=true") {
 		t.Error("cloudnative-pg app must sync with ServerSideApply=true (CNPG CRDs overflow client-side apply)")
 	}
-	if !strings.Contains(string(content), "app.kubernetes.io/part-of: nebari-foundational") {
+	if !strings.Contains(string(processed), "app.kubernetes.io/part-of: nebari-foundational") {
 		t.Error("cloudnative-pg app missing nebari-foundational label")
 	}
 }
