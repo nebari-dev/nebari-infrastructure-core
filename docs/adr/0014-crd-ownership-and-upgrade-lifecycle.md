@@ -2,12 +2,16 @@
 
 ## Status
 
-Proposed (2026-08-04)
+Proposed (2026-08-04) — ownership and deletion rules proposed as settled; the CRD
+*upgrade* question and the question of whether conditional foundational software
+belongs in ArgoCD are deliberately left open for discussion.
 
 Refines [ADR-0006](0006-conditional-foundational-software-helm.md) by specifying
 what its shared installer must do about CRDs, and records the CRD-ownership
-invariant that [ADR-0011](0011-gateway-listener-ownership.md) and [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) both rely
-on but neither states. Implementation lands via [#349](https://github.com/nebari-dev/nebari-infrastructure-core/issues/349).
+invariant that [ADR-0011](0011-gateway-listener-ownership.md) and
+[#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) both
+rely on but neither states. Implementation lands via
+[#349](https://github.com/nebari-dev/nebari-infrastructure-core/issues/349).
 
 ## Date
 
@@ -15,102 +19,144 @@ on but neither states. Implementation lands via [#349](https://github.com/nebari
 
 ## Context
 
-NIC delivers CRDs through two mechanisms that behave oppositely on upgrade, and
-nothing records which mechanism owns a given CRD group.
+### Why CRDs are not ordinary manifests
 
-| Mechanism | Components | CRDs installed | CRDs **upgraded** |
+A CustomResourceDefinition does not deploy a workload — it *extends the cluster's
+own API surface*. Applying one registers a new resource kind with the API server,
+defines the schema every object of that kind is validated against, and declares
+which version those objects are persisted in etcd. It is closer to a schema
+migration on a shared database than to a Deployment update.
+
+Three properties follow, and all three are why Helm treats CRDs differently from
+everything else in a chart:
+
+- **CRDs are cluster-scoped and singly-owned.** One definition serves every
+  namespace and every controller that consumes the group. Two writers means the
+  last apply wins, cluster-wide.
+- **Deleting a CRD deletes the data.** Removing a CRD garbage-collects every
+  custom resource of that kind. Deleting `longhorn.io` takes the Volume objects
+  with it; deleting `gateway.networking.k8s.io` takes every Gateway and HTTPRoute.
+  There is no undo and no dry run that shows it.
+- **A schema change can invalidate objects that already exist.** Narrowing a
+  field, removing a served version, or changing the storage version can leave
+  persisted objects unreadable, or be rejected outright by the API server.
+
+The practical failure is that a bad CRD apply does not look like a failed deploy.
+The apply succeeds; the controller starts; and the damage surfaces later as
+resources that cannot be read, reconciled, or recreated. On the ArgoCD path,
+where CRDs are applied automatically on every sync, a major CRD upgrade lands
+with no gate and no signal — the sync goes green and nobody learns anything until
+a controller misbehaves. That combination, high blast radius plus no feedback, is
+why this needs a rule rather than a convention.
+
+### The two mechanisms
+
+NIC delivers CRDs through two mechanisms with opposite upgrade behavior, and
+does not currently record which mechanism owns a CRD group. Neither behavior was
+chosen for CRD reasons — each is the default of its mechanism, and no document
+states a position either way.
+
+| Mechanism | Components | Installed | Upgraded |
 |---|---|---|---|
-| ArgoCD app | Envoy Gateway, cert-manager, CloudNativePG, trust-manager | rendered with `--include-crds` (no `skipCrds` anywhere in the tree) | **yes** — synced as ordinary manifests |
-| Imperative Helm ([ADR-0006](0006-conditional-foundational-software-helm.md)) | AWS LBC, Longhorn, cluster-autoscaler, GPU operator, and the Argo CD bootstrap itself | `action.Install` applies `crds/` | **never** |
+| ArgoCD app | Envoy Gateway, cert-manager, CloudNativePG, trust-manager | Rendered with `--include-crds` (no `skipCrds` anywhere in the tree) | Yes, as ordinary manifests |
+| Imperative Helm ([ADR-0006](0006-conditional-foundational-software-helm.md)) | AWS LBC, Longhorn, cluster-autoscaler, GPU operator, and the Argo CD bootstrap | `action.Install` applies `crds/` | Never |
 
-### Helm's behaviour, and Helm's position
+### Helm's CRD boundary
 
-Verified against the pinned `helm.sh/helm/v3 v3.21.1`:
+Against the pinned `helm.sh/helm/v3 v3.21.1`, `--skip-crds` is Helm's only CRD
+flag and is an opt-out. On `helm upgrade` it matters only when `--install`
+falls through to an install because the release does not exist
+(`cmd/helm/upgrade.go:137`); `pkg/action/upgrade.go` has no CRD application
+path. On install, `installCRDs` calls `KubeClient.Create` and skips existing
+CRDs and logs the skip (`pkg/action/install.go:161-180`), so a chart's
+already-present CRDs are not updated on install or upgrade.
 
-- `--skip-crds` is the only CRD flag and it is an opt-*out*. On `helm upgrade` it
-  takes effect only when `--install` falls through to an install because the
-  release does not exist (`cmd/helm/upgrade.go:137`). `pkg/action/upgrade.go`
-  contains no CRD application path at all.
-- Even on install, `installCRDs` uses `KubeClient.Create` and skips anything
-  already present with a log line (`pkg/action/install.go:161-180`). A chart
-  whose CRDs already exist never gets them updated, on install or upgrade.
+This is deliberate upstream. Helm documents that it does not support upgrading
+or deleting CRDs because of the risk of unintentional data loss, notes that
+there is no community consensus on CRD lifecycle, and recommends a separate
+CRD chart for operators that need lifecycle management.
 
-This is deliberate upstream, not a gap awaiting a patch. Helm's
-[CRD best practices](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/)
-state: "There is no support at this time for upgrading or deleting CRDs using
-Helm. This was an explicit decision after much community discussion due to the
-danger for unintentional data loss." Helm also notes there is "currently no
-community consensus around how to handle CRDs and their lifecycle," and its
-recommended pattern for operators who need lifecycle is to separate CRDs into
-their own chart, installed independently.
+### Risk and current pressure
 
-So "make the shared installer apply `crds/`" is not the obvious fix. It is one
-option among several, and it accepts a risk Helm declined on purpose.
+`status.storedVersions` records every version in which objects have been
+persisted. A version cannot be removed from `spec.versions` until existing
+objects are re-encoded through storage-version migration; removing a served
+version too early is rejected by the API server or leaves objects unreadable.
+Risk therefore scales by CRD group, the number of CRs, and the schema change.
+NIC has substantial `longhorn.io`, `postgresql.cnpg.io`, and
+`gateway.networking.k8s.io` objects, but essentially no `gateway.k8s.aws`
+objects.
 
-### Why the risk is real
+| Pressure | Evidence |
+|---|---|
+| AWS LBC | LBC 3.5.0 adds `v1` as the storage version to all three `gateway.k8s.aws` CRDs and demotes `v1beta1`, a 1,271-line diff in `crds/gateway-crds.yaml`. An imperative bump would ship a controller reading `v1` against CRDs serving only `v1beta1`. [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) pins the latest 3.4.x partly to sidestep this; those `crds/` are unchanged within the 3.4 line, so the gap is deferred rather than solved. (Not yet merged — `defaultLBCChartVersion` is still `3.2.1` in `pkg/providers/cluster/aws/config.go`.) |
+| Gateway API | Envoy Gateway 1.6.2 ships bundle v1.4.1; 1.8.2 ([#496](https://github.com/nebari-dev/nebari-infrastructure-core/pull/496)) ships v1.5.1 and adds `listenersets`. LBC 3.5.0 requires v1.6.0 and auto-disables NLB-gateway below it. LBC probes for Gateway API CRDs only at startup ([#383](https://github.com/nebari-dev/nebari-infrastructure-core/issues/383), [#417](https://github.com/nebari-dev/nebari-infrastructure-core/issues/417)). Confirmed on a fresh cluster: the crash path triggers only when the Gateway API CRDs are present **and** the LBC pod restarts so it notices them. Ordering between two independently-managed components decides the outcome. |
 
-A CRD's `status.storedVersions` records every version its objects have been
-persisted in, and a version cannot be dropped from `spec.versions` while it
-remains in `storedVersions`. Existing custom resources must be re-encoded
-(storage-version migration) first. An apply that removes a served version is
-therefore either rejected by the API server or leaves objects unreadable.
+Deleting a CRD cascades to every CR of that type. NIC's ArgoCD apps use
+`prune: true`, `selfHeal: true`, and
+`resources-finalizer.argocd.argoproj.io` (for example,
+`pkg/argocd/templates/apps/envoy-gateway.yaml`), so removing or renaming the
+`envoy-gateway` app would prune the Gateway API CRDs and every Gateway,
+HTTPRoute, and ListenerSet. ADR-0006's reconcile loop ("uninstalls managed
+releases no longer listed") therefore needs an explicit CRD carve-out.
 
-Risk also scales per group with how many CRs exist. NIC has substantial
-`longhorn.io`, `postgresql.cnpg.io` and `gateway.networking.k8s.io` objects, and
-essentially no `gateway.k8s.aws` objects while [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) keeps LBC's Gateway API
-controllers disabled. A single global rule is therefore either too paranoid for
-one group or too reckless for another.
+Upstream packaging is moving toward separate CRD ownership, but the boundary is
+unstable. Envoy Gateway moved CRDs into a `charts/crds` subchart so Helm and
+ArgoCD could upgrade them, and publishes a standalone
+[`gateway-crds-helm`](https://github.com/envoyproxy/gateway/tree/main/charts/gateway-crds-helm)
+chart. In 1.8.0, the `safe-upgrades` ValidatingAdmissionPolicy was under
+`charts/crds/crds/`, breaking Flux and other external CRD tooling
+([envoyproxy/gateway#9015](https://github.com/envoyproxy/gateway/issues/9015));
+1.8.1 moved it back into templates. Existing separate CRD installs must
+hand-add Helm ownership metadata to that policy before upgrading.
 
-### Two live pressures
+### Existing patterns
 
-1. **AWS LBC 3.5.0** adds `v1` as the storage version to all three
-   `gateway.k8s.aws` CRDs and demotes `v1beta1` — a 1,271-line diff in
-   `crds/gateway-crds.yaml`. On the imperative path an in-place bump ships a
-   controller reading `v1` against CRDs serving only `v1beta1`. [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) pins 3.4.3
-   partly to sidestep this: 3.4.3's `crds/` are byte-identical to 3.4.2, so the
-   gap is not exercised. That is a deferral, not a strategy.
-2. **Gateway API has two would-be consumers with diverging floors.** Envoy
-   Gateway 1.6.2 ships bundle v1.4.1; 1.8.2 ([#496](https://github.com/nebari-dev/nebari-infrastructure-core/pull/496)) ships v1.5.1 and adds
-   `listenersets`. LBC 3.5.0 requires v1.6.0 and auto-disables NLB-gateway below
-   it. [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) makes this moot by pinning LBC's Gateway API feature gates off, but
-   nothing records that as an invariant, so the next person to enable them
-   inherits unsolved ownership contention. LBC compounds it by probing for
-   Gateway API CRDs only at startup, so its behaviour depends on whether a pod
-   happened to restart after Envoy Gateway synced ([#383](https://github.com/nebari-dev/nebari-infrastructure-core/issues/383), [#417](https://github.com/nebari-dev/nebari-infrastructure-core/issues/417)).
+- **Flux** exposes `.spec.install.crds` and `.spec.upgrade.crds` with `Skip`,
+  `Create`, or `CreateReplace`; the defaults are `Create` on install and `Skip`
+  on upgrade. Auto-apply is a per-release opt-in, not a global default.
+- **Versioned CRD artifacts** are increasingly upstream practice. Envoy
+  Gateway's CRD-only chart is OCI-based and has `standard`/`experimental`
+  channels; cert-manager exposes `crds.enabled` / `crds.keep`. Envoy Gateway's
+  install docs prescribe `helm template … | kubectl apply --server-side` and
+  upgrading CRDs before the controller.
+- **Manual gating** is explicit in charts that do not provide a CRD-only
+  artifact: kube-prometheus-stack says CRDs are not updated by default and
+  should be updated manually, and a CRD change forces a major chart version.
+- **ArgoCD's CRD convention** is a dedicated Application at a negative sync
+  wave with `Prune=false` and `ServerSideApply=true`; NIC already applies the
+  server-side half for CNPG.
+- **Storage-version migration** is available through Kubernetes'
+  `StorageVersionMigration` API (`migration.k8s.io`, beta and off by default)
+  or the out-of-tree kube-storage-version-migrator, which rewrites existing CRs
+  into a new storage version.
 
-### Two hazards no current document addresses
-
-- **Deleting a CRD cascades to every CR of that type.** NIC's ArgoCD apps carry
-  `prune: true`, `selfHeal: true` and `resources-finalizer.argocd.argoproj.io`
-  (e.g. `pkg/argocd/templates/apps/envoy-gateway.yaml`). Removing or renaming
-  the `envoy-gateway` app would prune the Gateway API CRDs and every Gateway,
-  HTTPRoute and ListenerSet on the cluster. ADR-0006's reconcile loop
-  ("uninstalls managed releases no longer listed") needs an explicit CRD
-  carve-out before it is implemented.
-- **Upstream is already restructuring around this.** Envoy Gateway 1.8.2 moved
-  its CRDs out of `crds/` into a `charts/crds` subchart with a `safe-upgrades`
-  ValidatingAdmissionPolicy, specifically so Helm and ArgoCD would upgrade them.
-  We cannot restructure third-party charts, so any reconcile must be on our side.
-
-This spans the GitOps layer, the provider-driven Helm layer and third-party
-chart pins, so it is a structural decision rather than a bug fix.
+This is a structural decision across GitOps, provider-driven Helm, and
+third-party chart pins, not a single installer bug.
 
 ## Decision Drivers
 
-- Silent divergence is the concrete harm today: a controller upgrades, its CRDs
-  do not, and nothing reports it until a controller misbehaves in production.
-- Unintentional data loss is worse than drift. Helm's stated reasoning applies to
-  us and should not be overridden casually.
-- CRD risk is per-group, driven by whether CRs exist and by what the schema
-  change actually does, so a uniform global rule mis-fits.
-- Operators need to learn that a bump requires manual action *before* running it,
-  not after a five-minute Helm timeout.
-- Two mechanisms already exist ([ADR-0006](0006-conditional-foundational-software-helm.md));
-  this ADR must cover both rather than assume everything converges on one.
-- ADR-0006's shared installer is still unimplemented ([#349](https://github.com/nebari-dev/nebari-infrastructure-core/issues/349)), so a requirement
-  placed now costs one design line instead of four retrofits.
+- Both current behaviours are unreviewed. On the imperative path a controller can
+  upgrade while its CRDs do not, with no report until it misbehaves. On the
+  ArgoCD path a destructive schema change applies on the next sync and reports
+  success. Neither was chosen; both are the default of their mechanism.
+- Unintentional data loss is worse than drift, and Helm's stated reasoning
+  applies to NIC — but NIC already accepts auto-apply on most of the register, so
+  invoking that reasoning against only one path needs justifying.
+- CRD risk is group-specific, depending on existing CRs and the schema change,
+  so a uniform global rule mis-fits.
+- Whatever the rule is, operators must learn a bump needs manual action *before*
+  running it, not after a five-minute Helm timeout.
+- Both delivery mechanisms must be covered. ADR-0006's shared installer is
+  still unimplemented ([#349](https://github.com/nebari-dev/nebari-infrastructure-core/issues/349)),
+  so adding the requirement now costs one design line instead of four
+  retrofits.
 
 ## Considered Options
+
+Options 1, 2, 4 and 5 are candidate answers to the open upgrade question and are
+not ranked here. Option 3 is orthogonal — it changes *who delivers* a group, and
+composes with any of the others.
 
 1. Auto-apply CRDs in the shared installer
 2. Never auto-apply; detect drift and fail closed
@@ -120,19 +166,13 @@ chart pins, so it is a structural decision rather than a bug fix.
 
 ## Decision Outcome
 
-Chosen option: **Option 2 + Option 4 as the default, Option 3 where NIC already
-effectively vendors the CRDs, and Option 1 never blanket-enabled.**
+**Partially decided.** The four rules below are proposed as settled: they are
+about *ownership* and *deletion*, and hold regardless of how the upgrade question
+resolves. Whether NIC should auto-apply CRD upgrades, detect and gate them, or
+some mix per group is **left open** — see [Open Questions](#open-questions). This
+ADR should not be read as forbidding auto-apply.
 
-The reasoning: the harm today is that divergence is *silent*. Detection removes
-the silence at a fraction of the risk auto-apply accepts, and it does not require
-NIC to guess whether a given schema change is safe. Gating CRD-changing bumps
-turns the remaining cases into an explicit, documented migration rather than an
-accident. Where NIC would have to vendor CRDs anyway to control their version
-(Gateway API being the live example), a NIC-owned wave-0 ArgoCD app is both
-Helm's own recommended pattern and the mechanism that already upgrades CRDs
-correctly.
-
-This ADR also records five specific rules:
+Proposed rules:
 
 1. **Ownership register.** Every CRD group has exactly one owner and one
    delivery mechanism. No group has two writers. Proposed starting register:
@@ -149,146 +189,177 @@ This ADR also records five specific rules:
    | `gateway.k8s.aws` | AWS provider | imperative Helm (unused; gates off) |
    | `argoproj.io` | bootstrap | imperative Helm |
 
-2. **NIC does not auto-upgrade CRDs.** The shared installer detects divergence
-   between a chart's `crds/` and the live cluster and reports it; it does not
-   silently apply. Where it must apply (a group NIC owns outright under
-   Option 3), it does so through the GitOps path, not through Helm.
-
-3. **Automation never deletes a CRD.** Excluded from `Uninstall`, from the
+2. **Automation never deletes a CRD.** Excluded from `Uninstall`, from the
    reconcile loop's "no longer listed" pruning, and from ArgoCD pruning
-   (`Prune=false` on CRD resources). CRD removal is a documented manual operator
-   action.
+   (`Prune=false` on CRD resources). CRD removal is a documented manual
+   operator action. No app sets `Prune=false` on CRDs today, so this is a change,
+   not a description.
 
-4. **Shared-group contention rule.** When two controllers can consume the same
+3. **Shared-group contention rule.** When two controllers can consume the same
    CRD group, one is designated owner at `max(required bundle version)` and the
-   other's consumption is disabled by configuration. Concretely: Envoy Gateway
-   owns Gateway API; LBC's `ALBGatewayAPI`, `NLBGatewayAPI` and
-   `GatewayListenerSet` gates stay off ([#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532)). Enabling them is a design change
-   requiring a follow-up ADR that must address hoisting Gateway API CRDs to a
-   wave-0 app and LBC's startup-only CRD probe.
+   other's consumption is disabled by configuration. Concretely, Envoy Gateway
+   owns Gateway API; LBC's `ALBGatewayAPI`, `NLBGatewayAPI`, and
+   `GatewayListenerSet` gates stay off ([#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532)).
+   [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) sets
+   those gates; this rule is what stops the next person from enabling them and
+   inheriting unsolved ownership contention.
+   Enabling them is a design change requiring a follow-up ADR that addresses
+   hoisting Gateway API CRDs to their own app at a negative sync wave and LBC's
+   startup-only CRD probe.
 
-5. **CRD version floors are recorded** next to the chart pin they constrain, so a
-   chart bump cannot silently outrun the CRDs on disk.
+4. **CRD version floors are recorded** next to the chart pin they constrain, so
+   a chart bump cannot silently outrun the CRDs on disk.
 
-### Consequences
+## Open Questions
 
-**Good:**
+These are for discussion, not decided here.
 
-- Divergence becomes loud instead of silent, which is the actual failure mode
-  operators hit today.
-- NIC does not take on responsibility for judging whether a third-party schema
-  change is destructive.
-- Aligns with Helm's documented position rather than working against it, so
-  future Helm behaviour changes are unlikely to break us.
-- The Gateway API invariant becomes checkable, and the "why can't I enable
-  `ALBGatewayAPI`?" conversation has a documented answer.
-- One rule covers both mechanisms, so new foundational software has a CRD story
-  before it ships rather than after.
+**1. Should NIC auto-apply CRD upgrades?** The two paths currently answer this
+differently and neither answer was chosen deliberately:
 
-**Bad:**
+| | Imperative Helm | ArgoCD |
+|---|---|---|
+| On upgrade | Never applies CRDs — silent divergence | Applies every sync — no gate, no signal |
+| Reviewable before it hits a cluster? | Only as a chart version bump | Yes, as a rendered manifest diff in git |
+| Failure mode | Controller runs ahead of its CRDs | A destructive schema change lands green |
 
-- Some CRD upgrades stay manual. A deploy can now refuse to proceed on drift,
-  which is a new failure mode operators must understand.
-- A runbook is required, and runbooks rot. Without the detection wired into
-  `nic deploy` the rule is unenforced.
-- Option 3 means vendoring third-party CRDs for any group NIC takes over, with
-  the tracking burden that implies on every upstream bump.
-- CRDs that are never pruned accumulate on long-lived clusters, including for
-  software that has been removed.
-- Per-group policy is more to hold in your head than a single global rule.
+The asymmetry is worth confronting directly: the ArgoCD path already does the
+thing Option 1 would introduce on the Helm path, and it does it for the two
+groups with the most CRs (`postgresql.cnpg.io`, `gateway.networking.k8s.io`).
+Arguments in both directions:
+
+- *For auto-apply:* it is what already happens on most of the register, it keeps
+  controllers and CRDs versioned together, and Flux ships it as a supported
+  per-release option (`CreateReplace`). Forbidding it on one path while relying
+  on it on the other is hard to defend.
+- *Against blanket auto-apply:* NIC cannot tell an additive schema change from a
+  destructive one without inspecting it, and a bad apply is invisible until a
+  controller breaks. Helm declined this deliberately for that reason.
+- *Middle ground:* auto-apply as the default with detection and a named gate on
+  the changes that actually carry risk — a removed served version, a changed
+  storage version, a narrowed field — rather than on any `crds/` diff. This is
+  Option 5 in spirit, and needs Option 2's detection to exist first to tell us
+  how often each case arises.
+
+**2. Where is the gate — the deploy path, or a dedicated `nic upgrade` step?**
+If detection lands, drift can block the deploy, log a warning, or be handled
+somewhere else entirely. Blocking creates a new failure mode operators must
+understand; warning can be ignored indefinitely; either needs an override with
+teeth.
+
+A third answer is a dedicated `nic upgrade` step that handles CRD removal and
+replacement in a controlled sequence, rather than making `nic deploy` refuse to
+run. The precedent is Nebari Classic, which applied versioned upgrade steps in
+sequence from the config's version up to the target release — awkward in places,
+but it worked. Foundational software has no software pack to carry its
+migrations, so it likely needs `nic upgrade` machinery of its own regardless.
+
+This has a prerequisite the other answers do not: **sequential upgrade steps
+imply versioned configs, which NIC does not have.** Choosing this answer makes
+versioned configs a blocker rather than a nice-to-have.
+
+**3. Does the ArgoCD path need a review gate at all?** A CRD change there is
+visible as a manifest diff at PR time, which may already be the gate — or may be
+review theatre, given how large CRD diffs are (LBC 3.5.0 is 1,271 lines) and how
+unlikely they are to be read.
+
+**4. Which groups, if any, move to a dedicated CRD app?** Option 3 is cheap for
+Gateway API because upstream publishes `gateway-crds-helm`. It is not obviously
+worth it elsewhere.
+
+**5. Should conditional foundational software move into ArgoCD at all?** This
+question is in scope alongside the CRD one, and it subsumes much of the rest: with
+one delivery mechanism, most of the CRD problem is a mechanism-mismatch problem
+that stops existing.
+
+The starting position for discussion is that **everything except ArgoCD itself
+belongs in ArgoCD, conditional foundational software included** — the burden of
+proof sits on keeping the imperative path, not on removing it.
+
+The industry pattern is the same direction. GitOps Bridge — the provisioner stops
+installing software and instead writes cluster metadata that ArgoCD keys addon
+selection and values off, which AWS EKS Blueprints adopted in place of Terraform
+`helm_release` — answers ADR-0006's objection that provider-computed values are
+awkward to express declaratively. NIC is already close: `pkg/argocd/writer.go`
+computes values in Go and renders per-cluster manifests, which is the same idea
+without ApplicationSets.
+
+The residual case for the imperative path is teardown ordered against
+`tofu destroy` (Longhorn,
+[ADR-0002](0002-longhorn-distributed-block-storage-for-aws.md)) — one component,
+not a mechanism.
+
+If this resolves toward ArgoCD, rows 6–9 of the register collapse into the ArgoCD
+path and the shared-group rule loses most of its scope. The register above should
+therefore be read as a description of today, not a design to build against, and
+**question 1 should not be settled in a way that only makes sense while two
+mechanisms exist.** Resolving this also requires revising ADR-0006, which this
+ADR does not do.
+
+Whichever way question 1 resolves, the manual sequence is the same and is not
+in dispute: apply the new CRDs server-side, migrate stored objects
+(`StorageVersionMigration` or kube-storage-version-migrator), then upgrade the
+controller. What is open is when NIC does this for you and when it makes you do
+it.
+
+## Consequences
+
+Of the four proposed rules only — the upgrade question carries its own trade-offs,
+listed under [Open Questions](#open-questions).
+
+| Benefits | Costs |
+|---|---|
+| Every CRD group has one writer, so "who owns this" stops being re-litigated per component. | Per-group ownership is more to hold in mind than one global rule. |
+| No automated path can cascade a CRD deletion into every CR of that type. | CRDs are never pruned, so they accumulate on long-lived clusters, including for removed software. |
+| Gateway API ownership is checkable, including why `ALBGatewayAPI` cannot be enabled. | `Prune=false` must be added to every CRD-bearing app; until it is, the rule is aspirational. |
+| Recorded version floors mean a chart bump cannot silently outrun its CRDs. | Floors are hand-maintained and rot unless something checks them. |
+| New foundational software has a CRD owner before it ships rather than after. | The upgrade question stays open, so the divergence on the imperative path is documented but not yet fixed. |
 
 ## Options Detail
 
 ### Option 1: Auto-apply CRDs in the shared installer
 
 Server-side-apply `chrt.CRDObjects()` before `action.Upgrade`, with
-`SkipCRDs = true` on the install path so exactly one code path owns CRDs rather
-than racing Helm's `Create`-and-skip.
-
-**Pros:**
-- No drift, no manual step, no runbook to rot.
-- One change in one place fixes all imperative call sites at once.
-- Keeps the controller and its CRDs versioned together by construction.
-
-**Cons:**
-- Directly contradicts Helm's explicit decision and its stated data-loss
-  reasoning.
-- An additive-looking chart diff can still remove a served version or narrow a
-  schema; the installer cannot tell without inspecting every CRD change.
-- Blocked by `storedVersions` in exactly the cases that matter, so it would fail
-  loudly on real migrations anyway — after already having applied part of the set.
+`SkipCRDs = true` on install so one path owns CRDs. This removes drift and keeps
+controllers and CRDs together, but cannot infer destructive schema changes and
+can still fail during a real migration after partially applying a set. Flux's
+`CreateReplace` is the precedent, but only as a per-release opt-in.
 
 ### Option 2: Never auto-apply; detect drift and fail closed
 
-A preflight compares the chart's `crds/` against live CRDs and refuses the deploy
-(or warns) with a named operator action when they diverge.
-
-**Pros:**
-- Removes the silence, which is the real harm, without accepting the real risk.
-- Cheap: a comparison, not a migration engine.
-- Runs before any cloud work, so the failure is fast and named rather than a
-  five-minute Helm timeout.
-
-**Cons:**
-- The upgrade itself stays manual, and someone has to actually do it.
-- Requires a documented per-group procedure to be useful.
-- Fail-closed on drift can block an otherwise-fine deploy; warn-only can be
-  ignored forever. The ADR must pick one.
+A preflight compares chart `crds/` with live CRDs and reports a named operator
+action before cloud work. It is cheap and addresses the actual harm, but the
+upgrade remains manual and the implementation must choose whether drift blocks
+the deploy or becomes an ignorable warning.
 
 ### Option 3: Hoist CRDs into a NIC-owned artifact
 
-A dedicated wave-0 ArgoCD app (or vendored CRD-only chart) owns the CRDs, taking
-them off the imperative path entirely. This is Helm's own recommended Method 2,
-and what Envoy Gateway 1.8.2 adopted upstream.
-
-**Pros:**
-- CRDs become visible and diffable in GitOps, and ArgoCD already upgrades them.
-- Resolves shared-group contention directly: one owner, one pinned bundle
-  version, independent of any consumer's chart.
-- Matches where upstream is moving.
-
-**Cons:**
-- NIC vendors third-party CRDs and must track them on every upstream bump.
-- Needs `Prune=false` and finalizer care, or app removal cascades to every CR.
-- Splits a chart's CRDs from its templates, so a version mismatch between them
-  becomes newly possible.
+A dedicated ArgoCD app at a negative sync wave owns CRDs with `Prune=false` and
+`ServerSideApply=true`, making them visible and diffable and resolving shared
+ownership. This is Helm's recommended Method 2 and the standard ArgoCD
+convention. For Gateway API, use the upstream CRD-only artifact; groups without
+one still require vendoring and tracking.
 
 ### Option 4: Gate CRD-changing chart bumps
 
 Refuse a chart version whose `crds/` differ from the installed release's, making
-such bumps an explicit opt-in migration with a documented procedure.
-
-**Pros:**
-- Turns the dangerous class of bump into a deliberate decision.
-- Composes with Option 2: same comparison, applied at pin time rather than
-  deploy time.
-- Already the de facto practice — [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532) pins 3.4.3 for exactly this reason.
-
-**Cons:**
-- Slows routine bumps that happen to touch CRDs harmlessly.
-- Needs a documented override, and an override with no teeth is decoration.
+the bump an explicit opt-in migration. It composes with Option 2 and matches the
+practice represented by [#532](https://github.com/nebari-dev/nebari-infrastructure-core/pull/532),
+but can slow harmless bumps and needs an override with real teeth.
 
 ### Option 5: Policy per CRD group
 
-Auto-apply where the change is provably additive and no CRs exist; require the
-explicit path otherwise.
-
-**Pros:**
-- Most precise: matches the fact that risk genuinely varies per group.
-- Would let low-risk groups (`gateway.k8s.aws` today) upgrade automatically.
-
-**Cons:**
-- Most machinery: needs schema diffing, CR counting and a per-group policy table.
-- "Provably additive" is the hard part, and getting it wrong is the data-loss
-  case Helm warns about.
-- Premature until Option 2's detection exists and tells us how often each case
-  actually arises.
+Auto-apply only where a change is provably additive and no CRs exist; require the
+explicit path otherwise. This matches group-specific risk, but needs schema
+diffing, CR counts, and a policy table, while "provably additive" is precisely
+the hard case. It is premature before Option 2 produces data.
 
 ## Links
 
 - [ADR-0006](0006-conditional-foundational-software-helm.md) — conditional
   foundational software via provider-driven Helm; the mechanism with the gap
-  (decided in [#361](https://github.com/nebari-dev/nebari-infrastructure-core/pull/361), scope clarified in [#475](https://github.com/nebari-dev/nebari-infrastructure-core/issues/475))
+  (decided in [#361](https://github.com/nebari-dev/nebari-infrastructure-core/pull/361),
+  scope clarified in [#475](https://github.com/nebari-dev/nebari-infrastructure-core/issues/475))
 - [ADR-0011](0011-gateway-listener-ownership.md) — per-app Gateway listener
   ownership, the adjacent decision on the ArgoCD side
 - [ADR-0002](0002-longhorn-distributed-block-storage-for-aws.md) — Longhorn, an
@@ -307,5 +378,17 @@ explicit path otherwise.
   — the upstream argument against automated CRD upgrade/delete
 - [Kubernetes — versions in CustomResourceDefinitions](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/)
   — `storedVersions` and storage-version migration
+- [Kubernetes — Migrate Kubernetes Objects Using Storage Version Migration](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/storage-version-migration/)
+  — the named remedy for the `storedVersions` blocker
+- [Flux — HelmRelease CRD policies](https://fluxcd.io/flux/components/helm/helmreleases/)
+  — `Skip` / `Create` / `CreateReplace`; auto-apply as a per-release opt-in
+- [Envoy Gateway — `gateway-crds-helm`](https://github.com/envoyproxy/gateway/tree/main/charts/gateway-crds-helm)
+  and [install docs](https://gateway.envoyproxy.io/docs/install/install-helm/) —
+  an upstream versioned CRD-only chart, and the "CRDs first, then the controller"
+  ordering
+- [envoyproxy/gateway#9015](https://github.com/envoyproxy/gateway/issues/9015) —
+  the 1.8.0 `safe-upgrades` VAP placement that broke external CRD tooling
+- [GitOps Bridge](https://github.com/gitops-bridge-dev/gitops-bridge) — the
+  metadata-not-installs pattern behind "everything ArgoCD-managed"
 - Helm source at v3.21.1: `pkg/action/install.go:161-180`,
   `pkg/action/upgrade.go`, `cmd/helm/upgrade.go:267`
