@@ -151,7 +151,7 @@ type EC2Client interface {
 // provisions for Classic ELBs and ALBs. NLB interfaces do NOT carry it: they
 // are requested by per-region ELB service accounts with no stable ID, and are
 // matched by interface-type instead. All of them are service-owned and cannot
-// be deleted or force-detached from the account. The only option is to wait 
+// be deleted or force-detached from the account. The only option is to wait
 // for AWS to release them.
 const elbENIRequesterID = "amazon-elb"
 

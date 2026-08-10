@@ -679,25 +679,33 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	// balancers are gone from the ELB API; their ENIs are released lazily and
 	// hold public IPs that block subnet and internet-gateway deletion while
 	// they linger. Skipped for user-provided VPCs, which tofu does not delete
-	// (and which may host other clusters' load balancers).
+	// (and which may host other clusters' load balancers). The VPC ID comes
+	// from the terraform state rather than EKS so the gate still runs when
+	// retrying a destroy that already deleted the cluster.
 	if awsCfg.ExistingVPCID == "" {
-		eksClientForCleanup, err := newEKSClient(ctx, region)
-		if err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to create EKS client: %w", err)
-		}
-		vpcID, vpcErr := lookupClusterVPCID(ctx, eksClientForCleanup, projectName)
-		if vpcErr != nil {
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping ELB network interface wait — cluster VPC unknown: %v", vpcErr)).
-				WithResource("network-interface").WithAction("waiting"))
-		} else if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, awsCfg.LoadBalancerENIReleaseTimeout()); err != nil {
-			span.RecordError(err)
+		vpcID, vpcErr := vpcIDFromState(ctx, tf)
+		switch {
+		case vpcErr != nil:
+			span.RecordError(vpcErr)
 			if !opts.Force {
-				return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
+				return fmt.Errorf("failed to determine cluster VPC for ELB network interface wait: %w", vpcErr)
 			}
-			forcedErrs = append(forcedErrs, fmt.Errorf("wait for ELB network interface release: %w", err))
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("ELB network interfaces still present, continuing with --force: %v", err)).
+			forcedErrs = append(forcedErrs, fmt.Errorf("determine cluster VPC for ELB network interface wait: %w", vpcErr))
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cannot determine cluster VPC, skipping ELB network interface wait and continuing with --force: %v", vpcErr)).
 				WithResource("network-interface").WithAction("waiting"))
+		case vpcID == "":
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "No VPC in terraform state; skipping ELB network interface wait").
+				WithResource("network-interface").WithAction("waiting"))
+		default:
+			if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, awsCfg.LoadBalancerENIReleaseTimeout()); err != nil {
+				span.RecordError(err)
+				if !opts.Force {
+					return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
+				}
+				forcedErrs = append(forcedErrs, fmt.Errorf("wait for ELB network interface release: %w", err))
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("ELB network interfaces still present, continuing with --force: %v", err)).
+					WithResource("network-interface").WithAction("waiting"))
+			}
 		}
 	}
 
@@ -746,6 +754,25 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 // Results are cached in-memory per Provider instance, indexed by projectName and
 // region, so repeated calls within a single command invocation (e.g. ArgoCD, Longhorn,
 // and AWS LBC install) reuse the same fetched value.
+// vpcIDFromState reads the vpc_id output from the terraform state. Returns
+// "" with no error when the output is absent or empty — the VPC was already
+// destroyed or never created — so callers can skip VPC-scoped work.
+func vpcIDFromState(ctx context.Context, tf *tofu.TerraformExecutor) (string, error) {
+	outputs, err := tf.Output(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to read terraform outputs: %w", err)
+	}
+	out, ok := outputs["vpc_id"]
+	if !ok {
+		return "", nil
+	}
+	var vpcID string
+	if err := json.Unmarshal(out.Value, &vpcID); err != nil {
+		return "", fmt.Errorf("failed to unmarshal vpc_id output: %w", err)
+	}
+	return vpcID, nil
+}
+
 func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.GetKubeconfig")
