@@ -66,8 +66,9 @@ type AWSLoadBalancerControllerConfig struct {
 }
 
 // defaultLBCChartVersion pins the aws-load-balancer-controller Helm chart.
-// Bump to track the latest v3.x line; v2/chart-v1 is EOL.
-const defaultLBCChartVersion = "3.2.1"
+// 3.4.3 fixes GHSA-8hm3-878p-6823 (panic, 3.4.0-3.4.2); do not pin below
+// 3.2.2 (#383).
+const defaultLBCChartVersion = "3.4.3"
 
 // defaultLBCDestroyTimeout is the maximum time the graceful Kubernetes-side
 // cleanup will wait for LBC's finalizer to drain load balancers before falling
