@@ -105,7 +105,7 @@ func TestProcessConfigFileFailsOnNoExportedStructs(t *testing.T) {
 	}
 
 	cf := configFile{path: "pkg/providers/cluster/empty/config.go", docTitle: "Empty", docDesc: "Empty."}
-	if err := processConfigFile(root, outPath, cf, false); err == nil {
+	if _, err := processConfigFile(root, outPath, cf, false); err == nil {
 		t.Error("processConfigFile: want error for a config.go with no exported structs, got nil")
 	}
 }

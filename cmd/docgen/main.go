@@ -92,12 +92,35 @@ var configFiles = []configFile{
 		docTitle: "Trust Bundle Configuration",
 		docDesc:  "Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.",
 	},
+	{
+		// BackupsConfig is a top-level NebariConfig field in its own file.
+		// Empty structs means "document every exported struct in the file",
+		// so BackupsConfig and its nested targets/schedules are all covered.
+		path:     "pkg/config/backups.go",
+		docTitle: "Backups Configuration",
+		docDesc:  "Off-cluster backup scheduling for Longhorn volumes (S3/Azure targets, retention, keyless auth).",
+	},
+	{
+		// longhorn.Config is referenced as *longhorn.Config from the AWS, Hetzner
+		// and existing-cluster provider configs but lives outside pkg/config and
+		// pkg/providers, so neither the allowlist above nor provider discovery
+		// covers it. It carries the DedicatedNodes data-loss warning.
+		path:     "pkg/storage/longhorn/config.go",
+		docTitle: "Longhorn Storage Configuration",
+		docDesc:  "Distributed block storage settings shared by the cloud providers, including dedicated-node scheduling.",
+	},
 }
 
 // discoverProviderConfigFiles globs pkg/providers/{cluster,dns}/*/config.go
 // and returns one configFile per match, sorted by path for deterministic
 // output. Every match documents all of its exported structs; there is no way
 // for a provider directory to be silently skipped or partially documented.
+//
+// Only config.go is globbed (not *.go), so a provider that splits its config
+// across files won't have the extra file auto-discovered. That is caught rather
+// than silent: validateDocumentedRefs fails the build when a documented struct
+// references another struct in the same package with no page, which is exactly
+// what a split-out config file would produce.
 func discoverProviderConfigFiles(rootDir string) ([]configFile, error) {
 	var discovered []configFile
 
@@ -168,10 +191,21 @@ func main() {
 
 	allConfigFiles := append(append([]configFile{}, configFiles...), providerFiles...)
 
+	var allRendered []StructDoc
 	for _, cf := range allConfigFiles {
-		if err := processConfigFile(*rootDir, outPath, cf, *verbose); err != nil {
+		rendered, err := processConfigFile(*rootDir, outPath, cf, *verbose)
+		if err != nil {
 			log.Fatalf("Failed to process %s: %v", cf.path, err)
 		}
+		allRendered = append(allRendered, rendered...)
+	}
+
+	// Fail if a documented struct references another documentable struct that
+	// has no generated page. This generalizes the guarantee provider discovery
+	// already gives to the hand-maintained config allowlist, so a new
+	// *XxxConfig field can't ship a dangling reference with a green docs gate.
+	if err := validateDocumentedRefs(allRendered, *rootDir); err != nil {
+		log.Fatalf("Documentation gap: %v", err)
 	}
 
 	if err := generateIndex(outPath, allConfigFiles); err != nil {
@@ -187,7 +221,10 @@ func main() {
 	fmt.Printf("CLI documentation generated successfully in %s\n", cliOutPath)
 }
 
-func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (err error) {
+// processConfigFile parses cf's source, writes its page, and returns the
+// structs it rendered so the caller can validate cross-references across the
+// full documented set (see validateDocumentedRefs).
+func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (rendered []StructDoc, err error) {
 	srcPath := filepath.Join(rootDir, cf.path)
 
 	if verbose {
@@ -196,19 +233,18 @@ func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (er
 
 	allStructs, err := ParseFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("parsing %s: %w", srcPath, err)
+		return nil, fmt.Errorf("parsing %s: %w", srcPath, err)
 	}
 
-	var ordered []StructDoc
 	if len(cf.structs) > 0 {
-		ordered = orderStructs(FilterConfigStructs(allStructs, cf.structs), cf.structs)
-		if len(ordered) == 0 {
-			return fmt.Errorf("no matching structs found in %s (looking for %v)", srcPath, cf.structs)
+		rendered = orderStructs(FilterConfigStructs(allStructs, cf.structs), cf.structs)
+		if len(rendered) == 0 {
+			return nil, fmt.Errorf("no matching structs found in %s (looking for %v)", srcPath, cf.structs)
 		}
 	} else {
-		ordered = exportedStructs(allStructs)
-		if len(ordered) == 0 {
-			return fmt.Errorf("no exported structs found in %s; this provider directory would yield no documentation", srcPath)
+		rendered = exportedStructs(allStructs)
+		if len(rendered) == 0 {
+			return nil, fmt.Errorf("no exported structs found in %s; this config file would yield no documentation", srcPath)
 		}
 	}
 
@@ -221,7 +257,7 @@ func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (er
 
 	f, err := os.Create(filepath.Clean(outputPath))
 	if err != nil {
-		return fmt.Errorf("creating output file: %w", err)
+		return nil, fmt.Errorf("creating output file: %w", err)
 	}
 	defer func() {
 		if cerr := f.Close(); cerr != nil && err == nil {
@@ -229,9 +265,9 @@ func processConfigFile(rootDir, outPath string, cf configFile, verbose bool) (er
 		}
 	}()
 
-	GenerateConfigDoc(f, cf.docTitle, cf.docDesc, ordered)
+	GenerateConfigDoc(f, cf.docTitle, cf.docDesc, rendered)
 
-	return err
+	return rendered, err
 }
 
 // exportedStructs returns every struct with an exported (capitalized) name,

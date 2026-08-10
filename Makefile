@@ -10,7 +10,8 @@ GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+CLI_PKG=github.com/nebari-dev/nebari-infrastructure-core/internal/cli
+LDFLAGS=-ldflags "-s -w -X $(CLI_PKG).version=$(VERSION) -X $(CLI_PKG).commit=$(COMMIT) -X $(CLI_PKG).date=$(DATE)"
 
 help: ## Display this help message
 	@echo "Nebari Infrastructure Core - Makefile commands:"
