@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -28,6 +29,24 @@ var versionCmd = &cobra.Command{
 	RunE:  runVersion,
 }
 
+// tofuVersionLine describes which OpenTofu binary NIC would use: an external
+// one resolved via NIC_TOFU_PATH or PATH, or the pinned version it downloads.
+// Resolution errors (e.g. a bad NIC_TOFU_PATH) are reported rather than
+// returned so `nic version` stays usable as a diagnostic.
+func tofuVersionLine(ctx context.Context) string {
+	resolved, err := tofu.ResolveExternal(ctx)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("unresolved (%v)", err)
+	case resolved == nil:
+		return fmt.Sprintf("%s (downloaded by nic)", tofu.Version)
+	case resolved.Source == tofu.SourceOverride:
+		return fmt.Sprintf("%s (from %s: %s)", resolved.Version, tofu.EnvTofuPath, resolved.Path)
+	default:
+		return fmt.Sprintf("%s (from PATH: %s)", resolved.Version, resolved.Path)
+	}
+}
+
 func runVersion(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
@@ -41,7 +60,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Version: %s\n", version)
 	fmt.Printf("Commit: %s\n", commit)
 	fmt.Printf("Built: %s\n", date)
-	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
+	fmt.Printf("OpenTofu version: %s\n", tofuVersionLine(ctx))
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
