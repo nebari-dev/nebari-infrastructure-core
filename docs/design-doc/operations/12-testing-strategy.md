@@ -18,9 +18,12 @@ NIC has three testing levels today, plus one (health) that is planned but not ye
 - **Build tag**: `integration`. Unit-only runs (the default and what CI runs) exclude these via the absence of `-tags=integration`.
 - **Where they run**: Locally, on demand. Not currently wired into CI.
 
-### Provider tests (real cloud)
+### Deployment tests (real infrastructure)
 
-- **Status**: Not yet wired up. The intent is a small set of expensive tests that deploy real infrastructure on AWS (and eventually Hetzner) to validate end-to-end provider behavior. These will live behind a separate build tag and run only when explicitly invoked (e.g., for release candidates).
+- **Scope**: End-to-end `nic deploy` / `nic destroy` for every implemented provider: local (Kind), existing cluster (k3d on the runner), AWS, Azure, and Hetzner.
+- **Runner**: `.github/workflows/deployment-tests.yml`, which builds `nic`, then runs the [`nebari-dev/deploy-nebari-action`](https://github.com/nebari-dev/deploy-nebari-action) (pinned by commit SHA) with the per-provider configs in `.github/fixtures/deploy/`. The action deploys, waits for the platform to converge, and destroys in a post step that runs even on failure or cancellation.
+- **Where they run**: On demand via `workflow_dispatch` (pick one provider or `all`) and on every published release.
+- **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget.
 
 ### Health tests (planned)
 
@@ -49,54 +52,40 @@ GCS mocking is not in scope while the GCP provider remains a stub. Azure is impl
 
 ## 12.4 CI Pipeline
 
-The actual workflow at `.github/workflows/ci.yml`:
+`.github/workflows/ci.yml` runs these jobs on every push and PR against `main` (job details live in the workflow file itself; this table describes intent so it does not rot with every YAML change):
 
-```yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.0        # actions are pinned by SHA
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod            # tracks the version in go.mod
-      - run: go mod download
-      - run: go mod verify
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-      - run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
-      - uses: codecov/codecov-action@v7.0.0  # continue-on-error: true
-
-  build:
-    steps:
-      - run: make build
-      - run: ./nic --help || true
-
-  lint-config:   # "Workflow pins & release config"
-    steps:
-      - run: ./scripts/check-action-pins.sh  # every action must be SHA-pinned
-      - uses: goreleaser/goreleaser-action@v7.2.3  # validates .goreleaser config
-
-  vulnerabilities:
-    steps:
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
-      - run: ./scripts/govulncheck-gate.sh
-```
+| Job | What it does |
+|------|--------------|
+| `Lint` | `golangci-lint` (latest) |
+| `Test` | `go mod download` + `verify`, unit tests with `-race` and coverage, informational Codecov upload (`continue-on-error: true`) |
+| `Build` | `make build`, uploads the `nic` binary as a 1-day artifact |
+| `Deploy` | downloads the `Build` artifact and runs the deploy action with its built-in default config: a local Kind cluster with an auto-created GitOps repo, deployed, waited on, and destroyed on the runner |
+| `Workflow pins & release config` | `check-action-pins.sh` (every action SHA-pinned) + goreleaser config validation |
+| `Vulnerabilities` | `govulncheck` gate |
 
 Highlights:
 
-- Go version tracks `go.mod` (currently `1.26.5`) via `go-version-file`.
+- Go version tracks `go.mod` via `go-version-file`.
 - Unit tests run with `-race` and coverage.
-- Lint via the latest `golangci-lint`; all GitHub Actions are SHA-pinned and enforced by `check-action-pins.sh`.
+- All GitHub Actions are SHA-pinned, enforced by `check-action-pins.sh`.
 - A `govulncheck` gate fails the build on known vulnerabilities.
-- No integration-test job, no nightly schedule, no kind-based cluster spin-up.
+- The LocalStack integration tests are still not wired into CI; the Kind-based `Deploy` job is the end-to-end smoke test.
 
 Other workflows in `.github/workflows/`:
 
+- `deployment-tests.yml` - deployment tests for all providers (see 12.1)
 - `release.yml` - cuts releases via goreleaser
 - `opentofu-lockfile-pr.yml` - keeps tofu lockfiles fresh
 - `add-to-project.yaml` - GitHub Projects auto-add
+
+### CI prerequisites (state outside this repository)
+
+The deployment tests depend on setup that lives in repo settings and sibling repositories, not in this tree:
+
+- **Scratch GitOps repository**: `nebari-dev/nic-ci-gitops`. Each provider job pushes manifests to its own branch (`local`, `aws`, `azure`, `hetzner`, `existing`) under `clusters/<project>-ci`, and `.github/actions/reset-gitops-branch` force-resets that branch to an empty commit before every run so NIC regenerates manifests from scratch instead of skipping bootstrap.
+- **Repository secrets**: `NIC_CI_GITOPS_TOKEN` (Contents read/write on the scratch repo, used by every provider job) and `CLOUDFLARE_API_TOKEN` (manages records in the `nebari.dev` zone for the `*-ci.nebari.dev` test domains).
+- **Environments**: `aws` (`AWS_ROLE_ARN`, assumed via OIDC, `us-west-2`), `azure` (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, via OIDC), `hetzner` (`HETZNER_TOKEN`). The cloud environments are where approval gates (required reviewers) belong, so that runs against real cloud accounts need a human click.
+- **Certificates**: all cloud fixtures use the Let's Encrypt staging endpoint, so CI never consumes production ACME rate limits.
 
 ## 12.5 Local Development Loop
 
@@ -119,7 +108,7 @@ A few representative cases:
 **Fresh AWS deploy (manual integration):**
 
 - `nic deploy -f examples/aws-config.yaml`
-- Expect: state bucket created, EKS cluster up with `kubernetes_version: "1.34"` and the configured `node_groups`, EFS volume mounted, ArgoCD running in `argocd` namespace, foundational apps syncing.
+- Expect: state bucket created, EKS cluster up with the configured `kubernetes_version` and `node_groups`, EFS volume mounted, ArgoCD running in `argocd` namespace, foundational apps syncing.
 - Verify: `kubectl get nodes`, `kubectl get applications -n argocd`, the printed Argo CD and Keycloak access instructions.
 
 **Local Kind deploy (manual):**
@@ -140,6 +129,6 @@ A few representative cases:
 ## 12.7 Future Work
 
 - Wire integration tests into CI (likely as a separate, slower workflow with a manual trigger).
-- Add a `provider-tests` job on a schedule (nightly or weekly) that hits real cloud APIs.
+- Run the deployment tests on a schedule (nightly or weekly) in addition to releases and manual dispatch.
 - Implement the `nic health check` subcommand and a paired test harness.
 - Add Hetzner-specific integration tests (LocalStack analogue does not exist; may require recorded HTTP fixtures against the Hetzner Cloud API).
