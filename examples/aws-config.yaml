@@ -148,6 +148,7 @@ cluster:
     # aws_load_balancer_controller:
     #   enabled: true
     #   # chart_version: "3.4.3"  # hard-pinned by nic; set this to override
+    #   # eni_release_timeout: 30m  # how long destroy waits for AWS to release ELB network interfaces before VPC teardown
 
     # Scheme applied to the Gateway's NLB. Defaults to "internet-facing".
     # Set to "internal" for private-only VPCs (no public subnets / no IGW);

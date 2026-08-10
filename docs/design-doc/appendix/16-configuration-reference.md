@@ -141,6 +141,7 @@ cluster:
     #   enabled: true
     #   chart_version: "3.4.3"
     #   destroy_timeout: 5m
+    #   eni_release_timeout: 30m               # how long destroy waits for AWS to release ELB network interfaces before VPC teardown
 
     # Optional: Kubernetes Cluster Autoscaler (default: enabled)
     # cluster_autoscaler:
