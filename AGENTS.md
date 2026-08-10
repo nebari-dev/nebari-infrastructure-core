@@ -392,6 +392,18 @@ if err != nil {
 
 Either way, a failure that can leave resources behind must surface in the exit code: `pkg/nic.Destroy` re-wraps the provider error with `%w` and emits `LevelWarning` instead of `LevelSuccess`, so a partial teardown never looks clean (#534).
 
+### Release Installer (`scripts/install.sh`)
+
+`scripts/install.sh` is a **published entry point**, not an internal helper: the
+README documents `curl ... /main/scripts/install.sh | sh`, pinned to `main`. Do
+not rename or move it, and do not merge a `main` that leaves it broken, or every
+in-flight one-liner breaks. It hand-reimplements three facts from
+`.goreleaser.yml` (the archive name template, the `amd64` -> `x86_64` rename) and
+the release workflow filename (in its cosign identity regexp); changing either
+side without the other is caught by `scripts/check-installer-contract.sh` in the
+`workflow-pins` CI job. It is POSIX `sh` (not `bash`) because it is piped into
+arbitrary shells.
+
 ## Testing Strategy
 
 ### Unit Tests

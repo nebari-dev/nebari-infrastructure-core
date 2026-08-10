@@ -15,8 +15,9 @@ sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
 
 ## 2. Verify the signature (authenticity)
 
-Requires [cosign](https://docs.sigstore.dev/) v3+. Identity pinning is mandatory:
-a bundle-only verify checks the math, not who signed it.
+Requires [cosign](https://docs.sigstore.dev/) v2.4.2+ (the first release that
+reads this bundle format). Identity pinning is mandatory: a bundle-only verify
+checks the math, not who signed it.
 
 ```bash
 cosign verify-blob \

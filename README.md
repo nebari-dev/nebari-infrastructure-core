@@ -170,8 +170,11 @@ curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-cor
 ```
 
 `NIC_VERSION` defaults to `latest`; `INSTALL_DIR` defaults to `/usr/local/bin`
-(falling back to `sudo` when it is not writable). For the strongest guarantee,
-verify the release yourself first — see
+(falling back to `sudo` when it is not writable, and created if it does not
+exist). When `cosign` (>= 2.4.2) is present the installer also verifies the
+release signature; on an air-gapped host or a network that blocks `sigstore.dev`
+you can set `NIC_SKIP_SIGNATURE=1` to fall back to checksum-only. For the
+strongest guarantee, verify the release yourself first, see
 [docs/operations/verifying-releases.md](docs/operations/verifying-releases.md).
 
 > The installer URL is pinned to `main`, so `scripts/install.sh` is a stable
