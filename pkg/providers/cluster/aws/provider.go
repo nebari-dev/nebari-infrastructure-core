@@ -697,7 +697,12 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 			status.Send(ctx, status.NewUpdate(status.LevelInfo, "No VPC in terraform state; skipping ELB network interface wait").
 				WithResource("network-interface").WithAction("waiting"))
 		default:
-			if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, awsCfg.LoadBalancerENIReleaseTimeout()); err != nil {
+			// The --timeout flag bounds the whole destroy, so this single wait should not exceed it.
+			eniTimeout := awsCfg.LoadBalancerENIReleaseTimeout()
+			if opts.Timeout > 0 {
+				eniTimeout = min(eniTimeout, opts.Timeout)
+			}
+			if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, eniTimeout); err != nil {
 				span.RecordError(err)
 				if !opts.Force {
 					return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
