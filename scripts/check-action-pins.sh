@@ -29,11 +29,14 @@ for wf in "${workflows[@]}"; do
     fi
   done < <(grep -oE "uses:[[:space:]]*['\"]?[A-Za-z0-9][A-Za-z0-9._-]*/[^@'\"[:space:]]+@[^'\"[:space:]]+" "$wf" | sed -E "s/uses:[[:space:]]*['\"]?//")
 
-  # The two rules below cover the specific fetch vectors used inside run:
-  # blocks (curl of raw.githubusercontent.com scripts, container images passed
-  # via --image). They are not general coverage of run: blocks. Arbitrary
-  # shell cannot be audited by grep, but they stop the pins we do have from
-  # silently regressing.
+  # The three rules below cover the specific fetch vectors used inside run:
+  # blocks (curl of raw.githubusercontent.com scripts, the equivalent
+  # github.com/<owner>/<repo>/raw/<ref> form, and container images passed via
+  # --image). They are not general coverage of run: blocks. Arbitrary shell
+  # cannot be audited by grep, but they stop the pins we do have from silently
+  # regressing. Known-equivalent forms not covered because nothing here uses
+  # them: github.com/<owner>/<repo>/blob/<ref>/<path>?raw=true and
+  # codeload.github.com/<owner>/<repo>/tar.gz/<ref>.
 
   # raw.githubusercontent.com fetches: the path segment after owner/repo is
   # the git ref; require an immutable commit SHA there.
