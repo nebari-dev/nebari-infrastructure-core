@@ -148,17 +148,59 @@ type EC2Client interface {
 }
 
 // elbENIRequesterID is the requester-id AWS stamps on network interfaces it
-// provisions for the ELB family (Classic, ALB, NLB). Those ENIs are owned by
-// the amazon-elb service principal and cannot be deleted or force-detached
-// from the account; the only option is to wait for AWS to release them.
+// provisions for Classic ELBs and ALBs. NLB interfaces do NOT carry it: they
+// are requested by per-region ELB service accounts with no stable ID, and are
+// matched by interface-type instead. All of them are service-owned and cannot
+// be deleted or force-detached from the account. The only option is to wait 
+// for AWS to release them.
 const elbENIRequesterID = "amazon-elb"
 
-// waitForELBNetworkInterfacesRelease polls until no amazon-elb-requested ENIs
-// remain in the VPC, or timeout elapses. Deleting a load balancer (whether via
-// its Kubernetes Service or the ELB API) only removes it from the API; its
-// ENIs are released lazily — for NLBs often tens of minutes later — and while
-// they linger they hold public IPs that make subnet and internet-gateway
-// deletion fail with DependencyViolation.
+// elbENIFilterSets returns one DescribeNetworkInterfaces filter set per load
+// balancer kind: NLB interfaces are identified by interface-type, ALB/Classic
+// interfaces by requester-id (see elbENIRequesterID). A single query cannot
+// cover both kinds, because all filters in a query must match at once. The
+// one attribute the kinds do share, attachment.instance-owner-id=amazon-aws,
+// also matches NAT gateway interfaces, so it cannot be used to merge them.
+func elbENIFilterSets(vpcID string) [][]ec2types.Filter {
+	vpcFilter := ec2types.Filter{Name: aws.String("vpc-id"), Values: []string{vpcID}}
+	return [][]ec2types.Filter{
+		{vpcFilter, {Name: aws.String("interface-type"), Values: []string{string(ec2types.NetworkInterfaceTypeNetworkLoadBalancer)}}},
+		{vpcFilter, {Name: aws.String("requester-id"), Values: []string{elbENIRequesterID}}},
+	}
+}
+
+// listELBNetworkInterfaces returns the ELB-family network interfaces present
+// in the VPC, deduplicated across the filter sets.
+func listELBNetworkInterfaces(ctx context.Context, client EC2Client, vpcID string) ([]ec2types.NetworkInterface, error) {
+	var enis []ec2types.NetworkInterface
+	seen := map[string]struct{}{}
+	for _, filters := range elbENIFilterSets(vpcID) {
+		paginator := ec2.NewDescribeNetworkInterfacesPaginator(client, &ec2.DescribeNetworkInterfacesInput{Filters: filters})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe ELB network interfaces in VPC %s: %w", vpcID, err)
+			}
+			for _, eni := range page.NetworkInterfaces {
+				if eni.NetworkInterfaceId == nil {
+					continue
+				}
+				if _, ok := seen[*eni.NetworkInterfaceId]; ok {
+					continue
+				}
+				seen[*eni.NetworkInterfaceId] = struct{}{}
+				enis = append(enis, eni)
+			}
+		}
+	}
+	return enis, nil
+}
+
+// waitForELBNetworkInterfacesRelease polls until no ELB-family ENIs remain in
+// the VPC, or timeout elapses. Deleting a load balancer (whether via its
+// Kubernetes Service or the ELB API) only removes it from the API. Its ENIs
+// are released lazily and while they linger they hold public IPs that make subnet
+// and internet-gateway deletion fail with DependencyViolation.
 func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, vpcID string, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.waitForELBNetworkInterfacesRelease")
@@ -175,18 +217,13 @@ func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, v
 	const pollInterval = 15 * time.Second
 
 	for {
-		out, err := client.DescribeNetworkInterfaces(ctx, &ec2.DescribeNetworkInterfacesInput{
-			Filters: []ec2types.Filter{
-				{Name: aws.String("vpc-id"), Values: []string{vpcID}},
-				{Name: aws.String("requester-id"), Values: []string{elbENIRequesterID}},
-			},
-		})
+		enis, err := listELBNetworkInterfaces(ctx, client, vpcID)
 		if err != nil {
 			span.RecordError(err)
-			return fmt.Errorf("failed to describe ELB network interfaces in VPC %s: %w", vpcID, err)
+			return err
 		}
 
-		remaining := len(out.NetworkInterfaces)
+		remaining := len(enis)
 		if remaining == 0 {
 			span.SetAttributes(attribute.Int("elb_network_interface_stragglers", 0))
 			return nil

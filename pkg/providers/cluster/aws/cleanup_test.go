@@ -837,11 +837,11 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 		RequesterId:        aws.String(elbENIRequesterID),
 	}
 
-	t.Run("returns nil when no ELB ENIs remain and passes expected filters", func(t *testing.T) {
-		var capturedFilters []ec2types.Filter
+	t.Run("returns nil when no ELB ENIs remain and queries NLB and ALB/Classic filter sets", func(t *testing.T) {
+		var capturedFilters [][]ec2types.Filter
 		mock := &mockEC2Client{
 			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-				capturedFilters = params.Filters
+				capturedFilters = append(capturedFilters, params.Filters)
 				return &ec2.DescribeNetworkInterfacesOutput{}, nil
 			},
 		}
@@ -850,20 +850,46 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		wantFilters := map[string]string{
-			"vpc-id":       vpcID,
-			"requester-id": elbENIRequesterID,
+		// One call per filter set: NLB interfaces have no stable requester ID
+		// and are matched by interface-type; ALB/Classic by requester-id.
+		wantFilterSets := []map[string]string{
+			{"vpc-id": vpcID, "interface-type": "network_load_balancer"},
+			{"vpc-id": vpcID, "requester-id": elbENIRequesterID},
 		}
-		gotFilters := map[string]string{}
-		for _, f := range capturedFilters {
-			if f.Name != nil && len(f.Values) == 1 {
-				gotFilters[*f.Name] = f.Values[0]
+		if len(capturedFilters) != len(wantFilterSets) {
+			t.Fatalf("expected %d DescribeNetworkInterfaces calls, got %d", len(wantFilterSets), len(capturedFilters))
+		}
+		for i, want := range wantFilterSets {
+			got := map[string]string{}
+			for _, f := range capturedFilters[i] {
+				if f.Name != nil && len(f.Values) == 1 {
+					got[*f.Name] = f.Values[0]
+				}
+			}
+			for k, v := range want {
+				if got[k] != v {
+					t.Errorf("call %d: filter %q = %q, want %q", i, k, got[k], v)
+				}
+			}
+			if len(got) != len(want) {
+				t.Errorf("call %d: got %d filters %v, want %d", i, len(got), got, len(want))
 			}
 		}
-		for k, v := range wantFilters {
-			if gotFilters[k] != v {
-				t.Errorf("filter %q = %q, want %q", k, gotFilters[k], v)
-			}
+	})
+
+	t.Run("deduplicates ENIs matched by both filter sets", func(t *testing.T) {
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{elbENI}}, nil
+			},
+		}
+
+		enis, err := listELBNetworkInterfaces(context.Background(), mock, vpcID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(enis) != 1 {
+			t.Errorf("expected 1 deduplicated ENI, got %d", len(enis))
 		}
 	})
 
@@ -908,8 +934,10 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if attempts != 1 {
-			t.Errorf("expected 1 attempt before cancellation, got %d", attempts)
+		// One poll iteration issues two describe calls (NLB and ALB/Classic
+		// filter sets); cancellation must prevent a second iteration.
+		if attempts != 2 {
+			t.Errorf("expected 2 describe calls (one poll) before cancellation, got %d", attempts)
 		}
 	})
 }
