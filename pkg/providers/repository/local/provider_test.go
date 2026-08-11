@@ -193,3 +193,43 @@ func TestProviderValidate(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveDir(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("explicit path is returned", func(t *testing.T) {
+		dir, err := ResolveDir(ctx, "test", repoConfig(map[string]any{"path": "/srv/gitops"}))
+		if err != nil {
+			t.Fatalf("ResolveDir() unexpected error: %v", err)
+		}
+		if dir != "/srv/gitops" {
+			t.Errorf("ResolveDir() = %q, want %q", dir, "/srv/gitops")
+		}
+	})
+
+	t.Run("empty config resolves to the per-project default", func(t *testing.T) {
+		dir, err := ResolveDir(ctx, "test", repoConfig(map[string]any{}))
+		if err != nil {
+			t.Fatalf("ResolveDir() unexpected error: %v", err)
+		}
+		if want := config.DefaultLocalRepositoryPath("test"); dir != want {
+			t.Errorf("ResolveDir() = %q, want %q", dir, want)
+		}
+	})
+
+	t.Run("absent provider config resolves to the per-project default", func(t *testing.T) {
+		dir, err := ResolveDir(ctx, "test", repoConfig(nil))
+		if err != nil {
+			t.Fatalf("ResolveDir() unexpected error: %v", err)
+		}
+		if want := config.DefaultLocalRepositoryPath("test"); dir != want {
+			t.Errorf("ResolveDir() = %q, want %q", dir, want)
+		}
+	})
+
+	t.Run("malformed config errors", func(t *testing.T) {
+		if _, err := ResolveDir(ctx, "test", repoConfig(map[string]any{"path": map[string]any{}})); err == nil {
+			t.Error("ResolveDir() expected error, got nil")
+		}
+	})
+}
