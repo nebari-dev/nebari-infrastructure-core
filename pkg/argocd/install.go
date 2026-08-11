@@ -84,6 +84,17 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 		WithAction("installing").
 		WithMetadata("cluster_name", cfg.ProjectName))
 
+	// Reject unknown Source kinds up front: the dispatch sites below (the
+	// local hostPath mount and the remote credentials Secret) are guarded type
+	// assertions that would silently skip a kind they do not recognize.
+	switch src.(type) {
+	case repository.LocalSource, repository.RemoteSource:
+	default:
+		err := fmt.Errorf("unsupported repository source type %T", src)
+		span.RecordError(err)
+		return err
+	}
+
 	// Get kubeconfig from provider
 	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {

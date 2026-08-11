@@ -347,15 +347,18 @@ func (c *Client) resolveRepositorySource(ctx context.Context, cfg *config.Nebari
 }
 
 // gitAuth maps a resolved repository.Auth onto the git client's auth. A nil auth
-// (e.g. a local repository) yields the zero Auth (anonymous).
-func gitAuth(a repository.Auth) git.Auth {
+// (e.g. a local repository) yields the zero Auth (anonymous); an unrecognized
+// kind is an error rather than a silent anonymous fallback.
+func gitAuth(a repository.Auth) (git.Auth, error) {
 	switch a := a.(type) {
+	case nil:
+		return git.Auth{}, nil
 	case repository.TokenAuth:
-		return git.NewAuthToken(a.Token)
+		return git.NewAuthToken(a.Token), nil
 	case repository.SSHKeyAuth:
-		return git.NewSSHKeyAuth(a.Key, a.InsecureSkipHostKeyVerification)
+		return git.NewSSHKeyAuth(a.Key, a.InsecureSkipHostKeyVerification), nil
 	default:
-		return git.Auth{}
+		return git.Auth{}, fmt.Errorf("unsupported repository auth type %T", a)
 	}
 }
 
@@ -479,7 +482,11 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 	case repository.RemoteSource:
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing GitOps repository").
 			WithMetadata("url", s.URL))
-		auth := gitAuth(s.PushAuth)
+		auth, err := gitAuth(s.PushAuth)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
 		if err := gitClient.ValidateAuth(ctx, s.URL, auth); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("git authentication failed: %w", err)
