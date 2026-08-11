@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -846,7 +847,7 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 			},
 		}
 
-		if err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute); err != nil {
+		if err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute, time.Millisecond); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -893,16 +894,41 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error on timeout when ENIs persist", func(t *testing.T) {
+	t.Run("polls until the ENIs are released", func(t *testing.T) {
+		calls := 0
+		mock := &mockEC2Client{
+			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+				calls++
+				// First poll iteration (two describe calls) still sees the
+				// ENI; later iterations see it released.
+				if calls <= 2 {
+					return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{elbENI}}, nil
+				}
+				return &ec2.DescribeNetworkInterfacesOutput{}, nil
+			},
+		}
+
+		if err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute, time.Millisecond); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if calls < 3 {
+			t.Errorf("expected at least a second poll iteration, got %d describe calls", calls)
+		}
+	})
+
+	t.Run("returns error naming the ENIs on timeout", func(t *testing.T) {
 		mock := &mockEC2Client{
 			DescribeNetworkInterfacesFunc: func(ctx context.Context, params *ec2.DescribeNetworkInterfacesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
 				return &ec2.DescribeNetworkInterfacesOutput{NetworkInterfaces: []ec2types.NetworkInterface{elbENI}}, nil
 			},
 		}
 
-		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, 0)
+		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, 0, time.Millisecond)
 		if err == nil {
 			t.Fatal("expected timeout error, got nil")
+		}
+		if !strings.Contains(err.Error(), "eni-111") {
+			t.Errorf("expected error to name the lingering ENI, got: %v", err)
 		}
 	})
 
@@ -913,7 +939,7 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 			},
 		}
 
-		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute)
+		err := waitForELBNetworkInterfacesRelease(context.Background(), mock, vpcID, time.Minute, time.Millisecond)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -930,7 +956,7 @@ func TestWaitForELBNetworkInterfacesRelease(t *testing.T) {
 			},
 		}
 
-		err := waitForELBNetworkInterfacesRelease(ctx, mock, vpcID, time.Minute)
+		err := waitForELBNetworkInterfacesRelease(ctx, mock, vpcID, time.Minute, time.Millisecond)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

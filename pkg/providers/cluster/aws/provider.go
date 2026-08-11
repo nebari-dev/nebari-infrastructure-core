@@ -674,46 +674,6 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
-	// Stage 3: wait for ELB-owned network interfaces to be released before
-	// tofu destroy touches the VPC. Stages 1 and 2 only guarantee the load
-	// balancers are gone from the ELB API; their ENIs are released lazily and
-	// hold public IPs that block subnet and internet-gateway deletion while
-	// they linger. Skipped for user-provided VPCs, which tofu does not delete
-	// (and which may host other clusters' load balancers). The VPC ID comes
-	// from the terraform state rather than EKS so the gate still runs when
-	// retrying a destroy that already deleted the cluster.
-	if awsCfg.CreatesVPC() {
-		vpcID, vpcErr := vpcIDFromState(ctx, tf)
-		switch {
-		case vpcErr != nil:
-			span.RecordError(vpcErr)
-			if !opts.Force {
-				return fmt.Errorf("failed to determine cluster VPC for ELB network interface wait: %w", vpcErr)
-			}
-			forcedErrs = append(forcedErrs, fmt.Errorf("determine cluster VPC for ELB network interface wait: %w", vpcErr))
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cannot determine cluster VPC, skipping ELB network interface wait and continuing with --force: %v", vpcErr)).
-				WithResource("network-interface").WithAction("waiting"))
-		case vpcID == "":
-			status.Send(ctx, status.NewUpdate(status.LevelInfo, "No VPC in terraform state; skipping ELB network interface wait").
-				WithResource("network-interface").WithAction("waiting"))
-		default:
-			// The --timeout flag bounds the whole destroy, so this single wait should not exceed it.
-			eniTimeout := awsCfg.LoadBalancerENIReleaseTimeout()
-			if opts.Timeout > 0 {
-				eniTimeout = min(eniTimeout, opts.Timeout)
-			}
-			if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, eniTimeout); err != nil {
-				span.RecordError(err)
-				if !opts.Force {
-					return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
-				}
-				forcedErrs = append(forcedErrs, fmt.Errorf("wait for ELB network interface release: %w", err))
-				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("ELB network interfaces still present, continuing with --force: %v", err)).
-					WithResource("network-interface").WithAction("waiting"))
-			}
-		}
-	}
-
 	// Preserve a retained Longhorn backup bucket: drop it (and its dependent
 	// resources) from Terraform state so `tofu destroy` leaves it — and its
 	// backups — intact. Only when NIC provisioned it and retain_on_destroy is
@@ -736,6 +696,46 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 			if err := uninstallGPUOperator(ctx, kubeconfigBytes); err != nil {
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("GPU Operator uninstall failed, continuing: %v", err)).
 					WithResource("gpu-operator").WithAction("uninstalling"))
+			}
+		}
+	}
+
+	// Last step before tofu destroy. Wait for ELB-owned network
+	// interfaces to be released. The load balancer cleanup above only
+	// guarantees the LBs are gone from the ELB API. Their ENIs are released
+	// lazily and hold public IPs that block subnet and internet-gateway
+	// deletion while they linger. Skipped for user-provided VPCs, which tofu
+	// does not delete (and which may host other clusters' load balancers).
+	// The VPC ID comes from the terraform state rather than EKS so the gate
+	// still runs when retrying a destroy that already deleted the cluster.
+	if awsCfg.CreatesVPC() {
+		vpcID, vpcErr := vpcIDFromState(ctx, tf)
+		switch {
+		case vpcErr != nil:
+			span.RecordError(vpcErr)
+			if !opts.Force {
+				return fmt.Errorf("failed to determine cluster VPC for ELB network interface wait: %w", vpcErr)
+			}
+			forcedErrs = append(forcedErrs, fmt.Errorf("determine cluster VPC for ELB network interface wait: %w", vpcErr))
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cannot determine cluster VPC, skipping ELB network interface wait and continuing with --force: %v", vpcErr)).
+				WithResource("network-interface").WithAction("waiting"))
+		case vpcID == "":
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "No VPC in terraform state; skipping ELB network interface wait").
+				WithResource("network-interface").WithAction("waiting"))
+		default:
+			// The --timeout flag bounds the whole destroy, so this single wait should not exceed it.
+			eniTimeout := awsCfg.LoadBalancerENIReleaseTimeout()
+			if opts.Timeout > 0 {
+				eniTimeout = min(eniTimeout, opts.Timeout)
+			}
+			if err := waitForELBNetworkInterfacesRelease(ctx, ec2ClientForCleanup, vpcID, eniTimeout, defaultENIPollInterval); err != nil {
+				span.RecordError(err)
+				if !opts.Force {
+					return fmt.Errorf("failed waiting for ELB network interfaces to release: %w", err)
+				}
+				forcedErrs = append(forcedErrs, fmt.Errorf("wait for ELB network interface release: %w", err))
+				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("ELB network interfaces still present, continuing with --force: %v", err)).
+					WithResource("network-interface").WithAction("waiting"))
 			}
 		}
 	}

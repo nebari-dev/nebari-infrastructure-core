@@ -196,12 +196,17 @@ func listELBNetworkInterfaces(ctx context.Context, client EC2Client, vpcID strin
 	return enis, nil
 }
 
+// defaultENIPollInterval is how often the ENI release wait re-queries EC2.
+// Injectable via the pollInterval parameter so tests can drive the loop
+// through multiple polls without real sleeps.
+const defaultENIPollInterval = 15 * time.Second
+
 // waitForELBNetworkInterfacesRelease polls until no ELB-family ENIs remain in
 // the VPC, or timeout elapses. Deleting a load balancer (whether via its
 // Kubernetes Service or the ELB API) only removes it from the API. Its ENIs
 // are released lazily and while they linger they hold public IPs that make subnet
 // and internet-gateway deletion fail with DependencyViolation.
-func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, vpcID string, timeout time.Duration) error {
+func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, vpcID string, timeout, pollInterval time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.waitForELBNetworkInterfacesRelease")
 	defer span.End()
@@ -214,7 +219,6 @@ func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, v
 		WithResource("network-interface").WithAction("waiting"))
 
 	deadline := time.Now().Add(timeout)
-	const pollInterval = 15 * time.Second
 
 	for {
 		enis, err := listELBNetworkInterfaces(ctx, client, vpcID)
@@ -226,12 +230,15 @@ func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, v
 		remaining := len(enis)
 		if remaining == 0 {
 			span.SetAttributes(attribute.Int("elb_network_interface_stragglers", 0))
+			status.Send(ctx, status.NewUpdate(status.LevelSuccess, fmt.Sprintf("No lingering ELB network interfaces in VPC %s", vpcID)).
+				WithResource("network-interface").WithAction("waiting"))
 			return nil
 		}
 
 		if time.Now().After(deadline) {
 			span.SetAttributes(attribute.Int("elb_network_interface_stragglers", remaining))
-			return fmt.Errorf("%d ELB network interface(s) still present in VPC %s after %s", remaining, vpcID, timeout)
+			return fmt.Errorf("%d ELB network interface(s) still present in VPC %s after %s: %s",
+				remaining, vpcID, timeout, strings.Join(describeENIs(enis), ", "))
 		}
 
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Waiting for %d ELB network interface(s) to be released", remaining)).
@@ -243,6 +250,20 @@ func waitForELBNetworkInterfacesRelease(ctx context.Context, client EC2Client, v
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// describeENIs renders network interfaces as "eni-id (description)" strings
+// so a timed-out wait names the interfaces the operator needs to look at.
+func describeENIs(enis []ec2types.NetworkInterface) []string {
+	rendered := make([]string, 0, len(enis))
+	for _, eni := range enis {
+		entry := aws.ToString(eni.NetworkInterfaceId)
+		if desc := aws.ToString(eni.Description); desc != "" {
+			entry += " (" + desc + ")"
+		}
+		rendered = append(rendered, entry)
+	}
+	return rendered
 }
 
 // ELBv2Client defines the Application/Network Load Balancer operations needed
@@ -260,9 +281,10 @@ type ELBv2Client interface {
 const clusterTagELBv2 = "elbv2.k8s.aws/cluster"
 
 // cleanupELBv2LoadBalancers deletes all NLBs/ALBs tagged
-// elbv2.k8s.aws/cluster=<clusterName>. Waits for each deletion to complete via
-// the elbv2 LoadBalancersDeletedWaiter so ENIs are released before the caller
-// moves on to VPC teardown.
+// elbv2.k8s.aws/cluster=<clusterName>. The elbv2 LoadBalancersDeletedWaiter
+// only confirms each load balancer is gone from the ELB API; the ENIs it
+// leaves behind are released lazily afterwards, which is what
+// waitForELBNetworkInterfacesRelease gates on before VPC teardown.
 func cleanupELBv2LoadBalancers(ctx context.Context, client ELBv2Client, clusterName string) (int, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.cleanupELBv2LoadBalancers")
