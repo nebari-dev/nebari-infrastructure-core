@@ -10,7 +10,7 @@ import (
 
 func TestProviderName(t *testing.T) {
 	p := NewProvider()
-	if got := p.Name(); got != providerName {
+	if got := p.Name(); got != ProviderName {
 		t.Errorf("Name() = %q, want \"azure\"", got)
 	}
 }
@@ -19,7 +19,7 @@ func TestProviderValidateRejectsBadConfig(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			providerName: map[string]any{
+			ProviderName: map[string]any{
 				// missing region — must fail
 				"node_groups": map[string]any{
 					"system": map[string]any{
@@ -43,7 +43,7 @@ func TestProviderValidateRequiresSubscriptionID(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			providerName: map[string]any{
+			ProviderName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"system": map[string]any{
@@ -67,7 +67,7 @@ func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			providerName: map[string]any{
+			ProviderName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"s": map[string]any{
@@ -91,7 +91,7 @@ func TestProviderDestroyFailsWithoutSubscription(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			providerName: map[string]any{
+			ProviderName: map[string]any{
 				"region": "eastus",
 				"node_groups": map[string]any{
 					"s": map[string]any{
@@ -126,7 +126,7 @@ func TestProviderSummaryWithConfig(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{
 		Providers: map[string]any{
-			providerName: map[string]any{
+			ProviderName: map[string]any{
 				"region":              "eastus",
 				"resource_group_name": "rg-1",
 				"node_groups": map[string]any{

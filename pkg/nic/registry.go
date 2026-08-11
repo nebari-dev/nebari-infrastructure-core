@@ -53,26 +53,26 @@ func (c *Client) ProviderNames(ctx context.Context) *Providers {
 func defaultRegistry(ctx context.Context) (*registry.Registry, error) {
 	r := registry.NewRegistry()
 
-	if err := r.ClusterProviders.Register(ctx, "aws", clusteraws.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clusteraws.ProviderName, clusteraws.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register aws cluster provider: %w", err)
 	}
-	if err := r.ClusterProviders.Register(ctx, "gcp", clustergcp.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clustergcp.ProviderName, clustergcp.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register gcp cluster provider: %w", err)
 	}
-	if err := r.ClusterProviders.Register(ctx, "azure", clusterazure.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clusterazure.ProviderName, clusterazure.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register azure cluster provider: %w", err)
 	}
-	if err := r.ClusterProviders.Register(ctx, "local", clusterlocal.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clusterlocal.ProviderName, clusterlocal.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register local cluster provider: %w", err)
 	}
-	if err := r.ClusterProviders.Register(ctx, "hetzner", clusterhetzner.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clusterhetzner.ProviderName, clusterhetzner.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register hetzner cluster provider: %w", err)
 	}
-	if err := r.ClusterProviders.Register(ctx, "existing", clusterexisting.NewProvider()); err != nil {
+	if err := r.ClusterProviders.Register(ctx, clusterexisting.ProviderName, clusterexisting.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register existing cluster provider: %w", err)
 	}
 
-	if err := r.DNSProviders.Register(ctx, "cloudflare", dnscloudflare.NewProvider()); err != nil {
+	if err := r.DNSProviders.Register(ctx, dnscloudflare.ProviderName, dnscloudflare.NewProvider()); err != nil {
 		return nil, fmt.Errorf("register cloudflare dns provider: %w", err)
 	}
 

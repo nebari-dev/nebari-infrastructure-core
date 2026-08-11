@@ -16,7 +16,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
-const providerName = "hetzner"
+const ProviderName = "hetzner"
 
 // Provider implements the Hetzner Cloud provider using hetzner-k3s.
 type Provider struct{}
@@ -26,7 +26,7 @@ func NewProvider() *Provider {
 	return &Provider{}
 }
 
-func (p *Provider) Name() string { return providerName }
+func (p *Provider) Name() string { return ProviderName }
 
 // parseConfig extracts and validates the Hetzner config from ClusterConfig.
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
@@ -47,7 +47,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -90,7 +90,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -253,7 +253,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
