@@ -7,9 +7,6 @@ import (
 )
 
 // Provider provisions or resolves the GitOps repository for a deployment.
-//
-// Implementations must not depend on pkg/git or go-git: their job is to produce
-// a Source, not to operate on the repository.
 type Provider interface {
 	// Name returns the provider name (e.g. "local", "existing").
 	Name() string
