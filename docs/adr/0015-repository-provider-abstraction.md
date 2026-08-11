@@ -1,4 +1,4 @@
-# ADR-0007: Repository Provider Abstraction for GitOps Bootstrap
+# ADR-0015: Repository Provider Abstraction for GitOps Bootstrap
 
 ## Status
 
@@ -55,7 +55,7 @@ repository:
 # or, for local/dev clusters (kind):
 repository:
   local:
-    path: /tmp/my-gitops          # optional; defaults to a per-project temp dir
+    path: /home/user/my-gitops    # optional; defaults to ~/.nic/gitops/<project_name>
 ```
 
 The `repository:` block is **required**. The previous implicit modes (auto-created local directory on kind, silently skipping GitOps bootstrap on cloud clusters without a git config) are gone: the skip mode produced a cluster where ArgoCD managed nothing, since every foundational service is synced from the repository via the root App-of-Apps. A config without the block now fails validation with guidance instead of deploying a half-functional cluster.
@@ -67,7 +67,7 @@ The `repository:` block is **required**. The previous implicit modes (auto-creat
   - `Source` is a sealed interface with two kinds: `LocalSource{Dir, Branch, Path}` and `RemoteSource{URL, Branch, Path, PushAuth, ReadAuth}`. Shared accessors (`RepoURL()`, `GetBranch()`, `RepoPath()`) serve consumers that do not care about the kind; genuine dispatch points type-switch on the concrete kinds.
   - `Auth` is a sealed interface with two kinds: `TokenAuth` and `SSHKeyAuth`, holding values already resolved from their environment variables. `RemoteSource.ArgoCDAuth()` returns `ReadAuth`, falling back to `PushAuth` when no separate read credential is configured.
 - **`pkg/providers/repository/existing`**: resolves a pre-existing remote repository into a `RemoteSource`. Auth config is a tagged union (`auth: token: {env: X}` or `auth: ssh: {env: X}`) validated as exactly-one-of.
-- **`pkg/providers/repository/local`**: provisions a directory on disk as a `LocalSource`, defaulting to a per-project directory under the OS temp dir. The zero-dependency option for local/dev clusters.
+- **`pkg/providers/repository/local`**: provisions a directory on disk as a `LocalSource`, defaulting to `~/.nic/gitops/<project_name>` (falling back to a per-project directory under the OS temp dir only when the home directory cannot be resolved). The zero-dependency option for local/dev clusters.
 - **`pkg/git`**: rewritten as a concrete `Client` struct with no interface and no upward dependencies. The acquisition split is explicit: `Init(ctx, dir)` opens or initializes a local repository in place; `ValidateAuth`/`Clone` acquire a remote one into a managed temp dir. `CommitAndPush` is split into `Commit` and `Push` so local repositories simply never push.
 
 ### Wiring

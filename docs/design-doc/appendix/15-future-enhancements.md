@@ -4,7 +4,7 @@
 >
 > Some items below have shipped in part:
 >
-> - **§2 Git Repository Provisioning & CI/CD**: the **consumption** side is done (the `repository:` provider block with `existing` and `local` providers, env-var auth). The **provisioning** side (`nic init` creating a new repo, auto-generated workflows) is still future work; the repository-provider seam (ADR-0007) is where a forge-backed provider would slot in.
+> - **§2 Git Repository Provisioning & CI/CD**: the **consumption** side is done (the `repository:` provider block with `existing` and `local` providers, env-var auth). The **provisioning** side (`nic init` creating a new repo, auto-generated workflows) is still future work; the repository-provider seam (ADR-0015) is where a forge-backed provider would slot in.
 > - **Secrets management** via `.env` + env-var indirection is shipped for MVP (see [`14-open-questions.md`](14-open-questions.md) §14.2).
 
 This document provides detailed specifications for future enhancements planned for NIC.

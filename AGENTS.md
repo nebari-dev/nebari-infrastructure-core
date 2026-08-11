@@ -10,12 +10,13 @@ This file follows the [AGENTS.md](https://agents.md) convention and is read by C
 
 NIC is organized around pluggable **providers**. A provider is a small Go interface with one implementation per backend; each provider is free to use whatever tool fits the backend best (OpenTofu, a vendor CLI, a Kubernetes-native installer, a REST API). The CLI never branches on provider names - it depends only on provider interfaces.
 
-The codebase currently has two provider categories in tree:
+The codebase currently has three provider categories in tree:
 
 - **Cluster providers** (`pkg/providers/cluster/`) - bring up the Kubernetes cluster
 - **DNS providers** (`pkg/providers/dns/`) - manage DNS records pointing at the cluster's load balancer
+- **Repository providers** (`pkg/providers/repository/`) - provision or resolve the GitOps repository that ArgoCD syncs foundational software from
 
-More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
+More categories (certificate issuers, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
 
 ### Cluster Providers
@@ -183,12 +184,13 @@ DNS providers are stateless - domain and config are passed to each call. `cloudf
 
 ### The Provider Registry
 
-`pkg/registry/registry.go` holds both provider categories behind one thread-safe struct:
+`pkg/registry/registry.go` holds all provider categories behind one thread-safe struct:
 
 ```go
 type Registry struct {
-    ClusterProviders *ProviderList[provider.Provider]
-    DNSProviders     *ProviderList[dnsprovider.DNSProvider]
+    ClusterProviders    *ProviderList[cluster.Provider]
+    DNSProviders        *ProviderList[dns.Provider]
+    RepositoryProviders *ProviderList[repository.Provider]
 }
 ```
 

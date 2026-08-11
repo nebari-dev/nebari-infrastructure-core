@@ -254,7 +254,7 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 **Location:** `pkg/providers/repository/`
 
-**Purpose:** GitOps repository provider abstraction. Providers resolve (or create) the repository that ArgoCD syncs foundational software from, and return a typed `Source` describing how to reach it. The `repository:` config block is required and follows the same provider-name-as-key pattern as `cluster:` and `dns:`. See [ADR-0007](docs/adr/0007-repository-provider-abstraction.md) for the design rationale.
+**Purpose:** GitOps repository provider abstraction. Providers resolve (or create) the repository that ArgoCD syncs foundational software from, and return a typed `Source` describing how to reach it. The `repository:` config block is required and follows the same provider-name-as-key pattern as `cluster:` and `dns:`. See [ADR-0015](docs/adr/0015-repository-provider-abstraction.md) for the design rationale.
 
 ### Core Repository Infrastructure
 
@@ -549,13 +549,13 @@ cmd/nic/
 ### Finding Documentation
 
 **"How does stateless operation work?"**
-- `docs/architecture/06-stateless-operation.md`
+- `docs/design-doc/architecture/05-state-management.md`
 
 **"What are the design decisions?"**
-- `docs/architecture/` - Architectural Decision Records (ADRs)
+- `docs/adr/` - Architecture Decision Records (ADRs)
 
 **"How do I test?"**
-- `docs/operations/` - Testing procedures
+- `docs/design-doc/operations/` - Testing procedures
 
 ## Version Information
 

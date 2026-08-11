@@ -30,7 +30,7 @@ Numbering note: this file is the chapter immediately following the operations se
 
 ## 14.5 Platform Automation Questions
 
-15. **Git Repository Provisioning**: NIC **consumes** an existing GitOps repo today (the `repository.existing` provider in `pkg/providers/repository`). The **provisioning** side (auto-create the repo on GitHub/GitLab/Gitea, configure protections, etc.) is still open — the repository-provider seam (ADR-0007) is where a forge-backed provider would slot in. See `15-future-enhancements.md` §2.
+15. **Git Repository Provisioning**: NIC **consumes** an existing GitOps repo today (the `repository.existing` provider in `pkg/providers/repository`). The **provisioning** side (auto-create the repo on GitHub/GitLab/Gitea, configure protections, etc.) is still open — the repository-provider seam (ADR-0015) is where a forge-backed provider would slot in. See `15-future-enhancements.md` §2.
 
 16. **CI/CD Workflow Generation**: Auto-generate validation/deploy/drift workflows. Still open.
 
