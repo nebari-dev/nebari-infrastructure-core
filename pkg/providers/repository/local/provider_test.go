@@ -173,4 +173,23 @@ func TestProviderValidate(t *testing.T) {
 			t.Errorf("Validate() error = %v, want error containing %q", err, "must be an absolute directory")
 		}
 	})
+
+	t.Run("path occupied by a file is rejected", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "gitops")
+		if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+
+		cfg := repoConfig(map[string]any{"path": file})
+		if err := p.Validate(ctx, "test", cfg); err == nil || !strings.Contains(err.Error(), "is not a directory") {
+			t.Errorf("Validate() error = %v, want error containing %q", err, "is not a directory")
+		}
+	})
+
+	t.Run("missing path is valid", func(t *testing.T) {
+		cfg := repoConfig(map[string]any{"path": filepath.Join(t.TempDir(), "does-not-exist-yet")})
+		if err := p.Validate(ctx, "test", cfg); err != nil {
+			t.Errorf("Validate() unexpected error: %v", err)
+		}
+	})
 }

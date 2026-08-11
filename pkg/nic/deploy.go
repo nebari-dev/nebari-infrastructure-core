@@ -97,6 +97,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	// Offline repository provider validation, so a malformed repository config
+	// (e.g. missing url or ambiguous auth) fails here instead of after the
+	// cluster has been provisioned. Runs in dry-run too, unlike Provision.
+	if err := validateRepositoryProvider(ctx, cfg, reg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Configuration parsed successfully").
 		WithResource("config").
 		WithAction("validated").
@@ -145,6 +153,17 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			WithMetadata("provider", cfg.Cluster.ProviderName()).
 			WithMetadata("error", err.Error()))
 		return nil, fmt.Errorf("validate backups configuration: %w", err)
+	}
+
+	// Reject the local repository provider on a cluster that cannot host it
+	// before provisioning any infrastructure. The source-kind check after
+	// repository provisioning below remains the backstop for providers whose
+	// LocalSource cannot be predicted from the config alone.
+	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
+			WithMetadata("error", err.Error()))
+		return nil, err
 	}
 
 	// Resolve the top-level trust bundle once, here at the orchestration layer.

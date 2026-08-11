@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -96,6 +97,16 @@ func (p *Provider) Validate(ctx context.Context, projectName string, repoConfig 
 	}
 
 	if err := localCfg.Validate(); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// A missing directory is valid: Provision creates it later. Only reject
+	// when something already exists at the resolved path and is not a
+	// directory, which Provision could not repair.
+	dir := resolveDir(localCfg, projectName)
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		err := fmt.Errorf("repository path exists but is not a directory: %s", dir)
 		span.RecordError(err)
 		return err
 	}

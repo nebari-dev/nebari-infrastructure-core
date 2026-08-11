@@ -8,6 +8,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
+	repositorylocal "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
@@ -33,6 +34,13 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	// Offline repository provider validation (well-formed provider config)
+	// runs here and in deploy for the same reason.
+	if err := validateRepositoryProvider(ctx, cfg, c.registry); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn.
 	// InfraSettings is a pure getter (no cloud I/O), so we can consult the
 	// registered provider here and catch the misconfiguration at validate time
@@ -42,7 +50,12 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		span.RecordError(err)
 		return fmt.Errorf("get cluster provider %q: %w", cfg.Cluster.ProviderName(), err)
 	}
-	if err := ensureBackupsHaveLonghorn(cfg, clusterProvider.InfraSettings(cfg.Cluster).StorageClass); err != nil {
+	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
@@ -65,6 +78,38 @@ func validateDNSProvider(ctx context.Context, cfg *config.NebariConfig, reg *reg
 	}
 	if err := dnsProvider.Validate(ctx, cfg.Domain, cfg.DNS.ProviderConfig(), dns.ValidateOptions{CheckCreds: false}); err != nil {
 		return fmt.Errorf("invalid dns: %w", err)
+	}
+	return nil
+}
+
+// validateRepositoryProvider runs the registered repository provider's offline
+// validation (e.g. url and exactly one auth method for existing, absolute path
+// for local). Called by validate and deploy (including dry-run) so misconfigurations
+// surface before any infrastructure is provisioned. Destroy and kubeconfig deliberately
+// skip it so a cluster with a stale repository config remains destroyable. Presence of
+// the repository block itself is enforced by cfg.Validate, so a nil block is a no-op here.
+func validateRepositoryProvider(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) error {
+	if cfg.Repository == nil {
+		return nil
+	}
+	repoProvider, err := reg.RepositoryProviders.Get(ctx, cfg.Repository.ProviderName())
+	if err != nil {
+		return fmt.Errorf("get repository provider %q: %w", cfg.Repository.ProviderName(), err)
+	}
+	if err := repoProvider.Validate(ctx, cfg.ProjectName, cfg.Repository); err != nil {
+		return fmt.Errorf("invalid repository: %w", err)
+	}
+	return nil
+}
+
+// ensureLocalRepositorySupported rejects the local repository provider on a
+// cluster that cannot host its directory (only local/kind clusters can mount
+// one). The name-based check catches this at validate time; deploy re-checks
+// the provisioned source kind, which also covers out-of-tree providers that
+// return a LocalSource.
+func ensureLocalRepositorySupported(cfg *config.NebariConfig, supportsLocalGitOps bool) error {
+	if cfg.Repository != nil && cfg.Repository.ProviderName() == repositorylocal.ProviderName && !supportsLocalGitOps {
+		return fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repository provider", cfg.Cluster.ProviderName())
 	}
 	return nil
 }
