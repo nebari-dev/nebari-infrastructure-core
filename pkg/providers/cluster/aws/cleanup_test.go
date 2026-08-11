@@ -588,9 +588,11 @@ func TestCleanupLBCManagedSecurityGroups_PassesExpectedFilters(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Filtering by the cluster tag alone is deliberate: it matches both the
+	// frontend SGs (ManagedLBSecurityGroup) and the shared backend SG
+	// (backend-sg), which LBC may never garbage-collect during teardown.
 	wantFilterNames := map[string]string{
-		"tag:" + clusterTagELBv2:       clusterName,
-		"tag:service.k8s.aws/resource": "ManagedLBSecurityGroup",
+		"tag:" + clusterTagELBv2: clusterName,
 	}
 	gotFilterNames := map[string]string{}
 	for _, f := range capturedFilters {
@@ -602,6 +604,9 @@ func TestCleanupLBCManagedSecurityGroups_PassesExpectedFilters(t *testing.T) {
 		if gotFilterNames[k] != v {
 			t.Errorf("filter %q = %q, want %q", k, gotFilterNames[k], v)
 		}
+	}
+	if len(gotFilterNames) != len(wantFilterNames) {
+		t.Errorf("got %d filters %v, want %d — extra filters would exclude the backend SG", len(gotFilterNames), gotFilterNames, len(wantFilterNames))
 	}
 }
 

@@ -483,14 +483,14 @@ func cleanupK8sSecurityGroupsByPrefix(ctx context.Context, client EC2Client, tag
 }
 
 // cleanupLBCManagedSecurityGroups deletes security groups managed by the AWS
-// Load Balancer Controller for the given cluster. LBC tags every frontend SG
-// it creates with two tags:
-//   - elbv2.k8s.aws/cluster=<clusterName>
-//   - service.k8s.aws/resource=ManagedLBSecurityGroup
+// Load Balancer Controller for the given cluster. LBC tags every SG it owns
+// with elbv2.k8s.aws/cluster=<clusterName>. That covers both the per-LB
+// frontend SGs (also tagged service.k8s.aws/resource=ManagedLBSecurityGroup)
+// and the cluster's shared backend SG (k8s-traffic-<cluster>-<hash>, tagged
+// elbv2.k8s.aws/resource=backend-sg).
 //
-// The SG name follows the pattern k8s-<ns-trunc>-<svc-trunc>-<hash>, which is
-// not a fixed prefix - name-prefix matching is unreliable. Tag filtering is the
-// supported way to find them.
+// SG names carry no fixed prefix, so name-prefix matching is unreliable. Tag
+// filtering by the cluster tag alone is the supported way to find them all.
 func cleanupLBCManagedSecurityGroups(ctx context.Context, client EC2Client, clusterName string) (int, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.cleanupLBCManagedSecurityGroups")
@@ -502,10 +502,6 @@ func cleanupLBCManagedSecurityGroups(ctx context.Context, client EC2Client, clus
 			{
 				Name:   aws.String("tag:" + clusterTagELBv2),
 				Values: []string{clusterName},
-			},
-			{
-				Name:   aws.String("tag:service.k8s.aws/resource"),
-				Values: []string{"ManagedLBSecurityGroup"},
 			},
 		},
 	})
