@@ -342,6 +342,15 @@ func SomeFunction(ctx context.Context, ...) error {
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
 
+### Adding a New Repository Provider
+
+1. Create `pkg/providers/repository/<name>/`.
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
+4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
+5. Update `examples/` configs with the new `repository:` provider block.
+6. Cover the provider with table-driven unit tests (see `pkg/providers/repository/existing/` for the pattern).
+
 ### Adding a New Configuration Field
 
 1. Decide whether the field is generic (top-level on `NebariConfig`) or provider-specific (decoded by the provider from `ProviderConfig()`).
@@ -476,6 +485,6 @@ Run before every commit:
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
 6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
-7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
+7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.
