@@ -147,7 +147,7 @@ cluster:
     #   service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     # aws_load_balancer_controller:
     #   enabled: true
-    #   # chart_version: "3.2.1"  # optional override; tracks latest v3.x by default
+    #   # chart_version: "3.4.3"  # hard-pinned by nic; set this to override
 
     # Scheme applied to the Gateway's NLB. Defaults to "internet-facing".
     # Set to "internal" for private-only VPCs (no public subnets / no IGW);
