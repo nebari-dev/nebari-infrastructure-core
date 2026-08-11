@@ -1,0 +1,34 @@
+project_name: hetzner-ci
+domain: hetzner-ci.nebari.dev
+
+certificate:
+  type: letsencrypt
+  acme:
+    email: ci@nebari.dev
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+
+dns:
+  cloudflare:
+    zone_name: nebari.dev
+
+git_repository:
+  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+  branch: hetzner
+  path: "clusters/hetzner-ci"
+  auth:
+    token_env: GIT_TOKEN
+
+cluster:
+  hetzner:
+    location: fsn1
+    kubernetes_version: "1.36"
+
+    node_groups:
+      master:
+        instance_type: cpx32
+        count: 1
+        master: true
+
+      workers:
+        instance_type: cpx32
+        count: 1
