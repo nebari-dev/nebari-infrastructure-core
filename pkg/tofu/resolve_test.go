@@ -46,11 +46,30 @@ func TestResolve(t *testing.T) {
 		skipWindows bool
 	}{
 		{
+			// This row deliberately pins compatibleVersion(Version): it feeds
+			// NIC's own pinned download Version through the external-binary
+			// compatibility check. If a Version bump ever falls outside
+			// [MinVersion, 2.0.0), this row fails, and that failure is a
+			// prompt to revisit the floor deliberately, not an accident.
 			name:     "NIC_TOFU_PATH hit",
 			env:      "/opt/tofu/bin/tofu",
 			statInfo: execInfo,
 			version:  Version,
 			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: Version, Source: SourceOverride},
+		},
+		{
+			name:     "NIC_TOFU_PATH with surrounding whitespace is trimmed",
+			env:      "  /opt/tofu/bin/tofu\n",
+			statInfo: execInfo,
+			version:  Version,
+			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: Version, Source: SourceOverride},
+		},
+		{
+			name:    "whitespace-only NIC_TOFU_PATH is treated as unset",
+			env:     "   ",
+			pathHit: "/usr/local/bin/tofu",
+			version: "1.12.5",
+			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.12.5", Source: SourcePath},
 		},
 		{
 			name:     "NIC_TOFU_PATH hit with newer compatible version",
@@ -137,6 +156,10 @@ func TestResolve(t *testing.T) {
 				t.Skip("executable-bit check does not apply on windows")
 			}
 
+			// Record the paths handed to stat and the version probe so a
+			// regression that validates one binary but resolves another is
+			// caught, not silently absorbed by path-agnostic mocks.
+			var statPaths, versionPaths []string
 			r := &resolver{
 				getenv: func(key string) string {
 					if key == EnvTofuPath {
@@ -151,17 +174,37 @@ func TestResolve(t *testing.T) {
 					return tt.pathHit, nil
 				},
 				stat: func(path string) (os.FileInfo, error) {
+					statPaths = append(statPaths, path)
 					if tt.statErr != nil {
 						return nil, tt.statErr
 					}
 					return tt.statInfo, nil
 				},
 				binaryVersion: func(ctx context.Context, path string) (string, error) {
+					versionPaths = append(versionPaths, path)
 					return tt.version, tt.versionErr
 				},
 			}
 
 			got, err := r.resolve(context.Background())
+
+			// stat is only ever aimed at the (trimmed) override; the version
+			// probe targets the override when set, otherwise the PATH hit.
+			override := strings.TrimSpace(tt.env)
+			for _, p := range statPaths {
+				if p != override {
+					t.Errorf("stat called with %q, want %q", p, override)
+				}
+			}
+			wantProbe := override
+			if wantProbe == "" {
+				wantProbe = tt.pathHit
+			}
+			for _, p := range versionPaths {
+				if p != wantProbe {
+					t.Errorf("binaryVersion called with %q, want %q", p, wantProbe)
+				}
+			}
 
 			if tt.wantErr != "" {
 				if err == nil {
@@ -197,6 +240,9 @@ func TestCompatibleVersion(t *testing.T) {
 		version string
 		wantErr bool
 	}{
+		// Pins compatibleVersion(Version): NIC's own pinned download version
+		// must always sit inside the supported range.
+		{version: Version, wantErr: false},
 		{version: MinVersion, wantErr: false},
 		{version: "1.11.2", wantErr: true},
 		{version: "1.12.5", wantErr: false},
@@ -205,6 +251,11 @@ func TestCompatibleVersion(t *testing.T) {
 		{version: "2.1.0", wantErr: true},
 		{version: "0.9.0", wantErr: true},
 		{version: "not-a-version", wantErr: true},
+		// Pre-releases are compared by their base version (see compatibleVersion):
+		// an rc of the floor is accepted, a preview of 2.0 is rejected.
+		{version: "1.11.3-rc1", wantErr: false},
+		{version: "1.12.0-beta1", wantErr: false},
+		{version: "2.0.0-beta1", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -235,8 +286,8 @@ func TestQueryBinaryVersion(t *testing.T) {
 		return path
 	}
 
-	t.Run("parses version json", func(t *testing.T) {
-		path := writeScript(t, `echo '{"terraform_version":"1.12.5","platform":"linux_amd64"}'`)
+	t.Run("parses version banner", func(t *testing.T) {
+		path := writeScript(t, "echo 'OpenTofu v1.12.5'\necho 'on linux_amd64'")
 
 		got, err := queryBinaryVersion(context.Background(), path)
 		if err != nil {
@@ -247,30 +298,36 @@ func TestQueryBinaryVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("errors on non-json output", func(t *testing.T) {
-		path := writeScript(t, `echo 'OpenTofu v1.12.5'`)
+	t.Run("rejects Terraform masquerading as tofu", func(t *testing.T) {
+		path := writeScript(t, `echo 'Terraform v1.14.8'`)
 
 		_, err := queryBinaryVersion(context.Background(), path)
 		if err == nil {
-			t.Fatal("queryBinaryVersion() error = nil, want parse error")
+			t.Fatal("queryBinaryVersion() error = nil, want Terraform rejection")
+		}
+		if !strings.Contains(err.Error(), "Terraform, not OpenTofu") {
+			t.Errorf("queryBinaryVersion() error = %v, want mention of Terraform, not OpenTofu", err)
 		}
 	})
 
-	t.Run("errors on missing version key", func(t *testing.T) {
-		path := writeScript(t, `echo '{}'`)
+	t.Run("errors on unrecognized output", func(t *testing.T) {
+		path := writeScript(t, `echo 'definitely not tofu'`)
 
 		_, err := queryBinaryVersion(context.Background(), path)
 		if err == nil {
-			t.Fatal("queryBinaryVersion() error = nil, want missing-version error")
+			t.Fatal("queryBinaryVersion() error = nil, want identification error")
 		}
 	})
 
-	t.Run("errors on command failure", func(t *testing.T) {
-		path := writeScript(t, `exit 1`)
+	t.Run("errors on command failure and includes stderr", func(t *testing.T) {
+		path := writeScript(t, "echo 'linker error: missing libfoo' >&2\nexit 1")
 
 		_, err := queryBinaryVersion(context.Background(), path)
 		if err == nil {
 			t.Fatal("queryBinaryVersion() error = nil, want exec error")
+		}
+		if !strings.Contains(err.Error(), "missing libfoo") {
+			t.Errorf("queryBinaryVersion() error = %v, want stderr content included", err)
 		}
 	})
 }

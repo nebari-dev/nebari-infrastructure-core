@@ -306,7 +306,8 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 // invoking those methods.
 // The caller is responsible for calling Init() and Apply() with appropriate options and
 // deferring Cleanup() to remove the temporary working directory.
-// Downloaded archives are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
+// Downloaded archives are cached in os.UserCacheDir()/nic/tofu (e.g. ~/.cache/nic/tofu on
+// Linux, ~/Library/Caches/nic/tofu on macOS) to avoid re-downloading on subsequent runs.
 // The extracted binary is written to the temporary working directory to avoid conflicts
 // when multiple deployments run concurrently or use different OpenTofu versions.
 func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
