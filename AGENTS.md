@@ -349,6 +349,8 @@ func SomeFunction(ctx context.Context, ...) error {
 5. Update example configs in `examples/`.
 6. Add tests.
 
+**Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `NebariConfig.Validate` rejects any string field whose value *contains* `CHANGEME` (including nested provider blocks, lists, and maps), before any provider lookup or cloud I/O. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
+
 ### Error Handling Convention
 
 ```go
