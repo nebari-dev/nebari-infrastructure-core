@@ -155,14 +155,16 @@ dot:
 
 (1) A customer request relayed by Marcelo Villa on 2026-08-12 asks that two packs (Ray and the Data Science Pack) read the same data.
 (2) The team decided on 2026-08-12 that **each component installed into the cluster gets its own namespace** (least privilege; the Nebari Classic one-big-namespace model is being phased out), so pack-to-pack sharing is cross-namespace by construction.
-(3) A PVC is namespace-bound and each PV binds to exactly one PVC, but Longhorn's `volumes.longhorn.io` CR is cluster-scoped — so per-namespace PVC/PV pairs can point at one underlying Longhorn volume (Amit Kumar, correcting Marcelo).
+(3) A PVC is namespace-bound and each PV binds to exactly one PVC, so serving one dataset to two namespaces needs a mechanism; on Longhorn that mechanism is _one cluster-scoped volume behind two namespace-bound PV/PVC pairs_. Whichever mechanism is used, the two consumers write concurrently.
 (4) That arrangement requires ReadWriteMany.
 ----
 (5) [Cross-pack sharing needs RWX]: RWX demand survives even if group-directory collaboration were removed from scope.
     -> [No RWX without collaboration]
 
+[Longhorn can share one volume across namespaces]: Longhorn's `volumes.longhorn.io` CR is cluster-scoped, so per-namespace PVC/PV pairs can point at one underlying Longhorn volume (Amit Kumar, correcting Marcelo). Whether that is *safe* is a separate question from whether cross-pack sharing needs RWX at all. #open-decision
+    <- [Concurrent-writer safety is unverified]
+
 [Concurrent-writer safety is unverified]: Whether Longhorn natively synchronises writes when two namespaces' PVs point at the same volume is unknown. If it does not, concurrent writers corrupt data. #open-decision
-    _> <Cross-pack sharing is a second RWX consumer>
 
     // Amit Kumar raised this on 2026-08-12 and nobody could answer it. Marcelo
     // expected the share-manager pod handles it; Vini hypothesised the Longhorn
@@ -280,14 +282,14 @@ dot:
 
 <RWX pays a write acknowledgement on every operation>: The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.
 
-(1) A Longhorn RWO write lands in the writing node's page cache and is acknowledged there; Longhorn syncs to the data source afterwards.
-(2) A Longhorn RWX write goes over NFS and waits for acknowledgement from every node holding the data.
+(1) Both access modes sit on the same block layer. Longhorn replicates *every* volume synchronously — a write is acknowledged once its replicas have it — so replica acknowledgement is not what separates RWO from RWX.
+(2) What separates them is the hop in front of that layer. An RWO volume is attached to the writing node as a block device and used through a local filesystem, so the kernel's page and dentry caches absorb most metadata work before anything crosses the network. An RWX volume is an NFS export from a share-manager pod, so every operation the client cannot serve from its own attribute cache is a network round trip to that pod, which then performs it against the same replicated volume.
 (3) The cost is per *operation*, not per byte, so it is metadata-bound work that suffers: a conda or pixi environment is tens of thousands of small files, and each create, stat, rename, and unlink is its own round trip. Bulk sequential I/O barely notices the same path.
 (4) Environment builds, `git status` over a large tree, and notebook autosave are exactly that pattern, which is why Nebari Classic — NFS everywhere — suffered for it, and why the penalty shows up as slow interactive work rather than as a bandwidth number.
 (5) Read caching does not rescue it: an environment build is mostly cold writes and fresh metadata, so there is little to cache.
 (6) Amit Kumar corrected his own earlier framing on 2026-08-12: the co-location is at the software layer, not the data layer — with dedicated storage nodes enabled the data lives only on those nodes, not on the writing node.
 ----
-(7) This cuts both ways, and the two comparisons must not be run together. For a single-pod volume such as a home, Longhorn RWO acknowledges in the writing node's page cache and will beat any network filesystem — that is what "Longhorn is faster" is a claim about, and it is the claim the home performance gate has to disprove. For a shared volume, both candidates are network file storage, and Longhorn adds the replica-acknowledgement fan-out and the single share-manager on top of the same NFS round trip.
+(7) This cuts both ways, and the two comparisons must not be run together. For a single-pod volume such as a home, an RWO Longhorn volume is a local block device with local filesystem caching, and will beat any network filesystem on metadata-heavy work — that is what "Longhorn is faster" is a claim about, and it is the claim the home performance gate has to disprove. For a shared volume both candidates are network file storage, and what Longhorn adds over a managed appliance is that its NFS server is a pod inside the cluster writing into a synchronously replicated volume, rather than a managed endpoint writing into its own storage.
 ----
 (8) [RWX is materially slower per operation]: RWX on Longhorn should be scoped to workloads that need sharing, never used as a general default. Its advantage over managed storage is on the RWO path, not the RWX one.
 
@@ -364,7 +366,7 @@ dot:
 (2) What it does mean is that the pod is not free to land in the wrong AZ. A dynamically provisioned EBS PV carries a zone requirement (`topology.ebs.csi.aws.com/zone`), which the scheduler treats as a hard constraint, so a rescheduled pod is placed back in the volume's AZ or not placed at all. The failure surfaces as a Pending pod — visible, and a capacity problem — rather than as a wrong-AZ mount attempt. (The mount failures in nebari issue 3008 are the Immediate-binding signature, and NIC's Longhorn-disabled fallback is the legacy `gp2` class, so binding mode is a required check, not an assumption.)
 (3) The gap is therefore whether the cluster can *supply* a node in that AZ on demand.
 (4) It cannot today: Cluster Autoscaler's documented requirement for AZ-bound volumes is one node group per AZ, because a multi-AZ ASG gives it no way to add capacity in a specific AZ. NIC ships one ASG spanning every AZ, so a pod pending on an AZ-bound volume can be met by a new node in the wrong AZ and stay pending. That is a node-group layout gap, which Longhorn papers over. Karpenter, which reads a PV's zone requirement natively, is the alternative to per-AZ groups.
-(5) The pin is bounded: it holds only while the user has pods running; once they exit, the volume follows their compute to any node or AZ (Amit Kumar, 2026-08-12).
+(5) The *node* pin is bounded — it holds only while the user has pods running (Amit Kumar, 2026-08-12) — but the AZ binding is not. An EBS volume stays in the AZ it was created in for its whole life and attaches only to instances there, so as long as the home PVC exists the user's next pods must come back to that AZ. Only deleting and recreating the volume from a snapshot moves it. What the topology work buys is that compute is always available in that AZ, not that the volume becomes free.
 (6) The historical anecdotes do not transfer to the proposed shapes: the Celery-worker breakage was a multi-pod RWX need, which stays on the RWX path by definition, and single-pod databases like Keycloak are CNPG's job — `instances: 2-3` across AZs is app-layer replication, the idiomatic fix.
     <- [HA is not durability]: CNPG `instances: 2-3` answers AZ failover, not data protection — it survives a lost node or AZ, not a bad migration or a dropped table. A specific backup and restore strategy is an explicit non-goal of ADR-0007 and barman-to-S3 is unbuilt, so Longhorn's volume backups are today the only thing standing behind the Keycloak database. Moving it to gp3 removes that with nothing in its place. #open-decision
 (7) Longhorn's own AZ tolerance is softer than assumed: NIC sets replica zone anti-affinity to *soft* with two replicas, so both replicas can land in one AZ and nothing checks or reports the actual spread.
@@ -398,7 +400,7 @@ dot:
 
 <The performance claim is implementation-specific>: The documented rationale is sound about the RWX implementations it was written against, and silent about the one under evaluation.
 
-(1) The _RWX is materially slower per operation_ claim derives the penalty from Longhorn's data path specifically — an NFS export from a share-manager pod, waiting on acknowledgement from every node holding a replica.
+(1) The _RWX is materially slower per operation_ claim derives the penalty from Longhorn's data path specifically — an in-cluster share-manager pod exporting NFS in front of a synchronously replicated volume.
 (2) The other measured RWX candidate was EFS, whose Bursting mode measured slow and drew field complaints on Nebi environment builds (Vini Cerutti, 2026-08-11); its Elastic throughput mode is unmeasured.
 (3) FSx for OpenZFS has a different structure: a single managed appliance with a large in-memory ARC read cache, provisioned throughput and IOPS, and NFSv4.1 — no replica-acknowledgement fan-out and no burst-credit model.
 (4) The pack's argument establishes that RWO is *sufficient and cheaper* for a single-user volume, which is a different claim from RWX being unworkable for one.
@@ -411,7 +413,7 @@ dot:
 (2) [AZ constraint disappears]: FSx for OpenZFS Multi-AZ presents a floating endpoint with automatic failover to a standby in a second AZ, so a home is reachable from any AZ. Per-AZ node groups, binding-mode care, and the residual dead-AZ exposure all become unnecessary rather than managed.
 (3) [Longhorn leaves AWS entirely]: Scoping Longhorn to RWX still leaves it installed, with its imperative Helm install outside GitOps, pinned chart, per-volume engine upgrades, node-drain procedures, manual capacity tuning, and its live-cluster failure history. One filesystem serving both the group directories and the homes removes all of it from AWS.
 (4) [One backup story]: ZFS snapshots plus FSx backups cover homes and group directories together, so the RWX-homes shape still has a single backup story on AWS after Longhorn leaves. What it does not do is avoid work — _unified backup is a live Longhorn benefit_, so this replaces a shipped, tested implementation rather than sparing the project an unbuilt one, and it leaves AWS and Hetzner on different backup implementations, credential models, and restore runbooks. Priced under the _backup and restore gate_.
-(5) Per-user PVCs can be provisioned dynamically against an FSx OpenZFS StorageClass, so each home keeps its own volume, quota, and snapshot schedule — RWX homes need not mean subdirectories of one shared volume.
+(5) RWX homes need not mean subdirectories of one shared volume: the FSx OpenZFS CSI driver provisions volumes dynamically, so per-user PVCs are the intended form. Whether each one carries its own quota and snapshot schedule, and how many a filesystem tolerates, is unverified — see _Assumption 13_, which this premise is conditional on.
 ----
 (6) [RWX homes are the stronger shape if they benchmark]: If FSx meets the home-directory performance gate, moving homes onto it is a larger simplification than scoping Longhorn to RWX.
 
@@ -471,7 +473,7 @@ dot:
 * [Assumption 5]: Longhorn remains a supported implementation for Hetzner and other providers without a suitable managed RWX service. #core-assumption
 * [Assumption 6]: FSx for OpenZFS is the lead managed AWS candidate, with EFS (Elastic throughput mode, unmeasured) behind it; adoption of either depends on evidence from the AWS decision gate. #open-decision
 * [Assumption 7]: RWX scope *today* is `/shared/group-name` only; per-user home volumes are RWO (`claim-username`) by deliberate pack design, on the grounds that home workloads are small-file metadata operations (conda/pixi environments, git, notebook autosave) that degrade badly on network file storage. Whether that holds against FSx for OpenZFS specifically is an open question, not settled — see _home volume access mode is open_. #open-decision
-* [Assumption 8]: A user's pods are pinned to one node by a required inter-pod affinity term, so whichever class serves home volumes determines that user's node — and, on an AZ-bound class like EBS, their AZ. The pinning lasts only while the user has pods running: once all of them exit, the volume can follow their compute to any node (Amit Kumar, 2026-08-12), which bounds how long an unlucky AZ placement can persist. #core-assumption
+* [Assumption 8]: A user's pods are pinned to one node by a required inter-pod affinity term, so whichever class serves home volumes determines that user's node — and, on an AZ-bound class like EBS, their AZ. The node pin lasts only while the user has pods running (Amit Kumar, 2026-08-12), but the AZ does not follow: an EBS volume lives in one AZ for its lifetime, so an unlucky AZ placement persists for as long as the home volume does, and is undone only by migrating the data. On a replicated or Multi-AZ class the release of the node pin does free the user entirely. #core-assumption
 * [Assumption 9]: One node's resources are a hard ceiling on a single user's concurrent workloads, and the failure is an opaque JupyterHub spawn error. Accepted knowingly for delivery speed; workaround is a larger node size. #core-assumption
 * [Assumption 10]: RWX demand is not limited to `/shared/group-name`. Cross-namespace data sharing between packs is a second consumer, made structural by the decision that every component gets its own namespace — but it is gated on a written user story before any design work. #open-decision
 * [Assumption 11]: Nebari-specific Longhorn behaviour will be documented in the Nebari docs rather than left as tribal knowledge (team decision 2026-08-12; Amit Kumar owns the write-up). Whatever this map concludes has to survive being written down publicly. #architecture-decision
