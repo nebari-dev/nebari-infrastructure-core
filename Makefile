@@ -1,10 +1,12 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot argdown
 
 # Variables
 BINARY_NAME=nic
 CMD_DIR=./cmd/nic
 PKG_DIRS=$(shell go list ./... | grep -v /vendor/)
 GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
+ARGDOWN_FILES=docs/adr/*.argdown
+ARGDOWN_OUT=docs/assets
 
 # Build information
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -109,6 +111,14 @@ pre-commit: ## Install pre-commit hooks
 pre-commit-run: ## Run pre-commit hooks on all files
 	@echo "Running pre-commit hooks..."
 	pre-commit run --all-files
+
+argdown: ## Render Argdown argument maps (docs/adr/*.argdown) to SVG in docs/assets
+	@echo "Rendering Argdown maps..."
+	@which npx > /dev/null || (echo "Error: npx is not installed. Install Node.js." && exit 1)
+	@# without the dot binary the CLI still reports success and writes only .dot
+	@which dot > /dev/null || (echo "Error: graphviz is not installed. Install with: brew install graphviz" && exit 1)
+	npx -y @argdown/cli map "$(ARGDOWN_FILES)" $(ARGDOWN_OUT) --format svg
+	@echo "SVGs written to $(ARGDOWN_OUT)"
 
 release-snapshot: ## Create a snapshot release (local testing)
 	@echo "Creating snapshot release..."
