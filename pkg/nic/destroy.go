@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
@@ -141,6 +142,25 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("resolve trust_bundle: %w", err)
+	}
+
+	// Halt Argo CD reconciliation before the provider starts deleting cluster
+	// resources. With the application controller running, self-heal recreates
+	// deleted resources mid-teardown. An unreachable cluster is skipped, since
+	// nothing is running that could recreate resources. A reachable cluster that
+	// cannot be suspended aborts the destroy unless Force is set.
+	if !opts.DryRun {
+		if kubeconfigBytes, kcErr := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster); kcErr != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cluster unreachable; skipping Argo CD suspension: %v", kcErr)).
+				WithResource("argocd").WithAction("suspending"))
+		} else if err := argocd.SuspendReconciliation(ctx, kubeconfigBytes); err != nil {
+			span.RecordError(err)
+			if !opts.Force {
+				return fmt.Errorf("suspend Argo CD reconciliation: %w", err)
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to suspend Argo CD reconciliation, continuing with --force; deleted resources may be recreated during teardown: %v", err)).
+				WithResource("argocd").WithAction("suspending"))
+		}
 	}
 
 	var destroyErr error
