@@ -14,6 +14,7 @@ import (
 	goversion "github.com/hashicorp/go-version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -29,6 +30,13 @@ const MinVersion = "1.11.3"
 // maxVersionExclusive caps external binaries below the next major version,
 // where breaking CLI or state format changes are fair game.
 const maxVersionExclusive = "2.0.0"
+
+// The supported range bounds, parsed once rather than on every
+// compatibleVersion call.
+var (
+	minSupportedVersion   = goversion.Must(goversion.NewVersion(MinVersion))
+	maxUnsupportedVersion = goversion.Must(goversion.NewVersion(maxVersionExclusive))
+)
 
 // Source identifies how the OpenTofu binary in use was obtained.
 type Source string
@@ -134,13 +142,24 @@ func (r *resolver) resolve(ctx context.Context) (res *Resolution, err error) {
 	// wording of issue #554: a stale system tofu on PATH predates NIC and must
 	// not break existing users, so the hard error is reserved for the explicit
 	// NIC_TOFU_PATH override, where the operator has stated intent.
+	// The span event keeps "why did it download when tofu is on PATH?"
+	// answerable from the trace, where the outcome alone reads source=download.
 	ver, verErr := r.binaryVersion(ctx, path)
 	if verErr != nil {
+		span.AddEvent("tofu.path_binary_ignored", trace.WithAttributes(
+			attribute.String("tofu.path", path),
+			attribute.String("tofu.ignore_reason", verErr.Error()),
+		))
 		return &Resolution{Notes: []string{
 			fmt.Sprintf("Ignoring tofu on PATH (%s): failed to determine its version: %v; falling back to download", path, verErr),
 		}}, nil
 	}
 	if compatErr := compatibleVersion(ver); compatErr != nil {
+		span.AddEvent("tofu.path_binary_ignored", trace.WithAttributes(
+			attribute.String("tofu.path", path),
+			attribute.String("tofu.version", ver),
+			attribute.String("tofu.ignore_reason", compatErr.Error()),
+		))
 		return &Resolution{Notes: []string{
 			fmt.Sprintf("Ignoring tofu %s on PATH (%s): %v; falling back to download", ver, path, compatErr),
 		}}, nil
@@ -205,10 +224,10 @@ func compatibleVersion(raw string) error {
 	if err != nil {
 		return fmt.Errorf("unparseable OpenTofu version %q: %w", raw, err)
 	}
-	if v.Core().LessThan(goversion.Must(goversion.NewVersion(MinVersion))) {
+	if v.Core().LessThan(minSupportedVersion) {
 		return fmt.Errorf("OpenTofu %s is below the minimum supported version %s", raw, MinVersion)
 	}
-	if v.Core().GreaterThanOrEqual(goversion.Must(goversion.NewVersion(maxVersionExclusive))) {
+	if v.Core().GreaterThanOrEqual(maxUnsupportedVersion) {
 		return fmt.Errorf("OpenTofu %s is not supported (must be below %s)", raw, maxVersionExclusive)
 	}
 	return nil
@@ -225,7 +244,18 @@ const tofuVersionPrefix = "OpenTofu v"
 
 // queryBinaryVersion runs `<path> version`, verifies the binary identifies
 // itself as OpenTofu (not Terraform or something else), and extracts the version.
-func queryBinaryVersion(ctx context.Context, path string) (string, error) {
+// It gets its own span because it execs a subprocess — operation-granularity
+// work on par with the executor's Init/Plan/Apply wrappers.
+func queryBinaryVersion(ctx context.Context, path string) (ver string, err error) {
+	ctx, span := otel.Tracer("nebari-infrastructure-core").Start(ctx, "tofu.queryBinaryVersion")
+	defer span.End()
+	span.SetAttributes(attribute.String("tofu.path", path))
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, binaryVersionTimeout)
 	defer cancel()
 
@@ -249,10 +279,23 @@ func queryBinaryVersion(ctx context.Context, path string) (string, error) {
 		return "", fmt.Errorf("%s does not identify itself as OpenTofu (`version` reported %q)", path, banner)
 	}
 
-	ver := strings.TrimPrefix(banner, tofuVersionPrefix)
+	ver = strings.TrimPrefix(banner, tofuVersionPrefix)
 	if ver == "" {
 		return "", fmt.Errorf("%s version reported no version number (%q)", path, banner)
 	}
 
 	return ver, nil
+}
+
+// ValidateOverride fails fast when NIC_TOFU_PATH is set but unusable. It is a
+// no-op when the override is unset, so providers can call it before creating
+// any cloud resources (state buckets, resource groups) without paying a probe
+// on the default path. A typo'd override in a packaged or air-gapped
+// environment then surfaces before the first cloud API call, not after.
+func ValidateOverride(ctx context.Context) error {
+	if strings.TrimSpace(os.Getenv(EnvTofuPath)) == "" {
+		return nil
+	}
+	_, err := ResolveExternal(ctx)
+	return err
 }

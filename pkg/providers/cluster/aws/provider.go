@@ -261,6 +261,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		attribute.Bool("dry_run", opts.DryRun),
 	)
 
+	// Fail fast on a bad NIC_TOFU_PATH before any cloud resources (like the
+	// state bucket) are created; the check is purely local.
+	if err := tofu.ValidateOverride(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {

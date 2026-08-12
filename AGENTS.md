@@ -445,7 +445,7 @@ Core libraries (see `go.mod`):
 - `k8s.io/client-go` - Kubernetes client
 
 Runtime dependencies (per cluster provider):
-- **AWS:** OpenTofu binary in `PATH` (NIC will also download into a cache if needed)
+- **AWS / Azure:** OpenTofu, resolved in order: `NIC_TOFU_PATH` override, compatible `tofu` on `PATH`, automatic download into the user cache. See `docs/operations/packaging.md` for the full contract
 - **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context

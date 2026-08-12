@@ -295,6 +295,33 @@ func TestAnnounce(t *testing.T) {
 	})
 }
 
+// TestValidateOverride covers the fail-fast check providers run before
+// creating any cloud resources.
+func TestValidateOverride(t *testing.T) {
+	t.Run("no-op when unset", func(t *testing.T) {
+		t.Setenv(EnvTofuPath, "  ")
+		// PATH discovery must not run either: an empty PATH would otherwise
+		// still succeed, but the point is that unset means zero probing.
+		t.Setenv("PATH", t.TempDir())
+
+		if err := ValidateOverride(context.Background()); err != nil {
+			t.Errorf("ValidateOverride() = %v, want nil", err)
+		}
+	})
+
+	t.Run("fails fast on a bad override", func(t *testing.T) {
+		t.Setenv(EnvTofuPath, "/does/not/exist")
+
+		err := ValidateOverride(context.Background())
+		if err == nil {
+			t.Fatal("ValidateOverride() = nil, want error for missing override binary")
+		}
+		if !strings.Contains(err.Error(), "/does/not/exist") {
+			t.Errorf("ValidateOverride() = %v, want it to name the bad path", err)
+		}
+	})
+}
+
 func TestCompatibleVersion(t *testing.T) {
 	tests := []struct {
 		version string

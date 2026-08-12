@@ -102,8 +102,8 @@ Terraform state files contain sensitive material (cluster credentials, certifica
 
 1. Allocates a temp directory via `afero.TempDir(appFs, "", "nic-tofu")`
 2. Walks the embedded `templates/` filesystem and copies each file into the working dir
-3. Downloads (or reuses, from `~/.cache/nic/tofu/`) the OpenTofu binary and writes it into the working dir
-4. Sets `TF_PLUGIN_CACHE_DIR` to `~/.cache/nic/tofu/plugins` so provider plugins are reused across runs
+3. Resolves the OpenTofu binary — `NIC_TOFU_PATH`, a compatible `tofu` on `PATH`, or a download cached under `os.UserCacheDir()/nic/tofu/` — writing only a downloaded binary into the working dir (external binaries are used in place)
+4. Sets `TF_PLUGIN_CACHE_DIR` to the `plugins/` subdirectory of the cache so provider plugins are reused across runs
 5. Marshals provider-supplied tfvars to `terraform.tfvars.json` in the working dir
 6. Returns a `TerraformExecutor` whose `Cleanup()` method removes the working dir
 

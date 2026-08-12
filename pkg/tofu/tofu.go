@@ -308,8 +308,9 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 // deferring Cleanup() to remove the temporary working directory.
 // Downloaded archives are cached in os.UserCacheDir()/nic/tofu (e.g. ~/.cache/nic/tofu on
 // Linux, ~/Library/Caches/nic/tofu on macOS) to avoid re-downloading on subsequent runs.
-// The extracted binary is written to the temporary working directory to avoid conflicts
-// when multiple deployments run concurrently or use different OpenTofu versions.
+// A downloaded binary is written to the temporary working directory to avoid conflicts
+// when multiple deployments run concurrently or use different OpenTofu versions; an
+// external binary (NIC_TOFU_PATH or PATH) is used in place and never copied or deleted.
 func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
 	appFs := afero.NewOsFs()
 
@@ -348,7 +349,7 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		}
 	}()
 
-	resolution, err := newResolver().resolve(ctx)
+	resolution, err := ResolveExternal(ctx)
 	if err != nil {
 		return nil, err
 	}
