@@ -123,17 +123,19 @@ pkg/
   │   ├── validate.go   # Validate orchestration
   │   ├── kubeconfig.go # Kubeconfig retrieval
   │   └── status.go     # status.Update -> slog translation (StartSlogHandler)
-  ├── provider/         # Cluster provider interface + implementations
-  │   ├── provider.go   # Provider interface, InfraSettings, DeployOptions
-  │   ├── aws/          # OpenTofu-backed; templates/ holds embedded .tf files
-  │   ├── azure/        # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
-  │   ├── hetzner/      # hetzner-k3s-backed; downloads + caches the binary
-  │   ├── existing/     # Bring-your-own kubeconfig
-  │   ├── local/        # Kubeconfig validator for Kind clusters
-  │   └── gcp/          # Stub
-  ├── dnsprovider/      # DNS provider interface + implementations
-  │   ├── provider.go   # DNSProvider interface
-  │   └── cloudflare/   # Cloudflare API implementation
+  ├── providers/        # Provider interfaces + implementations, one directory per category
+  │   ├── cluster/      # Provider interface, InfraSettings, DeployOptions (provider.go)
+  │   │   ├── aws/      # OpenTofu-backed; templates/ holds embedded .tf files
+  │   │   ├── azure/    # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
+  │   │   ├── hetzner/  # hetzner-k3s-backed; downloads + caches the binary
+  │   │   ├── existing/ # Bring-your-own kubeconfig
+  │   │   ├── local/    # Kind-backed local clusters
+  │   │   └── gcp/      # Stub
+  │   ├── dns/          # DNSProvider interface (provider.go)
+  │   │   └── cloudflare/ # Cloudflare API implementation
+  │   └── repository/   # Repository provider interface + sealed Source/Auth contract (provider.go)
+  │       ├── existing/ # Pre-existing remote repository (https or ssh)
+  │       └── local/    # Directory on disk for local/dev clusters
   ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
   │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
