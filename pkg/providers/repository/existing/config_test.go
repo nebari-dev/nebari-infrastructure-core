@@ -40,6 +40,54 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid subdirectory path",
+			cfg: Config{
+				URL:  "https://github.com/org/repo.git",
+				Path: "clusters/my-nebari",
+				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "interior dot-dot that stays inside the repository",
+			cfg: Config{
+				URL:  "https://github.com/org/repo.git",
+				Path: "clusters/../other",
+				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "absolute path rejected",
+			cfg: Config{
+				URL:  "https://github.com/org/repo.git",
+				Path: "/clusters/my-nebari",
+				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},
+			},
+			wantErr:     true,
+			errContains: "must be relative to the repository root",
+		},
+		{
+			name: "path escaping the repository root rejected",
+			cfg: Config{
+				URL:  "https://github.com/org/repo.git",
+				Path: "../..",
+				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},
+			},
+			wantErr:     true,
+			errContains: "must not escape the repository root",
+		},
+		{
+			name: "disguised escape rejected",
+			cfg: Config{
+				URL:  "https://github.com/org/repo.git",
+				Path: "clusters/../../etc",
+				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},
+			},
+			wantErr:     true,
+			errContains: "must not escape the repository root",
+		},
+		{
 			name: "missing url",
 			cfg: Config{
 				Auth: AuthConfig{Token: &EnvRef{Env: "GIT_TOKEN"}},

@@ -3,6 +3,7 @@ package existing
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
@@ -66,6 +67,17 @@ func (c *Config) Validate() error {
 	}
 	if strings.HasPrefix(c.URL, "file://") {
 		return fmt.Errorf("the existing provider is for remote repositories; use the local provider for a file:// directory")
+	}
+	// Path is joined onto the clone directory (filepath.Join cleans the
+	// result), so a `..` component would scope writes and stale-manifest
+	// deletion outside the repository.
+	if c.Path != "" {
+		if filepath.IsAbs(c.Path) {
+			return fmt.Errorf("path must be relative to the repository root, got: %s", c.Path)
+		}
+		if cleaned := filepath.Clean(c.Path); cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("path must not escape the repository root, got: %s", c.Path)
+		}
 	}
 	if err := c.Auth.Validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
