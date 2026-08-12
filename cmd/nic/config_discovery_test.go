@@ -1,8 +1,13 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // writeTempConfig creates a readable config.yaml in dir and returns its path.
@@ -180,5 +185,28 @@ func TestFileExists_Directory(t *testing.T) {
 func TestFileExists_Missing(t *testing.T) {
 	if fileExists("/nonexistent/path/config.yaml") {
 		t.Error("fileExists() = true for nonexistent path, want false")
+	}
+}
+
+// TestAnnotateConfigError verifies that placeholder errors are enriched with the
+// config file path (so the user sees both the field and the file), while other
+// errors pass through unchanged.
+func TestAnnotateConfigError(t *testing.T) {
+	placeholderErr := fmt.Errorf("configuration validation failed: %w", &config.PlaceholderError{FieldPath: "cluster.aws.region"})
+	got := annotateConfigError(placeholderErr, "/path/to/nebari-config.yaml")
+	if !strings.Contains(got.Error(), "cluster.aws.region") {
+		t.Errorf("annotated error %q does not mention the field path", got)
+	}
+	if !strings.Contains(got.Error(), "/path/to/nebari-config.yaml") {
+		t.Errorf("annotated error %q does not mention the config file", got)
+	}
+	var pErr *config.PlaceholderError
+	if !errors.As(got, &pErr) {
+		t.Errorf("annotated error no longer unwraps to *PlaceholderError")
+	}
+
+	other := errors.New("some other validation failure")
+	if got := annotateConfigError(other, "/path/to/nebari-config.yaml"); got != other {
+		t.Errorf("annotateConfigError modified a non-placeholder error: %v", got)
 	}
 }

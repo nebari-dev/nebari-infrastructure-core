@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // defaultConfigFilename is the name of the config file auto-discovered by NIC.
@@ -57,6 +59,18 @@ func checkReadable(path string) error {
 	}
 	_ = f.Close()
 	return nil
+}
+
+// annotateConfigError enriches a validation error with the config file path so
+// the user sees which file to edit. Placeholder errors carry only the field path
+// from the config layer; the file path is known here at the cmd layer. Other
+// errors are returned unchanged to preserve their existing wording.
+func annotateConfigError(err error, configFile string) error {
+	var placeholderErr *config.PlaceholderError
+	if errors.As(err, &placeholderErr) {
+		return fmt.Errorf("%w (in config file %q)", err, configFile)
+	}
+	return err
 }
 
 // fileExists reports whether path points to a regular file (not a directory).
