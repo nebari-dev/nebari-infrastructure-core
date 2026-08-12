@@ -118,6 +118,9 @@ argdown: ## Render Argdown argument maps (docs/adr/*.argdown) to SVG in docs/ass
 	@# without the dot binary the CLI still reports success and writes only .dot
 	@which dot > /dev/null || (echo "Error: graphviz is not installed. Install with: brew install graphviz" && exit 1)
 	npx -y @argdown/cli map "$(ARGDOWN_FILES)" $(ARGDOWN_OUT) --format svg
+	@# graphviz stamps the map's full intrinsic size, so browsers render it at
+	@# ~7700px wide instead of fitting the viewport; the viewBox is enough
+	@perl -pi -e 's/<svg width="[0-9]+pt" height="[0-9]+pt"/<svg/' $(ARGDOWN_OUT)/*.svg
 	@echo "SVGs written to $(ARGDOWN_OUT)"
 
 release-snapshot: ## Create a snapshot release (local testing)
