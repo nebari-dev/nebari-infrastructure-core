@@ -65,11 +65,22 @@ pre-populated `TF_PLUGIN_CACHE_DIR`, which NIC sets to the `plugins/`
 subdirectory of the cache directory, e.g. `~/.cache/nic/tofu/plugins` on Linux);
 `NIC_TOFU_PATH` only covers the OpenTofu binary itself.
 
-## Packaging guidance (conda-forge, distro packages)
+**External binaries are trusted, not verified.** When NIC downloads its own
+OpenTofu, the download is integrity-checked (signed artifacts via `tofudl`). A
+binary supplied through `NIC_TOFU_PATH` or found on `PATH` gets no such check:
+NIC executes it to probe its version, so the version floor is a correctness
+gate, not a trust boundary. Vet the provenance of pre-installed binaries
+through your own supply-chain controls; `NIC_TOFU_PATH` is a packaging
+feature, not a hardening one.
+
+## Packaging guidance (pixi/prefix.dev, distro packages)
 
 Declare `opentofu` as a runtime dependency and either rely on `PATH` discovery or
-set `NIC_TOFU_PATH` in an activation script. conda-forge ships `opentofu` for all
-platforms NIC supports, so a packaged NIC never has to phone home on first run.
+set `NIC_TOFU_PATH` in an activation script. NIC itself is distributed via the
+prefix.dev `github-releases` channel (see
+[https://github.com/nebari-dev/nebari-infrastructure-core/issues/552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552)),
+and conda-forge ships `opentofu` for all platforms NIC supports, so a pixi
+workspace that pins both never has to phone home on first run.
 
 ## CI
 

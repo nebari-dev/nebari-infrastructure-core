@@ -348,14 +348,18 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		}
 	}()
 
-	resolved, err := newResolver().resolve(ctx)
+	resolution, err := newResolver().resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
+	for _, note := range resolution.Notes {
+		status.Warning(ctx, note)
+	}
 
 	var execPath string
-	if resolved != nil {
-		execPath = resolved.Path
+	if resolution.Binary != nil {
+		resolution.Binary.announce(ctx)
+		execPath = resolution.Binary.Path
 	} else {
 		downloader := &tofuDownloader{cacheDir: cacheDir, version: Version}
 		execPath, err = downloadExecutable(ctx, appFs, workingDir, downloader)

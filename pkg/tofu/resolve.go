@@ -49,6 +49,19 @@ type ResolvedBinary struct {
 	Source  Source
 }
 
+// Resolution is the outcome of external-binary resolution. Resolution itself
+// is a pure query: it never emits status updates, so callers decide how to
+// surface Notes (Setup sends them as warnings on the status channel; `nic
+// version` folds them into its output line).
+type Resolution struct {
+	// Binary is the external binary to use, or nil when NIC should fall
+	// back to downloading its pinned version.
+	Binary *ResolvedBinary
+	// Notes are human-readable diagnostics produced while resolving, e.g.
+	// why a tofu found on PATH was ignored.
+	Notes []string
+}
+
 // binaryVersionTimeout bounds the `tofu version -json` probe of an external binary.
 const binaryVersionTimeout = 30 * time.Second
 
@@ -76,15 +89,15 @@ func newResolver() *resolver {
 
 // ResolveExternal reports the pre-installed OpenTofu binary NIC would use, if
 // any. The resolution order is: NIC_TOFU_PATH (hard error if unusable), then
-// `tofu` on PATH (skipped with a warning if unusable). A nil result with a nil
-// error means no external binary applies and NIC falls back to downloading its
-// pinned version.
-func ResolveExternal(ctx context.Context) (*ResolvedBinary, error) {
+// `tofu` on PATH (skipped with a note if unusable). A Resolution with a nil
+// Binary means no external binary applies and NIC falls back to downloading
+// its pinned version.
+func ResolveExternal(ctx context.Context) (*Resolution, error) {
 	return newResolver().resolve(ctx)
 }
 
 // resolve implements the external-binary resolution order. See ResolveExternal.
-func (r *resolver) resolve(ctx context.Context) (resolved *ResolvedBinary, err error) {
+func (r *resolver) resolve(ctx context.Context) (res *Resolution, err error) {
 	ctx, span := otel.Tracer("nebari-infrastructure-core").Start(ctx, "tofu.ResolveExternal")
 	defer span.End()
 	defer func() {
@@ -93,8 +106,8 @@ func (r *resolver) resolve(ctx context.Context) (resolved *ResolvedBinary, err e
 			return
 		}
 		outcome := &ResolvedBinary{Source: SourceDownload, Version: Version}
-		if resolved != nil {
-			outcome = resolved
+		if res.Binary != nil {
+			outcome = res.Binary
 		}
 		span.SetAttributes(
 			attribute.String("tofu.resolution.source", string(outcome.Source)),
@@ -104,26 +117,36 @@ func (r *resolver) resolve(ctx context.Context) (resolved *ResolvedBinary, err e
 	}()
 
 	if override := strings.TrimSpace(r.getenv(EnvTofuPath)); override != "" {
-		return r.resolveOverride(ctx, override)
+		binary, err := r.resolveOverride(ctx, override)
+		if err != nil {
+			return nil, err
+		}
+		return &Resolution{Binary: binary}, nil
 	}
 
-	path, err := r.lookPath("tofu")
-	if err != nil {
-		return nil, nil
+	path, lookErr := r.lookPath("tofu")
+	if lookErr != nil {
+		return &Resolution{}, nil
 	}
 
-	ver, err := r.binaryVersion(ctx, path)
-	if err != nil {
-		status.Warningf(ctx, "Ignoring tofu on PATH (%s): failed to determine its version: %v; falling back to download", path, err)
-		return nil, nil
+	// An unusable PATH binary falls back to download instead of hard-erroring.
+	// This is a deliberate divergence from the "hard error below the floor"
+	// wording of issue #554: a stale system tofu on PATH predates NIC and must
+	// not break existing users, so the hard error is reserved for the explicit
+	// NIC_TOFU_PATH override, where the operator has stated intent.
+	ver, verErr := r.binaryVersion(ctx, path)
+	if verErr != nil {
+		return &Resolution{Notes: []string{
+			fmt.Sprintf("Ignoring tofu on PATH (%s): failed to determine its version: %v; falling back to download", path, verErr),
+		}}, nil
 	}
-	if err := compatibleVersion(ver); err != nil {
-		status.Warningf(ctx, "Ignoring tofu %s on PATH (%s): %v; falling back to download", ver, path, err)
-		return nil, nil
+	if compatErr := compatibleVersion(ver); compatErr != nil {
+		return &Resolution{Notes: []string{
+			fmt.Sprintf("Ignoring tofu %s on PATH (%s): %v; falling back to download", ver, path, compatErr),
+		}}, nil
 	}
 
-	reportExternal(ctx, ver, fmt.Sprintf("PATH (%s)", path))
-	return &ResolvedBinary{Path: path, Version: ver, Source: SourcePath}, nil
+	return &Resolution{Binary: &ResolvedBinary{Path: path, Version: ver, Source: SourcePath}}, nil
 }
 
 // resolveOverride validates an explicit NIC_TOFU_PATH. Unlike PATH discovery,
@@ -149,21 +172,26 @@ func (r *resolver) resolveOverride(ctx context.Context, override string) (*Resol
 		return nil, fmt.Errorf("%s binary %s: %w", EnvTofuPath, override, err)
 	}
 
-	reportExternal(ctx, ver, fmt.Sprintf("%s (%s)", EnvTofuPath, override))
 	return &ResolvedBinary{Path: override, Version: ver, Source: SourceOverride}, nil
 }
 
-// reportExternal announces which external binary is in use, noting when its
-// version differs from the pinned version NIC is tested against. Both messages
-// are info-level: a different in-range version is the normal steady state for
-// conda/distro installs, so warning on every run would drown out warnings that
-// need attention.
-func reportExternal(ctx context.Context, ver, from string) {
-	if ver == Version {
-		status.Infof(ctx, "Using OpenTofu %s from %s", ver, from)
+// announce reports which external binary is in use, noting when its version
+// differs from the pinned version NIC is tested against. Both messages are
+// info-level: a different in-range version is the normal steady state for
+// pixi/distro installs, so warning on every run would drown out warnings that
+// need attention. Announcing is the consumer's job (Setup), not resolve's, so
+// resolution stays a pure query that callers like `nic version` can render
+// their own way without double-reporting.
+func (b *ResolvedBinary) announce(ctx context.Context) {
+	from := fmt.Sprintf("PATH (%s)", b.Path)
+	if b.Source == SourceOverride {
+		from = fmt.Sprintf("%s (%s)", EnvTofuPath, b.Path)
+	}
+	if b.Version == Version {
+		status.Infof(ctx, "Using OpenTofu %s from %s", b.Version, from)
 		return
 	}
-	status.Infof(ctx, "Using OpenTofu %s from %s; NIC is tested against %s", ver, from, Version)
+	status.Infof(ctx, "Using OpenTofu %s from %s; NIC is tested against %s", b.Version, from, Version)
 }
 
 // compatibleVersion enforces the supported range [MinVersion, maxVersionExclusive)

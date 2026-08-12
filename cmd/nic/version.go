@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
@@ -34,37 +33,23 @@ var versionCmd = &cobra.Command{
 // tofuVersionLine describes which OpenTofu binary NIC would use: an external
 // one resolved via NIC_TOFU_PATH or PATH, or the pinned version it downloads.
 // Resolution errors (e.g. a bad NIC_TOFU_PATH) are reported rather than
-// returned so `nic version` stays usable as a diagnostic.
-//
-// Resolution emits its diagnostics (e.g. "ignoring tofu on PATH: too old") as
-// status updates, which are dropped unless a status channel is attached to ctx.
-// A handler is attached here to capture warnings and fold them into the line;
-// without it the command could not explain why an external binary was rejected,
-// which is the packaging problem this line exists to diagnose.
+// returned so `nic version` stays usable as a diagnostic. Resolution notes
+// (e.g. why a tofu found on PATH was rejected) are folded into the line so the
+// command explains the packaging problem it exists to diagnose.
 func tofuVersionLine(ctx context.Context) string {
-	var warnings []string
-	ctx, cleanup := status.StartHandler(ctx, func(update status.Update) {
-		if update.Level == status.LevelWarning {
-			warnings = append(warnings, update.Message)
-		}
-	})
-	resolved, err := tofu.ResolveExternal(ctx)
-	// cleanup closes the channel and waits for the handler goroutine, so
-	// warnings is safe to read afterwards.
-	cleanup()
-
+	resolution, err := tofu.ResolveExternal(ctx)
 	switch {
 	case err != nil:
 		return fmt.Sprintf("unresolved (%v)", err)
-	case resolved == nil:
-		if len(warnings) > 0 {
-			return fmt.Sprintf("%s (downloaded by nic; %s)", tofu.Version, strings.Join(warnings, "; "))
+	case resolution.Binary == nil:
+		if len(resolution.Notes) > 0 {
+			return fmt.Sprintf("%s (downloaded by nic; %s)", tofu.Version, strings.Join(resolution.Notes, "; "))
 		}
 		return fmt.Sprintf("%s (downloaded by nic)", tofu.Version)
-	case resolved.Source == tofu.SourceOverride:
-		return fmt.Sprintf("%s (from %s: %s%s)", resolved.Version, tofu.EnvTofuPath, resolved.Path, testedAgainstNote(resolved.Version))
+	case resolution.Binary.Source == tofu.SourceOverride:
+		return fmt.Sprintf("%s (from %s: %s%s)", resolution.Binary.Version, tofu.EnvTofuPath, resolution.Binary.Path, testedAgainstNote(resolution.Binary.Version))
 	default:
-		return fmt.Sprintf("%s (from PATH: %s%s)", resolved.Version, resolved.Path, testedAgainstNote(resolved.Version))
+		return fmt.Sprintf("%s (from PATH: %s%s)", resolution.Binary.Version, resolution.Binary.Path, testedAgainstNote(resolution.Binary.Version))
 	}
 }
 

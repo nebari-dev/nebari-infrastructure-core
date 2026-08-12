@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // fakeFileInfo implements os.FileInfo for stat mocks.
@@ -41,7 +43,10 @@ func TestResolve(t *testing.T) {
 		version    string
 		versionErr error
 
-		want        *ResolvedBinary
+		want *ResolvedBinary
+		// wantNote is a substring expected in the resolution notes; when
+		// empty, no notes are expected.
+		wantNote    string
 		wantErr     string
 		skipWindows bool
 	}{
@@ -125,16 +130,18 @@ func TestResolve(t *testing.T) {
 			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.12.5", Source: SourcePath},
 		},
 		{
-			name:    "PATH binary below version floor falls back to download",
-			pathHit: "/usr/local/bin/tofu",
-			version: "1.6.0",
-			want:    nil,
+			name:     "PATH binary below version floor falls back to download",
+			pathHit:  "/usr/local/bin/tofu",
+			version:  "1.6.0",
+			want:     nil,
+			wantNote: "below the minimum supported version",
 		},
 		{
 			name:       "PATH binary version probe failure falls back to download",
 			pathHit:    "/usr/local/bin/tofu",
 			versionErr: errors.New("exec format error"),
 			want:       nil,
+			wantNote:   "failed to determine its version",
 		},
 		{
 			name: "neither override nor PATH binary falls back to download",
@@ -186,7 +193,7 @@ func TestResolve(t *testing.T) {
 				},
 			}
 
-			got, err := r.resolve(context.Background())
+			res, err := r.resolve(context.Background())
 
 			// stat is only ever aimed at the (trimmed) override; the version
 			// probe targets the override when set, otherwise the PATH hit.
@@ -219,20 +226,73 @@ func TestResolve(t *testing.T) {
 				t.Fatalf("resolve() error = %v", err)
 			}
 
+			if tt.wantNote == "" {
+				if len(res.Notes) != 0 {
+					t.Errorf("resolve() notes = %q, want none", res.Notes)
+				}
+			} else if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], tt.wantNote) {
+				t.Errorf("resolve() notes = %q, want one note containing %q", res.Notes, tt.wantNote)
+			}
+
 			if tt.want == nil {
-				if got != nil {
-					t.Fatalf("resolve() = %+v, want nil (download fallback)", got)
+				if res.Binary != nil {
+					t.Fatalf("resolve() binary = %+v, want nil (download fallback)", res.Binary)
 				}
 				return
 			}
-			if got == nil {
-				t.Fatalf("resolve() = nil, want %+v", tt.want)
+			if res.Binary == nil {
+				t.Fatalf("resolve() binary = nil, want %+v", tt.want)
 			}
-			if *got != *tt.want {
-				t.Errorf("resolve() = %+v, want %+v", got, tt.want)
+			if *res.Binary != *tt.want {
+				t.Errorf("resolve() binary = %+v, want %+v", res.Binary, tt.want)
 			}
 		})
 	}
+}
+
+// TestAnnounce covers both announcement branches: an external version matching
+// the pin is a plain notice, a differing in-range version names the pin. Both
+// are info-level so routine pixi/distro version skew does not spam warnings.
+func TestAnnounce(t *testing.T) {
+	capture := func(t *testing.T, b *ResolvedBinary) []status.Update {
+		t.Helper()
+		var updates []status.Update
+		ctx, cleanup := status.StartHandler(context.Background(), func(u status.Update) {
+			updates = append(updates, u)
+		})
+		b.announce(ctx)
+		cleanup()
+		return updates
+	}
+
+	t.Run("version matching the pin", func(t *testing.T) {
+		updates := capture(t, &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: Version, Source: SourcePath})
+		if len(updates) != 1 {
+			t.Fatalf("announce() sent %d updates, want 1", len(updates))
+		}
+		if updates[0].Level != status.LevelInfo {
+			t.Errorf("announce() level = %q, want %q", updates[0].Level, status.LevelInfo)
+		}
+		if strings.Contains(updates[0].Message, "tested against") {
+			t.Errorf("announce() message = %q, want no tested-against note for the pinned version", updates[0].Message)
+		}
+	})
+
+	t.Run("version differing from the pin", func(t *testing.T) {
+		updates := capture(t, &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.12.5", Source: SourceOverride})
+		if len(updates) != 1 {
+			t.Fatalf("announce() sent %d updates, want 1", len(updates))
+		}
+		if updates[0].Level != status.LevelInfo {
+			t.Errorf("announce() level = %q, want %q", updates[0].Level, status.LevelInfo)
+		}
+		wantParts := []string{"1.12.5", EnvTofuPath, "NIC is tested against " + Version}
+		for _, part := range wantParts {
+			if !strings.Contains(updates[0].Message, part) {
+				t.Errorf("announce() message = %q, want it to contain %q", updates[0].Message, part)
+			}
+		}
+	})
 }
 
 func TestCompatibleVersion(t *testing.T) {
