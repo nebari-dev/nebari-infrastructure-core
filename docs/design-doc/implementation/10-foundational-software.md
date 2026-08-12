@@ -48,7 +48,7 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 
 ```
 <repo>/<path>/
-├── nic-config.yaml                  # Scrubbed copy of nebari-config.yaml
+├── nic-config.yaml                  # Copy of nebari-config.yaml (auth holds env-var names, not secrets)
 ├── .bootstrapped                    # Marker file
 ├── apps/                            # One ArgoCD Application per app; root.yaml points here
 │   ├── root.yaml                    # App-of-apps root (recurse: false)

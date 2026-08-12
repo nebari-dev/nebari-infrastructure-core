@@ -131,6 +131,38 @@ func TestCommittedConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("auth env-var names are committed verbatim", func(t *testing.T) {
+		// Deliberate: the config references credentials only by environment
+		// variable name, never by value, so the auth block is safe to commit
+		// as-is and the committed record stays a single source of truth with
+		// the operator's config. This reverses the pre-repository-provider
+		// scrub, which recorded a false empty auth block (see ADR-0015).
+		cfg := &config.NebariConfig{
+			ProjectName: "test",
+			Repository: &config.RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{
+						"url":         "git@github.com:org/repo.git",
+						"auth":        map[string]any{"ssh": map[string]any{"env": "MY_SSH_KEY"}},
+						"argocd_auth": map[string]any{"token": map[string]any{"env": "ARGOCD_TOKEN"}},
+					},
+				},
+			},
+		}
+
+		out, err := yaml.Marshal(committedConfig(cfg, ""))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		s := string(out)
+
+		for _, want := range []string{"MY_SSH_KEY", "ARGOCD_TOKEN", "argocd_auth"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("committed output should contain %q:\n%s", want, s)
+			}
+		}
+	})
+
 	t.Run("marshalled output excludes machine-local trust_bundle path", func(t *testing.T) {
 		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
 		cfg := &config.NebariConfig{

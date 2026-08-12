@@ -83,6 +83,7 @@ Credentials are resolved from environment variables inside `Provision` and exist
 - `pkg/config` no longer imports `pkg/git`; go-git stays sealed inside `pkg/git`; the contract package is dependency-light for out-of-tree consumers.
 - Local-versus-remote behavior is explicit in types rather than inferred from URL prefixes.
 - Resolved credentials are never serializable as part of the config.
+- The `nic-config.yaml` committed to the GitOps repository now carries the `repository:` block verbatim, including auth env-var names. This deliberately reverses the earlier scrub, which recorded a false empty `auth:` block: the names are identifiers rather than secrets, and committing them keeps the record a single source of truth with the operator's config.
 
 **Bad:**
 - The `repository:` block is a breaking config change: `git_repository:` users must migrate, and configs that previously omitted git entirely must now choose a provider.
