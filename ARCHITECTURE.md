@@ -52,7 +52,7 @@ nebari-infrastructure-core/
 
 ### Key Patterns:
 
-- **Provider Registration:** `main.go` explicitly registers all cloud, DNS, and repository providers using registry pattern
+- **Provider Registration:** `defaultRegistry` in `pkg/nic/registry.go` explicitly registers all cluster, DNS, and repository providers using registry pattern
 - **Telemetry Setup:** OpenTelemetry initialized in `main.go` based on environment variables
 - **Logging:** Structured JSON logging via `slog` - only at this application layer
 - **Signal Handling:** Context cancellation for graceful shutdown on SIGINT/SIGTERM
@@ -287,7 +287,7 @@ Provisions a directory on disk as a `LocalSource` - the zero-dependency, no-netw
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | `Provision` creates the directory (default: per-project dir under the OS temp dir) and returns a `LocalSource` |
+| `provider.go` | `Provision` creates the directory (default: `~/.nic/gitops/<project_name>`, with a per-project dir under the OS temp dir as the no-home fallback) and returns a `LocalSource` |
 | `config.go` | `Config` with optional absolute `path` and `branch` |
 | `provider_test.go` | Default-path derivation, directory creation, and validation |
 
@@ -464,7 +464,7 @@ defer cleanup()
 ### 3. Explicit Dependencies
 - No blank imports (`import _ "provider/aws"`)
 - No init() magic
-- Providers explicitly registered in `cmd/nic/main.go`
+- Providers explicitly registered in `defaultRegistry` (`pkg/nic/registry.go`)
 - Makes dependencies testable and visible
 
 ### 4. Provider Configuration Isolation
@@ -507,7 +507,7 @@ pkg/providers/cluster/<provider>/
 ### Command Package Structure
 ```
 cmd/nic/
-├── main.go              # Entry point, provider registration, telemetry
+├── main.go              # Entry point, telemetry setup
 ├── <command>.go         # Each command in separate file
 └── shared.go            # Shared helpers (status handler, etc.)
 ```
@@ -543,7 +543,7 @@ cmd/nic/
 - Usage: Every function in `pkg/` starts with `tracer.Start()`
 
 **"Where are providers registered?"**
-- Registration: `cmd/nic/main.go`
+- Registration: `defaultRegistry` in `pkg/nic/registry.go`
 - Registry implementation: `pkg/registry/registry.go`
 
 ### Finding Documentation

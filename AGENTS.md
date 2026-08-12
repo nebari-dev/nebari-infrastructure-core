@@ -134,13 +134,13 @@ pkg/
   ├── dnsprovider/      # DNS provider interface + implementations
   │   ├── provider.go   # DNSProvider interface
   │   └── cloudflare/   # Cloudflare API implementation
-  ├── registry/         # Unified registry holding both cluster and DNS providers
+  ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
   │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
   ├── tofu/             # terraform-exec wrapper (used by the AWS and Azure cluster providers)
   ├── argocd/           # ArgoCD bootstrap and foundational-apps templating
   ├── config/           # YAML config parsing/validation
-  ├── git/              # Git config types and client used by ArgoCD GitOps repo
+  ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
@@ -399,7 +399,7 @@ Either way, a failure that can leave resources behind must surface in the exit c
 
 **Critical:** Code must respect package boundaries.
 
-- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`provider.Provider`, `dnsprovider.DNSProvider`), never on specific implementations.
+- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`cluster.Provider`, `dns.Provider`, `repository.Provider`), never on specific implementations.
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
