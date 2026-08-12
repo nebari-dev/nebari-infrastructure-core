@@ -21,6 +21,19 @@ var (
 	date    = "unknown"
 )
 
+// versionString renders the version report. It is a pure helper (no client
+// construction or I/O) so it can be unit-tested independently of runVersion.
+func versionString(version, commit, date, tofuVersion string) string {
+	return fmt.Sprintf(
+		"Nebari Infrastructure Core (NIC)\n"+
+			"Version: %s\n"+
+			"Commit: %s\n"+
+			"Built: %s\n"+
+			"OpenTofu version: %s\n",
+		version, commit, date, tofuVersion,
+	)
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
@@ -37,11 +50,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Version command executed", "version", version, "commit", commit, "date", date)
 
-	fmt.Printf("Nebari Infrastructure Core (NIC)\n")
-	fmt.Printf("Version: %s\n", version)
-	fmt.Printf("Commit: %s\n", commit)
-	fmt.Printf("Built: %s\n", date)
-	fmt.Printf("OpenTofu version: %s\n", tofu.Version)
+	fmt.Print(versionString(version, commit, date, tofu.Version))
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {

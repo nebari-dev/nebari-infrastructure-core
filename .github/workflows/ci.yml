@@ -74,6 +74,17 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Assert version injection
+        run: |
+          make build VERSION=ci-test-v9.9.9 COMMIT=abcdef1 DATE=2020-01-01T00:00:00Z
+          if ! ./nic version | grep -q "Version: ci-test-v9.9.9"; then
+            echo "ldflags version injection failed: 'Version: ci-test-v9.9.9' not found in 'nic version' output" >&2
+            ./nic version >&2
+            exit 1
+          fi
+          # Restore the normally-versioned binary for the upload step.
+          make build
+
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
