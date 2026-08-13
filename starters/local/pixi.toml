@@ -1,0 +1,46 @@
+[workspace]
+name = "nebari-local"
+channels = ["conda-forge", "https://prefix.dev/github-releases"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
+version = "0.1.0"
+
+[dependencies]
+# nic is the centerpiece; it resolves from the prefix.dev github-releases
+# channel once that channel is live (issue #579). Until then, run the tasks
+# below with a nic binary on PATH. The package name is not yet settled
+# (#556/#579), so keep this commented during the pilot.
+# nebari-infrastructure-core = "0.11.*"
+#
+# The local provider does NOT use OpenTofu: it drives kind via an embedded Go
+# library, so there is no `opentofu` dependency here (unlike the cloud
+# starters). The default env therefore has no required deps.
+
+# Optional operator convenience tools. Kept OUT of the required deps because
+# kubernetes-client (the kubectl binary; there is no separate `kubectl` package
+# on conda-forge) lags badly on linux-aarch64 (1.24 vs 1.34 elsewhere). The
+# feature is therefore scoped to the platforms that carry a current kubectl, so
+# the CORE workspace still solves on all four. nic does not need kubectl - it
+# talks to the cluster via embedded client-go. Enable with: pixi install -e tools
+[feature.tools]
+platforms = ["linux-64", "osx-arm64"]
+
+[feature.tools.dependencies]
+kubernetes-client = ">=1.30"
+k9s = ">=0.32"
+
+[environments]
+tools = ["tools"]
+
+[tasks]
+validate = "nic validate"
+deploy = { cmd = "nic deploy", depends-on = ["validate"] }
+destroy = "nic destroy"
+kubeconfig = "nic kubeconfig -o kubeconfig.yaml"
+
+# nebi bundles workspace files as OCI asset layers (nebi >= 0.10). pixi.toml and
+# pixi.lock are always included; `include` is a strict allowlist for everything
+# else, so the starter ships its placeholder config.yaml and README and nothing
+# a user might add later (a filled config, a kubeconfig, tfstate) leaks by
+# accident. Requires nebi >= 0.10 on the publisher/importer.
+[tool.nebi.bundle]
+include = ["config.yaml", "README.md"]

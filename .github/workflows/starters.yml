@@ -1,0 +1,145 @@
+name: Starters
+
+on:
+  pull_request:
+    paths:
+      - "starters/**"
+      - ".github/workflows/starters.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "starters/**"
+      - ".github/workflows/starters.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# TODO confirm namespace (nebari_environments vs nebari) - open question on #560.
+env:
+  NEBI_QUAY_NAMESPACE: nebari_environments
+
+jobs:
+  # NOTE: the "unedited config must be rejected" assertion below only holds once
+  # #561 (PR #583) is merged to main. Until then, nic-from-main has no CHANGEME
+  # check, so `nic validate` on the placeholder config SUCCEEDS and this job goes
+  # red. That failure is expected for this draft PR.
+  validate-starters:
+    name: Validate starters
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic
+        run: make build
+
+      - name: Put nic on PATH
+        run: sudo mv nic /usr/local/bin/nic
+
+      - name: DoD - unedited fails, filled passes (starters/local)
+        run: |
+          set -euo pipefail
+          config="starters/local/config.yaml"
+
+          # 1. The unedited placeholder config MUST be rejected.
+          echo "== asserting unedited config is rejected =="
+          if err="$(nic validate -f "$config" 2>&1)"; then
+            echo "FAIL: nic validate accepted the unedited placeholder config"
+            echo "$err"
+            exit 1
+          fi
+          echo "$err"
+          if ! echo "$err" | grep -q "CHANGEME"; then
+            echo "FAIL: validation error did not mention CHANGEME"
+            exit 1
+          fi
+          echo "OK: unedited config rejected and error names CHANGEME"
+
+          # 2. A filled copy MUST validate.
+          echo "== asserting filled config passes =="
+          filled="$(mktemp)"
+          sed 's/project_name: CHANGEME/project_name: nebari-local-ci/' "$config" > "$filled"
+          nic validate -f "$filled"
+          echo "OK: filled config passed validation"
+
+  publish-starters:
+    name: Publish starters to quay.io
+    needs: validate-starters
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic
+        run: make build
+
+      - name: Put nic on PATH
+        run: sudo mv nic /usr/local/bin/nic
+
+      - name: Install pixi and nebi
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pixi.sh/install.sh | bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          pixi global install "nebi>=0.10"
+
+      - name: Skip if no quay credentials
+        id: creds
+        run: |
+          if [ -z "${QUAY_TOKEN:-}" ]; then
+            echo "no quay creds, skipping publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure quay registry
+        if: steps.creds.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
+            --name quay \
+            --url quay.io \
+            --namespace "$NEBI_QUAY_NAMESPACE" \
+            --username "$QUAY_USERNAME" \
+            --password-stdin
+
+      - name: Publish starter-local
+        if: steps.creds.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          cd starters/local
+          nebi init
+          # Let the tag auto-increment; publish straight to the registry with no
+          # nebi server.
+          nebi publish --local --registry quay --repo starter-local
+
+      - name: Round-trip DoD - imported unedited config still fails
+        if: steps.creds.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/imported
+          # Import the just-published starter and assert the (unedited) config it
+          # ships is still rejected by nic validate.
+          nebi import "quay.io/$NEBI_QUAY_NAMESPACE/starter-local:latest" -o /tmp/imported
+          if nic validate -f /tmp/imported/config.yaml; then
+            echo "FAIL: imported unedited config was accepted by nic validate"
+            exit 1
+          fi
+          echo "OK: imported unedited config is still rejected"

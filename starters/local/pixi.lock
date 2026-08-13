@@ -1,0 +1,111 @@
+version: 7
+platforms:
+- name: linux-64
+- name: linux-aarch64
+- name: osx-64
+- name: osx-arm64
+environments:
+  default:
+    channels:
+    - url: https://conda.anaconda.org/conda-forge/
+    - url: https://prefix.dev/github-releases/
+    packages: {}
+  tools:
+    channels:
+    - url: https://conda.anaconda.org/conda-forge/
+    - url: https://prefix.dev/github-releases/
+    packages:
+      linux-64:
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/k9s-0.51.0-h643be8f_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/kubernetes-client-1.34.3-h6950dcc_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.1.0-ha9f2e26_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.1.0-he0feb66_1.conda
+      osx-arm64:
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/k9s-0.51.0-hfb368cc_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/kubernetes-client-1.34.3-h91756fb_0.conda
+packages:
+- conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
+  build_number: 20
+  sha256: 1dd3fffd892081df9726d7eb7e0dea6198962ba775bd88842135a4ddb4deb3c9
+  md5: a9f577daf3de00bca7c3c76c0ecbd1de
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libgomp >=7.5.0
+  constrains:
+  - openmp_impl <0.0a0
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports:
+    strong:
+    - _openmp_mutex >=4.5
+  size: 28948
+  timestamp: 1770939786096
+- conda: https://conda.anaconda.org/conda-forge/linux-64/k9s-0.51.0-h643be8f_0.conda
+  sha256: a3237f76b3057d38afcb575c7486671c35794bd44e062ef7a29ff030d66fabdb
+  md5: 768c676ef74f1e5f1b4227b74a7917ee
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 72731742
+  timestamp: 1780730847822
+- conda: https://conda.anaconda.org/conda-forge/linux-64/kubernetes-client-1.34.3-h6950dcc_0.conda
+  sha256: 1d64241b9bc5bd6513094543b98e19ce80918b9df392cee6e001aebaafadcc8e
+  md5: 839902381c88deb7c5524fa7c61b7aed
+  depends:
+  - __glibc >=2.17
+  - __glibc >=2.17,<3.0.a0
+  - libgcc >=14
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 26335888
+  timestamp: 1765415822485
+- conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-16.1.0-ha9f2e26_1.conda
+  sha256: d5cb8475131c31680f8fd30512c418f373064e272e452063276a8fb14c9fa42f
+  md5: 5a7d954665c707c93311657cd779c705
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - _openmp_mutex >=4.5
+  constrains:
+  - libgomp 16.1.0 he0feb66_1
+  - libgcc-ng ==16.1.0=*_1
+  license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
+  run_exports: {}
+  size: 1057877
+  timestamp: 1785375436766
+- conda: https://conda.anaconda.org/conda-forge/linux-64/libgomp-16.1.0-he0feb66_1.conda
+  sha256: 62cb599ad0539d99386515326d9d5e8f51f75a60c69c2131b21df76edf35bd89
+  md5: 88f2d91cb1533194c323534253094d23
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  license: GPL-3.0-only WITH GCC-exception-3.1
+  license_family: GPL
+  run_exports:
+    strong:
+    - _openmp_mutex >=4.5
+  size: 640415
+  timestamp: 1785375373755
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/k9s-0.51.0-hfb368cc_0.conda
+  sha256: 386e6400587ed43562603437af0f07a6a2187d7a96360c19f103a426278f0f22
+  md5: 251f7f00e493efe79dfd745c9900d86a
+  depends:
+  - __osx >=11.0
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 71515912
+  timestamp: 1780730928833
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/kubernetes-client-1.34.3-h91756fb_0.conda
+  sha256: 235f0748c94b9174d2597c4925cf2a3cbd0a2d6b97d6c30d1e7585fe6203e421
+  md5: 03d17ebf4f8347030434a974c2c040b3
+  depends:
+  - __osx >=11.0
+  license: Apache-2.0
+  license_family: APACHE
+  run_exports: {}
+  size: 24972079
+  timestamp: 1765416015649
