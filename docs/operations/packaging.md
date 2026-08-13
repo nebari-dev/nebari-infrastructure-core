@@ -5,6 +5,10 @@ infrastructure declaratively (AWS, Azure). By default it downloads its own pinne
 OpenTofu binary on first use. This page covers how to make NIC use a pre-installed
 binary instead, which matters for OS/conda packaging, CI, and air-gapped environments.
 
+The Hetzner provider additionally uses the
+[`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary, resolved the same
+way — see [hetzner-k3s](#hetzner-k3s-hetzner-provider) below.
+
 ## OpenTofu resolution order
 
 When a command needs OpenTofu, NIC resolves the binary in this order:
@@ -89,8 +93,36 @@ picked up automatically through `PATH` discovery. Otherwise, persist the
 [NIC cache directory](#the-nic-cache-directory) (`~/.cache/nic/tofu/` on typical
 Linux runners) across runs to avoid a re-download per fresh runner.
 
+## hetzner-k3s (Hetzner provider)
+
+The Hetzner provider drives cluster creation through
+[`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) rather than OpenTofu. NIC
+resolves it in the same order:
+
+1. **`NIC_HETZNER_K3S_PATH`** — an explicit path to a `hetzner-k3s` binary. If set it
+   must point to an executable; anything else is a hard error.
+2. **`hetzner-k3s` on `PATH`** — used when present.
+3. **Download** — NIC downloads its pinned version and caches it under
+   `<user-cache-dir>/nic/hetzner-k3s/`, verifying it against a SHA256 table of known
+   digests before use.
+
+Two differences from OpenTofu, both deliberate:
+
+- **No version gate on external binaries.** `hetzner-k3s` ships as a single pinned
+  release with no supported range and no stable self-version probe, so a binary from
+  `NIC_HETZNER_K3S_PATH` or `PATH` is used as-is — NIC does not check its version.
+- **External binaries are neither integrity- nor version-checked.** Only the download
+  path is SHA256-verified, and that table covers the pinned version alone. Supplying
+  your own `hetzner-k3s` trades that verification for air-gapped/pre-provisioned
+  installs; vet its provenance through your own supply-chain controls.
+
+Unlike OpenTofu, `hetzner-k3s` is **not** packaged on conda-forge/prefix.dev, so there
+is no dependency to declare. Air-gapped Hetzner deploys must pre-provide the binary via
+`NIC_HETZNER_K3S_PATH`, `PATH`, or a pre-seeded `<user-cache-dir>/nic/hetzner-k3s/`
+cache directory.
+
 ## Related
 
-- The Hetzner provider uses the `hetzner-k3s` binary rather than OpenTofu; the same
-  external-binary treatment for it is tracked in
-  [https://github.com/nebari-dev/nebari-infrastructure-core/issues/558](https://github.com/nebari-dev/nebari-infrastructure-core/issues/558).
+- A shared resolution seam for both binaries (extracting the common override → `PATH` →
+  download logic behind one interface) is planned as a follow-up once
+  [ADR-0016](https://github.com/nebari-dev/nebari-infrastructure-core/pull/584) lands.

@@ -23,7 +23,7 @@ More categories (certificate issuers, git hosting, software installers) are plan
 | Provider | Backing tool | Status |
 | --- | --- | --- |
 | `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
-| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
+| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; resolved via `NIC_HETZNER_K3S_PATH` / `PATH` / pinned download (checksum-verified) | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
 | `local` | Kind. `nic deploy` creates the Kind cluster (reusing it if one already exists) and bootstraps it; `nic destroy` deletes it | Working |
 | `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
@@ -446,7 +446,7 @@ Core libraries (see `go.mod`):
 
 Runtime dependencies (per cluster provider):
 - **AWS / Azure:** OpenTofu, resolved in order: `NIC_TOFU_PATH` override, compatible `tofu` on `PATH`, automatic download into the user cache. See `docs/operations/packaging.md` for the full contract
-- **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
+- **Hetzner:** `hetzner-k3s`, resolved in order: `NIC_HETZNER_K3S_PATH` override, `hetzner-k3s` on `PATH`, automatic download (SHA256-verified) into the user cache. Not on conda-forge/prefix.dev, so air-gapped Hetzner deploys must pre-provide it. See `docs/operations/packaging.md`
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
 
