@@ -11,13 +11,14 @@ This document describes the wrapper, the Setup helper, and how AWS-provider code
 ```
 pkg/tofu/
 ├── tofu.go               # TerraformExecutor type, Setup, Init/Plan/Apply/Destroy/Output, downloader
+├── resolve.go            # External binary resolution (NIC_TOFU_PATH, PATH, download fallback)
 ├── log.go                # JSON line mapper for status streaming
 ├── version.go            # Pinned OpenTofu version
 ├── context_default.go    # Non-Linux signal handling
 └── context_linux.go      # Linux-specific signal handling (PR_SET_PDEATHSIG)
 ```
 
-There is no `executor.go`, `workspace.go`, or `outputs.go`. The entire wrapper is in `tofu.go`.
+There is no `executor.go`, `workspace.go`, or `outputs.go`. The wrapper is in `tofu.go`; binary resolution is in `resolve.go`.
 
 ## 8.3 The Wrapper Type
 
@@ -71,15 +72,15 @@ It does the following:
 
 1. Allocates a fresh temp working directory via `afero.TempDir`.
 2. Walks the `templates` filesystem (an `embed.FS` from the calling provider) and copies each file into the working dir.
-3. Ensures `~/.cache/nic/tofu/` exists and uses it as the OpenTofu download cache.
-4. Downloads the OpenTofu binary (version pinned in `pkg/tofu/version.go`) via the `tofudl` library, with `MirrorConfig` that caches both API responses and artifacts indefinitely. Writes the executable into the working dir to avoid version-mismatch races between concurrent NIC invocations.
-5. Sets `TF_PLUGIN_CACHE_DIR` to `~/.cache/nic/tofu/plugins` so provider plugins are reused across runs.
+3. Ensures `os.UserCacheDir()/nic/tofu/` exists and uses it as the OpenTofu download cache.
+4. Resolves the OpenTofu binary (`resolve.go`): an explicit `NIC_TOFU_PATH` override (hard error if unusable), else a compatible `tofu` on `PATH` (skipped with a warning if unusable), else downloads the version pinned in `pkg/tofu/version.go` via the `tofudl` library, with `MirrorConfig` that caches both API responses and artifacts indefinitely. Only a **downloaded** binary is written into the working dir — that is what avoids version-mismatch races between concurrent NIC invocations; an external binary is used in place, never copied, so `Cleanup()` cannot touch it. See [Packaging and External Binaries](../../operations/packaging.md) for the resolution contract.
+5. Sets `TF_PLUGIN_CACHE_DIR` to the `plugins/` subdirectory of the cache so provider plugins are reused across runs.
 6. Marshals `tfvars` to `terraform.tfvars.json` in the working dir.
 7. Constructs `tfexec.NewTerraform(workingDir, execPath)` and returns the wrapped `TerraformExecutor`.
 
 If any step fails, the temp dir and the (empty) cache directories are cleaned up. The caller is responsible for `defer executor.Cleanup()` once Setup succeeds.
 
-There is **no** `findOpenTofuBinary()` in `PATH`. The binary is always the version NIC pinned and downloaded.
+Binary resolution is owned entirely by `pkg/tofu`: providers never look up tofu themselves, and the download remains the default when no compatible external binary is present.
 
 ## 8.5 AWS Provider Usage
 
@@ -118,7 +119,7 @@ Key points the previous version of this doc got wrong:
 
 - The CLI does **not** call a function like `generateTerraformVars(cfg)` itself; each provider owns its own tfvars construction.
 - There is no `cfg.Provider` or `cfg.ProviderConfig` field on `NebariConfig`. The provider name is `cfg.Cluster.ProviderName()`; the typed config comes from decoding `cfg.Cluster.ProviderConfig()` inside the provider package.
-- There is no `findOpenTofuBinary()`; see Setup above.
+- Providers never resolve the tofu binary themselves; resolution (`NIC_TOFU_PATH` / `PATH` / download) happens inside `Setup`, see above.
 
 ## 8.6 Backend Override (Dry-Run)
 
