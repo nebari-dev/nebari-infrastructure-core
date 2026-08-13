@@ -61,6 +61,24 @@ func checkReadable(path string) error {
 	return nil
 }
 
+// rejectPlaceholders scans configFile for unfilled CHANGEME placeholders and
+// returns a *config.PlaceholderError naming every offending field, or nil.
+//
+// The scan needs the YAML source, which NebariConfig.Validate does not have, so
+// it runs here at the cmd layer for the validate and deploy commands only. It is
+// deliberately not part of Validate, so destroy/kubeconfig are not gated on it.
+// The file is re-read (cheaply) rather than threading bytes through ParseConfig,
+// keeping the placeholder concern off the shared parse path.
+func rejectPlaceholders(configFile string) error {
+	// G304: configFile is the user-supplied config path already resolved and
+	// read by ParseConfig; re-reading it here is the intended behavior.
+	raw, err := os.ReadFile(configFile) //nolint:gosec
+	if err != nil {
+		return fmt.Errorf("cannot read config file %q: %w", configFile, err)
+	}
+	return config.CheckPlaceholders(raw)
+}
+
 // annotateConfigError enriches a validation error with the config file path so
 // the user sees which file to edit. Placeholder errors carry only the field path
 // from the config layer; the file path is known here at the cmd layer. Other

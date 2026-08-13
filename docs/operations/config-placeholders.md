@@ -6,20 +6,27 @@ clear error instead of provisioning real infrastructure against nonsense values.
 
 ## The convention
 
-The placeholder token is the literal string **`CHANGEME`** (case-sensitive). Any
-string field whose value *contains* `CHANGEME` is treated as an unfilled
-placeholder. This includes nested provider blocks, lists, and maps — the whole
-config is scanned.
+The placeholder token is the literal string **`CHANGEME`** (case-sensitive). The
+check walks the parsed YAML node tree, so any scalar value *or mapping key* whose
+text *contains* `CHANGEME` is treated as an unfilled placeholder. This includes
+nested provider blocks, lists, and map keys (e.g. `node_groups: { CHANGEME: … }`)
+— the whole config is scanned in one pass, and every offending field is reported
+together rather than just the first.
+
+Placeholders in **comments are ignored**: only scalar values and mapping keys are
+scanned, so a `# CHANGEME` reminder in a comment does not trip the check.
 
 When a placeholder is found, validation fails before any provider API call with a
-message naming the field path and the config file, for example:
+message naming the field path(s) and the config file, for example:
 
 ```
-configuration validation failed: placeholder value "CHANGEME" found in field
-"cluster.aws.region"; edit the config before deploying (in config file "nebari-config.yaml")
+placeholder value "CHANGEME" found in fields "cluster.aws.node_groups.CHANGEME",
+"project_name"; edit the config before deploying (in config file "nebari-config.yaml")
 ```
 
-The check runs at both `nic validate` and `nic deploy`.
+The check runs at `nic validate` and `nic deploy` only. It does **not** gate
+`nic destroy` or `nic kubeconfig`, which only need a parseable config and must keep
+working against a cluster that was deployed from an already-edited file.
 
 ## For example and starter authors
 

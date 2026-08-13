@@ -48,6 +48,14 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Reject unfilled CHANGEME placeholders before any further validation, so a
+	// user who runs validate on an unedited starter/example config gets a clean
+	// error naming the fields to fill in.
+	if err := rejectPlaceholders(configFile); err != nil {
+		span.RecordError(err)
+		return annotateConfigError(err, configFile)
+	}
+
 	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)

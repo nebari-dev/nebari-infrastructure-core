@@ -192,7 +192,7 @@ func TestFileExists_Missing(t *testing.T) {
 // config file path (so the user sees both the field and the file), while other
 // errors pass through unchanged.
 func TestAnnotateConfigError(t *testing.T) {
-	placeholderErr := fmt.Errorf("configuration validation failed: %w", &config.PlaceholderError{FieldPath: "cluster.aws.region"})
+	placeholderErr := fmt.Errorf("configuration validation failed: %w", &config.PlaceholderError{FieldPaths: []string{"cluster.aws.region"}})
 	got := annotateConfigError(placeholderErr, "/path/to/nebari-config.yaml")
 	if !strings.Contains(got.Error(), "cluster.aws.region") {
 		t.Errorf("annotated error %q does not mention the field path", got)

@@ -2,36 +2,12 @@ package config
 
 import (
 	"fmt"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
-
-// PlaceholderValue is the literal sentinel that marks an unfilled config value.
-// Any string field whose value contains this token (case-sensitive) is treated
-// as a placeholder and rejected by validation before any provider API call.
-//
-// A literal sentinel is used, rather than pattern-matching values like
-// "example.com", so the check is explicit and greppable and never rejects a
-// user who legitimately owns such a value. Example and starter configs must use
-// this exact token wherever the reader is expected to substitute their own
-// value.
-const PlaceholderValue = "CHANGEME"
-
-// PlaceholderError reports that a config field still holds the CHANGEME
-// placeholder. FieldPath is the dotted path (from yaml tags / map keys) to the
-// offending field, e.g. "cluster.aws.region". Callers that know the config file
-// path (the cmd layer) wrap this so the user sees both the field and the file.
-type PlaceholderError struct {
-	FieldPath string
-}
-
-func (e *PlaceholderError) Error() string {
-	return fmt.Sprintf("placeholder value %q found in field %q; edit the config before deploying", PlaceholderValue, e.FieldPath)
-}
 
 // ValidateOptions configures validation behavior.
 // Provider lists are injected by the caller (typically from a registry)
@@ -361,13 +337,6 @@ var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // The opts parameter provides the set of valid provider names, injected by the caller.
 // Returns an error describing the first validation failure encountered.
 func (c *NebariConfig) Validate(opts ValidateOptions) error {
-	// Reject unfilled placeholder values first, before any provider lookups, so
-	// a user who runs deploy on an unedited starter/example config gets a clean
-	// error instead of a real deploy against nonsense values.
-	if err := c.checkPlaceholders(); err != nil {
-		return err
-	}
-
 	if c.ProjectName == "" {
 		return fmt.Errorf("project_name field is required")
 	}
@@ -409,94 +378,4 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 	}
 
 	return nil
-}
-
-// checkPlaceholders walks every string field of the config (including nested
-// provider blocks, slices, maps, and pointers) and returns a *PlaceholderError
-// for the first field whose value contains the CHANGEME sentinel. It relies on
-// reflection so provider blocks parsed into map[string]any are covered without
-// enumerating every provider-specific key here.
-func (c *NebariConfig) checkPlaceholders() error {
-	return walkPlaceholders(reflect.ValueOf(c), "")
-}
-
-// walkPlaceholders recursively inspects v, building a dotted path from struct
-// yaml tags and map keys, and returns a *PlaceholderError on the first string
-// containing PlaceholderValue.
-func walkPlaceholders(v reflect.Value, path string) error {
-	switch v.Kind() {
-	case reflect.Pointer, reflect.Interface:
-		if v.IsNil() {
-			return nil
-		}
-		return walkPlaceholders(v.Elem(), path)
-
-	case reflect.Struct:
-		t := v.Type()
-		for i := 0; i < v.NumField(); i++ {
-			field := t.Field(i)
-			if !field.IsExported() {
-				continue
-			}
-			name, inline := yamlFieldName(field)
-			childPath := path
-			if !inline {
-				childPath = joinFieldPath(path, name)
-			}
-			if err := walkPlaceholders(v.Field(i), childPath); err != nil {
-				return err
-			}
-		}
-
-	case reflect.Map:
-		for _, key := range v.MapKeys() {
-			keyStr := fmt.Sprintf("%v", key.Interface())
-			if err := walkPlaceholders(v.MapIndex(key), joinFieldPath(path, keyStr)); err != nil {
-				return err
-			}
-		}
-
-	case reflect.Slice, reflect.Array:
-		for i := 0; i < v.Len(); i++ {
-			if err := walkPlaceholders(v.Index(i), fmt.Sprintf("%s[%d]", path, i)); err != nil {
-				return err
-			}
-		}
-
-	case reflect.String:
-		if strings.Contains(v.String(), PlaceholderValue) {
-			return &PlaceholderError{FieldPath: path}
-		}
-	}
-	return nil
-}
-
-// yamlFieldName returns the field's yaml name and whether it is inlined. An
-// inline field contributes no path segment of its own (its children hang off the
-// parent path); this keeps provider blocks reported as e.g. "cluster.aws.region"
-// rather than "cluster.providers.aws.region".
-func yamlFieldName(field reflect.StructField) (name string, inline bool) {
-	tag := field.Tag.Get("yaml")
-	if tag == "" {
-		return strings.ToLower(field.Name), false
-	}
-	parts := strings.Split(tag, ",")
-	name = parts[0]
-	if name == "" {
-		name = strings.ToLower(field.Name)
-	}
-	for _, opt := range parts[1:] {
-		if opt == "inline" {
-			inline = true
-		}
-	}
-	return name, inline
-}
-
-// joinFieldPath appends segment to path with a dot separator.
-func joinFieldPath(path, segment string) string {
-	if path == "" {
-		return segment
-	}
-	return path + "." + segment
 }
