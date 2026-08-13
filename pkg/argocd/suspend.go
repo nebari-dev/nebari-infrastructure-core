@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -61,21 +62,14 @@ func suspendReconciliation(ctx context.Context, client kubernetes.Interface, tim
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Suspending Argo CD reconciliation").
 		WithResource("argocd").WithAction("suspending"))
 
-	sts, err := client.AppsV1().StatefulSets(defaultNamespace).Get(ctx, applicationControllerStatefulSet, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		span.SetAttributes(attribute.String("suspend_result", "controller_absent"))
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD application controller not found; nothing to suspend").
-			WithResource("argocd").WithAction("suspending"))
-		return nil
-	}
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("get Argo CD application controller: %w", err)
-	}
-
-	zero := int32(0)
-	sts.Spec.Replicas = &zero
-	if _, err := client.AppsV1().StatefulSets(defaultNamespace).Update(ctx, sts, metav1.UpdateOptions{}); err != nil {
+	scaleToZero := []byte(`{"spec":{"replicas":0}}`)
+	if _, err := client.AppsV1().StatefulSets(defaultNamespace).Patch(ctx, applicationControllerStatefulSet, types.StrategicMergePatchType, scaleToZero, metav1.PatchOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			span.SetAttributes(attribute.String("suspend_result", "controller_absent"))
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD application controller not found; nothing to suspend").
+				WithResource("argocd").WithAction("suspending"))
+			return nil
+		}
 		span.RecordError(err)
 		return fmt.Errorf("scale Argo CD application controller to zero: %w", err)
 	}
