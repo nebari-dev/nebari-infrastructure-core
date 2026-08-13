@@ -277,8 +277,19 @@ dot:
 (5) Every write across that path also pays the acknowledgement cost below, so the single path is the slow path too.
 (6) A managed filesystem has no equivalent component. FSx for OpenZFS and EFS are appliances outside the cluster with their own HA and failover, no pod to reschedule, no NFS grace period after a node drain, and throughput that scales by configuration rather than by whatever one node can push. On the *shared* path, therefore, the structural comparison does not favour Longhorn — which is the opposite of the direction it runs for single-pod volumes, and is still unmeasured either way.
 ----
-(7) [Longhorn RWX concentrates the shared data path]: Shared storage on Longhorn today is one NFS pod serving the whole cluster — one bottleneck and one failure domain, with no equivalent in a managed filesystem. That is a property of this implementation, not of the RWX requirement.
+(7) [Longhorn RWX concentrates the shared data path]: Shared storage today is served by a single in-cluster NFS pod — Longhorn's share-manager where RWX is used, the pack's transitional NFS server on a stock deploy — making it one bottleneck and one failure domain for every group at once, with no equivalent in a managed filesystem. That is a property of this implementation, not of the RWX requirement.
     + <RWX pays a write acknowledgement on every operation>
+
+<The concentration is a pack layout choice>: The whole-cluster scope of that data path is ours, not Longhorn's, and is fixable without changing storage backend.
+
+(1) Three choices stack to produce the single path, and two of them are the pack's: one `shared-storage` PVC for every group sliced by `subPath`, and the transitional NFS server on by default. Only the third — that Longhorn serves RWX through a share-manager pod — belongs to the storage layer.
+(2) Removing the second-hop pod is not new engineering. Setting `sharedStorage.storageClass` makes the chart drop its own NFS server and provision a real RWX PVC; that is ADR-0003's value injection, designed and unimplemented, and as _RWX is already not uniform_ establishes it should happen regardless of the AWS decision.
+(3) Splitting the shared PVC per group — `shared-group-name` mounted whole rather than by `subPath` — would split the bottleneck and the failure domain N ways, so one group's share-manager reattach stops stalling every other group. The mechanism exists already: the spawner provisions a per-user PVC through the Kubernetes API for the workspace volume. It would also make per-group quotas possible, which the single-PVC layout cannot support at all.
+(4) What that costs is unverified: one share-manager pod and one Longhorn volume per group rather than one each, and no measurement of how many RWX volumes a cluster tolerates.
+(5) So the loudest part of the concern — *one pod for the whole cluster* — is reachable on either provider without adopting a managed filesystem.
+----
+(6) [Concentration is fixable in the pack]: The whole-cluster scope should be fixed in the pack whichever way AWS storage goes, so it carries little weight for the managed-filesystem branch. What survives is per-group and smaller: an in-cluster NFS pod over synchronous replication, plus a control plane shared by every volume in the cluster.
+    _> <Longhorn RWX data-path concern>
 
 <RWX pays a write acknowledgement on every operation>: The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.
 
