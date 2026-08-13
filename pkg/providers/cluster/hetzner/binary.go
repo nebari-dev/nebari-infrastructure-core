@@ -132,7 +132,7 @@ func ensureBinary(ctx context.Context, cacheDir, version string, downloader bina
 	span.SetAttributes(attribute.String("version", version))
 
 	execPath := filepath.Join(cacheDir, fmt.Sprintf("hetzner-k3s-%s", version))
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		execPath += ".exe"
 	}
 

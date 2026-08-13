@@ -446,7 +446,7 @@ Core libraries (see `go.mod`):
 
 Runtime dependencies (per cluster provider):
 - **AWS / Azure:** OpenTofu, resolved in order: `NIC_TOFU_PATH` override, compatible `tofu` on `PATH`, automatic download into the user cache. See `docs/operations/packaging.md` for the full contract
-- **Hetzner:** `hetzner-k3s`, resolved in order: `NIC_HETZNER_K3S_PATH` override, `hetzner-k3s` on `PATH`, automatic download (SHA256-verified) into the user cache. Not on conda-forge/prefix.dev, so air-gapped Hetzner deploys must pre-provide it. See `docs/operations/packaging.md`
+- **Hetzner:** `hetzner-k3s`, resolved in order: `NIC_HETZNER_K3S_PATH` override, `hetzner-k3s` on `PATH`, automatic download (SHA256-verified) into the user cache. Not on conda-forge/prefix.dev, so network-restricted deploys can pre-provide it - though `nic deploy` still fetches k3s release tags via `hetzner-k3s releases`, so fully air-gapped Hetzner deploys are not yet supported. See `docs/operations/packaging.md`
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
 

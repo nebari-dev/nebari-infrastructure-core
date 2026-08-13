@@ -25,38 +25,30 @@ const binaryName = "hetzner-k3s"
 // executable bit.
 const windowsOS = "windows"
 
-// Source identifies how the hetzner-k3s binary in use was obtained.
-type Source string
+// source identifies how the hetzner-k3s binary in use was obtained.
+type source string
 
 const (
-	// SourceOverride means the binary came from an explicit NIC_HETZNER_K3S_PATH.
-	SourceOverride Source = "override"
-	// SourcePath means the binary was discovered as `hetzner-k3s` on PATH.
-	SourcePath Source = "path"
-	// SourceDownload means NIC downloaded its own pinned binary.
-	SourceDownload Source = "download"
+	// sourceOverride means the binary came from an explicit NIC_HETZNER_K3S_PATH.
+	sourceOverride source = "override"
+	// sourcePath means the binary was discovered as `hetzner-k3s` on PATH.
+	sourcePath source = "path"
+	// sourceDownload means NIC downloaded its own pinned binary.
+	sourceDownload source = "download"
 )
 
-// ResolvedBinary describes the hetzner-k3s binary NIC resolved and where it
-// came from. Version is empty for external binaries: unlike OpenTofu,
-// hetzner-k3s is a single pinned release with no supported range and no
-// self-version probe wired, so NIC does not gate external binaries on version
-// (see resolve).
-type ResolvedBinary struct {
+// resolvedBinary describes the hetzner-k3s binary NIC resolved and where it came
+// from. Version is empty for external binaries: unlike OpenTofu, hetzner-k3s is
+// a single pinned release with no supported range and no self-version probe
+// wired, so NIC does not gate external binaries on version (see resolve).
+//
+// These types stay unexported: nothing outside this package consumes them yet.
+// When the shared resolver seam is extracted (tracked against ADR-0016), the
+// tool-agnostic shape moves to a neutral package and is exported there.
+type resolvedBinary struct {
 	Path    string
 	Version string
-	Source  Source
-}
-
-// Resolution is the outcome of external-binary resolution. Like the OpenTofu
-// resolver, it is a pure query: it never emits status updates, so callers
-// decide how to surface Notes.
-type Resolution struct {
-	// Binary is the external binary to use, or nil when NIC should fall back
-	// to downloading its pinned version.
-	Binary *ResolvedBinary
-	// Notes are human-readable diagnostics produced while resolving.
-	Notes []string
+	Source  source
 }
 
 // resolver finds an external hetzner-k3s binary. Its dependencies are injectable
@@ -75,34 +67,34 @@ func newResolver() *resolver {
 	}
 }
 
-// ResolveExternal reports the pre-installed hetzner-k3s binary NIC would use, if
+// resolveExternal reports the pre-installed hetzner-k3s binary NIC would use, if
 // any. The resolution order mirrors the OpenTofu resolver: NIC_HETZNER_K3S_PATH
-// (hard error if unusable), then `hetzner-k3s` on PATH. A Resolution with a nil
-// Binary means no external binary applies and NIC falls back to downloading its
+// (hard error if unusable), then `hetzner-k3s` on PATH. A nil binary with a nil
+// error means no external binary applies and NIC falls back to downloading its
 // pinned version.
 //
 // Unlike OpenTofu, an external hetzner-k3s binary is NOT integrity-checked or
 // version-verified: hetzner-k3s is not on conda-forge/prefix.dev, so there is no
 // packaged alternative to normalize against, and the SHA256 table in binary.go
 // only covers the pinned download. Pointing NIC at an external binary is an
-// explicit trade of that verification for air-gapped/pre-provisioned installs;
+// explicit trade of that verification for pre-provisioned installs;
 // docs/operations/packaging.md states this plainly.
-func ResolveExternal(ctx context.Context) (*Resolution, error) {
+func resolveExternal(ctx context.Context) (*resolvedBinary, error) {
 	return newResolver().resolve(ctx)
 }
 
-// resolve implements the external-binary resolution order. See ResolveExternal.
-func (r *resolver) resolve(ctx context.Context) (res *Resolution, err error) {
-	_, span := otel.Tracer("nebari-infrastructure-core").Start(ctx, "hetzner.ResolveExternal")
+// resolve implements the external-binary resolution order. See resolveExternal.
+func (r *resolver) resolve(ctx context.Context) (binary *resolvedBinary, err error) {
+	_, span := otel.Tracer("nebari-infrastructure-core").Start(ctx, "hetzner.resolveExternal")
 	defer span.End()
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
 			return
 		}
-		outcome := &ResolvedBinary{Source: SourceDownload, Version: DefaultHetznerK3sVersion}
-		if res.Binary != nil {
-			outcome = res.Binary
+		outcome := &resolvedBinary{Source: sourceDownload, Version: DefaultHetznerK3sVersion}
+		if binary != nil {
+			outcome = binary
 		}
 		span.SetAttributes(
 			attribute.String("hetzner.k3s_resolution.source", string(outcome.Source)),
@@ -111,30 +103,26 @@ func (r *resolver) resolve(ctx context.Context) (res *Resolution, err error) {
 	}()
 
 	if override := strings.TrimSpace(r.getenv(EnvHetznerK3sPath)); override != "" {
-		binary, oErr := r.resolveOverride(override)
-		if oErr != nil {
-			return nil, oErr
-		}
-		return &Resolution{Binary: binary}, nil
+		return r.resolveOverride(override)
 	}
 
 	path, lookErr := r.lookPath(binaryName)
 	if lookErr != nil {
-		return &Resolution{}, nil
+		return nil, nil
 	}
 
 	// No version gate: hetzner-k3s has no supported range and no self-version
 	// probe, so a binary discovered on PATH is accepted as-is. A stale or wrong
 	// build here is the operator's responsibility, the same trade the explicit
 	// override makes.
-	return &Resolution{Binary: &ResolvedBinary{Path: path, Source: SourcePath}}, nil
+	return &resolvedBinary{Path: path, Source: sourcePath}, nil
 }
 
 // resolveOverride validates an explicit NIC_HETZNER_K3S_PATH. Unlike PATH
 // discovery, every failure is a hard error: the operator asked for this exact
 // binary, so silently downloading a different one would mask the
 // misconfiguration.
-func (r *resolver) resolveOverride(override string) (*ResolvedBinary, error) {
+func (r *resolver) resolveOverride(override string) (*resolvedBinary, error) {
 	info, err := r.stat(override)
 	if err != nil {
 		return nil, fmt.Errorf("%s points to %s: %w", EnvHetznerK3sPath, override, err)
@@ -146,16 +134,16 @@ func (r *resolver) resolveOverride(override string) (*ResolvedBinary, error) {
 		return nil, fmt.Errorf("%s points to %s, which is not executable", EnvHetznerK3sPath, override)
 	}
 
-	return &ResolvedBinary{Path: override, Source: SourceOverride}, nil
+	return &resolvedBinary{Path: override, Source: sourceOverride}, nil
 }
 
 // announce reports which external hetzner-k3s binary is in use. Announcing is
 // the consumer's job (resolveHetznerK3sBinary), not resolve's, so resolution
 // stays a pure query. It is info-level and states plainly that an external
 // binary is unverified.
-func (b *ResolvedBinary) announce(ctx context.Context) {
+func (b *resolvedBinary) announce(ctx context.Context) {
 	from := fmt.Sprintf("PATH (%s)", b.Path)
-	if b.Source == SourceOverride {
+	if b.Source == sourceOverride {
 		from = fmt.Sprintf("%s (%s)", EnvHetznerK3sPath, b.Path)
 	}
 	status.Infof(ctx, "Using hetzner-k3s from %s; NIC does not verify its version or integrity (pinned build is %s)", from, DefaultHetznerK3sVersion)
@@ -167,16 +155,13 @@ func (b *ResolvedBinary) announce(ctx context.Context) {
 // override is a hard error, surfaced before any cloud call at the deploy/destroy
 // sites that invoke this.
 func resolveHetznerK3sBinary(ctx context.Context, cacheDir string) (string, error) {
-	res, err := ResolveExternal(ctx)
+	binary, err := resolveExternal(ctx)
 	if err != nil {
 		return "", err
 	}
-	if res.Binary != nil {
-		res.Binary.announce(ctx)
-		return res.Binary.Path, nil
-	}
-	for _, note := range res.Notes {
-		status.Warningf(ctx, "%s", note)
+	if binary != nil {
+		binary.announce(ctx)
+		return binary.Path, nil
 	}
 
 	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}

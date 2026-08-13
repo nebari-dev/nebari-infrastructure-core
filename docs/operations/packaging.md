@@ -117,9 +117,12 @@ Two differences from OpenTofu, both deliberate:
   installs; vet its provenance through your own supply-chain controls.
 
 Unlike OpenTofu, `hetzner-k3s` is **not** packaged on conda-forge/prefix.dev, so there
-is no dependency to declare. Air-gapped Hetzner deploys must pre-provide the binary via
-`NIC_HETZNER_K3S_PATH`, `PATH`, or a pre-seeded `<user-cache-dir>/nic/hetzner-k3s/`
-cache directory.
+is no dependency to declare. Network-restricted operators can pre-provide the binary
+via `NIC_HETZNER_K3S_PATH`, `PATH`, or a pre-seeded `<user-cache-dir>/nic/hetzner-k3s/`
+cache directory. Note this covers the binary only: `nic deploy` still runs
+`hetzner-k3s releases`, which fetches k3s release tags from GitHub on a cold cache (and
+cluster provisioning pulls k3s onto the servers), so fully air-gapped Hetzner deploys
+are not currently supported.
 
 ## Related
 

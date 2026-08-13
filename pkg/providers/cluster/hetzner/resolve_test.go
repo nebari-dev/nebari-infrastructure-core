@@ -38,7 +38,7 @@ func TestResolve(t *testing.T) {
 		// statInfo is returned by stat when statErr is nil.
 		statInfo os.FileInfo
 
-		want        *ResolvedBinary
+		want        *resolvedBinary
 		wantErr     string
 		skipWindows bool
 	}{
@@ -46,7 +46,7 @@ func TestResolve(t *testing.T) {
 			name:     "NIC_HETZNER_K3S_PATH hit",
 			env:      "/opt/hetzner-k3s/bin/hetzner-k3s",
 			statInfo: execInfo,
-			want:     &ResolvedBinary{Path: "/opt/hetzner-k3s/bin/hetzner-k3s", Source: SourceOverride},
+			want:     &resolvedBinary{Path: "/opt/hetzner-k3s/bin/hetzner-k3s", Source: sourceOverride},
 		},
 		{
 			name:    "NIC_HETZNER_K3S_PATH pointing at missing file",
@@ -70,7 +70,7 @@ func TestResolve(t *testing.T) {
 		{
 			name:    "PATH discovery hit",
 			pathHit: "/usr/local/bin/hetzner-k3s",
-			want:    &ResolvedBinary{Path: "/usr/local/bin/hetzner-k3s", Source: SourcePath},
+			want:    &resolvedBinary{Path: "/usr/local/bin/hetzner-k3s", Source: sourcePath},
 		},
 		{
 			name: "neither override nor PATH binary falls back to download",
@@ -81,7 +81,7 @@ func TestResolve(t *testing.T) {
 			env:      "/opt/hetzner-k3s/bin/hetzner-k3s",
 			pathHit:  "/usr/local/bin/hetzner-k3s",
 			statInfo: execInfo,
-			want:     &ResolvedBinary{Path: "/opt/hetzner-k3s/bin/hetzner-k3s", Source: SourceOverride},
+			want:     &resolvedBinary{Path: "/opt/hetzner-k3s/bin/hetzner-k3s", Source: sourceOverride},
 		},
 	}
 
@@ -112,7 +112,7 @@ func TestResolve(t *testing.T) {
 				},
 			}
 
-			res, err := r.resolve(context.Background())
+			got, err := r.resolve(context.Background())
 
 			if tt.wantErr != "" {
 				if err == nil {
@@ -128,16 +128,16 @@ func TestResolve(t *testing.T) {
 			}
 
 			if tt.want == nil {
-				if res.Binary != nil {
-					t.Fatalf("resolve() Binary = %+v, want nil (download fallback)", res.Binary)
+				if got != nil {
+					t.Fatalf("resolve() = %+v, want nil (download fallback)", got)
 				}
 				return
 			}
-			if res.Binary == nil {
-				t.Fatalf("resolve() Binary = nil, want %+v", tt.want)
+			if got == nil {
+				t.Fatalf("resolve() = nil, want %+v", tt.want)
 			}
-			if *res.Binary != *tt.want {
-				t.Errorf("resolve() Binary = %+v, want %+v", res.Binary, tt.want)
+			if *got != *tt.want {
+				t.Errorf("resolve() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
