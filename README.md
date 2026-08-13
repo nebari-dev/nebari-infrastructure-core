@@ -149,7 +149,7 @@ Every NIC deployment includes a landing page where users discover and access all
 - Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
 
-NIC automatically downloads and manages its own OpenTofu binary — no manual installation required.
+NIC automatically downloads and manages its own OpenTofu binary — no manual installation required. If you already have a compatible OpenTofu installed (e.g. via a package manager), NIC uses it instead: an explicit path via `NIC_TOFU_PATH`, or `tofu` found on `PATH`. See [Packaging and External Binaries](docs/operations/packaging.md).
 
 ### Install
 

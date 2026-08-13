@@ -119,8 +119,8 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`pkg/tofu/` (terraform-exec wrapper)**
 
-- `pkg/tofu/tofu.go` defines `TerraformExecutor`, which embeds `*tfexec.Terraform` plus a temp working dir and an `afero.Fs`. The rest of the package is the JSON log mapper (`log.go`), the pinned OpenTofu version (`version.go`), and OS-specific signal handling (`context_*.go`).
-- `Setup(ctx, templates fs.FS, tfvars any)` extracts embedded templates, downloads the OpenTofu binary via `tofudl` with caching at `~/.cache/nic/tofu/`, sets `TF_PLUGIN_CACHE_DIR`, writes `terraform.tfvars.json`, and returns the executor.
+- `pkg/tofu/tofu.go` defines `TerraformExecutor`, which embeds `*tfexec.Terraform` plus a temp working dir and an `afero.Fs`. The rest of the package is external binary resolution (`resolve.go`), the JSON log mapper (`log.go`), the pinned OpenTofu version (`version.go`), and OS-specific signal handling (`context_*.go`).
+- `Setup(ctx, templates fs.FS, tfvars any)` extracts embedded templates, resolves the OpenTofu binary (`NIC_TOFU_PATH`, then a compatible `tofu` on `PATH`, then download via `tofudl` with caching at `os.UserCacheDir()/nic/tofu/` — see [Packaging and External Binaries](../../operations/packaging.md)), sets `TF_PLUGIN_CACHE_DIR`, writes `terraform.tfvars.json`, and returns the executor.
 - `Init`, `Plan`, `Apply`, `Destroy` call the `*JSON` variants of `tfexec` and stream output through the status channel (Section 2.4). `Output` uses the standard tfexec entry point.
 
 **`pkg/config/` (Config parsing)**

@@ -60,7 +60,7 @@ func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOpti
 Two things to note:
 
 1. The wrapper calls `ApplyJSON`/`PlanJSON`/`InitJSON`/`DestroyJSON` and streams output through the **status channel** attached to `ctx` (see [System Overview §2.4](02-system-overview.md#24-the-status-channel-pkg--cmd-seam)). Library code does not call `slog` - that translation happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
-2. `Setup(ctx, templates fs.FS, tfvars any)` (also in `pkg/tofu/tofu.go`) handles binary acquisition via `tofudl` with caching at `~/.cache/nic/tofu/`, extraction of embedded templates, and `terraform.tfvars.json` writing. Callers do not look up tofu in `PATH`.
+2. `Setup(ctx, templates fs.FS, tfvars any)` (also in `pkg/tofu/tofu.go`) handles binary acquisition — resolving `NIC_TOFU_PATH`, then a compatible `tofu` on `PATH`, then downloading via `tofudl` with caching at `os.UserCacheDir()/nic/tofu/` (see [Packaging and External Binaries](../../operations/packaging.md)) — plus extraction of embedded templates and `terraform.tfvars.json` writing. Callers never resolve tofu themselves; resolution lives in `pkg/tofu/resolve.go`.
 
 See [Terraform-Exec Integration](../implementation/08-terraform-exec-integration.md).
 
@@ -170,7 +170,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Context:** How to package and distribute NIC.
 
-**Decision (today):** Single Go binary. AWS templates are embedded via `go:embed` from `pkg/providers/cluster/aws/templates/`. OpenTofu itself is downloaded on first use into `~/.cache/nic/tofu/` and reused thereafter.
+**Decision (today):** Single Go binary. AWS templates are embedded via `go:embed` from `pkg/providers/cluster/aws/templates/`. OpenTofu itself is resolved at runtime: a pre-installed binary via `NIC_TOFU_PATH` or a compatible `tofu` on `PATH` is used when present, otherwise it is downloaded on first use into `os.UserCacheDir()/nic/tofu/` and reused thereafter (see [Packaging and External Binaries](../../operations/packaging.md)).
 
 **Decision (planned, [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md)):** Move providers (cluster, DNS, cert, git, software) to out-of-tree gRPC plugins discovered at runtime. The current in-tree layout is the bootstrap target; the plugin architecture is the long-term direction.
 

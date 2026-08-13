@@ -25,6 +25,16 @@ func TestAWSLoadBalancerControllerHelmValues(t *testing.T) {
 			},
 		},
 		{
+			name:        "disables the Gateway API feature gates",
+			cfg:         &Config{Region: "us-west-2"},
+			clusterName: "my-cluster",
+			vpcID:       "vpc-abc123",
+			checkValues: map[string]any{
+				"controllerConfig.featureGates.ALBGatewayAPI": false,
+				"controllerConfig.featureGates.NLBGatewayAPI": false,
+			},
+		},
+		{
 			name:        "different region and cluster",
 			cfg:         &Config{Region: "eu-central-1"},
 			clusterName: "prod-eks",
@@ -52,5 +62,17 @@ func TestAWSLoadBalancerControllerHelmValues(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAWSLoadBalancerControllerHelmValuesOmitsListenerSetGate holds the
+// deliberate omission: GatewayListenerSet is a fatal unknown flag before chart
+// 3.2.2, and upstream reads it only when ALBGatewayAPI or NLBGatewayAPI is
+// enabled, so setting it would break old pins and buy nothing (#383).
+func TestAWSLoadBalancerControllerHelmValuesOmitsListenerSetGate(t *testing.T) {
+	values := awsLoadBalancerControllerHelmValues(&Config{Region: "us-west-2"}, "my-cluster", "vpc-abc123")
+
+	if got := getNestedValue(values, "controllerConfig.featureGates.GatewayListenerSet"); got != nil {
+		t.Errorf("GatewayListenerSet must not be set, got %v", got)
 	}
 }

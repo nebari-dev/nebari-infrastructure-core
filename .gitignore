@@ -50,9 +50,11 @@ CLAUDE.md
 # User config files (contain environment-specific values)
 config*.yaml
 local*.yaml
-# Keep the committed sample configs visible; this negation must stay last in
-# this block so the patterns above cannot re-ignore examples/local-config.yaml.
+# Keep the committed sample configs and fixtures visible; this negation must stay last in
+# this block so the patterns above cannot re-ignore examples/local-config.yaml
+# nor .github/fixtures/deploy/*.yaml
 !examples/*.yaml
+!.github/fixtures/deploy/*.yaml
 
 # Internal design docs
 docs/plans/

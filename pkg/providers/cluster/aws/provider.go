@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -260,6 +261,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		attribute.Bool("dry_run", opts.DryRun),
 	)
 
+	// Fail fast on a bad NIC_TOFU_PATH before any cloud resources (like the
+	// state bucket) are created; the check is purely local.
+	if err := tofu.ValidateOverride(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
@@ -500,7 +508,9 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	return nil
 }
 
-// Destroy tears down AWS infrastructure in reverse order
+// Destroy tears down AWS infrastructure in reverse order. Step failures that
+// opts.Force downgrades to warnings are collected and returned joined at the
+// end, so a teardown that continued past failures still reports them.
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.Destroy")
@@ -602,6 +612,10 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
+	// Errors that Force downgrades from fatal to warning accumulate here and
+	// are returned joined at the end of the destroy.
+	var forcedErrs []error
+
 	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
 	// falls through to the Stage 2 SDK sweep below.
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Attempting graceful Kubernetes-side load balancer cleanup").
@@ -636,13 +650,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return fmt.Errorf("failed to create EC2 client: %w", err)
 	}
 	if err := cleanupAWSLoadBalancers(ctx, elbClient, elbv2Client, ec2ClientForCleanup, projectName); err != nil {
-		if opts.Force {
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
-				WithResource("load-balancer").WithAction("cleanup"))
-		} else {
-			span.RecordError(err)
+		span.RecordError(err)
+		if !opts.Force {
 			return fmt.Errorf("failed to clean up load balancers: %w", err)
 		}
+		forcedErrs = append(forcedErrs, fmt.Errorf("clean up load balancers: %w", err))
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up load balancers, continuing with --force: %v", err)).
+			WithResource("load-balancer").WithAction("cleanup"))
 	}
 
 	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
@@ -656,10 +670,11 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 				WithResource("longhorn").WithAction("uninstalling"))
 		default:
 			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				span.RecordError(err)
 				if !opts.Force {
-					span.RecordError(err)
 					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
 				}
+				forcedErrs = append(forcedErrs, fmt.Errorf("uninstall Longhorn: %w", err))
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
 					WithResource("longhorn").WithAction("uninstalling"))
 			}
@@ -695,15 +710,15 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return errors.Join(append(forcedErrs, err)...)
 	}
 
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("failed to destroy state bucket: %w", err)
+		return errors.Join(append(forcedErrs, fmt.Errorf("failed to destroy state bucket: %w", err))...)
 	}
 
-	return nil
+	return errors.Join(forcedErrs...)
 }
 
 // GetKubeconfig generates a kubeconfig file for the EKS cluster.

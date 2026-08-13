@@ -1,0 +1,96 @@
+# Packaging and External Binaries
+
+NIC shells out to [OpenTofu](https://opentofu.org/) for the providers that provision
+infrastructure declaratively (AWS, Azure). By default it downloads its own pinned
+OpenTofu binary on first use. This page covers how to make NIC use a pre-installed
+binary instead, which matters for OS/conda packaging, CI, and air-gapped environments.
+
+## OpenTofu resolution order
+
+When a command needs OpenTofu, NIC resolves the binary in this order:
+
+1. **`NIC_TOFU_PATH`** — an explicit path to an OpenTofu binary (on Windows, the
+   full path to `tofu.exe`). If set, it must point to an executable, compatible
+   binary; anything else is a hard error. NIC never silently falls back to
+   another binary when the override is set.
+2. **`tofu` on `PATH`** — used if its version is compatible. If the `PATH` binary
+   is too old (or its version cannot be determined), NIC emits a warning and falls
+   back to downloading, so a stale system tofu never breaks a deploy.
+3. **Download** — NIC downloads its pinned version (`pkg/tofu.Version`) and caches
+   the archive under the [NIC cache directory](#the-nic-cache-directory). This is
+   the default when no external binary is present and matches the behavior of
+   earlier releases.
+
+A binary is *compatible* when its version is at or above the minimum supported
+version (`pkg/tofu.MinVersion`, currently the same as the pinned version) and below
+`2.0.0`. When the resolved version differs from the pinned version NIC is tested
+against, NIC notes the version in use in its status output.
+
+## The NIC cache directory
+
+NIC caches OpenTofu downloads under `<user-cache-dir>/nic/tofu/`, where
+`<user-cache-dir>` is Go's [`os.UserCacheDir()`](https://pkg.go.dev/os#UserCacheDir):
+
+| Platform | Default cache path |
+|----------|--------------------|
+| Linux    | `~/.cache/nic/tofu/` (or `$XDG_CACHE_HOME/nic/tofu/` if `XDG_CACHE_HOME` is set) |
+| macOS    | `~/Library/Caches/nic/tofu/` |
+| Windows  | `%LocalAppData%\nic\tofu\` |
+
+`nic version` reports which binary would be used, its version, and its source
+(`NIC_TOFU_PATH`, `PATH`, or downloaded), so include its output in support requests:
+
+```console
+$ nic version
+...
+OpenTofu version: 1.12.5 (from PATH: /usr/local/bin/tofu)
+```
+
+## Air-gapped and high-security environments
+
+NIC never needs network access to fetch OpenTofu if you provide the binary:
+
+```bash
+export NIC_TOFU_PATH=/opt/opentofu/tofu
+nic deploy -f config.yaml
+```
+
+Alternatively, pre-seed the [NIC cache directory](#the-nic-cache-directory)
+(e.g. `~/.cache/nic/tofu/` on Linux, `~/Library/Caches/nic/tofu/` on macOS) from
+a machine with network access; NIC serves downloads from that cache indefinitely
+once populated.
+
+Note that `tofu init` still needs access to provider plugin registries (or a
+pre-populated `TF_PLUGIN_CACHE_DIR`, which NIC sets to the `plugins/`
+subdirectory of the cache directory, e.g. `~/.cache/nic/tofu/plugins` on Linux);
+`NIC_TOFU_PATH` only covers the OpenTofu binary itself.
+
+**External binaries are trusted, not verified.** When NIC downloads its own
+OpenTofu, the download is integrity-checked (signed artifacts via `tofudl`). A
+binary supplied through `NIC_TOFU_PATH` or found on `PATH` gets no such check:
+NIC executes it to probe its version, so the version floor is a correctness
+gate, not a trust boundary. Vet the provenance of pre-installed binaries
+through your own supply-chain controls; `NIC_TOFU_PATH` is a packaging
+feature, not a hardening one.
+
+## Packaging guidance (pixi/prefix.dev, distro packages)
+
+Declare `opentofu` as a runtime dependency and either rely on `PATH` discovery or
+set `NIC_TOFU_PATH` in an activation script. NIC itself is distributed via the
+prefix.dev `github-releases` channel (see
+[https://github.com/nebari-dev/nebari-infrastructure-core/issues/552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552)),
+and conda-forge ships `opentofu` for all platforms NIC supports, so a pixi
+workspace that pins both never has to phone home on first run.
+
+## CI
+
+Runners that already provision OpenTofu (e.g. via `opentofu/setup-opentofu`) are
+picked up automatically through `PATH` discovery. Otherwise, persist the
+[NIC cache directory](#the-nic-cache-directory) (`~/.cache/nic/tofu/` on typical
+Linux runners) across runs to avoid a re-download per fresh runner.
+
+## Related
+
+- The Hetzner provider uses the `hetzner-k3s` binary rather than OpenTofu; the same
+  external-binary treatment for it is tracked in
+  [https://github.com/nebari-dev/nebari-infrastructure-core/issues/558](https://github.com/nebari-dev/nebari-infrastructure-core/issues/558).

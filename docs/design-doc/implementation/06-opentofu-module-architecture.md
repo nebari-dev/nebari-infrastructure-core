@@ -77,7 +77,7 @@ The backend is configured for S3 with native lockfile-based locking (`use_lockfi
 Templates are embedded into the NIC binary via Go's `embed.FS` declared inside `pkg/providers/cluster/aws/`. At deploy time, the AWS provider:
 
 1. Constructs a `map[string]any` of tfvars from the parsed AWS config (region, project name, node groups, EFS settings, etc.).
-2. Calls `pkg/tofu.Setup(ctx, templatesFS, tfvars)`, which extracts the embedded files into a fresh temp directory, downloads the OpenTofu binary if not cached, writes `terraform.tfvars.json`, and returns a `TerraformExecutor`.
+2. Calls `pkg/tofu.Setup(ctx, templatesFS, tfvars)`, which extracts the embedded files into a fresh temp directory, resolves the OpenTofu binary (a pre-installed one via `NIC_TOFU_PATH` or `PATH` when compatible, otherwise downloading if not cached), writes `terraform.tfvars.json`, and returns a `TerraformExecutor`.
 3. Calls `Init`, `Plan` (or `Apply`/`Destroy`) and lets `pkg/tofu` stream JSON output through the status channel.
 
 There is no in-tree EKS HCL, no in-tree node group resources, and no in-tree IAM HCL beyond what the upstream module provides. The intent is to leverage a battle-tested community module instead of maintaining a parallel implementation.
