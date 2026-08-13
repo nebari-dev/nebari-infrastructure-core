@@ -30,6 +30,12 @@ const deletingConfirmationFlagName = "deleting-confirmation-flag"
 // settingsResource identifies Longhorn's Setting custom resource, which is
 // how every Longhorn setting (including the deleting-confirmation-flag) is
 // stored on the cluster.
+//
+// The API version is pinned to the storage version served by ChartVersion
+// (see config.go). Verify it on every chart bump. If Longhorn ever stops
+// serving v1beta2, the patch's 404 would be indistinguishable from a missing
+// Setting and setDeletingConfirmationFlag would silently skip the flag,
+// bringing back the #398 uninstall failure.
 var settingsResource = schema.GroupVersionResource{
 	Group:    "longhorn.io",
 	Version:  "v1beta2",
