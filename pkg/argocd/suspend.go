@@ -39,6 +39,12 @@ const (
 // waits for its pods to terminate, so that nothing recreates resources deleted
 // during teardown. Returns nil when the controller does not exist (Argo CD
 // absent or already removed).
+//
+// The suspension is deliberately kept when a destroy aborts halfway through.
+// Reverting the reconciliation would reintroduce the recreation race on the
+// retry. A later deploy resets the controller to one replica via the chart.
+// To keep a cluster after an aborted destroy, scale it back manually with
+// `kubectl scale statefulset argocd-application-controller -n argocd --replicas=1`.
 func SuspendReconciliation(ctx context.Context, kubeconfig []byte) error {
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
