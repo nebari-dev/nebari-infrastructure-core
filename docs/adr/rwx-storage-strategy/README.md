@@ -16,7 +16,7 @@ Everything downstream depends on this. The claim is that a production Nebari wit
 
 Three ways out are argued and all three fail: pinning every collaborating pod to one node, replacing the shared directory with object storage, and dropping group collaboration from scope. A second RWX consumer — cross-namespace data sharing between packs — survives even if the first were removed, though it is gated on the requester writing a user story.
 
-The 2026-08-13 standup narrowed that second consumer without removing it. The team settled the product-level split — large datasets to object storage, user outputs and homes to mounted PVCs — so the Ray-to-Jupyter dataset case that motivated cross-pack RWX is being answered by a bucket, not a volume, and reports already travel back over the network. What survives is small-file sharing between packs, which Marcelo Villa argues is structural to a composable pack model. The same call moved the user story from blocked to in flight, and surfaced the object-storage side's own gap: no AWS identity per Keycloak user and no secrets management, with a data catalog proposed as the permission layer.
+The 2026-08-13 standup narrowed that second consumer without removing it: large datasets go to object storage — so the Ray-to-Jupyter case that motivated cross-pack RWX is answered by a bucket, not a volume — leaving small-file sharing between packs, which the map argues is structural to a composable pack model. The user story is now in flight, and the object-storage side has its own open gap: no per-user AWS identity, with a data catalog proposed as the permission layer.
 
 ![Is RWX required?](rwx-required.svg)
 
@@ -32,7 +32,7 @@ Only the per-pack principle is decided (2026-08-12): each pack requests the acce
 
 Longhorn's cost is not only the project's integration work — it is a standing burden on whoever runs each cluster, and the runbooks already in this repo are the evidence for its size: node drains need a five-step replica-eviction procedure, failure diagnosis needs Longhorn-specific concepts, and some capacity knobs are still tuned by hand per cluster.
 
-That cost scales with clusters and on-call operators, not with providers, which is where the uniformity argument prices it. Settled under the operations gate.
+That cost scales with clusters and on-call operators, not with providers, which is where the uniformity argument prices it. Priced under the operations gate.
 
 ![Operator burden](operations.svg)
 
@@ -40,9 +40,7 @@ That cost scales with clusters and on-call operators, not with providers, which 
 
 Longhorn does not serve RWX from its replicated block layer directly — it puts an NFS server pod in front, and the pack requests one shared PVC for all groups, so a single pod is the data path for every group's shared storage at once. On a stock deploy today that pod is the pack's own transitional NFS server exporting a Longhorn RWO volume, with Longhorn's share-manager not in the path at all. Either way, every operation across it pays a network round trip, which is what makes metadata-heavy work slow.
 
-Note what that does *not* cover. The metadata-heavy workloads usually cited — environment builds, `git status`, autosave — live on the home volume, not on `/shared`. The default environment is baked into the JupyterLab image and read from node-local disk; user-built nebi environments land on the RWO home PVC; nothing installs environments to the shared directory. That evidence prices the home gate below, and the two comparisons must not be run together.
-
-The counter is that the whole-cluster *scope* of that path is the pack's layout choice, fixable without changing storage backend. What survives is per-group and smaller — plus a bandwidth ceiling Tyler Potts named on 2026-08-13: clients share one pod's network connection, so a fleet of Ray workers scales into the bottleneck rather than around it. Whether Longhorn synchronises concurrent cross-namespace writers at all is still unanswered, asked again from the other side by Nick Byrne ("aren't we reimplementing S3?") and nobody on the call could answer it.
+Note what that does *not* cover: the metadata-heavy workloads usually cited — environment builds, `git status`, autosave — live on the home volume, not on `/shared`, so they price the home gate below; the two comparisons must not be run together. The counter is that the whole-cluster *scope* of the path is the pack's layout choice, fixable without changing storage backend. What survives is per-group and smaller: one pod's network connection as the bandwidth ceiling, and the still-unanswered question of whether Longhorn synchronises concurrent cross-namespace writers at all.
 
 ![Shared data path](data-path.svg)
 
@@ -76,7 +74,7 @@ Scoped separately because it decides how ambitious the AWS change is. Two shapes
 
 If FSx clears the home performance gate, moving homes onto it removes the per-user node pin, the cross-AZ objection, and Longhorn from AWS together. If it does not, the RWX-homes shape is dead and the split shape stands. Measurement decides, not argument.
 
-Two pack-side prerequisites ride along, both easy to miss because they are not storage-layer work. The per-user affinity term is unconditional, so RWX homes stay pinned until the pack gains a switch. And the pack establishes home ownership through kubelet-applied `fsGroup` — a block-volume mechanism that NFS-backed CSI drivers do not support — so the uid/gid model has to be rebuilt on the appliance's own export semantics rather than carried over.
+Two pack-side prerequisites ride along, both easy to miss because they are not storage-layer work: the per-user affinity term is unconditional, so RWX homes stay pinned until the pack gains a switch; and home ownership relies on kubelet-applied `fsGroup`, which NFS-backed CSI drivers do not support, so the uid/gid model has to be rebuilt on the appliance's export semantics.
 
 ![Home volume access mode](homes.svg)
 
@@ -84,4 +82,4 @@ Two pack-side prerequisites ride along, both easy to miss because they are not s
 
 The gates carry no map — they are the acceptance criteria the directions above defer to, listed in full in the [source](rwx-storage-strategy.argdown) under *AWS decision gate*: POSIX behavior, representative performance, availability, backup and restore, operations, cost, migration, portability cost, and cross-namespace sharing.
 
-Two of them are now being measured rather than argued. Benchmarking started on 2026-08-13: a matrix over small files, large files, and real workloads, including gp2 versus gp3 — NIC provisions gp2 today, which may move the split shape's numbers before any managed filesystem is compared. Cost sits in the same matrix at Kim Pevey's request, with operator overhead priced as a line inside it rather than left to the operations gate.
+Two of them are now being measured rather than argued. Benchmarking started on 2026-08-13: a matrix over small files, large files, and real workloads, including gp2 versus gp3 — which may move the split shape's numbers before any managed filesystem is compared. Cost sits in the same matrix, with operator overhead priced as a line inside it.
