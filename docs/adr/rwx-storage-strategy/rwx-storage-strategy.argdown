@@ -62,10 +62,12 @@ dot:
 
 # Core platform assumption
 
-[The requirement is a floor, not the scope]: This section asks only whether the platform must provide RWX *at all*, and answers it from `/shared` because that is the one place the requirement is forced. It is not the only candidate consumer and may not end up the largest. Home volumes are the bigger question — RWX there is not required by any contract, but it is the move that would dissolve the per-user node pin and the cross-AZ constraint at once, which is why it gets its own topic. Cross-pack sharing is a third, where no requirement is established yet and object storage may serve it instead. So: `/shared` settles *whether*, and the topics below settle *how much*. {isInMap: true}
+[Homes are a second reason to want RWX]: `/shared` is what makes RWX unavoidable, but homes are the larger prize. Nothing in the pack's contract requires RWX for a home volume; what recommends it is that RWX homes dissolve the per-user node pin, the cross-AZ constraint, and Longhorn's presence on AWS in one move rather than mitigating each separately. So the capability is forced by `/shared` and *wanted* well beyond it — see _Topic: home volume access mode_ for the full argument and the performance evidence against it. Cross-pack sharing is a third candidate, where no requirement is established at all and object storage may serve it instead.
+    +> [RWX is a core platform capability]
 
-[RWX is a core platform capability]: A production Nebari platform that includes the Data Science Pack must provide reliable ReadWriteMany storage for collaborative group directories. #core-assumption
+[RWX is a core platform capability]: A production Nebari platform that includes the Data Science Pack must provide reliable ReadWriteMany storage — for collaborative group directories at minimum, and plausibly for home volumes too. #core-assumption
     + <DSP collaboration requires RWX>
+    + <Homes on managed RWX dissolves several problems at once>
     - <Single-node RWO alternative>
         - <Single-node placement fails the platform requirements>
     - <Object-storage replacement>
