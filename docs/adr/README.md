@@ -23,7 +23,9 @@ An ADR is a document that captures an important architectural decision made alon
 
 ## Argument maps
 
-Some decisions get an [Argdown](https://argdown.org/) argument map before they get an ADR, recording what has been argued, what is settled, and what evidence would close the open questions. Each lives in its own directory with its source, its rendered SVGs, and a README explaining them; `make argdown` re-renders all of them.
+An ADR records a decision and its consequences. When the reasoning behind one is too tangled to follow as prose — several arguments running at once, objections to the objections, claims that only look settled — an [Argdown](https://argdown.org/) argument map is a useful complement: each claim becomes a node, each objection an arrow, and what is still open stays visibly open. The map does not replace the ADR. It shows the working the ADR concludes from, and stays alongside it so the reasoning can be revisited when the decision is.
+
+Not every decision needs one. Reach for a map when the argument is the hard part. Each map lives in its own directory with its source, its rendered SVGs, and a README that walks the argument section by section; `make argdown` re-renders all of them.
 
 - [rwx-storage-strategy](rwx-storage-strategy/) — RWX storage as a Nebari platform capability, and whether AWS keeps Longhorn
 
