@@ -68,9 +68,33 @@ Two things soften it: a hybrid fleet (Auto Mode plus a classic storage node grou
 
 The strongest objection to removing Longhorn: as the sole default StorageClass it also hides that EBS volumes are AZ-bound, which is the failure ADR-0002 was originally adopted to fix.
 
-The response is that this is a node-group topology gap, not a storage-layer one — a rescheduled pod needs a node in its volume's AZ, which per-AZ node groups or Karpenter supply and NIC's single multi-AZ ASG does not. The residual is AZ-outage availability for EBS-backed volumes, to be priced rather than argued away.
+The response is that this is a node-group topology gap, not a storage-layer one. Worth spelling out, because "per-AZ node groups fix it" is doing a lot of work in one clause.
+
+The volume never moves, either way. An EBS volume lives in one AZ for its whole life, and a dynamically provisioned PV carries a zone requirement the scheduler treats as a hard constraint — so a pod is never placed somewhere it cannot attach. The failure is not a wrong-AZ mount attempt; it is a pod stuck `Pending` because nothing can give it a node in the right AZ. NIC ships one autoscaling group spanning every AZ, and Cluster Autoscaler cannot ask a multi-AZ ASG for capacity in a *specific* zone, so it may well add a node in the wrong one and leave the pod pending anyway. One node group per AZ (or Karpenter, which reads the PV's zone requirement natively) is what makes "give me a node in us-east-1b" an answerable request. So the pod comes back as soon as that AZ has capacity — and if the AZ is what failed, it comes back when the AZ does, instead of sitting in an unexplained pending state that looks like a storage bug.
+
+That is a real cost, not a free fix. Per-AZ groups multiply the node-group config surface by the number of AZs — scaling limits, instance types, taints, labels, and GPU variants replicated per zone — and each group scales independently, so headroom is per-AZ too and utilisation drops. Karpenter avoids the fan-out but replaces cluster-autoscaler, which is another migration with its own surface. Neither is exotic; both are more configuration than the single ASG NIC ships today, and that difference belongs in the comparison rather than in a footnote.
+
+The honest residual is availability: if the AZ itself is gone, EBS-backed volumes are stranded until it returns, where Longhorn would usually reattach from a surviving replica.
+
+It is worth sizing that before treating it as decisive. Full-AZ outages are infrequent and usually measured in hours; recovery needs no operator action, since the volumes are intact and the pods reschedule when capacity comes back; and the workload is interactive analysis, not a customer-facing service, so the tolerable answer may simply be that affected users cannot work until the AZ returns. Two caveats keep that from being a finding: Nebari has no stated availability objective to check it against, so "acceptable" is a preference until someone writes the number down; and the things that genuinely should survive a lost AZ are databases, which belong to CNPG replication rather than to the storage layer. Longhorn's own survival is also softer than assumed — NIC sets replica zone anti-affinity to *soft* with two replicas, so both can be sitting in the AZ that just failed.
+
+Either way the residual disappears in the RWX-homes shape, where a Multi-AZ filesystem has no AZ to be pinned to.
 
 ![Cross-AZ attachment](cross-az.svg)
+
+## Topic: the other clouds
+
+The uniformity argument is being made on two providers. NIC wires Longhorn on AWS and Hetzner; GCP, Azure, and local hardcode `LonghornEnabled: false` with a "not yet wired" comment. The clouds that would actually test "Longhorn everywhere" are the ones it has never run on — and on the evidence available, they are where the case for it is weakest.
+
+Both ship RWX as a managed service rather than something to install: GKE has the Filestore CSI driver as a cluster addon (working on Autopilot as well as Standard), AKS ships the Azure Files CSI driver in-box with RWX storage classes. There is no ZFS-based service outside AWS, but the closest analogue exists on both — Google Cloud NetApp Volumes and Azure NetApp Files, ONTAP-based managed NAS sold on the same low-latency, provisioned-throughput property that makes FSx for OpenZFS a candidate here, and sitting above the commodity tier much as FSx sits above EFS. Whether that tier clears the home gate is the same open question on all three clouds, and the answer will probably travel.
+
+The cross-AZ problem barely exists there. Multi-zone AKS on 1.29+ defaults its built-in StorageClasses to zone-redundant disks and fails stateful pods over to a healthy zone; GKE offers regional persistent disks and Hyperdisk Balanced High Availability as synchronously replicated cross-zone block storage. ADR-0002's founding motivation is an AWS property, not a cloud property. The same goes for the compute argument: GKE Autopilot forbids privileged pods and hostPath outright, which is stricter than EKS Auto Mode, so keeping Longhorn everywhere declines the managed-node model everywhere.
+
+The counter is straightforward and unresolved: four providers with four managed filesystems means four CSI integrations, four Terraform surfaces, and four backup stories where Longhorn is one of each — and Hetzner keeps Longhorn in the project under every shape. That is what the portability cost gate prices.
+
+All of this is desk research from vendor documentation, dated 2026-08-14, unverified against any Nebari deployment, and subject to version floors (GKE 1.33+ for Hyperdisk Balanced HA, AKS 1.29+ and multi-zone for the ZRS defaults). It is scoping for when those providers are wired, not evidence about them.
+
+![The other clouds](other-clouds.svg)
 
 ## Topic: home volume access mode
 
