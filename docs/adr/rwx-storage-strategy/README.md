@@ -4,7 +4,7 @@ This is an argument map, not an ADR. It records what the team has argued about R
 
 The source of truth is [`rwx-storage-strategy.argdown`](rwx-storage-strategy.argdown). Rendering is `make argdown`, which writes every SVG below from that one file; the sections in the source are the sections on this page.
 
-The whole argument in one picture is [`overview.svg`](overview.svg) — 86 nodes, useful as a reference, unreadable as an introduction. The maps below are the same argument split by *direction*: each one takes the central fork and hangs a single line of attack off it.
+The whole argument in one picture is [`overview.svg`](overview.svg) — 87 nodes, useful as a reference, unreadable as an introduction. The maps below are the same argument split by *direction*: each one takes the central fork and hangs a single line of attack off it.
 
 ## How to read the maps
 
@@ -24,7 +24,7 @@ The 2026-08-13 standup narrowed that second consumer without removing it. The te
 
 This is the fork every direction below hangs off. Nebari can standardize the RWX *capability* and let each provider supply the implementation (managed filesystem on AWS, Longhorn on Hetzner), or it can run Longhorn everywhere and buy uniformity.
 
-Nothing here is decided. The rest of the page is the case against "Longhorn everywhere", direction by direction, plus what each direction has to measure before it counts.
+Only the per-pack principle is decided (2026-08-12): each pack requests the access mode it needs, with no cluster-wide policy. The fork itself is not — the rest of the page is the case against "Longhorn everywhere", direction by direction, plus what each direction has to measure before it counts.
 
 ![Capability versus implementation](provider-strategy.svg)
 
@@ -38,7 +38,7 @@ That cost scales with clusters and on-call operators, not with providers, which 
 
 ## Direction: the shared data path
 
-Longhorn does not serve RWX from its replicated block layer directly — it puts an NFS server pod in front, and the pack requests one shared PVC for all groups, so a single pod is the data path for every group's shared storage at once. Every operation across it pays a network round trip, which is what makes metadata-heavy work slow.
+Longhorn does not serve RWX from its replicated block layer directly — it puts an NFS server pod in front, and the pack requests one shared PVC for all groups, so a single pod is the data path for every group's shared storage at once. On a stock deploy today that pod is the pack's own transitional NFS server exporting a Longhorn RWO volume, with Longhorn's share-manager not in the path at all. Either way, every operation across it pays a network round trip, which is what makes metadata-heavy work slow.
 
 Note what that does *not* cover. The metadata-heavy workloads usually cited — environment builds, `git status`, autosave — live on the home volume, not on `/shared`. The default environment is baked into the JupyterLab image and read from node-local disk; user-built nebi environments land on the RWO home PVC; nothing installs environments to the shared directory. That evidence prices the home gate below, and the two comparisons must not be run together.
 
@@ -72,9 +72,9 @@ The response is that this is a node-group topology gap, not a storage-layer one 
 
 ## Direction: home volume access mode
 
-Scoped separately because it decides how ambitious the AWS change is. Homes are RWO today by deliberate pack design, on a performance rationale written against Longhorn's and EFS's data paths and silent about FSx for OpenZFS.
+Scoped separately because it decides how ambitious the AWS change is. Two shapes are live on AWS: the **split shape** moves only single-pod system volumes to gp3 and keeps homes and RWX on Longhorn; the **RWX-homes shape** puts homes on a managed RWX filesystem too, which removes Longhorn from AWS entirely. Homes are RWO today by deliberate pack design, on a performance rationale written against Longhorn's and EFS's data paths and silent about FSx for OpenZFS.
 
-If FSx clears the home performance gate, moving homes onto it removes the per-user node pin, the cross-AZ objection, and Longhorn from AWS together. If it does not, the shape is dead and the split shape stands. Measurement decides, not argument.
+If FSx clears the home performance gate, moving homes onto it removes the per-user node pin, the cross-AZ objection, and Longhorn from AWS together. If it does not, the RWX-homes shape is dead and the split shape stands. Measurement decides, not argument.
 
 Two pack-side prerequisites ride along, both easy to miss because they are not storage-layer work. The per-user affinity term is unconditional, so RWX homes stay pinned until the pack gains a switch. And the pack establishes home ownership through kubelet-applied `fsGroup` — a block-volume mechanism that NFS-backed CSI drivers do not support — so the uid/gid model has to be rebuilt on the appliance's own export semantics rather than carried over.
 

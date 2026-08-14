@@ -1340,8 +1340,8 @@
 <title>n74</title>
 <g id="a_node53"><a xlink:title="The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.">
 <path fill="#c3ccd4" stroke="black" d="M2701.92,-280.44C2701.92,-280.44 2450.08,-280.44 2450.08,-280.44 2444.08,-280.44 2438.08,-274.44 2438.08,-268.44 2438.08,-268.44 2438.08,-212.92 2438.08,-212.92 2438.08,-206.92 2444.08,-200.92 2450.08,-200.92 2450.08,-200.92 2701.92,-200.92 2701.92,-200.92 2707.92,-200.92 2713.92,-206.92 2713.92,-212.92 2713.92,-212.92 2713.92,-268.44 2713.92,-268.44 2713.92,-274.44 2707.92,-280.44 2701.92,-280.44"/>
-<text xml:space="preserve" text-anchor="start" x="2472.3" y="-264.68" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">RWX pays a write acknowledgement</text>
-<text xml:space="preserve" text-anchor="start" x="2520.65" y="-252.68" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> on every operation</text>
+<text xml:space="preserve" text-anchor="start" x="2477.99" y="-264.68" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">RWX pays a network round trip on</text>
+<text xml:space="preserve" text-anchor="start" x="2529.65" y="-252.68" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> every operation</text>
 <text xml:space="preserve" text-anchor="start" x="2486.44" y="-235.48" font-family="arial" font-size="11.00" fill="#000000">The RWO/RWX performance gap on</text>
 <text xml:space="preserve" text-anchor="start" x="2489.78" y="-222.28" font-family="arial" font-size="11.00" fill="#000000"> Longhorn is structural, not a tuning</text>
 <text xml:space="preserve" text-anchor="start" x="2553.07" y="-209.08" font-family="arial" font-size="11.00" fill="#000000"> problem.</text>
@@ -1598,17 +1598,18 @@
 <!-- n35 -->
 <g id="node64" class="node">
 <title>n35</title>
-<g id="a_node64"><a xlink:title="The historical anecdotes do not transfer to the proposed shapes: the Celery&#45;worker breakage was a multi&#45;pod RWX need, which stays on the RWX path by definition, and single&#45;pod databases like Keycloak are CNPG&#39;s job — `instances: 2&#45;3` across AZs is app&#45;layer replication, the idiomatic fix.">
-<path fill="white" stroke="#c3ccd4" stroke-width="2" d="M6651.92,-817.28C6651.92,-817.28 6400.08,-817.28 6400.08,-817.28 6394.08,-817.28 6388.08,-811.28 6388.08,-805.28 6388.08,-805.28 6388.08,-698.56 6388.08,-698.56 6388.08,-692.56 6394.08,-686.56 6400.08,-686.56 6400.08,-686.56 6651.92,-686.56 6651.92,-686.56 6657.92,-686.56 6663.92,-692.56 6663.92,-698.56 6663.92,-698.56 6663.92,-805.28 6663.92,-805.28 6663.92,-811.28 6657.92,-817.28 6651.92,-817.28"/>
-<text xml:space="preserve" text-anchor="start" x="6449.56" y="-800.32" font-family="arial" font-size="11.00" fill="#000000">The historical anecdotes do not</text>
-<text xml:space="preserve" text-anchor="start" x="6436.11" y="-787.12" font-family="arial" font-size="11.00" fill="#000000"> transfer to the proposed shapes: the</text>
-<text xml:space="preserve" text-anchor="start" x="6449.89" y="-773.92" font-family="arial" font-size="11.00" fill="#000000"> Celery&#45;worker breakage was a</text>
-<text xml:space="preserve" text-anchor="start" x="6434.6" y="-760.72" font-family="arial" font-size="11.00" fill="#000000"> multi&#45;pod RWX need, which stays on</text>
-<text xml:space="preserve" text-anchor="start" x="6447.12" y="-747.52" font-family="arial" font-size="11.00" fill="#000000"> the RWX path by definition, and</text>
-<text xml:space="preserve" text-anchor="start" x="6438.56" y="-734.32" font-family="arial" font-size="11.00" fill="#000000"> single&#45;pod databases like Keycloak</text>
-<text xml:space="preserve" text-anchor="start" x="6440.89" y="-721.12" font-family="arial" font-size="11.00" fill="#000000"> are CNPG&#39;s job — `instances: 2&#45;3`</text>
-<text xml:space="preserve" text-anchor="start" x="6438.88" y="-707.92" font-family="arial" font-size="11.00" fill="#000000"> across AZs is app&#45;layer replication,</text>
-<text xml:space="preserve" text-anchor="start" x="6485.04" y="-694.72" font-family="arial" font-size="11.00" fill="#000000"> the idiomatic fix.</text>
+<g id="a_node64"><a xlink:title="The historical failures do not transfer to the proposed shapes: the Celery&#45;worker breakage was a multi&#45;pod RWX need, which stays on the RWX path by definition, and single&#45;pod databases like Keycloak are CNPG&#39;s job — `instances: 2&#45;3` across AZs is app&#45;layer replication, the idiomatic fix.">
+<path fill="white" stroke="#c3ccd4" stroke-width="2" d="M6651.92,-826.48C6651.92,-826.48 6400.08,-826.48 6400.08,-826.48 6394.08,-826.48 6388.08,-820.48 6388.08,-814.48 6388.08,-814.48 6388.08,-689.36 6388.08,-689.36 6388.08,-683.36 6394.08,-677.36 6400.08,-677.36 6400.08,-677.36 6651.92,-677.36 6651.92,-677.36 6657.92,-677.36 6663.92,-683.36 6663.92,-689.36 6663.92,-689.36 6663.92,-814.48 6663.92,-814.48 6663.92,-820.48 6657.92,-826.48 6651.92,-826.48"/>
+<text xml:space="preserve" text-anchor="start" x="6439.99" y="-810.72" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">The anecdotes do not transfer</text>
+<text xml:space="preserve" text-anchor="start" x="6457.22" y="-791.12" font-family="arial" font-size="11.00" fill="#000000">The historical failures do not</text>
+<text xml:space="preserve" text-anchor="start" x="6436.11" y="-777.92" font-family="arial" font-size="11.00" fill="#000000"> transfer to the proposed shapes: the</text>
+<text xml:space="preserve" text-anchor="start" x="6449.89" y="-764.72" font-family="arial" font-size="11.00" fill="#000000"> Celery&#45;worker breakage was a</text>
+<text xml:space="preserve" text-anchor="start" x="6434.6" y="-751.52" font-family="arial" font-size="11.00" fill="#000000"> multi&#45;pod RWX need, which stays on</text>
+<text xml:space="preserve" text-anchor="start" x="6447.12" y="-738.32" font-family="arial" font-size="11.00" fill="#000000"> the RWX path by definition, and</text>
+<text xml:space="preserve" text-anchor="start" x="6438.56" y="-725.12" font-family="arial" font-size="11.00" fill="#000000"> single&#45;pod databases like Keycloak</text>
+<text xml:space="preserve" text-anchor="start" x="6440.89" y="-711.92" font-family="arial" font-size="11.00" fill="#000000"> are CNPG&#39;s job — `instances: 2&#45;3`</text>
+<text xml:space="preserve" text-anchor="start" x="6438.88" y="-698.72" font-family="arial" font-size="11.00" fill="#000000"> across AZs is app&#45;layer replication,</text>
+<text xml:space="preserve" text-anchor="start" x="6485.04" y="-685.52" font-family="arial" font-size="11.00" fill="#000000"> the idiomatic fix.</text>
 </a>
 </g>
 </g>
@@ -1630,8 +1631,8 @@
 <g id="edge89" class="edge">
 <title>n35&#45;&gt;n79</title>
 <g id="a_edge89"><a xlink:title="support">
-<path fill="none" stroke="#5c9e6f" stroke-width="2.5" d="M6526,-817.71C6526,-875.18 6526,-958.56 6526,-1015.11"/>
-<polygon fill="#5c9e6f" stroke="#5c9e6f" stroke-width="2.5" points="6522.15,-1014.81 6526,-1025.81 6529.85,-1014.81 6522.15,-1014.81"/>
+<path fill="none" stroke="#5c9e6f" stroke-width="2.5" d="M6526,-826.85C6526,-883.7 6526,-961.35 6526,-1014.97"/>
+<polygon fill="#5c9e6f" stroke="#5c9e6f" stroke-width="2.5" points="6522.15,-1014.63 6526,-1025.63 6529.85,-1014.63 6522.15,-1014.63"/>
 </a>
 </g>
 </g>
@@ -1660,8 +1661,8 @@
 <g id="edge38" class="edge">
 <title>n36&#45;&gt;n35</title>
 <g id="a_edge38"><a xlink:title="attack">
-<path fill="none" stroke="#c26060" stroke-width="2.5" d="M6526,-587.84C6526,-615.29 6526,-645.02 6526,-671.48"/>
-<polygon fill="#c26060" stroke="#c26060" stroke-width="2.5" points="6522.15,-671.44 6526,-682.44 6529.85,-671.44 6522.15,-671.44"/>
+<path fill="none" stroke="#c26060" stroke-width="2.5" d="M6526,-587.84C6526,-612.18 6526,-638.31 6526,-662.36"/>
+<polygon fill="#c26060" stroke="#c26060" stroke-width="2.5" points="6522.15,-662.25 6526,-673.25 6529.85,-662.25 6522.15,-662.25"/>
 </a>
 </g>
 </g>
