@@ -100,26 +100,6 @@ dot:
 (6) [RWO cannot emulate sharing]: Permanent single-node co-location of collaborating pods is not an acceptable production platform constraint.
     -> [RWO can emulate sharing]
 
-<The co-location ceiling is already being hit>: The capacity ceiling is an observed problem in the shipped per-user design, not a theoretical objection to extending it to groups.
-
-(1) A user spawning several JupyterHub apps that all need the same home volume has them all forced onto one node, and can exhaust that node's limits (Vini Cerutti, 2026-08-12).
-(2) The resulting failure appears on JupyterHub's spawn screen, which "tells you almost nothing" — no reason, no next step.
-(3) Amit Kumar agreed the UX is bad, said hooking in a useful message should be straightforward, and confirmed the current design was chosen for delivery speed while accepting this edge case; "use a larger node size" is the interim workaround.
-(4) Tyler Potts asked what stops too many users piling onto one node; Amit's answer was that this is Kubernetes' job, and if it fails the cluster is out of resources and needs resizing.
-----
-(5) [One node is a hard capacity ceiling]
-
-[Per-user opt-in access mode]: Users should be able to opt into a shared-filesystem mode (EFS or equivalent) for their home volume, trading write latency for not being capped by one node's capacity. #open-decision
-    + <The co-location ceiling is already being hit>
-    - <RWX pays a write acknowledgement on every operation>
-
-    // Vini Cerutti proposed this on 2026-08-12; Amit Kumar called it ideal for
-    // a future iteration, not this one. Parked, not rejected. It is the
-    // per-user opt-in form of [Home volume access mode is open]; Vini named
-    // EFS, whose Bursting mode measured slow — the proposal is at least as
-    // strong against FSx for OpenZFS or EFS Elastic, the modes actually
-    // under evaluation.
-
 <Object-storage replacement>: S3-compatible object storage could replace the shared filesystem.
 
 (1) Object storage supports multi-node concurrent access without an RWX filesystem.
@@ -222,6 +202,8 @@ dot:
 ----
 (4) [Longhorn remains supported]: Nebari must continue to install, test, upgrade, back up, and support Longhorn for Hetzner and comparable environments even if AWS uses a managed filesystem. A managed AWS filesystem is therefore a second implementation added, not a first one replaced — which is a cost of diverging and a reason to consider using Longhorn everywhere.
 
+# Longhorn everywhere
+
 <Use Longhorn universally>: A single Longhorn implementation on every provider would reduce variation in deployment and support procedures.
 
 (1) Longhorn already supplies the default storage capability in NIC's AWS and Hetzner providers.
@@ -237,6 +219,8 @@ dot:
     - <RWX is already not uniform>
     - <Longhorn's config surface is incomplete>
     - <Longhorn forecloses EKS Auto Mode>
+
+# Direction: backup and restore
 
 <Unified backup already ships>: Longhorn is not only the storage layer on AWS — it is also the platform's only working backup implementation, and that shipped after this map first treated backups as pending work.
 
@@ -257,6 +241,8 @@ dot:
 ----
 (4) [Backup carries its own upkeep]: Unified backup is real but not free, and its cost is the same per-provider coupling the rest of the Longhorn integration carries — so it counts as a benefit of the incumbent, not as a decisive one.
 
+# Direction: operator burden
+
 <Longhorn is an operations tax on every cluster>: Longhorn's cost is not only the project's integration work. It is a standing, storage-specific burden on the humans who run each cluster, and the runbooks NIC already ships are the evidence for how large it is.
 
 (1) Routine node maintenance is not routine. Longhorn's per-instance-manager PodDisruptionBudget makes a plain `kubectl drain` hang, so NIC ships a five-step procedure: cordon, patch `nodes.longhorn.io` to disable scheduling and request replica eviction, poll `replicas.longhorn.io` until the node is clear, then drain, then terminate (`docs/design-doc/operations/longhorn-node-maintenance.md`). Every node replacement, OS patch, and scale-in on every Longhorn cluster goes through it.
@@ -267,6 +253,17 @@ dot:
 (6) What it buys is operational, not performance. Nothing here assumes a managed filesystem is faster, and the evidence available runs the other way for home-type workloads: EFS in Bursting mode was too slow for environment builds, and field experience holds Longhorn faster — a comparison against Longhorn's RWO path, not against another RWX implementation. So this is a trade at an unknown performance price, which is what the gates exist to settle.
 ----
 (7) [Longhorn taxes operators, not just the project]: The honest unit of Longhorn's operational cost is per cluster and per operator, not per provider. Removing it from AWS does not remove it from the project while Hetzner needs it, but it does remove it from every AWS cluster and everyone on call for one. Priced under the _operations gate_.
+
+<Longhorn's config surface is incomplete>: Longhorn's production-critical capacity knobs are not all reachable from NIC config today.
+
+(1) A node restart on dev-internal left volumes stale with insufficient space to recover; the fix was setting Longhorn storage overprovisioning to 200% **by hand** (Tyler Potts, 2026-08-12) — dev user volumes request ~20 GB and barely use it.
+(2) The equivalent setting appears to be wired into config only on the path where dedicated storage nodes are enabled, and Tyler's cluster has none (Vini Cerutti's recollection of Chuck's change, unverified; Tyler is checking).
+(3) Hand-tuning a storage layer's overcommit per cluster is operational debt a managed filesystem does not carry.
+----
+(4) [Longhorn carries per-cluster manual tuning]: Longhorn's operational cost includes capacity knobs that are not yet expressible in NIC config.
+    -> [Universal Longhorn]
+
+# Direction: the shared data path
 
 <Longhorn RWX data-path concern>: Longhorn does not serve RWX from the replicated block layer directly — it puts an NFS server pod in front of it, and the pack's layout funnels the whole cluster's shared storage through one of them.
 
@@ -304,14 +301,17 @@ dot:
 ----
 (8) [RWX is materially slower per operation]: RWX on Longhorn should be scoped to workloads that need sharing, never used as a general default. Its advantage over managed storage is on the RWO path, not the RWX one.
 
-<Longhorn's config surface is incomplete>: Longhorn's production-critical capacity knobs are not all reachable from NIC config today.
+<RWX is already not uniform>: Longhorn is not in fact the project's universal RWX implementation today.
 
-(1) A node restart on dev-internal left volumes stale with insufficient space to recover; the fix was setting Longhorn storage overprovisioning to 200% **by hand** (Tyler Potts, 2026-08-12) — dev user volumes request ~20 GB and barely use it.
-(2) The equivalent setting appears to be wired into config only on the path where dedicated storage nodes are enabled, and Tyler's cluster has none (Vini Cerutti's recollection of Chuck's change, unverified; Tyler is checking).
-(3) Hand-tuning a storage layer's overcommit per cluster is operational debt a managed filesystem does not carry.
+(1) The Data Science Pack ships a transitional in-cluster NFS server (`sharedStorage.nfsServer`, `quay.io/nebari/volume-nfs`) that is **on by default even on Longhorn clusters**: the chart only disables it when `sharedStorage.storageClass` is explicitly set, and nothing sets it today — ADR-0003's convention of injecting the cluster's class into pack values is designed but unimplemented in NIC — so a stock deploy serves `/shared` from the pack's NFS pod exporting a Longhorn *RWO* backend volume, with Longhorn's own RWX share-manager not in the data path at all.
+(2) That mode exists because no RWX class is wired outside AWS and Hetzner — GCP, Azure, and local all hardcode `LonghornEnabled: false` with a "not yet wired" comment, and are not providers anyone runs in anger today. It is tracked for removal in Data Science Pack issue 29.
+(3) The pack therefore already documents provider-dependent RWX, and needs the same nodeSelector/nodeAffinity pinning to dodge slow RWO reattach (30-120s on Hetzner) that Longhorn's own share-manager placement suffers from.
+(4) So "Longhorn everywhere" means AWS and Hetzner, which is everywhere that currently counts — the uniformity benefit is a two-provider benefit, and one of those two is the provider under debate.
 ----
-(4) [Longhorn carries per-cluster manual tuning]: Longhorn's operational cost includes capacity knobs that are not yet expressible in NIC config.
+(5) [Longhorn is not universal today]: The uniformity on offer is narrower than it sounds: two live providers, and on a stock deploy Longhorn's RWX path is not even what serves `/shared`.
     -> [Universal Longhorn]
+
+# Direction: the compute model
 
 <Longhorn forecloses EKS Auto Mode>: Keeping Longhorn on AWS also decides the compute model, because Longhorn cannot run on AWS-managed immutable nodes.
 
@@ -352,15 +352,7 @@ dot:
 (5) [Auto Mode adoptability is unsettled]: Whether EKS Auto Mode is adoptable for Nebari is an open question independent of storage, so foreclosing it is a real cost but not a decisive one. #open-decision
     _> <Longhorn forecloses EKS Auto Mode>
 
-<RWX is already not uniform>: Longhorn is not in fact the project's universal RWX implementation today.
-
-(1) The Data Science Pack ships a transitional in-cluster NFS server (`sharedStorage.nfsServer`, `quay.io/nebari/volume-nfs`) that is **on by default even on Longhorn clusters**: the chart only disables it when `sharedStorage.storageClass` is explicitly set, and nothing sets it today — ADR-0003's convention of injecting the cluster's class into pack values is designed but unimplemented in NIC — so a stock deploy serves `/shared` from the pack's NFS pod exporting a Longhorn *RWO* backend volume, with Longhorn's own RWX share-manager not in the data path at all.
-(2) That mode exists because no RWX class is wired outside AWS and Hetzner — GCP, Azure, and local all hardcode `LonghornEnabled: false` with a "not yet wired" comment, and are not providers anyone runs in anger today. It is tracked for removal in Data Science Pack issue 29.
-(3) The pack therefore already documents provider-dependent RWX, and needs the same nodeSelector/nodeAffinity pinning to dodge slow RWO reattach (30-120s on Hetzner) that Longhorn's own share-manager placement suffers from.
-(4) So "Longhorn everywhere" means AWS and Hetzner, which is everywhere that currently counts — the uniformity benefit is a two-provider benefit, and one of those two is the provider under debate.
-----
-(5) [Longhorn is not universal today]: The uniformity on offer is narrower than it sounds: two live providers, and on a stock deploy Longhorn's RWX path is not even what serves `/shared`.
-    -> [Universal Longhorn]
+# Direction: cross-AZ attachment
 
 <Longhorn also masks EBS's AZ boundedness>: The strongest objection to removing Longhorn (Amit Kumar and Vini Cerutti, 2026-08-11): it is not only the RWX provider — as the sole default StorageClass it also hides that EBS volumes are AZ-bound.
 
@@ -400,6 +392,26 @@ dot:
     // Vini's parked [Per-user opt-in access mode] proposal is the per-user,
     // opt-in version of this same question; the RWX-homes shape is the
     // platform-default version. Both need the same measurement.
+
+<The co-location ceiling is already being hit>: The capacity ceiling is an observed problem in the shipped per-user design, not a theoretical objection to extending it to groups.
+
+(1) A user spawning several JupyterHub apps that all need the same home volume has them all forced onto one node, and can exhaust that node's limits (Vini Cerutti, 2026-08-12).
+(2) The resulting failure appears on JupyterHub's spawn screen, which "tells you almost nothing" — no reason, no next step.
+(3) Amit Kumar agreed the UX is bad, said hooking in a useful message should be straightforward, and confirmed the current design was chosen for delivery speed while accepting this edge case; "use a larger node size" is the interim workaround.
+(4) Tyler Potts asked what stops too many users piling onto one node; Amit's answer was that this is Kubernetes' job, and if it fails the cluster is out of resources and needs resizing.
+----
+(5) [One node is a hard capacity ceiling]
+
+[Per-user opt-in access mode]: Users should be able to opt into a shared-filesystem mode (EFS or equivalent) for their home volume, trading write latency for not being capped by one node's capacity. #open-decision
+    + <The co-location ceiling is already being hit>
+    - <RWX pays a write acknowledgement on every operation>
+
+    // Vini Cerutti proposed this on 2026-08-12; Amit Kumar called it ideal for
+    // a future iteration, not this one. Parked, not rejected. It is the
+    // per-user opt-in form of [Home volume access mode is open]; Vini named
+    // EFS, whose Bursting mode measured slow — the proposal is at least as
+    // strong against FSx for OpenZFS or EFS Elastic, the modes actually
+    // under evaluation.
 
 <Homes are RWO by documented design>: The Data Science Pack has already decided this question.
 

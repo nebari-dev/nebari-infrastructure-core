@@ -27,6 +27,12 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0017](0017-user-journey-tests-for-foundational-software.md) | User Journey (E2E) Tests for Foundational Software | Accepted | 2026-08-27 |
 | [ADR-0018](0018-local-gateway-host-ports.md) | Publish the Local Gateway on Host Ports Instead of MetalLB | Accepted | 2026-09-01 |
 
+## Argument maps
+
+Some decisions get an [Argdown](https://argdown.org/) argument map before they get an ADR, recording what has been argued, what is settled, and what evidence would close the open questions. Each lives in its own directory with its source, its rendered SVGs, and a README explaining them; `make argdown` re-renders all of them.
+
+- [rwx-storage-strategy](rwx-storage-strategy/) — RWX storage as a Nebari platform capability, and whether AWS keeps Longhorn
+
 ## ADR Statuses
 
 - **Proposed**: Under discussion, not yet accepted
