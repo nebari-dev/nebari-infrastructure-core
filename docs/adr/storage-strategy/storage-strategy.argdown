@@ -1,5 +1,5 @@
 ===
-title: RWX storage as a Nebari platform capability
+title: Nebari storage strategy
 model:
   mode: loose
   removeTagsFromText: true
@@ -252,6 +252,38 @@ dot:
     - <RWX is already not uniform>
     - <Longhorn's config surface is incomplete>
     - <Longhorn forecloses EKS Auto Mode>
+
+# Topic: Longhorn as the default StorageClass
+
+<Being the RWX provider and being the default class are separate decisions>: Longhorn holds several roles in NIC at once — sole default StorageClass, RWX implementation, and backup implementation — and it was adopted for none of them: ADR-0002 adopted it for the cross-AZ attach problem, with RWX and backups named as benefits that came later. The roles arrived separately and are separable, so the default-class one is decidable on its own, whichever way the AWS question goes.
+
+(1) It is hardcoded, not chosen. NIC installs the chart with `persistence.defaultClass: true` (`pkg/storage/longhorn/install.go`) and then, on both install and upgrade, lists every other StorageClass and patches `storageclass.kubernetes.io/is-default-class: "false"` onto it (`pkg/storage/longhorn/default\_class.go`). Only the replica count is configurable; nothing gates the default or the demotion.
+(2) On AWS it is also on by default: a nil `longhorn:` block returns enabled (`pkg/providers/cluster/aws/config.go`), and the reference `examples/aws-config.yaml` ships it with dedicated storage nodes. So "Longhorn everywhere" in practice means "Longhorn under everything", which is a stronger commitment than the RWX requirement asks for.
+(3) The workload this matters most for is a database. Keycloak's Postgres runs on CloudNativePG, which replicates at the application layer across instances; putting synchronously replicated block storage underneath it stores a second copy of a guarantee the database already provides, adds a replication round trip to every fsync, and puts a shared storage control plane in the failure path of the component that gates every login. It needs neither RWX nor cross-node attach — CNPG failover starts a replica that has its own volume.
+(4) Nothing about that argument depends on the AWS decision. Even under _Universal Longhorn_, Longhorn can be present as the RWX class while single-pod volumes use the provider's native block storage; the two roles were only ever fused by the install.
+(5) It is the cluster-level counterpart of the per-pack principle already decided on 2026-08-12: if each pack should request the access mode it needs, no cluster-wide default should be silently answering that question for every unclassed PVC.
+----
+(6) [Longhorn should not be the default class]: Scoping Longhorn to the volumes that need RWX is right on every path, and should be separated from the AWS provider question rather than bundled into it. What blocks it today is sequencing, not the argument.
+    +> [Access mode is a per-pack decision]
+
+<The config cannot express it today>: De-defaulting is a code change with a missing seam behind it, not a config flag someone forgot to set.
+
+(1) Both the `defaultClass: true` value and the demotion loop are unconditional, so there is no supported way to run Longhorn without it becoming the default.
+(2) Removing the default is not enough on its own. NIC computes one cluster-wide `InfraSettings.StorageClass` and renders it into the only PVC-bearing manifest it owns — the Keycloak CNPG cluster template takes that one value in its `storageClass` field — so with Longhorn enabled the database is pinned to `longhorn` by an explicit rendered literal, not by default-class inheritance. Dropping the default annotation would not move it.
+(3) What is missing is a per-workload class surface. The one precedent for a second class is the opt-in EFS provisioner mode, which creates an `efs-sc` class without annotating it default — and nothing routes any workload onto it, so it demonstrates the gap rather than filling it. It is the same missing injection seam ADR-0003 designs for pack values.
+(4) The fallback class is also assumed rather than provisioned: NIC names `gp2` when Longhorn is off but no Terraform creates it, so it is EKS's built-in in-tree class — and gp2 versus gp3 is itself unmeasured, per the _representative performance gate_.
+----
+(5) [De-defaulting needs a storage-class surface first]: The change is a small config surface plus a per-workload class field, not a flag flip — cheap, but real work that has to be scoped rather than assumed.
+    _> <Being the RWX provider and being the default class are separate decisions>
+
+<Backups sequence the change>: Whatever moves off the default class today leaves the backup set, and one of those volumes is the one with no other durability story.
+
+(1) Backup enrolment is keyed to the default `longhorn` StorageClass, and `nic` refuses a backups config outright unless the effective storage class is `longhorn` (`pkg/nic/backups.go`), so this is not a silent gap — it is a validation error the operator meets immediately.
+(2) The Keycloak CNPG database is exactly the volume the argument wants moved, and per _HA is not durability_ its only data protection today is Longhorn's volume backups: barman-to-S3 is unbuilt and ADR-0007 makes backup an explicit non-goal.
+(3) So the order matters: a durability answer for the database has to exist before, or with, the class change — not after it.
+----
+(4) [De-defaulting is gated on the backup story]: The right sequence is backup coverage first, then de-defaulting; done in the other order it trades an unnecessary storage layer for an unprotected database. Priced under the _backup and restore gate_.
+    _> [Longhorn should not be the default class]
 
 # Topic: backup and restore
 
@@ -595,6 +627,7 @@ dot:
 * [Assumption 14]: The AWS storage choice is also a compute choice. Longhorn cannot run on EKS Auto Mode — its node-level iSCSI prerequisite has no install path on AWS-managed immutable nodes, and Auto Mode's forced node rotation is hostile to node-local replicas — so keeping Longhorn on AWS forecloses Auto Mode. The hybrid (Auto Mode fleet plus a classic storage node group) is technically available and keeps every code path Auto Mode would remove. Whether Auto Mode is adoptable at all is separately open: `extra\_ca\_bundle` has no Auto Mode equivalent, and the 21-day rotation conflicts with long-lived user pods. #open-decision
 * [Assumption 15]: The cross-AZ attach problem is real, observed (Keycloak on old Nebari, conda-store's Celery workers, nebari issue 3008), and predates RWX — it is ADR-0002's original motivation, which Longhorn currently masks as the default StorageClass. It is answerable without storage-layer replication: per-AZ node groups (or Karpenter) plus `WaitForFirstConsumer` binding for the split shape, Multi-AZ RWX homes for the RWX-homes shape. The residual is AZ-outage availability for EBS-backed volumes, to be priced, not argued away. #core-assumption
 * [Assumption 16]: Backup on AWS is a shipped Longhorn feature, not a pending one. Native Longhorn backups merged in July 2026 (issue 431), enrol every volume on the default `longhorn` StorageClass automatically, and are hard-gated on Longhorn being that default class — `nic validate` and `nic deploy` both refuse otherwise. There is no storage-agnostic backup path in the project (Velero is "Needs Research") and no ADR for backup or restore, so each candidate shape must state which volumes it backs up and how. The split shape owes this most: moving system volumes to gp3 drops them from the backup set, and _HA is not durability_ leaves the Keycloak CNPG database with no durability story at all. #core-assumption
+* [Assumption 22]: Longhorn's two roles are fused by the install, not by the requirement. NIC sets `persistence.defaultClass: true` and then demotes every other StorageClass to non-default on install and upgrade; on AWS Longhorn is on unless opted out. Scoping it to the volumes that need RWX is right on every path — a CNPG database in particular gains nothing from synchronously replicated block storage under its own application-layer replication — but it is not a flag flip: NIC has one cluster-wide storage class, rendered as an explicit literal into the Keycloak CNPG manifest, so a per-workload class surface has to exist first, and backup coverage for the database has to exist alongside it, since `nic` refuses a backups config when the effective class is not `longhorn`. #open-decision
 * [Assumption 21]: The other clouds change the shape of the "Longhorn everywhere" argument and are not yet wired to test it. GCP and Azure hardcode `LonghornEnabled: false` in NIC today; both ship a managed RWX filesystem in-box (Filestore CSI on GKE including Autopilot, Azure Files CSI on AKS) with an ONTAP-based tier behind it (Google Cloud NetApp Volumes, Azure NetApp Files) as the nearest analogue to FSx for OpenZFS; and both offer cross-zone block storage (Hyperdisk Balanced HA or regional PD on GKE 1.33+, ZRS-backed default StorageClasses on multi-zone AKS 1.29+), so the AZ-attachment failure Longhorn masks is an AWS property rather than a cloud one. Against that, each managed filesystem is another integration to build and back up, and Hetzner keeps Longhorn in the project regardless. Desk research from vendor documentation, unverified against any Nebari deployment. #open-decision
 * [Assumption 17]: The retired `longhorn-backup-pack` is superseded by the native NIC implementation and should not be reproposed; `docs/longhorn-backups.md` carries the cutover procedure. One stale pointer remains in `docs/design-doc/operations/longhorn-dedicated-nodes-migration.md`, which still tells operators to install the pack.
 * [Assumption 18]: Storage tiering is settled at the product level even though the implementation is not (team, 2026-08-13). Large datasets belong in object storage — cluster PV capacity does not scale to terabytes and Ray parallelises reads far better against S3 — while user outputs, reports, notebooks, and home directories stay on mounted PVCs, since environment installs need small-file performance an object store does not offer. That bounds this map: RWX is being chosen for homes and shared small-file work, not for dataset serving. #core-assumption

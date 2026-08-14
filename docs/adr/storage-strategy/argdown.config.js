@@ -17,6 +17,7 @@ const maps = {
   legend: ["Legend"],
   "rwx-required": ["Core platform assumption"],
   "provider-strategy": FORK,
+  "default-class": [...FORK, "Topic: Longhorn as the default StorageClass"],
   backup: [...FORK, "Topic: backup and restore"],
   operations: [...FORK, "Topic: operator burden"],
   "data-path": [...FORK, "Topic: the shared data path"],
@@ -37,7 +38,7 @@ const svg = [
   "save-svg-as-svg",
 ];
 
-const dir = "./docs/adr/rwx-storage-strategy";
+const dir = "./docs/adr/storage-strategy";
 
 const processes = {};
 for (const [name, selectedSections] of Object.entries(maps)) {
@@ -50,7 +51,7 @@ for (const [name, selectedSections] of Object.entries(maps)) {
 
 module.exports = {
   config: {
-    inputPath: `${dir}/rwx-storage-strategy.argdown`,
+    inputPath: `${dir}/storage-strategy.argdown`,
     logLevel: "error",
     processes,
   },

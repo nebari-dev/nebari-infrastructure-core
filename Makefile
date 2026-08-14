@@ -5,7 +5,7 @@ BINARY_NAME=nic
 CMD_DIR=./cmd/nic
 PKG_DIRS=$(shell go list ./... | grep -v /vendor/)
 GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
-ARGDOWN_CONFIG=docs/adr/rwx-storage-strategy/argdown.config.js
+ARGDOWN_CONFIG=docs/adr/storage-strategy/argdown.config.js
 ARGDOWN_OUT=$(dir $(ARGDOWN_CONFIG))
 # process names defined in ARGDOWN_CONFIG
 ARGDOWN_MAPS=$(shell node -e 'console.log(Object.keys(require("./$(ARGDOWN_CONFIG)").config.processes).join(" "))' 2>/dev/null)

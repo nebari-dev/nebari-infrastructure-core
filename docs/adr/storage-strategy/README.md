@@ -1,8 +1,10 @@
-# RWX storage as a Nebari platform capability
+# Nebari storage strategy
 
-This is an argument map, not an ADR. It records what the team has argued about ReadWriteMany (RWX) storage on AWS — which claims are settled, which are open, and what evidence would close them — so the eventual ADR is written from a position everyone can inspect.
+Longhorn holds several roles in a Nebari cluster at once — sole default StorageClass, RWX implementation, backup implementation. This works through which of those it should keep, on which providers, and what replaces the rest. It started as the narrower question of ReadWriteMany (RWX) storage on AWS, and kept running into the others.
 
-The source of truth is [`rwx-storage-strategy.argdown`](rwx-storage-strategy.argdown). Rendering is `make argdown`, which writes every SVG below from that one file; the sections in the source are the sections on this page. The source also carries two things this page does not: the acceptance gates each topic defers to (under *AWS decision gate*), and the running list of assumptions the argument leaves behind.
+Nothing here proposes a decision. It records what has been argued, which claims are settled, which are open, and what evidence would close them, so that whatever gets proposed later starts from a position anyone can inspect and dispute. Some of it will end up amending [ADR-0002](../0002-longhorn-distributed-block-storage-for-aws.md), which adopted Longhorn to solve cross-AZ EBS attachment and named RWX and backups as later benefits.
+
+The source of truth is [`storage-strategy.argdown`](storage-strategy.argdown). Rendering is `make argdown`, which writes every SVG below from that one file; the sections in the source are the sections on this page. The source also carries two things this page does not: the acceptance gates each topic defers to (under *AWS decision gate*), and the running list of assumptions the argument leaves behind.
 
 The whole argument in one picture is [`overview.svg`](overview.svg) — useful as a reference, unreadable as an introduction. The maps below are the same argument split by *topic*: each one takes the central fork and hangs a single line of attack off it.
 
@@ -47,6 +49,20 @@ Note what that does *not* cover: the metadata-heavy workloads usually cited — 
 One open idea would cut across all of it: data-intensive jobs may not need to run *from* shared storage. Stage the inputs onto the node's local NVMe, run there, copy results back, and the network filesystem is paid at the edges instead of per operation. Unexplored — it needs a staging mechanism, a cache-invalidation story, and instance types with enough local disk — but if it works it narrows what the storage layer has to be fast at, which changes what the performance gate is measuring.
 
 ![Shared data path](data-path.svg)
+
+## Topic: Longhorn as the default StorageClass
+
+Longhorn holds several roles in NIC at once — sole default StorageClass, RWX implementation, backup implementation — and it was adopted for none of them: ADR-0002 adopted it to solve cross-AZ EBS attachment, with RWX and backups named as benefits that came later. Those roles arrived separately and are separable. NIC installs the chart with `persistence.defaultClass: true` and then, on install and on upgrade, walks every other StorageClass and patches it to non-default. Only the replica count is configurable; nothing gates the default or the demotion. On AWS, Longhorn is on unless you opt out. So "Longhorn everywhere" in practice means "Longhorn under everything", which is a larger commitment than the RWX requirement asks for.
+
+The workload that makes this concrete is a database. Keycloak's Postgres runs on CloudNativePG, which replicates across instances at the application layer; synchronously replicated block storage underneath it stores a second copy of a guarantee the database already provides, adds a replication round trip to every fsync, and puts a shared storage control plane in the failure path of the component that gates every login. It needs neither RWX nor cross-node attach. None of that depends on the AWS question — even under "Longhorn everywhere", Longhorn can be the RWX class while single-pod volumes use native block storage. It is the cluster-level counterpart of the per-pack principle already decided: if each pack should request what it needs, no cluster-wide default should be answering that question for every unclassed PVC.
+
+Two things stand between that and a config change, and they are why this is scoped as its own topic rather than assumed done.
+
+**There is no seam to hang it on.** Dropping the default annotation would not actually move the database. NIC computes one cluster-wide storage class and renders it as a literal into the only PVC-bearing manifest it owns — the Keycloak CNPG cluster — so with Longhorn enabled that volume is pinned to `longhorn` explicitly, not by default-class inheritance. What is missing is a per-workload class field. The only precedent for a second class is the opt-in EFS provisioner mode, which creates an `efs-sc` class without annotating it default and has nothing routed onto it — it shows the gap rather than filling it. Same missing injection seam ADR-0003 designs for pack values. Worth noting too that the fallback class is assumed rather than provisioned: NIC names `gp2` when Longhorn is off, but nothing in Terraform creates it — that is EKS's built-in in-tree class, and gp2 versus gp3 is itself unmeasured.
+
+**Backups set the order.** Backup enrolment is keyed to the default `longhorn` class, and `nic` refuses a backups config outright when the effective storage class is not `longhorn` — so this is a validation error the operator meets immediately, not a silent gap. The Keycloak database is exactly the volume the argument wants moved, and its only data protection today is Longhorn's volume backups: barman-to-S3 is unbuilt and ADR-0007 makes backup an explicit non-goal. Durability answer first, then de-defaulting; the other order trades an unnecessary storage layer for an unprotected database.
+
+![Longhorn as the default StorageClass](default-class.svg)
 
 ## Topic: backup and restore
 
