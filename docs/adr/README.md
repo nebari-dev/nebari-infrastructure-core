@@ -21,6 +21,12 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0009](0009-declarative-keycloak-configuration.md) | Declarative Keycloak Configuration via keycloak-config-cli | Accepted | 2026-07-15 |
 | [ADR-0010](0010-high-security-mode.md) | High-Security Mode (Opt-In Whitelist-Everything Hardening) | Proposed | 2026-07-15 |
 
+## Argument maps
+
+Some decisions get an [Argdown](https://argdown.org/) argument map before they get an ADR, recording what has been argued, what is settled, and what evidence would close the open questions. Each lives in its own directory with its source, its rendered SVGs, and a README explaining them; `make argdown` re-renders all of them.
+
+- [rwx-storage-strategy](rwx-storage-strategy/) — RWX storage as a Nebari platform capability, and whether AWS keeps Longhorn
+
 ## ADR Statuses
 
 - **Proposed**: Under discussion, not yet accepted

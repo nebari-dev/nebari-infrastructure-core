@@ -5,8 +5,10 @@ BINARY_NAME=nic
 CMD_DIR=./cmd/nic
 PKG_DIRS=$(shell go list ./... | grep -v /vendor/)
 GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
-ARGDOWN_FILES=docs/adr/*.argdown
-ARGDOWN_OUT=docs/assets
+ARGDOWN_CONFIG=docs/adr/rwx-storage-strategy/argdown.config.js
+ARGDOWN_OUT=$(dir $(ARGDOWN_CONFIG))
+# process names defined in ARGDOWN_CONFIG
+ARGDOWN_MAPS=$(shell node -e 'console.log(Object.keys(require("./$(ARGDOWN_CONFIG)").config.processes).join(" "))' 2>/dev/null)
 
 # Build information
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -112,15 +114,17 @@ pre-commit-run: ## Run pre-commit hooks on all files
 	@echo "Running pre-commit hooks..."
 	pre-commit run --all-files
 
-argdown: ## Render Argdown argument maps (docs/adr/*.argdown) to SVG in docs/assets
+argdown: ## Render Argdown argument maps to SVG beside their .argdown source
 	@echo "Rendering Argdown maps..."
 	@which npx > /dev/null || (echo "Error: npx is not installed. Install Node.js." && exit 1)
 	@# without the dot binary the CLI still reports success and writes only .dot
 	@which dot > /dev/null || (echo "Error: graphviz is not installed. Install with: brew install graphviz" && exit 1)
-	npx -y @argdown/cli map "$(ARGDOWN_FILES)" $(ARGDOWN_OUT) --format svg
-	@# graphviz stamps the map's full intrinsic size, so browsers render it at
-	@# ~7700px wide instead of fitting the viewport; the viewBox is enough
-	@perl -pi -e 's/<svg width="[0-9]+pt" height="[0-9]+pt"/<svg/' $(ARGDOWN_OUT)/*.svg
+	@# one process per map: an overview plus a map per argument direction
+	for p in $(ARGDOWN_MAPS); do \
+		npx -y @argdown/cli run $$p --config $(ARGDOWN_CONFIG) || exit 1; \
+	done
+	@# keep graphviz's width/height: an SVG with only a viewBox scales itself to
+	@# the viewport, so browser zoom re-lays it out instead of magnifying it
 	@echo "SVGs written to $(ARGDOWN_OUT)"
 
 release-snapshot: ## Create a snapshot release (local testing)
