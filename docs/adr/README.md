@@ -27,7 +27,7 @@ An ADR records a decision and its consequences. When the reasoning behind one is
 
 Not every decision needs one. Reach for a map when the argument is the hard part. Each map lives in its own directory with its source, its rendered SVGs, and a README that walks the argument section by section; `make argdown` re-renders all of them.
 
-- [rwx-storage-strategy](rwx-storage-strategy/) — RWX storage as a Nebari platform capability, and whether AWS keeps Longhorn
+- [storage-strategy](storage-strategy/) — Nebari storage strategy: which of Longhorn's roles it should keep, and what replaces the rest
 
 ## ADR Statuses
 
