@@ -22,6 +22,7 @@ const maps = {
   "data-path": [...FORK, "Topic: the shared data path"],
   compute: [...FORK, "Topic: the compute model"],
   "cross-az": [...FORK, "Topic: cross-AZ attachment"],
+  "other-clouds": [...FORK, "Topic: the other clouds"],
   homes: ["Topic: home volume access mode"],
 };
 
