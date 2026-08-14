@@ -1,12 +1,12 @@
 # Nebari storage strategy
 
-Longhorn holds several roles in a Nebari cluster at once — sole default StorageClass, RWX implementation, backup implementation. This works through which of those it should keep, on which providers, and what replaces the rest. It started as the narrower question of ReadWriteMany (RWX) storage on AWS, and kept running into the others.
+Longhorn holds several roles in a Nebari cluster at once — sole default StorageClass, RWX implementation, backup implementation. This page works through which of those roles it should keep, on which providers, and what replaces the rest. It started as the narrower question of ReadWriteMany (RWX) storage on AWS, and kept running into the others.
 
 Nothing here proposes a decision. It records what has been argued, which claims are settled, which are open, and what evidence would close them, so that whatever gets proposed later starts from a position anyone can inspect and dispute. Some of it will end up amending [ADR-0002](../0002-longhorn-distributed-block-storage-for-aws.md), which adopted Longhorn to solve cross-AZ EBS attachment and named RWX and backups as later benefits.
 
 The source of truth is [`storage-strategy.argdown`](storage-strategy.argdown). Rendering is `make argdown`, which writes every SVG below from that one file; the sections in the source are the sections on this page. The source also carries two things this page does not: the acceptance gates each topic defers to (under *AWS decision gate*), and the running list of assumptions the argument leaves behind.
 
-The whole argument in one picture is [`overview.svg`](overview.svg) — useful as a reference, unreadable as an introduction. The maps below are the same argument split by *topic*: each one takes the central fork and hangs a single line of attack off it.
+The whole argument in one picture is [`overview.svg`](overview.svg) — useful as a reference, unreadable as an introduction. The maps below are the same argument split by *topic*: each one takes the central fork and hangs one strand of the argument off it.
 
 ## How to read the maps
 
@@ -20,7 +20,7 @@ Three ways out are argued and all three fail: pinning every collaborating pod to
 
 **Homes are the second reason to want it, and the larger one.** `/shared` is what makes RWX unavoidable, so it is what this section argues from — but nothing about the requirement stops there. Nothing in the pack's contract requires RWX for a *home* volume; what recommends it is that RWX homes dissolve the per-user node pin, the cross-AZ constraint, and Longhorn's presence on AWS in one move, rather than mitigating each separately. That is a supporting reason for the capability, not a second requirement, and it is why homes get [their own topic](#topic-home-volume-access-mode) — including the performance evidence running against them. Cross-namespace sharing between packs is a third candidate, and the weakest: no requirement is established there at all.
 
-That third candidate has moved on twice. The 2026-08-13 standup narrowed it: large datasets go to object storage, so the Ray-to-Jupyter case that originally motivated cross-pack RWX is answered by a bucket, not a volume, leaving small-file sharing between packs. And the user-story gate is now met — the work is two tracked spikes, [#597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) (object-storage access) and [#598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) (cross-namespace volume sharing). What has *not* been established is that the remainder needs RWX at all. The map now carries the working preference that it probably does not: reach for object storage wherever it fits and treat a shared filesystem as the fallback for what genuinely needs POSIX. That preference is not free either, and its costs are the open ones — no per-user AWS identity to key access on (a data catalog is the leading proposal for the permission layer), unproven small-file and metadata performance, and nothing in-cluster short of running MinIO, which trades a managed service for another storage system to operate.
+That third candidate has shifted twice. The 2026-08-13 standup narrowed it: large datasets go to object storage, so the Ray-to-Jupyter case that originally motivated cross-pack RWX is answered by a bucket, not a volume, leaving small-file sharing between packs. And the user-story gate is now met — the work is two tracked spikes, [#597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) (object-storage access) and [#598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) (cross-namespace volume sharing). What has *not* been established is that the remainder needs RWX at all. The map now carries the working preference that it probably does not: reach for object storage wherever it fits and treat a shared filesystem as the fallback for what genuinely needs POSIX. That preference is not free either, and its costs are the open ones — no per-user AWS identity to key access on (a data catalog is the leading proposal for the permission layer), unproven small-file and metadata performance, and nothing in-cluster short of running MinIO, which trades a managed service for another storage system to operate.
 
 ![Is RWX required?](rwx-required.svg)
 
@@ -28,7 +28,7 @@ That third candidate has moved on twice. The 2026-08-13 standup narrowed it: lar
 
 This is the fork every topic below hangs off. Nebari can standardize the RWX *capability* and let each provider supply the implementation (managed filesystem on AWS, Longhorn on Hetzner), or it can run Longhorn everywhere and buy uniformity.
 
-Only the per-pack principle is decided (2026-08-12): each pack requests the access mode it needs, with no cluster-wide policy. The fork itself is not — the rest of the page is the case against "Longhorn everywhere", topic by topic, plus what each topic has to measure before it counts.
+Only the per-pack principle is decided (2026-08-12): each pack requests the access mode it needs, with no cluster-wide policy. The fork itself is not — the rest of the page works through it topic by topic: the case against "Longhorn everywhere", the strongest points for it, and what each topic has to measure before it counts.
 
 ![Capability versus implementation](provider-strategy.svg)
 
@@ -36,25 +36,25 @@ Only the per-pack principle is decided (2026-08-12): each pack requests the acce
 
 Longhorn's cost is not only the project's integration work — it is a standing burden on whoever runs each cluster, and the runbooks already in this repo are the evidence for its size: node drains need a five-step replica-eviction procedure, failure diagnosis needs Longhorn-specific concepts, and some capacity knobs are still tuned by hand per cluster.
 
-That cost scales with clusters and on-call operators, not with providers, which is where the uniformity argument prices it. Priced under the operations gate.
+That cost scales with clusters and on-call operators, not with providers — which is where the uniformity argument prices it, if it prices it at all. Priced under the operations gate.
 
 Two of those costs stopped being arguments during the benchmark work: a routine node-group resize was blocked three times by the instance-manager PDB and completed only with `--force`, and Longhorn RWX turned out not to work at all on NIC's default AWS node disk size. Both are in the map under this topic — and both are NIC bugs we can and will fix, so neither is evidence that Longhorn cannot work here. What they are evidence of is how much Longhorn-specific knowledge the integration assumes: the disk-size failure names no cause, and the drain needs a data-safety setting relaxed before maintenance proceeds. Better tooling shortens that work; it does not remove the class of it, which is what this topic is about.
+
+![Operator burden](operations.svg)
 
 ## Topic: cost
 
 Priced on 2026-08-14 against the AWS Price List API — us-east-1, on-demand, five shapes across 10 / 50 / 200-user tiers, with operator overhead kept as a line item in hours rather than folded into dollars.
 
-**Longhorn costs 2.5–2.7× the benchmark-favoured shape at every tier** — $231 / $1,045 / $6,235 a month against $86 / $423 / $2,466 for gp3 homes plus an FSx Single-AZ `/shared`. The driver is not $/GB: it is a 2.67× capacity multiplier (two replicas ÷ the 25% reserve) on provisioned block storage, paid for bytes that are mostly empty, plus a dedicated storage node group and roughly 12% of every user node's CPU for `instance-manager` — which scales with `max_nodes` and reaches $2,826/mo on a 200-user cluster, the largest single figure in the model and the one least likely to be in anyone's estimate. So the map has been treating performance and cost as a trade, and on the numbers available they agree.
+**Longhorn costs 2.5-2.7x the benchmark-favoured shape at every tier** — $231 / $1,045 / $6,235 a month against $86 / $423 / $2,466 for gp3 homes plus an FSx Single-AZ `/shared`. The driver is not $/GB: it is a 2.67x capacity multiplier (two replicas ÷ the 25% reserve) on provisioned block storage, paid for bytes that are mostly empty, plus a dedicated storage node group and roughly 12% of every user node's CPU for `instance-manager` — which scales with `max_nodes` and reaches $2,826/mo on a 200-user cluster, the largest single figure in the model and the one least likely to be in anyone's estimate. The map has been treating performance and cost as a trade; on the numbers available they agree.
 
 The operator delta is **~7 h/mo/cluster** — ~9.3 h on Longhorn against ~2.3 h residual on a managed filesystem — and it is deliberately left in hours, because converting it needs a loaded rate that belongs to whoever owns the staffing budget. Two consequences do not need one: it is flat, so ten Longhorn clusters is roughly half an FTE; and being flat it lands hardest on small clusters, where the entire infrastructure bill is $231/mo. It is an estimate built from shipped runbooks and two observed incidents, not a measurement, and it is the number most worth firming up.
 
-Three results cut against the simple story. **Multi-AZ FSx is cheap in latency and not in dollars** — ~20% on performance but 1.65× on the bill — so the cross-AZ question moves from performance to cost, and nobody has been asked whether AZ-outage availability for `/shared` is worth ~$285/mo at the medium tier. **EFS buys its flat concurrency scaling with an unbounded bill**: storage is 3.3× FSx Single-AZ and Elastic mode charges per GB of data access, reaching $7,300/mo at the large tier under plausible I/O — worse than Longhorn — though GB/user/month is unmeasured, so that is a sensitivity range rather than a price. And **Longhorn does not fit a 200-user cluster as configured**: replica capacity lives on the node root disk, gp3 caps at 16 TiB per volume, so 66.7 TiB raw needs at least five storage nodes rather than the two or three the examples imply, and NIC cannot express gp3 IOPS or throughput at all — likely a second ceiling behind the measured concurrency degradation, and the cheaper one to fix.
+Three results cut against the simple story. **Multi-AZ FSx is cheap in latency and not in dollars** — ~20% on performance but 1.65x on the bill — so the cross-AZ question moves from performance to cost, and nobody has been asked whether AZ-outage availability for `/shared` is worth ~$285/mo at the medium tier. **EFS buys its flat concurrency scaling with an unbounded bill**: storage is 3.3x FSx Single-AZ and Elastic mode charges per GB of data access, reaching $7,300/mo at the large tier under plausible I/O — worse than Longhorn — though GB/user/month is unmeasured, so that is a sensitivity range rather than a price. And **Longhorn does not fit a 200-user cluster as configured**: replica capacity lives on the node root disk, gp3 caps at 16 TiB per volume, so 66.7 TiB raw needs at least five storage nodes rather than the two or three the examples imply, and NIC cannot express gp3 IOPS or throughput at all — likely a second ceiling behind the measured concurrency degradation, and the cheaper one to fix.
 
-What would most change these numbers: per-request charges for EFS Elastic and FSx Intelligent-Tiering are unmodelled on a workload the benchmark showed is metadata-operation-bound, which is the likeliest way the cheap options are cheaper than they look. And right-sizing home PVC requests is an untested do-nothing-else alternative that is 2.67× more effective under Longhorn than under gp3, with no migration attached. Full model, unit prices, and caveats are in the task's `pricing` note.
+What would most change these numbers: per-request charges for EFS Elastic and FSx Intelligent-Tiering are unmodelled on a workload the benchmark showed is metadata-operation-bound, which is the likeliest way the cheap options are cheaper than they look. And right-sizing home PVC requests is an untested do-nothing-else alternative that is 2.67x more effective under Longhorn than under gp3, with no migration attached. Full model, unit prices, and caveats are in the task's `pricing` note.
 
 ![Cost](cost.svg)
-
-![Operator burden](operations.svg)
 
 ## Topic: the shared data path
 
@@ -82,7 +82,7 @@ Two things stand between that and a config change, and they are why this is scop
 
 ## Topic: backup and restore
 
-Native Longhorn backups shipped in July 2026 and are hard-gated on Longhorn being the default StorageClass — `nic validate` and `nic deploy` both refuse otherwise. There is no storage-agnostic backup path in the project, so any AWS shape that moves volumes off Longhorn replaces working, tested machinery rather than merely avoiding work it would have had to build.
+Native Longhorn backups shipped in July 2026 and are hard-gated on Longhorn being the default StorageClass — `nic validate` and `nic deploy` both refuse a backups config otherwise. There is no storage-agnostic backup path in the project, so any AWS shape that moves volumes off Longhorn replaces working, tested machinery rather than merely avoiding work it would have had to build.
 
 The offsetting point is that the implementation is coupled to per-provider Terraform internals and carries its own upkeep. Backup is priced on its own gate, not folded into availability or cost.
 
@@ -110,7 +110,7 @@ The honest residual is availability: if the AZ itself is gone, EBS-backed volume
 
 It is worth sizing that before treating it as decisive. Full-AZ outages are infrequent and usually measured in hours; recovery needs no operator action, since the volumes are intact and the pods reschedule when capacity comes back; and the workload is interactive analysis, not a customer-facing service, so the tolerable answer may simply be that affected users cannot work until the AZ returns. Two caveats keep that from being a finding: Nebari has no stated availability objective to check it against, so "acceptable" is a preference until someone writes the number down; and the things that genuinely should survive a lost AZ are databases, which belong to CNPG replication rather than to the storage layer. Longhorn's own survival is also softer than assumed — NIC sets replica zone anti-affinity to *soft* with two replicas, so both can be sitting in the AZ that just failed.
 
-Either way the residual disappears in the RWX-homes shape, where a Multi-AZ filesystem has no AZ to be pinned to — and that dissolution is cheap in latency: Multi-AZ FSx costs ~20% over Single-AZ on extraction and clone, nothing on environment creation, and nothing at all at four writers. It is not cheap in dollars — 1.65× Single-AZ on the bill — so the trade is a cost question rather than a performance one, priced under the cost topic. The shape still fails the home gate for other reasons.
+Either way the residual disappears in the RWX-homes shape, where a Multi-AZ filesystem has no AZ to be pinned to — and that dissolution is cheap in latency: Multi-AZ FSx costs ~20% over Single-AZ on extraction and clone, nothing on environment creation, and nothing at all at four writers. It is not cheap in dollars — 1.65x Single-AZ on the bill — so the trade is a cost question rather than a performance one, priced under the cost topic. And the shape still has the adverse home-gate numbers to answer regardless.
 
 ![Cross-AZ attachment](cross-az.svg)
 
@@ -118,7 +118,7 @@ Either way the residual disappears in the RWX-homes shape, where a Multi-AZ file
 
 The uniformity argument is being made on two providers. NIC wires Longhorn on AWS and Hetzner; GCP, Azure, and local hardcode `LonghornEnabled: false` with a "not yet wired" comment. The clouds that would actually test "Longhorn everywhere" are the ones it has never run on — and on the evidence available, they are where the case for it is weakest.
 
-Both ship RWX as a managed service rather than something to install: GKE has the Filestore CSI driver as a cluster addon (working on Autopilot as well as Standard), AKS ships the Azure Files CSI driver in-box with RWX storage classes. There is no ZFS-based service outside AWS, but the closest analogue exists on both — Google Cloud NetApp Volumes and Azure NetApp Files, ONTAP-based managed NAS sold on the same low-latency, provisioned-throughput property that makes FSx for OpenZFS a candidate here, and sitting above the commodity tier much as FSx sits above EFS. Whether that tier clears the home gate is the same open question on all three clouds, and the answer will probably travel.
+Both ship RWX as a managed service rather than something to install: GKE has the Filestore CSI driver as a cluster addon (working on Autopilot as well as Standard); AKS ships the Azure Files CSI driver in-box with RWX storage classes. There is no ZFS-based service outside AWS, but the closest analogue exists on both — Google Cloud NetApp Volumes and Azure NetApp Files, ONTAP-based managed NAS sold on the same low-latency, provisioned-throughput property that makes FSx for OpenZFS a candidate here, and sitting above the commodity tier much as FSx sits above EFS. Whether that tier clears the home gate is the same open question on all three clouds, and the answer will probably travel.
 
 The cross-AZ problem barely exists there. Multi-zone AKS on 1.29+ defaults its built-in StorageClasses to zone-redundant disks and fails stateful pods over to a healthy zone; GKE offers regional persistent disks and Hyperdisk Balanced High Availability as synchronously replicated cross-zone block storage. ADR-0002's founding motivation is an AWS property, not a cloud property. The same goes for the compute argument: GKE Autopilot forbids privileged pods and hostPath outright, which is stricter than EKS Auto Mode, so keeping Longhorn everywhere declines the managed-node model everywhere.
 
@@ -130,9 +130,9 @@ All of this is desk research from vendor documentation, dated 2026-08-14, unveri
 
 ## Topic: home volume access mode
 
-Scoped separately because it decides how ambitious the AWS change is. Two shapes are live on AWS: the **split shape** moves only single-pod system volumes to gp3 and keeps homes and RWX on Longhorn; the **RWX-homes shape** puts homes on a managed RWX filesystem too, which removes Longhorn from AWS entirely. Homes are RWO today by deliberate pack design, on a performance rationale written against Longhorn's and EFS's data paths and silent about FSx for OpenZFS.
+Scoped separately because it decides how ambitious the AWS change is. Two shapes are live on AWS: the **split shape** moves only single-pod system volumes to gp3 and keeps homes and RWX on Longhorn; the **RWX-homes shape** puts homes on a managed RWX filesystem too, which removes Longhorn from AWS entirely. The cost topic above prices a middle shape as well — homes RWO but on gp3, with only `/shared` on a managed filesystem — which also removes Longhorn from AWS and is the benchmark-favoured shape there; what it pays instead is the cross-AZ topology work, since gp3 homes stay AZ-bound. Homes are RWO today by deliberate pack design, on a performance rationale written against Longhorn's and EFS's data paths and silent about FSx for OpenZFS.
 
-If FSx clears the home performance gate, moving homes onto it removes the per-user node pin, the cross-AZ objection, and Longhorn from AWS together. If it does not, the RWX-homes shape is dead and the split shape stands. Measurement decides, not argument.
+If FSx clears the home performance gate, moving homes onto it removes the per-user node pin, the cross-AZ objection, and Longhorn from AWS together. If it does not, the RWX-homes shape is dead and homes stay RWO — on Longhorn in the split shape, or on gp3 in the middle one. Measurement decides, not argument — and the measurement is now in; what it still lacks is a bar to judge against.
 
 ### The numbers
 
@@ -146,7 +146,7 @@ What collapses is narrower than the pack's rationale says. Metadata *reads* actu
 
 **Concurrency inverts the ranking**, which is the finding most likely to change a decision. From one to four writers Longhorn degrades 2.2-2.6x and FSx 1.7-2.7x, while EFS Elastic is flat — by four writers the three converge and EFS is *fastest* on environment creation (72 s, against Longhorn 83 s and FSx 99 s). The mechanism is structural: one share-manager pod on one node, and FSx's provisioned tier, are fixed budgets divided among clients, where EFS scales capacity on demand. That qualifies the adverse EFS evidence in this map, which is all single-user-shaped: EFS is clearly worst at one writer and it is the only candidate whose curve stays flat. Nebari is a multi-user platform and four writers is a small cluster, so where the crossover sits beyond four is now the most decision-relevant gap left.
 
-Cost is modelled separately and points the same way — see the cost topic below, where the benchmark-favoured shape is also the cheapest at every tier.
+Cost is modelled separately and points the same way — see the cost topic above, where the benchmark-favoured shape is also the cheapest at every tier.
 
 Two more results worth carrying. Longhorn is the fastest RWX option at one writer — 1.8x faster than FSx on environment creation — so moving `/shared` to a managed filesystem is a measurable regression, not a free operational simplification. And Multi-AZ FSx is close to free: ~20% over Single-AZ on extraction and clone, nothing on environment creation, indistinguishable at four writers. Cross-AZ write acknowledgement is not what constrains FSx; its throughput tier is, which makes the concurrency ceiling a cost question rather than a hard limit.
 
@@ -156,7 +156,7 @@ Two more results worth carrying. Longhorn is the fastest RWX option at one write
 
 Three findings that stand independently of the timings.
 
-**FSx's per-PVC form works, with three constraints.** Dynamic provisioning does yield one child volume per PVC with its own quota and snapshot lineage, which is what RWX homes assume. But FSx volumes cannot be expanded in place — growing a home is a migration, not a resize — PVCs must request exactly `1Gi` since capacity comes from the StorageClass, and the upstream EKS cluster module has no FSx support at all, so both the filesystem and the CSI driver's IAM wiring live in NIC's own templates today.
+**FSx's per-PVC form works, with three constraints.** Dynamic provisioning does yield one child volume per PVC with its own quota and snapshot lineage, which is what RWX homes assume. But FSx volumes cannot be expanded in place, so growing a home is a migration rather than a resize; PVCs must request exactly `1Gi`, since capacity comes from the StorageClass; and the upstream EKS cluster module has no FSx support at all, so both the filesystem and the CSI driver's IAM wiring live in NIC's own templates today.
 
 **Longhorn RWX is broken on a default-shaped AWS cluster.** Replicas live on the node root disk with 25% reserved, so NIC's 20 GB default leaves ~2.4 GB schedulable and a 20 GiB RWX volume goes straight to `faulted` — no share-manager pod, consuming pods stuck in `ContainerCreating`, and no error naming disk space. RWX is the only capability the split shape keeps Longhorn for, and it does not work out of the box.
 
