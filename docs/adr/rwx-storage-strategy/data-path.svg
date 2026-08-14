@@ -381,8 +381,8 @@
 <title>n15</title>
 <g id="a_node16"><a xlink:title="The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.">
 <path fill="#c3ccd4" stroke="black" d="M579.92,-281.84C579.92,-281.84 328.08,-281.84 328.08,-281.84 322.08,-281.84 316.08,-275.84 316.08,-269.84 316.08,-269.84 316.08,-214.32 316.08,-214.32 316.08,-208.32 322.08,-202.32 328.08,-202.32 328.08,-202.32 579.92,-202.32 579.92,-202.32 585.92,-202.32 591.92,-208.32 591.92,-214.32 591.92,-214.32 591.92,-269.84 591.92,-269.84 591.92,-275.84 585.92,-281.84 579.92,-281.84"/>
-<text xml:space="preserve" text-anchor="start" x="350.3" y="-266.08" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">RWX pays a write acknowledgement</text>
-<text xml:space="preserve" text-anchor="start" x="398.65" y="-254.08" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> on every operation</text>
+<text xml:space="preserve" text-anchor="start" x="355.99" y="-266.08" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">RWX pays a network round trip on</text>
+<text xml:space="preserve" text-anchor="start" x="407.65" y="-254.08" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> every operation</text>
 <text xml:space="preserve" text-anchor="start" x="364.44" y="-236.88" font-family="arial" font-size="11.00" fill="#000000">The RWO/RWX performance gap on</text>
 <text xml:space="preserve" text-anchor="start" x="367.78" y="-223.68" font-family="arial" font-size="11.00" fill="#000000"> Longhorn is structural, not a tuning</text>
 <text xml:space="preserve" text-anchor="start" x="431.07" y="-210.48" font-family="arial" font-size="11.00" fill="#000000"> problem.</text>

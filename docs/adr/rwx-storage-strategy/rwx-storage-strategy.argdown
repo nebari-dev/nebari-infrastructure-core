@@ -92,7 +92,7 @@ dot:
 <Single-node placement fails the platform requirements>: Group-level co-location is not a satisfactory production platform assumption.
 
 (1) [Independent scheduling]
-(2) A group-scoped term would have to intersect with the existing per-user term, and a user belonging to several groups produces constraints no node can satisfy.
+(2) A group-scoped term would have to intersect with the existing per-user term, and a user belonging to several groups transitively chains those groups onto a single node — in the limit a constraint set no node can satisfy.
 (3) Node failure or maintenance would require volume detach, reattach, and coordinated rescheduling.
 (4) Constraining each collaboration group to one node weakens autoscaling and concentrates failure risk.
 (5) [One node is a hard capacity ceiling]: Pods pinned to one node are capped by that node's resources, and the failure surfaces as an unexplained scheduling failure.
@@ -140,7 +140,7 @@ dot:
 
 (1) A customer request relayed by Marcelo Villa on 2026-08-12 asks that two packs (Ray and the Data Science Pack) read the same data. Kim Pevey put the concrete shape on it on 2026-08-13: jobs are launched from Jupyter with paths passed to Ray, the Ray cluster cannot read Jupyter's storage at all, and the same shape returns with the FiftyOne dataset-viewer pack in the following weeks.
 (2) The team decided on 2026-08-12 that **each component installed into the cluster gets its own namespace** (least privilege; the Nebari Classic one-big-namespace model is being phased out), so pack-to-pack sharing is cross-namespace by construction.
-(3) A PVC is namespace-bound and each PV binds to exactly one PVC, so serving one dataset to two namespaces needs a mechanism; on Longhorn that mechanism is _one cluster-scoped volume behind two namespace-bound PV/PVC pairs_. Whichever mechanism is used, the two consumers write concurrently.
+(3) A PVC is namespace-bound and each PV binds to exactly one PVC, so serving one dataset to two namespaces needs a mechanism; on Longhorn that mechanism is _one cluster-scoped volume behind two namespace-bound PV/PVC pairs_. Whichever mechanism is used, the two consumers access the data concurrently from different nodes, with at least one of them writing.
 (4) That arrangement requires ReadWriteMany.
 (5) [Composability generalises the demand]: Marcelo Villa, 2026-08-13: the project is building composability and letting people write their own packs, so packs interacting through the filesystem — small files, not datasets — is hard to imagine *not* recurring. Both use cases are needed for JATIC.
 ----
@@ -157,6 +157,9 @@ dot:
 (4) [The dataset case is not an RWX case]: The Ray-to-Jupyter dataset demand is answered by object storage, so what remains of cross-pack RWX is small-file sharing between packs — a narrower claim than the one first made, and still unquantified.
 
 [Longhorn can share one volume across namespaces]: Longhorn's `volumes.longhorn.io` CR is cluster-scoped, so per-namespace PVC/PV pairs can point at one underlying Longhorn volume (Amit Kumar, correcting Marcelo). Whether that is *safe* is a separate question from whether cross-pack sharing needs RWX at all. #open-decision
+    // An undercut would be the truer relation — safety-unverified grants the
+    // mechanism and disputes relying on it — but a statement-to-statement
+    // undercut drops the target from the rendered map, so this stays an attack.
     <- [Concurrent-writer safety is unverified]
 
 [Concurrent-writer safety is unverified]: Whether Longhorn natively synchronises writes when two namespaces' PVs point at the same volume is unknown. If it does not, concurrent writers corrupt data. #open-decision
@@ -299,12 +302,12 @@ dot:
 (2) The Data Science Pack requests one shared PVC for all groups — `/shared/group-name` are subdirectories of it — so a single share-manager is the data path for every group's shared storage at once, not one per group.
 (3) That makes it both the throughput bottleneck and the failure domain: all group I/O crosses one pod's network and one node's NFS server, and if that node fails or is drained the volume must detach and reattach under a replacement share-manager before the export returns. Clients stall through the reattach plus the NFS grace period, and every group stalls together. Reattach has been observed at 30-120s on Hetzner, which is why share-manager placement gets pinned — a mitigation, not a removal.
 (4) A stock deploy today is a further hop worse: as _RWX is already not uniform_ establishes, the pack's transitional NFS pod is still on by default and exports a Longhorn *RWO* backend, so `/shared` is served by a second single-pod NFS server with Longhorn's own share-manager not in the path at all.
-(5) Every write across that path also pays the acknowledgement cost below, so the single path is the slow path too.
+(5) Every write across that path also pays the round-trip cost below, so the single path is the slow path too.
 (6) Its bandwidth ceiling is one pod's network connection, so a distributed consumer scales *into* the bottleneck: Tyler Potts, 2026-08-13 — a fleet of Ray workers opens parallel connections against S3 but shares one against a share-manager, and at terabyte dataset sizes serial traversal is not an option.
 (7) A managed filesystem has no equivalent component. FSx for OpenZFS and EFS are appliances outside the cluster with their own HA and failover, no pod to reschedule, no NFS grace period after a node drain, and throughput that scales by configuration rather than by whatever one node can push. On the *shared* path, therefore, the structural comparison does not favour Longhorn — which is the opposite of the direction it runs for single-pod volumes, and is still unmeasured either way.
 ----
 (8) [Longhorn RWX concentrates the shared data path]: Shared storage today is served by a single in-cluster NFS pod — Longhorn's share-manager where RWX is used, the pack's transitional NFS server on a stock deploy — making it one bottleneck and one failure domain for every group at once, with no equivalent in a managed filesystem. That is a property of this implementation, not of the RWX requirement.
-    + <RWX pays a write acknowledgement on every operation>
+    + <RWX pays a network round trip on every operation>
 
 <The concentration is a pack layout choice>: The whole-cluster scope of that data path is ours, not Longhorn's, and is fixable without changing storage backend.
 
@@ -317,7 +320,7 @@ dot:
 (6) [Concentration is fixable in the pack]: The whole-cluster scope should be fixed in the pack whichever way AWS storage goes, so it carries little weight for the managed-filesystem branch. What survives is per-group and smaller: an in-cluster NFS pod over synchronous replication, plus a control plane shared by every volume in the cluster.
     _> <Longhorn RWX data-path concern>
 
-<RWX pays a write acknowledgement on every operation>: The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.
+<RWX pays a network round trip on every operation>: The RWO/RWX performance gap on Longhorn is structural, not a tuning problem.
 
 (1) Both access modes sit on the same block layer. Longhorn replicates *every* volume synchronously — a write is acknowledged once its replicas have it — so replica acknowledgement is not what separates RWO from RWX.
 (2) What separates them is the hop in front of that layer. An RWO volume is attached to the writing node as a block device and used through a local filesystem, so the kernel's page and dentry caches absorb most metadata work before anything crosses the network. An RWX volume is an NFS export from a share-manager pod, so every operation the client cannot serve from its own attribute cache is a network round trip to that pod, which then performs it against the same replicated volume.
@@ -399,7 +402,7 @@ dot:
 (3) The gap is therefore whether the cluster can *supply* a node in that AZ on demand.
 (4) It cannot today: Cluster Autoscaler's documented requirement for AZ-bound volumes is one node group per AZ, because a multi-AZ ASG gives it no way to add capacity in a specific AZ. NIC ships one ASG spanning every AZ, so a pod pending on an AZ-bound volume can be met by a new node in the wrong AZ and stay pending. That is a node-group layout gap, which Longhorn papers over. Karpenter, which reads a PV's zone requirement natively, is the alternative to per-AZ groups.
 (5) The *node* pin is bounded — it holds only while the user has pods running (Amit Kumar, 2026-08-12) — but the AZ binding is not. An EBS volume stays in the AZ it was created in for its whole life and attaches only to instances there, so as long as the home PVC exists the user's next pods must come back to that AZ. Only deleting and recreating the volume from a snapshot moves it. What the topology work buys is that compute is always available in that AZ, not that the volume becomes free.
-(6) The historical anecdotes do not transfer to the proposed shapes: the Celery-worker breakage was a multi-pod RWX need, which stays on the RWX path by definition, and single-pod databases like Keycloak are CNPG's job — `instances: 2-3` across AZs is app-layer replication, the idiomatic fix.
+(6) [The anecdotes do not transfer]: The historical failures do not transfer to the proposed shapes: the Celery-worker breakage was a multi-pod RWX need, which stays on the RWX path by definition, and single-pod databases like Keycloak are CNPG's job — `instances: 2-3` across AZs is app-layer replication, the idiomatic fix.
     <- [HA is not durability]: CNPG `instances: 2-3` answers AZ failover, not data protection — it survives a lost node or AZ, not a bad migration or a dropped table. A specific backup and restore strategy is an explicit non-goal of ADR-0007 and barman-to-S3 is unbuilt, so Longhorn's volume backups are today the only thing standing behind the Keycloak database. Moving it to gp3 removes that with nothing in its place. #open-decision
 (7) Longhorn's own AZ tolerance is softer than assumed: NIC sets replica zone anti-affinity to *soft* with two replicas, so both replicas can land in one AZ and nothing checks or reports the actual spread.
 ----
@@ -433,7 +436,7 @@ dot:
 
 [Per-user opt-in access mode]: Users should be able to opt into a shared-filesystem mode (EFS or equivalent) for their home volume, trading write latency for not being capped by one node's capacity. #open-decision
     + <The co-location ceiling is already being hit>
-    - <RWX pays a write acknowledgement on every operation>
+    - <RWX pays a network round trip on every operation>
 
     // Vini Cerutti proposed this on 2026-08-12; Amit Kumar called it ideal for
     // a future iteration, not this one. Parked, not rejected. It is the
@@ -520,6 +523,10 @@ dot:
 <Cross-namespace sharing gate>: Check how each candidate serves one dataset to two namespaces, given that every component now gets its own namespace. Longhorn's route is a PV per namespace's PVC, all pointing at one cluster-scoped `volumes.longhorn.io` CR, with _concurrent-writer safety unverified_; a managed filesystem serves the same directory to any number of namespaces with no CR trickery and documented concurrency semantics. This is a point *for* the managed option that the 2026-08-12 discussion surfaced by accident. {isInMap: false}
 
 # Resulting assumptions
+
+// Assumption numbers are stable identifiers, not an ordering — placement is
+// topical (20 sits beside 7 because both scope the home workload). This list
+// deliberately has no relations, so it renders as text only, never as map nodes.
 
 * [Assumption 1]: Multi-user group-directory collaboration is in scope for production Data Science Pack deployments. #core-assumption
 * [Assumption 2]: User workloads must remain schedulable across multiple nodes. #core-assumption
