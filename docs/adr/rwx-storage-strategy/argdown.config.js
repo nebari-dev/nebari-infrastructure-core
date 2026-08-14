@@ -1,12 +1,12 @@
 // Renders this directory's .argdown source as one overview map plus one map
-// per "direction" the storage decision runs in, so no single SVG has to carry
+// per topic the storage decision runs in, so no single SVG has to carry
 // the whole argument. Output lands beside the README that embeds it.
 // Run via `make argdown`.
 //
 // Map settings (colors, dot layout) live in the .argdown frontmatter and apply
 // to every process; all this file does is pick sections and name output files.
 //
-// Each direction map selects the fork it hangs off — "Storage strategy"
+// Each topic map selects the fork it hangs off — "Storage strategy"
 // (per-provider vs. one implementation) and "Longhorn everywhere" — plus its
 // own section, so it reads as an argument rather than a pile of boxes.
 const FORK = ["Storage strategy", "Longhorn everywhere"];
@@ -17,12 +17,12 @@ const maps = {
   legend: ["Legend"],
   "rwx-required": ["Core platform assumption"],
   "provider-strategy": FORK,
-  backup: [...FORK, "Direction: backup and restore"],
-  operations: [...FORK, "Direction: operator burden"],
-  "data-path": [...FORK, "Direction: the shared data path"],
-  compute: [...FORK, "Direction: the compute model"],
-  "cross-az": [...FORK, "Direction: cross-AZ attachment"],
-  homes: ["Home volume scope"],
+  backup: [...FORK, "Topic: backup and restore"],
+  operations: [...FORK, "Topic: operator burden"],
+  "data-path": [...FORK, "Topic: the shared data path"],
+  compute: [...FORK, "Topic: the compute model"],
+  "cross-az": [...FORK, "Topic: cross-AZ attachment"],
+  homes: ["Topic: home volume access mode"],
 };
 
 const svg = [
