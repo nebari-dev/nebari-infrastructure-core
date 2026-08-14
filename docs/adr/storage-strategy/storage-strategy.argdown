@@ -221,9 +221,9 @@ dot:
 
 (1) AWS supplies managed shared filesystems (FSx for OpenZFS, EFS) with EKS CSI integrations.
 (2) A managed service can remove storage replication, server lifecycle, patching, and failover work from the Kubernetes cluster.
-(3) EFS carries adverse evidence but stays a candidate: its Bursting mode measured too slow and Vini Cerutti reports it unreliable for Nebi PyTorch environment builds (2026-08-11), but Elastic throughput mode is unmeasured — and `nic` has already shipped an EFS provisioner mode, so re-testing it is cheap.
+(3) EFS carries adverse evidence but stays a candidate, and the 2026-08-14 benchmark is why: its Bursting mode measured too slow and Vini Cerutti reports it unreliable for Nebi PyTorch environment builds (2026-08-11), but Elastic throughput mode is the only backend tested whose performance does not degrade under concurrent writers — see _concurrency inverts the ranking_. `nic` has already shipped an EFS provisioner mode, so the integration cost is low; what is unsettled is the bill, per _EFS buys concurrency scaling with an unbounded bill_.
 (4) [The EFS evidence is dated and second-hand]: The 2026-08-13 discussion added three more adverse data points, each qualified by the person raising it. Tyler Potts: EFS caps IOPS where S3 parallelises reads across Ray workers, and EFS can get expensive. Nick Byrne: data-engineering reads are metadata-heavy — a Parquet sidecar read repeatedly to skip irrelevant blobs — which is where EFS is said to degrade, but he flagged it explicitly as inherited folklore he has never tested. Vini Cerutti: Quansight benchmarked blob storage against EFS and concluded EFS was too slow, and Confluency moved off EFS to S3 for exactly that Parquet read/write pattern — but that is three to four years old and Nebari Classic era. None of it measures Elastic throughput mode, and none of it is about FSx for OpenZFS.
-(5) FSx for OpenZFS has not yet been proven against the representative DSP workload. James Olds owns testing it as of 2026-08-13.
+(5) FSx for OpenZFS has now been measured against the representative DSP workload (James Olds, 2026-08-14). It is the fastest managed candidate at a single writer and the strongest on the `/shared` path, and it fails the home workload along with every other RWX implementation tested — so the conditional below is now answered per path rather than per product.
 ----
 (6) [Conditional AWS choice]: Adopt a managed filesystem on AWS only if benchmarks and operational evaluation show that it meets the platform acceptance criteria better than Longhorn.
 
@@ -321,7 +321,7 @@ dot:
 (3) The dedicated storage-node option doubles the topology an operator must understand and adds its own three-case migration runbook, with per-node replica evictions, verification that labels reached the *running* nodes, and ordering constraints where the wrong sequence loses data (`docs/design-doc/operations/longhorn-dedicated-nodes-migration.md`).
 (4) This burden scales with clusters and on-call operators, not with providers — which is where the uniformity argument prices it, if it prices it at all. It is also the least delegable kind of work: it lands on whoever is paged at 3am for a customer cluster, and it is expertise in one storage implementation rather than in Kubernetes.
 (5) A managed filesystem moves that class of work to AWS: a drain is a drain, there are no replicas to evict, no storage topology to choose, and no storage-specific CRs to diagnose. It substitutes its own surface — mount targets, throughput and IOPS limits, IAM — which is neither free nor zero-risk, but is smaller and more standard.
-(6) What it buys is operational, not performance. Nothing here assumes a managed filesystem is faster, and the evidence available runs the other way for home-type workloads: EFS in Bursting mode was too slow for environment builds, and field experience holds Longhorn faster — a comparison against Longhorn's RWO path, not against another RWX implementation. So this is a trade at an unknown performance price, which is what the gates exist to settle.
+(6) What it buys is operational, not performance, and the price is now measured rather than unknown. On the home path Longhorn RWO beats every managed RWX option by 9-37x, so a managed filesystem for homes is bought at that price; on the `/shared` path Longhorn RWX is fastest at one writer but degrades under concurrency where EFS does not. The operational case therefore has to be made against a known performance cost, not in the absence of one.
 ----
 (7) [Longhorn taxes operators, not just the project]: The honest unit of Longhorn's operational cost is per cluster and per operator, not per provider. Removing it from AWS does not remove it from the project while Hetzner needs it, but it does remove it from every AWS cluster and everyone on call for one. Priced under the _operations gate_.
 
@@ -379,7 +379,7 @@ dot:
 (5) Read caching does not rescue it: an environment build is mostly cold writes and fresh metadata, so there is little to cache.
 (6) Amit Kumar corrected his own earlier framing on 2026-08-12: the co-location is at the software layer, not the data layer — with dedicated storage nodes enabled the data lives only on those nodes, not on the writing node.
 ----
-(7) This cuts both ways, and the two comparisons must not be run together. For a single-pod volume such as a home, an RWO Longhorn volume is a local block device with local filesystem caching, and will beat any network filesystem on metadata-heavy work — that is what "Longhorn is faster" is a claim about, and it is the claim the home performance gate has to disprove. For a shared volume both candidates are network file storage, and what Longhorn adds over a managed appliance is that its NFS server is a pod inside the cluster writing into a synchronously replicated volume, rather than a managed endpoint writing into its own storage.
+(7) This cuts both ways, and the two comparisons must not be run together. For a single-pod volume such as a home, an RWO Longhorn volume is a local block device with local filesystem caching, and will beat any network filesystem on metadata-heavy work — that is what "Longhorn is faster" is a claim about, and the home gate tested it and confirmed it, at 9-37x on write-heavy phases. For a shared volume both candidates are network file storage, and what Longhorn adds over a managed appliance is that its NFS server is a pod inside the cluster writing into a synchronously replicated volume, rather than a managed endpoint writing into its own storage.
 ----
 (8) [RWX is materially slower per operation]: RWX on Longhorn should be scoped to workloads that need sharing, never used as a general default. Its advantage over managed storage is on the RWO path, not the RWX one.
 
@@ -530,7 +530,7 @@ dot:
     + <Homes on managed RWX dissolves several problems at once>
     + <The co-location ceiling is already being hit>
     - <Homes are RWO by documented design>
-        <_ <The performance claim is implementation-specific>
+        <_ <The rationale was a gate, and FSx did not clear it>
     - <Single filesystem concentrates the home failure domain>
 
     // Vini's parked [Per-user opt-in access mode] proposal is the per-user,
@@ -565,15 +565,15 @@ dot:
 ----
 (4) [Homes should stay RWO]: Home volumes should remain RWO and the question is closed.
 
-<The performance claim is implementation-specific>: The documented rationale is sound about the RWX implementations it was written against, and silent about the one under evaluation.
+<The rationale was a gate, and FSx did not clear it>: The pack's performance rationale was written against Longhorn and EFS and was silent about the candidate under evaluation, so it was a gate to measure rather than a finding to cite. It has now been measured, and it held — for a narrower reason than the pack gave, and still without the threshold that would close the question.
 
-(1) The _RWX is materially slower per operation_ claim derives the penalty from Longhorn's data path specifically — an in-cluster share-manager pod exporting NFS in front of a synchronously replicated volume.
-(2) The other measured RWX candidate was EFS, whose Bursting mode measured slow and drew field complaints on Nebi environment builds (Vini Cerutti, 2026-08-11); its Elastic throughput mode is unmeasured.
-(3) FSx for OpenZFS has a different structure: a single managed appliance with a large in-memory ARC read cache, provisioned throughput and IOPS, and NFSv4.1 — no replica-acknowledgement fan-out and no burst-credit model.
-(4) The pack's argument establishes that RWO is *sufficient and cheaper* for a single-user volume, which is a different claim from RWX being unworkable for one.
-(5) That gap has now been closed by measurement rather than by argument, and it closed against FSx: its structural differences — the ARC read cache in particular — show up exactly where the benchmark says caching helps (`git status` beats local EBS) and not at all where the cost is (metadata writes), so FSx lands in the same 9-37x band as the implementations the pack wrote its rationale against.
+(1) The _RWX is materially slower per operation_ claim derives the penalty from Longhorn's data path specifically — an in-cluster share-manager pod exporting NFS in front of a synchronously replicated volume. The other candidate the rationale was written against was EFS, whose Bursting mode measured slow and drew field complaints on Nebi environment builds (Vini Cerutti, 2026-08-11).
+(2) FSx for OpenZFS has a different structure — a single managed appliance with a large in-memory ARC read cache, provisioned throughput and IOPS, and NFSv4.1, with no replica-acknowledgement fan-out and no burst-credit model — which was the reason to think it might not inherit the penalty.
+(3) The 2026-08-14 benchmark settled that against FSx: it lands in the same 9-37x band on write-heavy work as the implementations the pack wrote its rationale against, and EFS Elastic, the untested mode the rationale never covered, lands there too.
+(4) The structural differences show up exactly where they cannot help. The ARC cache makes `git status` beat local EBS, and does nothing for the metadata *writes* that are the whole cost — so the pack's conclusion survives while its stated reason, that metadata operations degrade on network storage, has to be restated as metadata *write* latency.
+(5) What the pack's rationale still does not supply is a threshold. It establishes that RWO is *sufficient and cheaper* for a single-user volume, which is a different claim from RWX being unacceptable for one, and only a stated bar separates them — per _no acceptable-latency threshold has been set_.
 ----
-(6) [The documented rationale does not settle FSx]: The performance claim was a gate to measure against FSx for OpenZFS rather than a finding about it — and having been measured, the outcome is the pack's, though for a narrower reason than the pack gave.
+(6) [The rationale holds, on write latency alone]: Homes staying RWO is now the measured outcome as well as the documented design. What the documentation still does not do is close the question: whether the write-latency cost is worth what RWX homes buy is a product judgement the pack never made.
 
 <Homes on managed RWX dissolves several problems at once>: RWX homes remove a cluster of separate problems rather than mitigating each one.
 
