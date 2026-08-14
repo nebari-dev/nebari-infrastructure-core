@@ -64,16 +64,18 @@
 <!-- n3 -->
 <g id="node4" class="node">
 <title>n3</title>
-<g id="a_node4"><a xlink:title="The performance claim was a gate to measure against FSx for OpenZFS rather than a finding about it — and having been measured, the outcome is the pack&#39;s, though for a narrower reason than the pack gave.">
-<path fill="white" stroke="#c3ccd4" stroke-width="2" d="M1499.92,-584.34C1499.92,-584.34 1248.08,-584.34 1248.08,-584.34 1242.08,-584.34 1236.08,-578.34 1236.08,-572.34 1236.08,-572.34 1236.08,-477.22 1236.08,-477.22 1236.08,-471.22 1242.08,-465.22 1248.08,-465.22 1248.08,-465.22 1499.92,-465.22 1499.92,-465.22 1505.92,-465.22 1511.92,-471.22 1511.92,-477.22 1511.92,-477.22 1511.92,-572.34 1511.92,-572.34 1511.92,-578.34 1505.92,-584.34 1499.92,-584.34"/>
-<text xml:space="preserve" text-anchor="start" x="1272.66" y="-568.58" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">The documented rationale does not</text>
-<text xml:space="preserve" text-anchor="start" x="1343.99" y="-556.58" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> settle FSx</text>
-<text xml:space="preserve" text-anchor="start" x="1283.51" y="-539.38" font-family="arial" font-size="11.00" fill="#000000">The performance claim was a gate to</text>
-<text xml:space="preserve" text-anchor="start" x="1287.19" y="-526.18" font-family="arial" font-size="11.00" fill="#000000"> measure against FSx for OpenZFS</text>
-<text xml:space="preserve" text-anchor="start" x="1287.16" y="-512.98" font-family="arial" font-size="11.00" fill="#000000"> rather than a finding about it — and</text>
-<text xml:space="preserve" text-anchor="start" x="1277.69" y="-499.78" font-family="arial" font-size="11.00" fill="#000000"> having been measured, the outcome is</text>
-<text xml:space="preserve" text-anchor="start" x="1292.24" y="-486.58" font-family="arial" font-size="11.00" fill="#000000"> the pack&#39;s, though for a narrower</text>
-<text xml:space="preserve" text-anchor="start" x="1306.12" y="-473.38" font-family="arial" font-size="11.00" fill="#000000"> reason than the pack gave.</text>
+<g id="a_node4"><a xlink:title="Homes staying RWO is now the measured outcome as well as the documented design. What the documentation still does not do is close the question: whether the write&#45;latency cost is worth what RWX homes buy is a product judgement the pack never made.">
+<path fill="white" stroke="#c3ccd4" stroke-width="2" d="M1499.92,-597.54C1499.92,-597.54 1248.08,-597.54 1248.08,-597.54 1242.08,-597.54 1236.08,-591.54 1236.08,-585.54 1236.08,-585.54 1236.08,-464.02 1236.08,-464.02 1236.08,-458.02 1242.08,-452.02 1248.08,-452.02 1248.08,-452.02 1499.92,-452.02 1499.92,-452.02 1505.92,-452.02 1511.92,-458.02 1511.92,-464.02 1511.92,-464.02 1511.92,-585.54 1511.92,-585.54 1511.92,-591.54 1505.92,-597.54 1499.92,-597.54"/>
+<text xml:space="preserve" text-anchor="start" x="1292.66" y="-581.78" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">The rationale holds, on write</text>
+<text xml:space="preserve" text-anchor="start" x="1334.32" y="-569.78" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> latency alone</text>
+<text xml:space="preserve" text-anchor="start" x="1270.38" y="-552.58" font-family="arial" font-size="11.00" fill="#000000">Homes staying RWO is now the measured</text>
+<text xml:space="preserve" text-anchor="start" x="1284.73" y="-539.38" font-family="arial" font-size="11.00" fill="#000000"> outcome as well as the documented</text>
+<text xml:space="preserve" text-anchor="start" x="1284.12" y="-526.18" font-family="arial" font-size="11.00" fill="#000000"> design. What the documentation still</text>
+<text xml:space="preserve" text-anchor="start" x="1290.83" y="-512.98" font-family="arial" font-size="11.00" fill="#000000"> does not do is close the question:</text>
+<text xml:space="preserve" text-anchor="start" x="1294.22" y="-499.78" font-family="arial" font-size="11.00" fill="#000000"> whether the write&#45;latency cost is</text>
+<text xml:space="preserve" text-anchor="start" x="1293" y="-486.58" font-family="arial" font-size="11.00" fill="#000000"> worth what RWX homes buy is a</text>
+<text xml:space="preserve" text-anchor="start" x="1289.31" y="-473.38" font-family="arial" font-size="11.00" fill="#000000"> product judgement the pack never</text>
+<text xml:space="preserve" text-anchor="start" x="1357.19" y="-460.18" font-family="arial" font-size="11.00" fill="#000000"> made.</text>
 </a>
 </g>
 </g>
@@ -92,8 +94,8 @@
 <g id="edge3" class="edge">
 <title>n3&#45;&gt;n15</title>
 <g id="a_edge3"><a xlink:title="undercut">
-<path fill="none" stroke="#8a6bb0" stroke-width="2.5" d="M1374,-584.82C1374,-650.58 1374,-755.28 1374,-813.47"/>
-<polygon fill="#8a6bb0" stroke="#8a6bb0" stroke-width="2.5" points="1370.15,-813.45 1374,-824.45 1377.85,-813.46 1370.15,-813.45"/>
+<path fill="none" stroke="#8a6bb0" stroke-width="2.5" d="M1374,-597.84C1374,-663.79 1374,-759.14 1374,-813.61"/>
+<polygon fill="#8a6bb0" stroke="#8a6bb0" stroke-width="2.5" points="1370.15,-813.36 1374,-824.36 1377.85,-813.36 1370.15,-813.36"/>
 </a>
 </g>
 </g>
@@ -490,14 +492,20 @@
 <!-- n16 -->
 <g id="node17" class="node">
 <title>n16</title>
-<g id="a_node17"><a xlink:title="The documented rationale is sound about the RWX implementations it was written against, and silent about the one under evaluation.">
-<path fill="#c3ccd4" stroke="black" d="M1499.92,-194.52C1499.92,-194.52 1248.08,-194.52 1248.08,-194.52 1242.08,-194.52 1236.08,-188.52 1236.08,-182.52 1236.08,-182.52 1236.08,-113.8 1236.08,-113.8 1236.08,-107.8 1242.08,-101.8 1248.08,-101.8 1248.08,-101.8 1499.92,-101.8 1499.92,-101.8 1505.92,-101.8 1511.92,-107.8 1511.92,-113.8 1511.92,-113.8 1511.92,-182.52 1511.92,-182.52 1511.92,-188.52 1505.92,-194.52 1499.92,-194.52"/>
-<text xml:space="preserve" text-anchor="start" x="1301.64" y="-178.76" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">The performance claim is</text>
-<text xml:space="preserve" text-anchor="start" x="1303.65" y="-166.76" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> implementation&#45;specific</text>
-<text xml:space="preserve" text-anchor="start" x="1288.08" y="-149.56" font-family="arial" font-size="11.00" fill="#000000">The documented rationale is sound</text>
-<text xml:space="preserve" text-anchor="start" x="1278.01" y="-136.36" font-family="arial" font-size="11.00" fill="#000000"> about the RWX implementations it was</text>
-<text xml:space="preserve" text-anchor="start" x="1295.12" y="-123.16" font-family="arial" font-size="11.00" fill="#000000"> written against, and silent about</text>
-<text xml:space="preserve" text-anchor="start" x="1310.4" y="-109.96" font-family="arial" font-size="11.00" fill="#000000"> the one under evaluation.</text>
+<g id="a_node17"><a xlink:title="The pack&#39;s performance rationale was written against Longhorn and EFS and was silent about the candidate under evaluation, so it was a gate to measure rather than a finding to cite. It has now been measured, and it held — for a narrower reason than the pack gave, and still without the threshold that would close the question.">
+<path fill="#c3ccd4" stroke="black" d="M1499.92,-234.12C1499.92,-234.12 1248.08,-234.12 1248.08,-234.12 1242.08,-234.12 1236.08,-228.12 1236.08,-222.12 1236.08,-222.12 1236.08,-74.2 1236.08,-74.2 1236.08,-68.2 1242.08,-62.2 1248.08,-62.2 1248.08,-62.2 1499.92,-62.2 1499.92,-62.2 1505.92,-62.2 1511.92,-68.2 1511.92,-74.2 1511.92,-74.2 1511.92,-222.12 1511.92,-222.12 1511.92,-228.12 1505.92,-234.12 1499.92,-234.12"/>
+<text xml:space="preserve" text-anchor="start" x="1277.97" y="-218.36" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000">The rationale was a gate, and FSx</text>
+<text xml:space="preserve" text-anchor="start" x="1331.33" y="-206.36" font-family="arial" font-weight="bold" font-size="12.00" fill="#000000"> did not clear it</text>
+<text xml:space="preserve" text-anchor="start" x="1281.24" y="-189.16" font-family="arial" font-size="11.00" fill="#000000">The pack&#39;s performance rationale was</text>
+<text xml:space="preserve" text-anchor="start" x="1278.6" y="-175.96" font-family="arial" font-size="11.00" fill="#000000"> written against Longhorn and EFS and</text>
+<text xml:space="preserve" text-anchor="start" x="1282.88" y="-162.76" font-family="arial" font-size="11.00" fill="#000000"> was silent about the candidate under</text>
+<text xml:space="preserve" text-anchor="start" x="1300.01" y="-149.56" font-family="arial" font-size="11.00" fill="#000000"> evaluation, so it was a gate to</text>
+<text xml:space="preserve" text-anchor="start" x="1294.51" y="-136.36" font-family="arial" font-size="11.00" fill="#000000"> measure rather than a finding to</text>
+<text xml:space="preserve" text-anchor="start" x="1283.81" y="-123.16" font-family="arial" font-size="11.00" fill="#000000"> cite. It has now been measured, and</text>
+<text xml:space="preserve" text-anchor="start" x="1285.34" y="-109.96" font-family="arial" font-size="11.00" fill="#000000"> it held — for a narrower reason than</text>
+<text xml:space="preserve" text-anchor="start" x="1288.39" y="-96.76" font-family="arial" font-size="11.00" fill="#000000"> the pack gave, and still without the</text>
+<text xml:space="preserve" text-anchor="start" x="1299.7" y="-83.56" font-family="arial" font-size="11.00" fill="#000000"> threshold that would close the</text>
+<text xml:space="preserve" text-anchor="start" x="1350.15" y="-70.36" font-family="arial" font-size="11.00" fill="#000000"> question.</text>
 </a>
 </g>
 </g>
@@ -505,8 +513,8 @@
 <g id="edge17" class="edge">
 <title>n16&#45;&gt;n3</title>
 <g id="a_edge17"><a xlink:title="support">
-<path fill="none" stroke="#5c9e6f" stroke-width="2.5" d="M1374,-194.72C1374,-258.34 1374,-374.49 1374,-450.39"/>
-<polygon fill="#5c9e6f" stroke="#5c9e6f" stroke-width="2.5" points="1370.15,-450.23 1374,-461.23 1377.85,-450.23 1370.15,-450.23"/>
+<path fill="none" stroke="#5c9e6f" stroke-width="2.5" d="M1374,-234.17C1374,-294.79 1374,-376.05 1374,-437.06"/>
+<polygon fill="#5c9e6f" stroke="#5c9e6f" stroke-width="2.5" points="1370.15,-436.93 1374,-447.93 1377.85,-436.93 1370.15,-436.93"/>
 </a>
 </g>
 </g>
