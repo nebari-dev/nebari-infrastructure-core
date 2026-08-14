@@ -62,6 +62,8 @@ dot:
 
 # Core platform assumption
 
+[The requirement is a floor, not the scope]: This section asks only whether the platform must provide RWX *at all*, and answers it from `/shared` because that is the one place the requirement is forced. It is not the only candidate consumer and may not end up the largest. Home volumes are the bigger question — RWX there is not required by any contract, but it is the move that would dissolve the per-user node pin and the cross-AZ constraint at once, which is why it gets its own topic. Cross-pack sharing is a third, where no requirement is established yet and object storage may serve it instead. So: `/shared` settles *whether*, and the topics below settle *how much*. {isInMap: true}
+
 [RWX is a core platform capability]: A production Nebari platform that includes the Data Science Pack must provide reliable ReadWriteMany storage for collaborative group directories. #core-assumption
     + <DSP collaboration requires RWX>
     - <Single-node RWO alternative>
@@ -178,18 +180,16 @@ dot:
     // correct-but-slow, and the fallback would be Ceph/Rook as in Nebari
     // Classic. Nobody on the team is a Longhorn expert (Marcelo, Vini).
 
-[Cross-pack sharing is blocked on a user story]: No technical design for cross-pack data sharing proceeds until the requester writes down what they are trying to achieve. #architecture-decision
-    _> <Cross-pack sharing is a second RWX consumer>
+[Cross-pack sharing is now scoped work]: The user-story gate has been met. Cross-pack sharing is two tracked research spikes — nebari-infrastructure-core issue 597 (object-storage access) and issue 598 (cross-namespace volume sharing) — so the demand counts as real and the open question is no longer *whether* it is a requirement but *which mechanism* serves it. #architecture-decision
 
-    // Amit Kumar proposed this on 2026-08-12, Marcelo agreed and owns getting
-    // it. The undercut: the demand is real, but until the user story exists it
-    // does not yet count as a requirement.
-    // 2026-08-13: in flight. Vini Cerutti asked Kim Pevey to write the user
-    // story with JATIC specifics anonymised so implementation issues can
-    // reference it; Marcelo Villa committed to a parent issue with two
-    // sub-issues — object-storage access, and cross-namespace volume sharing —
-    // each warranting its own research spike. This undercut lifts when those
-    // land.
+    // Amit Kumar proposed the gate on 2026-08-12 and Marcelo Villa owned it:
+    // no technical design until the requester wrote down what they were trying
+    // to achieve. Kim Pevey wrote the story with JATIC specifics anonymised,
+    // and 597/598 are the resulting spikes. The undercut this node used to
+    // carry is therefore lifted, not merely weakened.
+
+[Object storage first wherever it fits]: Reach for object storage rather than RWX in any scenario it can serve, and treat a shared filesystem as the fallback for what genuinely needs POSIX. Stated as a working preference (James Olds, 2026-08-14), not a team decision, and it cuts hardest at cross-pack sharing, where no RWX requirement has been established at all. Its own costs are unsettled and named in _Object storage changes the product contract_: no per-user AWS identity to key access on, unproven small-file and metadata performance, and no in-cluster option short of running MinIO or equivalent — which trades the managed service for another storage system to operate. #open-decision
+    _> <Cross-pack sharing is a second RWX consumer>
 
 # Storage strategy
 
@@ -251,7 +251,7 @@ dot:
     - <Longhorn's config surface is incomplete>
     - <Longhorn forecloses EKS Auto Mode>
 
-# Direction: backup and restore
+# Topic: backup and restore
 
 <Unified backup already ships>: Longhorn is not only the storage layer on AWS — it is also the platform's only working backup implementation, and that shipped after this map first treated backups as pending work.
 
@@ -272,7 +272,7 @@ dot:
 ----
 (4) [Backup carries its own upkeep]: Unified backup is real but not free, and its cost is the same per-provider coupling the rest of the Longhorn integration carries — so it counts as a benefit of the incumbent, not as a decisive one.
 
-# Direction: operator burden
+# Topic: operator burden
 
 <Longhorn is an operations tax on every cluster>: Longhorn's cost is not only the project's integration work. It is a standing, storage-specific burden on the humans who run each cluster, and the runbooks NIC already ships are the evidence for how large it is.
 
@@ -294,7 +294,7 @@ dot:
 (4) [Longhorn carries per-cluster manual tuning]: Longhorn's operational cost includes capacity knobs that are not yet expressible in NIC config.
     -> [Universal Longhorn]
 
-# Direction: the shared data path
+# Topic: the shared data path
 
 <Longhorn RWX data-path concern>: Longhorn does not serve RWX from the replicated block layer directly — it puts an NFS server pod in front of it, and the pack's layout funnels the whole cluster's shared storage through one of them.
 
@@ -333,6 +333,9 @@ dot:
 ----
 (8) [RWX is materially slower per operation]: RWX on Longhorn should be scoped to workloads that need sharing, never used as a general default. Its advantage over managed storage is on the RWO path, not the RWX one.
 
+[Local ephemeral SSD as an escape hatch]: Data-intensive jobs may not need to run *from* shared storage at all: stage the inputs onto the node's local NVMe, run there, copy the results back, and the network filesystem is paid only at the edges instead of per operation. Raised 2026-08-14 and unexplored — it needs a staging mechanism, a cache-invalidation story, and enough local disk on the instance types in play — but if it works it narrows what the storage layer has to be fast at, which changes what the performance gate is even measuring. #open-decision
+    _> <RWX pays a network round trip on every operation>
+
 <RWX is already not uniform>: Longhorn is not in fact the project's universal RWX implementation today.
 
 (1) The Data Science Pack ships a transitional in-cluster NFS server (`sharedStorage.nfsServer`, `quay.io/nebari/volume-nfs`) that is **on by default even on Longhorn clusters**: the chart only disables it when `sharedStorage.storageClass` is explicitly set, and nothing sets it today — ADR-0003's convention of injecting the cluster's class into pack values is designed but unimplemented in NIC — so a stock deploy serves `/shared` from the pack's NFS pod exporting a Longhorn *RWO* backend volume, with Longhorn's own RWX share-manager not in the data path at all.
@@ -343,7 +346,7 @@ dot:
 (5) [Longhorn is not universal today]: The uniformity on offer is narrower than it sounds: two live providers, and on a stock deploy Longhorn's RWX path is not even what serves `/shared`.
     -> [Universal Longhorn]
 
-# Direction: the compute model
+# Topic: the compute model
 
 <Longhorn forecloses EKS Auto Mode>: Keeping Longhorn on AWS also decides the compute model, because Longhorn cannot run on AWS-managed immutable nodes.
 
@@ -384,7 +387,7 @@ dot:
 (5) [Auto Mode adoptability is unsettled]: Whether EKS Auto Mode is adoptable for Nebari is an open question independent of storage, so foreclosing it is a real cost but not a decisive one. #open-decision
     _> <Longhorn forecloses EKS Auto Mode>
 
-# Direction: cross-AZ attachment
+# Topic: cross-AZ attachment
 
 <Longhorn also masks EBS's AZ boundedness>: The strongest objection to removing Longhorn (Amit Kumar and Vini Cerutti, 2026-08-11): it is not only the RWX provider — as the sole default StorageClass it also hides that EBS volumes are AZ-bound.
 
@@ -412,7 +415,7 @@ dot:
 <Multi-AZ RWX homes remove the AZ constraint>: The RWX-homes shape dissolves the objection rather than answering it: FSx for OpenZFS Multi-AZ presents a floating endpoint with automatic failover to a standby in a second AZ (EFS is regional with a mount target per AZ and shares the property), so a home is reachable from any AZ, there is no AZ to be pinned to, and an AZ outage becomes AWS's failover problem rather than the cluster's.
     _> <Longhorn also masks EBS's AZ boundedness>
 
-# Home volume scope
+# Topic: home volume access mode
 
 [Home volume access mode is open]: Whether per-user home volumes stay RWO or move to a managed RWX filesystem is an open decision on AWS, settled by measurement rather than by the current design. #open-decision
     + <Homes on managed RWX dissolves several problems at once>
@@ -490,13 +493,26 @@ dot:
 ----
 (5) [Isolation is a narrower advantage than it looks]: Per-volume independence is a genuine but narrow advantage — it covers storage-media failure and nothing else — and it is not a reason to treat the current design as the lower-blast-radius option overall.
 
-[Home performance gate]: Benchmark conda and pixi environment creation, Git operations, and notebook autosave against FSx for OpenZFS — and EFS Elastic throughput mode if it is to be reconsidered — before proposing RWX homes. Failing this gate kills the shape; passing it makes the split shape an interim step rather than the destination. #open-decision
+[Home performance gate]: Benchmark conda and pixi environment creation, Git operations, and notebook autosave against FSx for OpenZFS — and EFS Elastic throughput mode if it is to be reconsidered — before proposing RWX homes. Failing this gate kills the shape; passing it makes the split shape an interim step rather than the destination. First numbers landed 2026-08-14; the gate is now about what threshold counts as passing. #open-decision
     + <Homes on managed RWX dissolves several problems at once>
+    <- <First environment-build measurements>
 
-[Affinity pin needs an upstream switch]: The affinity term is unconditional in the pack's `modify\_pod\_hook`, so RWX homes would still be pinned pointlessly. Removing the pin is a Data Science Pack change — a config switch, or keying off the home volume's access mode — and must be raised with the pack's owners early, since without it the RWX-homes shape keeps the constraint it exists to remove. #open-decision
+<First environment-build measurements>: The first numbers put a price on RWX homes, and it is not small.
+
+(1) Creating an environment measures ~3 seconds on an RWO EBS volume, ~60 seconds on EFS, and ~56 seconds on FSx for OpenZFS (James Olds, 2026-08-14, first pass). The two managed filesystems land in the same place, so the gap is between local block storage and network file storage in general — not between the two managed candidates, and not something a different appliance is likely to close.
+(2) The cost recurs rather than amortising. Changing kernels forces an environment rebuild, which one developer can hit several times a day — five was the working estimate — so the ~20x factor is paid per rebuild, in the middle of an interactive loop, for the life of the volume.
+(3) This is the workload _Assumption 20_ scopes to the home path specifically, so it prices this gate and no other.
+----
+(4) [The home numbers are adverse so far]: On the evidence available, RWX homes cost about a minute per environment rebuild where the current design costs three seconds. The burden is now on the benefits — losing the pin, losing the AZ constraint, and Longhorn leaving AWS — to be worth that, rather than on RWX homes to be merely workable.
+    -> [RWX homes are the stronger shape if they benchmark]
+
+[No acceptable-latency threshold has been set]: A measurement only decides something against a stated bar, and nobody has said what environment-rebuild latency is acceptable. A minute may be a perfectly good price for free scheduling, no AZ pin, and one less storage system to operate — the numbers cannot settle that on their own. Two things should be fixed before more benchmarking: write down the ceiling, and re-baseline against gp3, since NIC provisions gp2 today and the 3-second figure is the number the managed filesystems are being judged against. #open-decision
+    _> <First environment-build measurements>
+
+[Affinity pin is a pack change we own]: The affinity term is unconditional in the pack's `modify\_pod\_hook`, so RWX homes would still be pinned pointlessly until it is made conditional — a config switch, or keying off the home volume's access mode. Small work, and not an external dependency: the same maintainers own the Data Science Pack. It is listed only so the shape is not proposed without it, since without it the RWX-homes shape keeps the constraint it exists to remove.
     _> <Homes on managed RWX dissolves several problems at once>
 
-[Home ownership model does not carry across to NFS]: The pack establishes POSIX ownership on the home volume through kubelet-applied `fsGroup: 100` with `fsGroupChangePolicy: OnRootMismatch`, paired with a hardcoded `umask 0002` and setgid 2775 directories — the umask deliberately not a tunable knob, because it is coupled to the shared-storage setgid design. That is a block-volume mechanism: NFS-backed CSI drivers report no fsGroup support, so the kubelet does not apply it and ownership has to be established by the filesystem instead — FSx for OpenZFS uid/gid mapping and root-squash settings, or EFS access points enforcing a POSIX user. The RWX-homes shape therefore has to rebuild the ownership model on a different mechanism rather than carry it over, and re-verify the setgid propagation `/shared` already depends on against the appliance's export semantics. A second pack-side prerequisite alongside _Affinity pin needs an upstream switch_, and the reason the _POSIX behavior gate_ names fsGroup explicitly. #open-decision
+[Volume ownership moves from the kubelet to the appliance]: On a block volume the kubelet sets ownership: `fsGroup: 100` with `fsGroupChangePolicy: OnRootMismatch` makes the volume root group-owned so the container's non-root user can write. NFS-backed CSI drivers report no fsGroup support, so the kubelet skips that step and a freshly provisioned export arrives owned by whoever the appliance created it as — typically root — with the user unable to write to their own home. A dedicated per-user volume does not fix this by itself: nothing chowns it. What fixes it is the appliance doing the job instead — FSx for OpenZFS takes root uid/gid and permissions as volume-creation parameters, and controls root-squash; EFS uses access points that force a POSIX user on every request. So this is solvable per user, and the point is only that it is a *different* mechanism, configured in StorageClass parameters rather than in the pod spec, and therefore has to be verified rather than assumed to carry over. The reason the _POSIX behavior gate_ names fsGroup explicitly. #open-decision
     _> <Homes on managed RWX dissolves several problems at once>
 
 # AWS decision gate
@@ -506,7 +522,7 @@ dot:
 
 <POSIX behavior gate>: Verify concurrent reads and writes, file locking, atomic rename, permissions, ownership, setgid propagation, subPath mounts, and failure behavior. Ownership is the sharp edge, not a checklist item: the candidate must establish the pack's uid/gid model without kubelet-applied `fsGroup`, which NFS-backed CSI drivers do not support — see _Home ownership model does not carry across to NFS_. {isInMap: false}
 
-<Representative performance gate>: Measure p50 and p95 latency and aggregate throughput for small-file metadata operations, notebook saves, Git operations, package and archive extraction, Parquet reads and writes, and concurrent multi-user access. Started 2026-08-13 (James Olds): a test matrix over small files, large files, and the team's actual workloads. It also has to cover gp2 versus gp3 — NIC provisions gp2 today, and gp3 may change the calculus for the split shape before any managed filesystem is compared. {isInMap: false}
+<Representative performance gate>: Measure p50 and p95 latency and aggregate throughput for small-file metadata operations, notebook saves, Git operations, package and archive extraction, Parquet reads and writes, and concurrent multi-user access. Started 2026-08-13 (James Olds): a test matrix over small files, large files, and the team's actual workloads; first environment-build numbers are in — see _First environment-build measurements_ — and the gate now needs a stated acceptable-latency bar to judge them against. It also has to cover gp2 versus gp3 — NIC provisions gp2 today, and gp3 may change the calculus for the split shape before any managed filesystem is compared. {isInMap: false}
 
 <Availability gate>: Compare node failure, storage endpoint failure, remount time, lock recovery, maintenance behavior, backup, restore, and disaster recovery. {isInMap: false}
 
@@ -538,7 +554,7 @@ dot:
 * [Assumption 20]: The environment-build workload is narrower than the performance argument implies. The pack's *default* environment is baked into the JupyterLab image — `pixi install` into `/opt/jupyterlab/.pixi/envs` at image build time — so the common case, a user opening a notebook on the default kernel, reads from a read-only container layer on node-local disk and touches no PV at all. Only user-built nebi environments land on a PV, and they land on the RWO home volume; nothing installs environments to `/shared`, which carries collaboration files. So env builds price the *home* gate for users who build environments, and are not evidence about the shared data path at all. #core-assumption
 * [Assumption 8]: A user's pods are pinned to one node by a required inter-pod affinity term, so whichever class serves home volumes determines that user's node — and, on an AZ-bound class like EBS, their AZ. The node pin lasts only while the user has pods running (Amit Kumar, 2026-08-12), but the AZ does not follow: an EBS volume lives in one AZ for its lifetime, so an unlucky AZ placement persists for as long as the home volume does, and is undone only by migrating the data. On a replicated or Multi-AZ class the release of the node pin does free the user entirely. #core-assumption
 * [Assumption 9]: One node's resources are a hard ceiling on a single user's concurrent workloads, and the failure is an opaque JupyterHub spawn error. Accepted knowingly for delivery speed; workaround is a larger node size. #core-assumption
-* [Assumption 10]: RWX demand is not limited to `/shared/group-name`. Cross-namespace data sharing between packs is a second consumer, made structural by the decision that every component gets its own namespace — but it is gated on a written user story before any design work. As of 2026-08-13 that story is in flight (Kim Pevey writing it anonymised; Marcelo Villa opening a parent issue with two sub-issues, one research spike each) and the demand has split: the dataset half is answered by object storage, leaving small-file pack-to-pack sharing as the part that still needs RWX. #open-decision
+* [Assumption 10]: RWX demand is not limited to `/shared/group-name`. Cross-namespace data sharing between packs is a second consumer, made structural by the decision that every component gets its own namespace — but no RWX *requirement* has been established for it. The user-story gate is met and the work is now two tracked spikes — issue 597 (object-storage access) and issue 598 (cross-namespace volume sharing) — and the demand has split: the dataset half is answered by object storage, leaving small-file pack-to-pack sharing, for which object storage is the first thing to rule out before a shared filesystem is designed for it. #open-decision
 * [Assumption 11]: Nebari-specific Longhorn behaviour will be documented in the Nebari docs rather than left as tribal knowledge (team decision 2026-08-12; Amit Kumar owns the write-up). Whatever this map concludes has to survive being written down publicly. #architecture-decision
 * [Assumption 12]: Two candidate shapes are live on AWS, and they differ in ambition, not just detail. The **split shape** moves only single-pod system volumes to gp3, leaves homes and RWX on Longhorn, and needs no FSx evidence. The **RWX-homes shape** puts homes on FSx RWX too, which removes Longhorn from AWS, the per-user node pin, and the cross-AZ objection together. The _home performance gate_ decides between them; the split shape is the safe first landing either way, with one unpriced cost — see _Assumption 16_, since volumes moved to gp3 leave Longhorn's backup set. #open-decision
 * [Assumption 13]: Verify that `aws-fsx-openzfs-csi-driver` dynamic provisioning yields per-PVC child volumes with their own quotas, and what its practical volume count ceiling is per filesystem. The per-PVC form of RWX homes depends on it. #open-decision
