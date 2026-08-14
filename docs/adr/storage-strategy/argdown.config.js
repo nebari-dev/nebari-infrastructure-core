@@ -20,6 +20,7 @@ const maps = {
   "default-class": [...FORK, "Topic: Longhorn as the default StorageClass"],
   backup: [...FORK, "Topic: backup and restore"],
   operations: [...FORK, "Topic: operator burden"],
+  cost: [...FORK, "Topic: cost"],
   "data-path": [...FORK, "Topic: the shared data path"],
   compute: [...FORK, "Topic: the compute model"],
   "cross-az": [...FORK, "Topic: cross-AZ attachment"],
