@@ -85,7 +85,9 @@ nic kubeconfig -f <config-file> [-o output-file]
 
 ### `nic version`
 
-Show version information and registered providers.
+Show version information and registered providers, including which OpenTofu
+binary NIC would use — its version, path, and source (`NIC_TOFU_PATH` override,
+`PATH` discovery, or downloaded by NIC).
 
 ```bash
 nic version
@@ -116,6 +118,7 @@ cp .env.example .env
 | Variable | Description |
 |----------|-------------|
 | `NIC_CONFIG_PATH` | Override the config file path for all commands (lower priority than `--file`) |
+| `NIC_TOFU_PATH` | Path to a pre-installed OpenTofu binary; NIC uses it instead of downloading its own. Errors if the path is missing, not executable, or an unsupported version. Without it, a compatible `tofu` on `PATH` is used, then download. See [Packaging and External Binaries](operations/packaging.md). |
 
 ### OpenTelemetry Configuration
 

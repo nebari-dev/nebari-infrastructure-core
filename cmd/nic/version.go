@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -41,6 +43,38 @@ var versionCmd = &cobra.Command{
 	RunE:  runVersion,
 }
 
+// tofuVersionLine describes which OpenTofu binary NIC would use: an external
+// one resolved via NIC_TOFU_PATH or PATH, or the pinned version it downloads.
+// Resolution errors (e.g. a bad NIC_TOFU_PATH) are reported rather than
+// returned so `nic version` stays usable as a diagnostic. Resolution notes
+// (e.g. why a tofu found on PATH was rejected) are folded into the line so the
+// command explains the packaging problem it exists to diagnose.
+func tofuVersionLine(ctx context.Context) string {
+	resolution, err := tofu.ResolveExternal(ctx)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("unresolved (%v)", err)
+	case resolution.Binary == nil:
+		if len(resolution.Notes) > 0 {
+			return fmt.Sprintf("%s (downloaded by nic; %s)", tofu.Version, strings.Join(resolution.Notes, "; "))
+		}
+		return fmt.Sprintf("%s (downloaded by nic)", tofu.Version)
+	case resolution.Binary.Source == tofu.SourceOverride:
+		return fmt.Sprintf("%s (from %s: %s%s)", resolution.Binary.Version, tofu.EnvTofuPath, resolution.Binary.Path, testedAgainstNote(resolution.Binary.Version))
+	default:
+		return fmt.Sprintf("%s (from PATH: %s%s)", resolution.Binary.Version, resolution.Binary.Path, testedAgainstNote(resolution.Binary.Version))
+	}
+}
+
+// testedAgainstNote flags an external version that differs from the pinned one
+// NIC is tested against, so support requests carry the mismatch.
+func testedAgainstNote(ver string) string {
+	if ver == tofu.Version {
+		return ""
+	}
+	return fmt.Sprintf("; NIC is tested against %s", tofu.Version)
+}
+
 func runVersion(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
@@ -50,7 +84,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Version command executed", "version", version, "commit", commit, "date", date)
 
-	fmt.Print(versionString(version, commit, date, tofu.Version))
+	fmt.Print(versionString(version, commit, date, tofuVersionLine(ctx)))
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
