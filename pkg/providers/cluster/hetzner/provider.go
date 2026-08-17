@@ -125,12 +125,12 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
-	// Download hetzner-k3s binary
+	// Resolve the hetzner-k3s binary: an explicit override or a `hetzner-k3s`
+	// on PATH when present, otherwise NIC's pinned download.
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring hetzner-k3s binary is available").
 		WithResource("provider").WithAction("deploy"))
 
-	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
+	binaryPath, err := resolveHetznerK3sBinary(ctx, cacheDir)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
@@ -290,8 +290,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
+	binaryPath, err := resolveHetznerK3sBinary(ctx, cacheDir)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)

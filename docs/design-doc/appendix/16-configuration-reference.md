@@ -583,6 +583,7 @@ Loaded by `godotenv` from `.env` (gitignored) at startup. Used for credentials a
 | whatever you point `certificate.env.cert_env` / `key_env` at | `pkg/argocd` | Raw (non-base64) PEM for `certificate.type: existing` |
 | `KUBECONFIG` | `existing` provider, `nic kubeconfig` | Kubeconfig path (used when `cluster.existing.kubeconfig` is empty) |
 | `NIC_CONFIG_PATH` | `cmd/nic` | Overrides the config file path when `-f` is not given |
+| `NIC_TOFU_PATH` | `pkg/tofu` | Path to a pre-installed OpenTofu binary. Hard error if missing, not executable, or outside the supported version range. When unset, a compatible `tofu` on `PATH` is used, then download of the pinned version. See [Packaging and External Binaries](../../operations/packaging.md) |
 | `HELM_DRIVER` | Helm installs | Helm storage driver override |
 | `OTEL_EXPORTER` | `pkg/telemetry` | `none` (default), `console`, `otlp`, `both` |
 | `OTEL_ENDPOINT` | `pkg/telemetry` | OTLP endpoint (default: `localhost:4317`) |

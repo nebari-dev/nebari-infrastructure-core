@@ -131,6 +131,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
+	// Fail fast on a bad NIC_TOFU_PATH before any cloud resources (like the
+	// state backend) are created; the check is purely local.
+	if err := tofu.ValidateOverride(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// A dry run must not create cloud resources. If the state backend already
 	// exists we read from it; if not, initTofuBackend falls back to a local
 	// backend below. A real deploy always bootstraps the backend first.

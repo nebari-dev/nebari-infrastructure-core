@@ -37,7 +37,9 @@ const (
 	CreateDefaultDiskLabel = "node.longhorn.io/create-default-disk"
 
 	// ChartVersion pins the upstream Longhorn Helm chart version. Bump
-	// together with iscsiDaemonSetYAML when upgrading.
+	// together with iscsiDaemonSetYAML when upgrading, and verify that
+	// settingsResource (uninstall.go) still matches the Settings API version
+	// the new Longhorn serves.
 	// v1.11.2 (released 2026-05-05) includes the (*Controller).Snapshot
 	// nil-pointer panic fix from longhorn/longhorn#12081.
 	ChartVersion = "1.11.2"

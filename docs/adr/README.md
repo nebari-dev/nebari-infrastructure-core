@@ -22,6 +22,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0010](0010-high-security-mode.md) | High-Security Mode (Opt-In Whitelist-Everything Hardening) | Proposed | 2026-07-15 |
 | [ADR-0014](0014-helm-valuefiles-overlay-seam.md) | Helm valueFiles Overlay Seam for Foundational Apps | Accepted | 2026-07-22 |
 | [ADR-0015](0015-repository-provider-abstraction.md) | Repository Provider Abstraction for GitOps Bootstrap | Accepted | 2026-07-10 |
+| [ADR-0016](0016-opentofu-runtime-version-policy.md) | OpenTofu Runtime Version Policy (External Binaries and Compatibility Window) | Proposed | 2026-08-12 |
 
 ## ADR Statuses
 
