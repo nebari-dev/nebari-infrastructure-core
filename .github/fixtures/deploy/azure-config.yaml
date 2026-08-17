@@ -11,12 +11,14 @@ dns:
   cloudflare:
     zone_name: nebari.dev
 
-git_repository:
-  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
-  branch: azure
-  path: "clusters/azure-ci"
-  auth:
-    token_env: GIT_TOKEN
+repository:
+  existing:
+    url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+    branch: azure
+    path: "clusters/azure-ci"
+    auth:
+      token:
+        env: GIT_TOKEN
 
 cluster:
   azure:

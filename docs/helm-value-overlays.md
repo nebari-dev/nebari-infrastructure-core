@@ -64,7 +64,7 @@ Force a hard refresh on the affected Applications after an upgrade, or overlays 
 
 ## Verifying the seam end to end
 
-Use this when you suspect overlays are not being applied, or when validating the seam on a new provider. Every step has a pass condition, so a failure localises rather than leaving you guessing. Executed against Hetzner/k3s with a remote authenticated GitOps repo and a `git_repository.path` prefix, on both an OCI chart source and an HTTPS Helm repo source.
+Use this when you suspect overlays are not being applied, or when validating the seam on a new provider. Every step has a pass condition, so a failure localises rather than leaving you guessing. Executed against Hetzner/k3s with a remote authenticated GitOps repo and a `repository.existing.path` prefix, on both an OCI chart source and an HTTPS Helm repo source.
 
 **1. Confirm the repo-server is 3.4+.** Use the two checks in contract item 5 above. Do this first: everything below reports a false negative on a pre-3.4 repo-server.
 
@@ -75,9 +75,9 @@ kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[0].helm.valueFiles}{
 kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[?(@.ref=="values")]}{"\n"}'
 ```
 
-Expect both `valueFiles` entries carrying your `git_repository.path` prefix, and a source with `ref: values` pointing at your GitOps repo. The chart source is always `sources[0]` (the tests pin that), but the `ref: values` source is selected by its `ref` field rather than by position, so the filter form keeps working if an app carries additional sources. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
+Expect both `valueFiles` entries carrying your `repository.existing.path` prefix, and a source with `ref: values` pointing at your GitOps repo. The chart source is always `sources[0]` (the tests pin that), but the `ref: values` source is selected by its `ref` field rather than by position, so the filter form keeps working if an app carries additional sources. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
 
-**3. Confirm `base.yaml` applies before testing overlays.** Assert specific values, not just that the app is Healthy. Because `ignoreMissingValueFiles: true` also covers the `base.yaml` entry, a typo in `git_repository.path` silently falls back to the chart's own defaults instead of erroring. If you see chart defaults here, fix that before going further; step 4 would be meaningless.
+**3. Confirm `base.yaml` applies before testing overlays.** Assert specific values, not just that the app is Healthy. Because `ignoreMissingValueFiles: true` also covers the `base.yaml` entry, a typo in `repository.existing.path` silently falls back to the chart's own defaults instead of erroring. If you see chart defaults here, fix that before going further; step 4 would be meaningless.
 
 **4. Drop an overlay, with no `nic deploy`.** This is the property the seam exists to provide.
 

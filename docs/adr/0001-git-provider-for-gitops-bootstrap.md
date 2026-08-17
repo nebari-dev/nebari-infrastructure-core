@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Superseded by [ADR-0015](0015-repository-provider-abstraction.md)
 
 ## Date
 

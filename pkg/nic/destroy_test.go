@@ -88,6 +88,9 @@ func TestDestroyForceStillReturnsError(t *testing.T) {
 				Cluster: &config.ClusterConfig{
 					Providers: map[string]any{"fake": map[string]any{}},
 				},
+				Repository: &config.RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
 			}
 
 			err := client.Destroy(ctx, cfg, DestroyOptions{Force: tt.force})

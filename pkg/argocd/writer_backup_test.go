@@ -10,8 +10,8 @@ import (
 	goyaml "github.com/goccy/go-yaml"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 )
 
 func TestNewTemplateDataBackups(t *testing.T) {
@@ -76,7 +76,6 @@ func TestIsBackupPath(t *testing.T) {
 
 func TestWriteAllToGitRendersBackupManifests(t *testing.T) {
 	workDir := t.TempDir()
-	gitClient := &mockGitClient{workDir: workDir}
 
 	enabled := true
 	cfg := &config.NebariConfig{
@@ -90,8 +89,8 @@ func TestWriteAllToGitRendersBackupManifests(t *testing.T) {
 			},
 		}},
 	}
-	gitCfg := &git.Config{URL: "https://example.com/repo.git", Branch: "main"}
-	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}, ""); err != nil {
+	src := repository.RemoteSource{URL: "https://example.com/repo.git", Branch: "main"}
+	if err := WriteAllToGit(context.Background(), workDir, cfg, src, cluster.InfraSettings{}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 
@@ -146,11 +145,10 @@ func TestWriteAllToGitRendersBackupManifests(t *testing.T) {
 
 func TestWriteAllToGitSkipsBackupWhenDisabled(t *testing.T) {
 	workDir := t.TempDir()
-	gitClient := &mockGitClient{workDir: workDir}
 
 	cfg := &config.NebariConfig{ProjectName: "p"}
-	gitCfg := &git.Config{URL: "https://example.com/repo.git", Branch: "main"}
-	if err := WriteAllToGit(context.Background(), gitClient, cfg, gitCfg, cluster.InfraSettings{}, ""); err != nil {
+	src := repository.RemoteSource{URL: "https://example.com/repo.git", Branch: "main"}
+	if err := WriteAllToGit(context.Background(), workDir, cfg, src, cluster.InfraSettings{}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "apps/longhorn-backup.yaml")); !os.IsNotExist(err) {

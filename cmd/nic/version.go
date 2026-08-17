@@ -84,6 +84,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	providers := client.ProviderNames(ctx)
 	fmt.Printf("Registered cloud providers: %v\n", providers.Cluster)
 	fmt.Printf("Registered DNS providers: %v\n", providers.DNS)
+	fmt.Printf("Registered repository providers: %v\n", providers.Repository)
 
 	return nil
 }

@@ -10,12 +10,13 @@ This file follows the [AGENTS.md](https://agents.md) convention and is read by C
 
 NIC is organized around pluggable **providers**. A provider is a small Go interface with one implementation per backend; each provider is free to use whatever tool fits the backend best (OpenTofu, a vendor CLI, a Kubernetes-native installer, a REST API). The CLI never branches on provider names - it depends only on provider interfaces.
 
-The codebase currently has two provider categories in tree:
+The codebase currently has three provider categories in tree:
 
 - **Cluster providers** (`pkg/providers/cluster/`) - bring up the Kubernetes cluster
 - **DNS providers** (`pkg/providers/dns/`) - manage DNS records pointing at the cluster's load balancer
+- **Repository providers** (`pkg/providers/repository/`) - provision or resolve the GitOps repository that ArgoCD syncs foundational software from
 
-More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
+More categories (certificate issuers, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
 
 ### Cluster Providers
@@ -122,24 +123,26 @@ pkg/
   │   ├── validate.go   # Validate orchestration
   │   ├── kubeconfig.go # Kubeconfig retrieval
   │   └── status.go     # status.Update -> slog translation (StartSlogHandler)
-  ├── provider/         # Cluster provider interface + implementations
-  │   ├── provider.go   # Provider interface, InfraSettings, DeployOptions
-  │   ├── aws/          # OpenTofu-backed; templates/ holds embedded .tf files
-  │   ├── azure/        # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
-  │   ├── hetzner/      # hetzner-k3s-backed; downloads + caches the binary
-  │   ├── existing/     # Bring-your-own kubeconfig
-  │   ├── local/        # Kubeconfig validator for Kind clusters
-  │   └── gcp/          # Stub
-  ├── dnsprovider/      # DNS provider interface + implementations
-  │   ├── provider.go   # DNSProvider interface
-  │   └── cloudflare/   # Cloudflare API implementation
-  ├── registry/         # Unified registry holding both cluster and DNS providers
+  ├── providers/        # Provider interfaces + implementations, one directory per category
+  │   ├── cluster/      # Provider interface, InfraSettings, DeployOptions (provider.go)
+  │   │   ├── aws/      # OpenTofu-backed; templates/ holds embedded .tf files
+  │   │   ├── azure/    # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
+  │   │   ├── hetzner/  # hetzner-k3s-backed; downloads + caches the binary
+  │   │   ├── existing/ # Bring-your-own kubeconfig
+  │   │   ├── local/    # Kind-backed local clusters
+  │   │   └── gcp/      # Stub
+  │   ├── dns/          # DNSProvider interface (provider.go)
+  │   │   └── cloudflare/ # Cloudflare API implementation
+  │   └── repository/   # Repository provider interface + sealed Source/Auth contract (provider.go)
+  │       ├── existing/ # Pre-existing remote repository (https or ssh)
+  │       └── local/    # Directory on disk for local/dev clusters
+  ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
   │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
   ├── tofu/             # terraform-exec wrapper (used by the AWS and Azure cluster providers)
   ├── argocd/           # ArgoCD bootstrap and foundational-apps templating
   ├── config/           # YAML config parsing/validation
-  ├── git/              # Git config types and client used by ArgoCD GitOps repo
+  ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
@@ -183,12 +186,13 @@ DNS providers are stateless - domain and config are passed to each call. `cloudf
 
 ### The Provider Registry
 
-`pkg/registry/registry.go` holds both provider categories behind one thread-safe struct:
+`pkg/registry/registry.go` holds all provider categories behind one thread-safe struct:
 
 ```go
 type Registry struct {
-    ClusterProviders *ProviderList[provider.Provider]
-    DNSProviders     *ProviderList[dnsprovider.DNSProvider]
+    ClusterProviders    *ProviderList[cluster.Provider]
+    DNSProviders        *ProviderList[dns.Provider]
+    RepositoryProviders *ProviderList[repository.Provider]
 }
 ```
 
@@ -232,7 +236,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`
     DNS           *DNSConfig         `yaml:"dns,omitempty"`
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
 }
 ```
@@ -340,6 +344,15 @@ func SomeFunction(ctx context.Context, ...) error {
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
 
+### Adding a New Repository Provider
+
+1. Create `pkg/providers/repository/<name>/`.
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
+4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
+5. Update `examples/` configs with the new `repository:` provider block.
+6. Cover the provider with table-driven unit tests (see `pkg/providers/repository/existing/` for the pattern).
+
 ### Adding a New Configuration Field
 
 1. Decide whether the field is generic (top-level on `NebariConfig`) or provider-specific (decoded by the provider from `ProviderConfig()`).
@@ -388,7 +401,7 @@ Either way, a failure that can leave resources behind must surface in the exit c
 
 **Critical:** Code must respect package boundaries.
 
-- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`provider.Provider`, `dnsprovider.DNSProvider`), never on specific implementations.
+- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`cluster.Provider`, `dns.Provider`, `repository.Provider`), never on specific implementations.
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
@@ -474,6 +487,6 @@ Run before every commit:
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
 6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
-7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
+7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.
