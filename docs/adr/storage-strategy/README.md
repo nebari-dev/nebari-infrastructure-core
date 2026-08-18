@@ -33,7 +33,7 @@ Those roles do not have to remain coupled. The storage decision is therefore bro
 
 ## How to read the maps
 
-![Legend](legend.svg)
+[![Legend](legend.svg)](legend.svg)
 
 ## What DSP storage needs
 
@@ -55,7 +55,7 @@ Object storage complements this filesystem rather than replacing it. It is the a
 
 Cross-pack sharing remains a separate design question. [NIC #597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) covers object-storage access and [NIC #598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) covers cross-namespace volume sharing. These use cases should use object storage where it fits and require RWX only when POSIX sharing is part of the contract.
 
-![Is RWX required?](rwx-required.svg)
+[![Is RWX required?](rwx-required.svg)](rwx-required.svg)
 
 ## Current scheduling constraint
 
@@ -98,11 +98,56 @@ The C estimate is derived from the model's unit prices rather than from a modele
 
 The incumbent keeps the current AWS behavior. It avoids migrations and preserves one backup path, while retaining Longhorn's node-drain procedure, capacity tuning, dedicated storage nodes, and cluster-wide failure vocabulary. Because Longhorn is the default StorageClass, new unclassified PVCs also inherit it whether or not they need replication or RWX.
 
+
+
+```mermaid
+flowchart LR
+  subgraph n["user node · pinned by two RWO mounts"]
+    pod["jupyter pod"]
+  end
+  pod -->|/home/jovyan| h["home PVC · RWO"]
+  pod -->|workspaces| w["workspace PVC · RWO"]
+  pod -->|/shared/group| sh["shared PVC · RWX"]
+  kc["keycloak CNPG · 1 instance"] --> sys["database PVC · RWO"]
+  h --> LH
+  w --> LH
+  sh --> sm["share-manager NFS pod"] --> LH
+  sys --> LH
+  LH["Longhorn · default StorageClass"] --> sn["storage node group · 2 replicas per volume"]
+  LH --> bk["Longhorn backups to S3"]
+  classDef lh stroke:#b3762f,stroke-width:2px
+  class LH,sm,sn lh
+```
+
 ### B. System split: native block for system volumes
 
 This shape moves the Keycloak database to gp3 while leaving both user volumes and `/shared` on Longhorn. It avoids user-data migration and keeps the current scheduling behavior for users. Keycloak currently runs as one CNPG instance, so this shape must also configure multiple instances with zone-aware placement and provide a database backup strategy. Replication supplies failover only after that work exists, and it still does not protect against logical corruption or deletion.
 
 The shape reduces little of Longhorn's cost or operational burden. Its architectural value is conditional: once CNPG provides database-level high availability, Longhorn replication beneath it becomes unnecessary for failover. Until then, moving the database to gp3 removes both cross-AZ attachment and the current storage-layer redundancy.
+
+
+
+```mermaid
+flowchart LR
+  subgraph n["user node · pinned by two RWO mounts"]
+    pod["jupyter pod"]
+  end
+  pod -->|/home/jovyan| h["home PVC · RWO"]
+  pod -->|workspaces| w["workspace PVC · RWO"]
+  pod -->|/shared/group| sh["shared PVC · RWX"]
+  kc["keycloak CNPG · 1 instance"] --> sys["database PVC · RWO"]
+  h --> LH
+  w --> LH
+  sh --> sm["share-manager NFS pod"] --> LH
+  sys --> gp3["EBS gp3 · AZ-bound"]
+  LH["Longhorn · still default"] --> sn["storage node group"]
+  LH --> bk["Longhorn backups to S3"]
+  gp3 -.-> owed["owed: CNPG multi-instance,<br/>zone placement, backup"]
+  classDef lh stroke:#b3762f,stroke-width:2px
+  classDef gap stroke:#c26060,stroke-width:2px,stroke-dasharray:4 3
+  class LH,sm,sn lh
+  class owed gap
+```
 
 ### C. Longhorn only for RWX
 
@@ -110,17 +155,87 @@ This shape applies the access-mode boundary consistently. Homes, workspaces, and
 
 It avoids using a managed RWX service and preserves Longhorn backup coverage for shared group data. It also moves every home, requires AZ-aware node provisioning, requires multi-instance CNPG for Keycloak availability, and removes homes and system volumes from the existing backup set. Longhorn remains installed, so its drain, upgrade, capacity, and incident-response procedures remain part of every AWS cluster even though they apply to less data.
 
+
+
+```mermaid
+flowchart LR
+  subgraph n["user node · pinned by two RWO mounts"]
+    pod["jupyter pod"]
+  end
+  pod -->|/home/jovyan| h["home PVC · RWO"]
+  pod -->|workspaces| w["workspace PVC · RWO"]
+  pod -->|/shared/group| sh["shared PVC · RWX"]
+  kc["keycloak CNPG · 1 instance"] --> sys["database PVC · RWO"]
+  h --> gp3["EBS gp3 · AZ-bound"]
+  w --> gp3
+  sys --> gp3
+  sh --> sm["share-manager NFS pod"] --> LH["Longhorn · RWX class only"]
+  LH --> sn["storage node group · /shared replicas only"]
+  LH --> bk["Longhorn backups · /shared only"]
+  gp3 -.-> owed["owed: per-AZ capacity,<br/>CNPG HA, backup for gp3 volumes"]
+  classDef lh stroke:#b3762f,stroke-width:2px
+  classDef gap stroke:#c26060,stroke-width:2px,stroke-dasharray:4 3
+  class LH,sm,sn lh
+  class owed gap
+```
+
 ### D. Managed `/shared`, block-backed homes
 
 This shape puts RWO workloads on gp3 and `/shared` on an AWS-managed RWX service. It removes Longhorn from AWS while preserving fast block storage for interactive home workloads. EFS and FSx for OpenZFS are implementation candidates for the same shape.
 
 The benchmark favors the boundary this shape draws—block storage for RWO workloads and managed RWX for shared data—and the FSx cost model makes it the cheapest measured implementation. It requires a managed-RWX StorageClass and workload routing, a provider-specific backup and restore path, per-AZ node groups or Karpenter, multi-instance CNPG for Keycloak availability, and user-data migration. EFS support already exists in NIC and the upstream EKS module; FSx requires new provisioning, CSI installation, and IAM wiring. The FSx evaluation implementation on the `remove-longhorn-aws` branch demonstrates feasibility but is not a capability shipped on `main`.
 
+
+
+```mermaid
+flowchart LR
+  subgraph n["user node · pinned by two RWO mounts"]
+    pod["jupyter pod"]
+  end
+  pod -->|/home/jovyan| h["home PVC · RWO"]
+  pod -->|workspaces| w["workspace PVC · RWO"]
+  pod -->|/shared/group| sh["shared PVC · RWX"]
+  kc["keycloak CNPG · 1 instance"] --> sys["database PVC · RWO"]
+  h --> gp3["EBS gp3 · AZ-bound"]
+  w --> gp3
+  sys --> gp3
+  sh --> csi["managed RWX CSI driver"] --> fs["EFS or FSx for OpenZFS"]
+  fs -.-> bk["owed: provider backup<br/>and restore path"]
+  gp3 -.-> owed["owed: per-AZ capacity,<br/>CNPG HA, backup for gp3 volumes"]
+  classDef mg stroke:#5c9e6f,stroke-width:2px
+  classDef gap stroke:#c26060,stroke-width:2px,stroke-dasharray:4 3
+  class csi,fs mg
+  class bk,owed gap
+```
+
 ### E. Managed homes and shared storage
 
 This shape puts homes and `/shared` on a regional or Multi-AZ managed RWX service, keeps the Keycloak database on gp3, and makes workspaces ephemeral. It removes the user node pin, the persistent AZ binding for homes, and Longhorn from AWS. Keycloak still needs multi-instance CNPG with zone-aware placement because its gp3 volumes remain AZ-bound.
 
 It also imposes a 9-37x penalty on metadata-write-heavy interactive work. `git checkout` takes 15-32 seconds in the benchmark rather than roughly 0.4 seconds on block storage. This shape additionally requires DSP to make its affinity conditional, change the workspace lifecycle, and establish POSIX ownership through filesystem-specific StorageClass parameters.
+
+
+
+```mermaid
+flowchart LR
+  subgraph n["any node · pin released"]
+    pod["jupyter pod"]
+  end
+  pod -->|/home/jovyan| h["home PVC · RWX"]
+  pod -->|workspaces| w["emptyDir · node-local"]
+  pod -->|/shared/group| sh["shared PVC · RWX"]
+  kc["keycloak CNPG · 1 instance"] --> sys["database PVC · RWO"]
+  sys --> gp3["EBS gp3 · AZ-bound"]
+  h --> csi["managed RWX CSI driver"]
+  sh --> csi
+  csi --> fs["regional or Multi-AZ managed RWX"]
+  fs -.-> bk["owed: provider backup<br/>and restore path"]
+  gp3 -.-> owed["owed: CNPG HA,<br/>zone placement, backup"]
+  classDef mg stroke:#5c9e6f,stroke-width:2px
+  classDef gap stroke:#c26060,stroke-width:2px,stroke-dasharray:4 3
+  class csi,fs mg
+  class bk,owed,w gap
+```
 
 ### Selecting the AWS managed RWX provider
 
@@ -150,7 +265,7 @@ The cost is permanent divergence. Longhorn remains in the project for Hetzner, s
 
 The implementation count understates the ongoing work: each provider has a different credential model, ownership mechanism, capacity behavior, failure catalogue, and restore procedure.
 
-![Capability versus implementation](provider-strategy.svg)
+[![Capability versus implementation](provider-strategy.svg)](provider-strategy.svg)
 
 ### Longhorn uniformity
 
@@ -166,7 +281,7 @@ This architecture concentrates bandwidth and failure handling in one pod. Longho
 
 For operations that `/shared` actually serves, Longhorn and FSx are within noise at one writer; at four writers Longhorn is 1.2-1.4x faster on extraction and checkout. Environment creation is not part of this comparison because environments live on the per-user workspace volume, not `/shared`.
 
-![Shared data path](data-path.svg)
+[![Shared data path](data-path.svg)](data-path.svg)
 
 ### Home performance
 
@@ -187,7 +302,7 @@ The decisive gap is metadata writes and file creation. Metadata reads can improv
 
 No acceptable latency threshold exists for this trade. The product decision is whether slower interactive file operations are worth free scheduling, removal of the AZ pin, and a smaller AWS operations surface.
 
-![Home volume access mode](homes.svg)
+[![Home volume access mode](homes.svg)](homes.svg)
 
 ### Cross-AZ behavior
 
@@ -197,7 +312,7 @@ This solves rescheduling when the AZ is healthy. It does not provide service dur
 
 A regional or Multi-AZ managed RWX service removes the home-volume AZ constraint. In the measured FSx implementation, Multi-AZ latency is close to Single-AZ while modeled cost is 1.65-1.67x higher. This makes cross-AZ availability primarily a cost decision rather than a performance decision for FSx; EFS is regional by design and has its own request-based cost model.
 
-![Cross-AZ attachment](cross-az.svg)
+[![Cross-AZ attachment](cross-az.svg)](cross-az.svg)
 
 ### Default StorageClass
 
@@ -205,7 +320,7 @@ Longhorn's RWX role and default-class role are separate. NIC configures Longhorn
 
 Changing the default therefore requires a per-workload StorageClass surface, not only a chart flag. DSP's home and workspace PVCs inherit the cluster default, while the Keycloak database is explicitly rendered. A safe change must control both paths and state which class each workload uses.
 
-![Longhorn as the default StorageClass](default-class.svg)
+[![Longhorn as the default StorageClass](default-class.svg)](default-class.svg)
 
 ### Backup and restore
 
@@ -215,7 +330,7 @@ Every shape that moves a volume off Longhorn must provide a replacement durabili
 
 The Longhorn path carries maintenance of its own because retained backup buckets are coupled to provider Terraform state addresses. This is a real implementation benefit with a continuing provider-integration cost, not a decisive argument by itself.
 
-![Backup and restore](backup.svg)
+[![Backup and restore](backup.svg)](backup.svg)
 
 ### Operator burden
 
@@ -225,7 +340,7 @@ The cost model estimates Longhorn work at 9.3 operator hours per cluster per mon
 
 Longhorn also assumes capacity settings that NIC does not fully validate. A 20 GiB default AWS node disk leaves roughly 2.4 GiB schedulable after system use and Longhorn's 25% reserve, so a 20 GiB RWX volume cannot be provisioned on the default-shaped node. This is a correctable NIC configuration defect, but it illustrates the storage-specific knowledge operators need.
 
-![Operator burden](operations.svg)
+[![Operator burden](operations.svg)](operations.svg)
 
 ### Cost
 
@@ -241,7 +356,7 @@ EFS has a different cost risk. Elastic throughput stays flat in the four-writer 
 
 Right-sizing home PVC requests is a lower-risk cost intervention under every shape and has 2.67x the effect under Longhorn. It should be priced before migration work is justified solely by storage cost.
 
-![Cost](cost.svg)
+[![Cost](cost.svg)](cost.svg)
 
 ### Compute model and other clouds
 
@@ -249,9 +364,9 @@ Longhorn requires node-level iSCSI support, privileged access, and host storage.
 
 Provider-native storage changes the trade elsewhere. GKE exposes Filestore and cross-zone block storage; AKS exposes Azure Files and zone-redundant block storage. These observations come from vendor documentation rather than Nebari deployments and define future evaluation scope rather than verified product behavior.
 
-![Compute model](compute.svg)
+[![Compute model](compute.svg)](compute.svg)
 
-![The other clouds](other-clouds.svg)
+[![The other clouds](other-clouds.svg)](other-clouds.svg)
 
 ## Decision gates
 
