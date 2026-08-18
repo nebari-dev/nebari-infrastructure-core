@@ -125,6 +125,8 @@ argdown: ## Render Argdown argument maps to SVG beside their .argdown source
 	done
 	@# keep graphviz's width/height: an SVG with only a viewBox scales itself to
 	@# the viewport, so browser zoom re-lays it out instead of magnifying it
+	@# the CLI also drops its graphviz intermediate in ./dot; nothing consumes it
+	@rm -rf dot
 	@echo "SVGs written to $(ARGDOWN_OUT)"
 
 release-snapshot: ## Create a snapshot release (local testing)
