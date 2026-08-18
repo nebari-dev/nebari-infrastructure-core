@@ -78,6 +78,8 @@ dot:
 
 [RWX is a core platform capability]: A production Nebari deployment with DSP must provide reliable RWX storage for group collaboration. #core-assumption
     + <DSP collaboration requires RWX>
+    + <Ray worker home access favors RWX>
+        - <Ray can distribute files explicitly>
     - <Group co-location can emulate RWX>
         - <Group co-location breaks scheduling>
     - <Object storage can replace the shared directory>
@@ -93,6 +95,22 @@ dot:
 (4) RWO cannot provide read-write access from pods on different nodes.
 ----
 (5) [RWX is a core platform capability]
+
+<Ray worker home access favors RWX>: The agreed near-term Ray path mounts a user's home into independently scheduled workers.
+
+(1) Exploratory users need Ray workers to access local scripts, configuration, and other small files without first publishing everything to object storage.
+(2) A single-node Ray job can use one RWO home without creating a new multi-node access requirement.
+(3) Distributed Ray workers can run in another namespace and across several nodes.
+(4) RWO permits read-write mounts from only one node at a time.
+----
+(5) [Ray home access needs a portable path]: Mounting the home across a distributed Ray cluster requires RWX or an equivalent multi-node filesystem contract; single-node Ray does not.
+    +> [RWX is a core platform capability]
+    <+ [Ray environment delivery is separate]
+
+[Ray environment delivery is separate]: Dharhas Pothina proposed building a container from each user's Nebi or pixi definition before cluster launch, publishing it to Artifact Keeper or another configured registry, and having every autoscaled worker pull the same tagged image. This avoids rebuilding environments on each new worker and narrows the home mount to user files rather than environment trees. The integration and end-to-end workflow remain open design work. #open-decision
+
+<Ray can distribute files explicitly>: Ray can broadcast or copy selected files to workers instead of mounting the home, but that alternative needs its own lifecycle, consistency, and user-experience design.
+    -> [Ray home access needs a portable path]
 
 <Group co-location can emulate RWX>: Kubernetes permits several pods on one node to mount the same RWO volume, so required affinity could force every collaborating pod onto one node.
 
@@ -126,10 +144,20 @@ dot:
 (4) [Object storage does not remove the RWX requirement]: Use object storage for object-native data and mounted RWX storage where POSIX sharing is required.
     -> [Object storage removes the RWX requirement]
 
-[Object storage is the default for datasets]: Large datasets belong in object storage; homes, outputs, environments, and shared small-file workflows remain on mounted storage. #architecture-decision
+[Object storage is the default for datasets]: Large datasets belong in object storage; homes, outputs, environments, and shared small-file workflows remain on volume storage. #architecture-decision
+    + <Distributed compute needs a scalable data plane>
     _> <Object storage can replace the shared directory>
 
-[Cross-pack sharing has two research paths]: [NIC #597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) covers object-storage access and [NIC #598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) covers cross-namespace volume sharing. Cross-pack sharing uses RWX only when its product contract requires POSIX semantics. #open-decision
+<Distributed compute needs a scalable data plane>: Volume storage is a convenience path for exploratory, single-node, and small-scale work, not the bulk-data path for high-concurrency Ray or Dask workloads.
+
+(1) Distributed workers multiply concurrent filesystem operations.
+(2) Dharhas Pothina described a conference tutorial where large numbers of multi-node Dask clusters exhausted shared NFS, and a separate occasion where managed EFS became unresponsive even after its performance tier was raised.
+(3) Saturating a shared filesystem can also make unrelated homes and collaboration paths unavailable.
+(4) Object storage and parallel filesystems are designed for distributed data access.
+----
+(5) [Distributed data does not belong on shared NFS]: Use per-user volume storage for small user-local inputs and object storage or a parallel filesystem for the distributed data plane.
+
+[Cross-pack sharing has two research paths]: [NIC #597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) covers cross-namespace volume access and [NIC #598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) covers object-storage access. Cross-pack sharing uses RWX only when its product contract requires POSIX semantics. #open-decision
 
 <Shared storage can be disabled>: DSP can run without the optional shared directory, leaving only per-user RWO volumes.
 
@@ -282,13 +310,17 @@ dot:
 
 <The concentration is measurable under load>: Fixed-capacity paths slow as writers are added.
 
-(1) Longhorn slows 2.2-2.6x from one to four writers.
-(2) FSx at 160 MBps slows 1.7-2.7x.
-(3) EFS Elastic remains within 1.1-1.2x.
-(4) The benchmark does not cover more than four writers.
+(1) On untar, clone, and checkout, Longhorn slows 2.0-2.4x from one to four writers.
+(2) FSx at 160 MBps slows 2.6-2.7x.
+(3) EFS Elastic remains about 1.1x.
+(4) The 160 MBps FSx floor is the tier modeled only for a small cluster; the medium and large cost tiers buy 320 and 640 MBps, whose concurrency behavior is unmeasured.
+(5) The benchmark does not cover more than four writers.
 ----
-(5) [Concurrency crossover remains open]: EFS has the flattest curve, while its crossover with Longhorn and FSx lies beyond the measured range. #open-decision
+(6) [Concurrency crossover remains open]: EFS has the flattest curve, while its crossover with Longhorn and FSx lies beyond the measured range. #open-decision
     +> [Managed AWS storage is conditional]
+
+[Historical NFS saturation warns against extrapolation]: Nebari Classic exhausted shared NFS at conference tutorial scale, and managed EFS became unresponsive on a separate occasion even after its performance tier was raised. A managed service can therefore still become a system-wide bottleneck beyond the measured range. #open-decision
+    +> [Concurrency crossover remains open]
 
 <Local staging can narrow the filesystem requirement>: Data-intensive jobs can copy inputs to node-local storage, execute there, and save results back to durable storage.
 
@@ -307,8 +339,11 @@ dot:
 (3) The modeled monthly totals for 10, 50, and 200 users are $231, $1,045, and $6,235 for the incumbent, compared with $86, $423, and $2,466 for gp3 homes plus FSx Single-AZ shared storage.
 (4) The comparison excludes operator labor and cross-AZ Longhorn replication traffic.
 ----
-(5) [AWS cost model favors managed shared storage with FSx]: With FSx as the managed RWX provider, the managed-shared shape costs 2.5-2.7x less at each modeled tier.
+(5) [AWS cost model favors managed shared storage with FSx]: The Longhorn incumbent costs 2.5-2.7x the gp3-homes plus FSx Single-AZ shared-storage shape at each modeled tier.
     -> [Universal Longhorn]
+
+[Managed homes do not produce the same saving]: The Multi-AZ FSx shape that places both homes and `/shared` on managed RWX costs $231, $1,083, and $6,307, effectively the same as the $231, $1,045, and $6,235 Longhorn incumbent while carrying the home-latency penalty. #open-decision
+    _> <Longhorn costs more on AWS>
 
 [Right-size home requests before migration]: Every shape prices homes by requested capacity rather than actual use. Reducing oversized requests has 2.67x the effect under Longhorn and requires no backend migration. #open-decision
     _> <Longhorn costs more on AWS>
@@ -418,7 +453,7 @@ dot:
 
 (1) EFS is regional by design; FSx offers explicit Single-AZ and Multi-AZ deployment types.
 (2) Measured Multi-AZ FSx is about 20% slower than Single-AZ FSx on extraction and clone and indistinguishable at four writers.
-(3) Its modeled bill is 1.65-1.67x higher.
+(3) Its modeled total is about 1.7x higher at the medium tier and ranges from 1.3x to 2.3x across all modeled tiers.
 ----
 (4) [Multi-AZ storage turns availability into a provider and cost choice]: The architecture requires cross-AZ reachability; each managed provider supplies and prices it differently.
     _> <Longhorn masks EBS topology>
@@ -467,21 +502,22 @@ dot:
 (4) EFS Elastic takes 38.86, 33.09, and 31.77 seconds.
 (5) Metadata reads and bulk I/O do not show the same penalty; the home objection is specifically write latency.
 ----
-(6) [RWX homes impose a 9-to-37x write penalty]: The performance cost is a property of remote RWX access across all tested candidates.
+(6) [RWX home penalties span 16-to-100x]: Holding the engine constant, Longhorn RWO to RWX costs 16-37x on untar, clone, and checkout. Against gp3, managed RWX costs 19-47x for FSx Single-AZ, 26-57x for FSx Multi-AZ, and 47-100x for EFS Elastic.
     -> [Home access mode is a product decision]
 
 [Environment builds use the workspace volume]: The default environment is in the container image, interactive Nebi environments use the per-user workspace PVC, and application environments use node-local emptyDir. Environment-create timings do not measure home or `/shared` performance.
     _> <RWX writes are much slower>
 
-[No home latency threshold exists]: The benchmark cannot decide whether 15-32 second Git operations are an acceptable price for free scheduling and simpler AWS storage without an explicit product threshold. #open-decision
-    _> [RWX homes impose a 9-to-37x write penalty]
+[No home latency threshold exists]: The benchmark cannot decide whether 13-33 second Git operations are an acceptable price for free scheduling and simpler AWS storage without an explicit product threshold. #open-decision
+    _> [RWX home penalties span 16-to-100x]
 
 <One filesystem concentrates failures>: A managed filesystem can place many user homes behind one service-level failure domain.
 
 (1) Independent PVCs can still use separate child volumes, quotas, and snapshots.
 (2) The parent filesystem, throughput tier, and service endpoint remain shared.
+(3) Per-user filesystems limit a workload that saturates its home to one user; placing every home behind one parent filesystem lets one workload affect the whole deployment.
 ----
-(3) [Managed homes share infrastructure risk]: The managed design trades per-volume machinery for a broader managed-service dependency.
+(4) [Managed homes share infrastructure risk]: The managed design trades per-volume machinery for a broader managed-service dependency.
 
 [Managed RWX lifecycle is provider-specific]: EFS access points and FSx child volumes expose different quota, resize, snapshot, and deletion behavior. For FSx, child volumes can be quota-limited or share a growable parent pool but cannot combine a hard quota with in-place growth; the filesystem grows by at least 10%, has a six-hour cooldown, and never shrinks. Each candidate needs its own StorageClass and lifecycle contract. #open-decision
     _> [RWX homes simplify AWS operations]
@@ -517,12 +553,12 @@ dot:
 * [Assumption 1]: Production DSP includes multi-user group-directory collaboration. #core-assumption
 * [Assumption 2]: User workloads remain independently schedulable across nodes. #core-assumption
 * [Assumption 3]: RWX is a required platform capability, not a required cluster-wide default. #core-assumption
-* [Assumption 4]: Large datasets use object storage; mounted storage serves POSIX homes, outputs, environments, and shared small-file work. #architecture-decision
+* [Assumption 4]: Large datasets use object storage; volume storage serves POSIX homes, outputs, environments, and shared small-file work. #architecture-decision
 * [Assumption 5]: Longhorn remains supported for Hetzner and comparable environments. #core-assumption
 * [Assumption 6]: Managed RWX does not imply FSx. EFS is the existing AWS integration; the FSx evaluation on the `remove-longhorn-aws` branch establishes feasibility and benchmark data for an alternative. Selection compares FSx integration and maintenance against the recurring per-cluster EFS premium over the expected fleet lifetime. #open-decision
 * [Assumption 7]: Homes and Nebi workspaces are RWO and jointly require the per-user node pin. #core-assumption
 * [Assumption 8]: RWX homes require an ephemeral or otherwise non-pinning workspace volume to release the pin. #open-decision
-* [Assumption 9]: The benchmark shows a 9-37x metadata-write penalty for RWX homes and no product threshold for accepting it. #open-decision
+* [Assumption 9]: Holding the engine constant, RWO to RWX costs 16-37x on home-relevant operations. Against gp3, managed RWX costs 19-100x overall and the modeled Multi-AZ FSx home shape costs 26-57x; no product threshold exists for accepting it. #open-decision
 * [Assumption 10]: AWS EBS homes require per-AZ node groups or Karpenter; AZ-outage tolerance remains undefined. #open-decision
 * [Assumption 11]: Longhorn provides NIC's implemented backup path; every moved volume needs replacement coverage. #core-assumption
 * [Assumption 12]: With FSx as the managed RWX provider, the managed-shared shape is the least expensive modeled AWS shape. The EFS range is higher but depends on unmeasured I/O and lifecycle tiering, while the Longhorn-RWX-only estimate depends on unverified instance-manager placement. #open-decision
