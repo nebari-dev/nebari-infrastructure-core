@@ -29,9 +29,9 @@ NIC reads `examples/local-config.yaml` and handles three scenarios automatically
 
 | Config | What happens |
 |--------|-------------|
-| No `git_repository` section | Auto-creates `~/.nic/gitops/{project_name}` (or `$TMPDIR/nebari-gitops-{project_name}` when there is no home directory) and mounts it into the cluster |
-| `url: "file:///path/to/repo"` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
-| `url: "git@github.com:..."` | No mount - ArgoCD pulls from the remote repo directly |
+| `repository: { local: {} }` | Auto-creates `~/.nic/gitops/{project_name}` (or `$TMPDIR/nebari-gitops-{project_name}` when there is no home directory) and mounts it into the cluster |
+| `repository.local.path: /path/to/repo` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
+| `repository.existing.url: "git@github.com:..."` | No mount - ArgoCD pulls from the remote repo directly |
 
 For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
 

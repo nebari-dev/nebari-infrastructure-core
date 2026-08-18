@@ -25,7 +25,7 @@ You need:
 
 | Tool | Why | Notes |
 | --- | --- | --- |
-| Go 1.26.5 or newer | Building and testing NIC | `go.mod` holds the authoritative version |
+| Go 1.26.6 or newer | Building and testing NIC | `go.mod` holds the authoritative version |
 | Docker or Podman | The local Kind workflow and `make test-integration` | Either works for the Kind workflow. `make test-integration` checks for a `docker` binary specifically, so with Podman you need a `docker` alias on your PATH |
 | `golangci-lint` | `make lint`, and the pre-commit hook | [Install guide](https://golangci-lint.run/welcome/install/) |
 | `pre-commit` | `make pre-commit` | `pip install pre-commit` |

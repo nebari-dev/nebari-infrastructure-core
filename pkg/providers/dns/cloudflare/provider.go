@@ -15,6 +15,9 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+// ProviderName is the registry key and config block name for this provider.
+const ProviderName = "cloudflare"
+
 const (
 	defaultTTL      = 300
 	recordTypeA     = "A"
@@ -39,7 +42,7 @@ func NewProviderForTesting(client CloudflareClient) *Provider {
 
 // Name returns the provider name.
 func (p *Provider) Name() string {
-	return "cloudflare"
+	return ProviderName
 }
 
 // Validate checks that the Cloudflare configuration is consistent with the

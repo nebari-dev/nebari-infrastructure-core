@@ -20,7 +20,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`       // required
     DNS           *DNSConfig         `yaml:"dns,omitempty"`           // optional
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`    // required
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
     TrustBundle   *TrustBundleConfig `yaml:"trust_bundle,omitempty"`  // enterprise CA bundle
     Backups       *BackupsConfig     `yaml:"backups,omitempty"`       // off-cluster Longhorn backups
@@ -39,7 +39,9 @@ cluster:                       # required, exactly one provider
 dns:                           # optional, exactly one provider
   cloudflare: { ... }
 
-git_repository: { ... }        # optional on local provider; required for cloud providers
+repository:                    # required, exactly one provider
+  existing: { ... }
+
 certificate: { ... }           # optional, defaults to selfsigned
 trust_bundle: { ... }          # optional, enterprise CA bundle (path OR inline)
 backups: { ... }               # optional, off-cluster Longhorn backups
@@ -101,29 +103,42 @@ Two further optional top-level blocks, defined in `pkg/config/trust_bundle.go` a
 
 Field-level detail for both lives in [`16-configuration-reference.md`](../appendix/16-configuration-reference.md).
 
-## 7.6 Git Repository Block
+## 7.6 Repository Block
+
+The GitOps repository follows the same provider pattern as `cluster:` and `dns:` (`RepositoryConfig` in `pkg/config/config.go`): exactly one provider key, backed by the provider implementations in `pkg/providers/repository/`. Two providers exist: `existing` (a remote repo NIC clones and pushes to) and `local` (a directory on the host, for dev clusters).
 
 ```go
-// from pkg/git
+// from pkg/providers/repository/existing
 type Config struct {
-    URL        string      `yaml:"url"`              // git@..., https://..., or file://...
-    Branch     string      `yaml:"branch,omitempty"` // default: main
-    Path       string      `yaml:"path,omitempty"`   // subdirectory for this cluster
-    Auth       AuthConfig  `yaml:"auth"`
+    URL        string      `yaml:"url"`                   // git@... or https://...
+    Branch     string      `yaml:"branch"`                // default: main
+    Path       string      `yaml:"path"`                  // subdirectory for this cluster
+    Auth       AuthConfig  `yaml:"auth"`                  // NIC's write credentials
     ArgoCDAuth *AuthConfig `yaml:"argocd_auth,omitempty"` // optional read-only; falls back to Auth
 }
 
 type AuthConfig struct {
-    SSHKeyEnv string `yaml:"ssh_key_env,omitempty"`
-    TokenEnv  string `yaml:"token_env,omitempty"`
+    Token *EnvRef `yaml:"token,omitempty"` // HTTPS token auth
+    SSH   *EnvRef `yaml:"ssh,omitempty"`   // SSH private-key auth
+    InsecureSkipHostKeyVerification bool `yaml:"insecure_skip_host_key_verification,omitempty"`
+}
+
+type EnvRef struct {
+    Env string `yaml:"env"` // name of the env var holding the secret
+}
+
+// from pkg/providers/repository/local
+type Config struct {
+    Path   string `yaml:"path"`   // default: ~/.nic/gitops/<project_name>
+    Branch string `yaml:"branch"` // default: main
 }
 ```
 
-The git repository is where NIC renders ArgoCD `Application` manifests during deploy. ArgoCD then syncs from it.
+The repository is where NIC renders ArgoCD `Application` manifests during deploy. ArgoCD then syncs from it.
 
-- **Local file:// repos** are valid (and the default for local Kind clusters that have `InfraSettings.SupportsLocalGitOps = true`). The local provider's auto-bootstrap creates `~/.nic/gitops/<project_name>` if no `git_repository:` block is provided (`git.DefaultLocalPath`), falling back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved.
-- **Cloud providers** require an explicit `git_repository:` block; cluster nodes cannot see the dev machine's filesystem, so a remote (SSH or HTTPS) repo is required.
-- Credentials are referenced by env-var name, never inlined. NIC scrubs the `auth:` and `argocd_auth:` blocks, and the resolved trust bundle, from any copy of the config it writes into the GitOps repo (`scrubbedConfig` in `pkg/nic/deploy.go`).
+- **`repository.local`** provisions a directory on the host and is only valid on cluster providers with `InfraSettings.SupportsLocalGitOps = true` (currently only local Kind clusters). When `path` is omitted, NIC creates `~/.nic/gitops/<project_name>` (`config.DefaultLocalRepositoryPath`), falling back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved.
+- **Cloud providers** require `repository.existing`; cluster nodes cannot see the dev machine's filesystem, so a remote (SSH or HTTPS) repo is required.
+- Credentials are referenced by env-var name, never inlined, so the copy of the config NIC commits into the repo (`nic-config.yaml`) is safe as-is; only a `path:`-based trust bundle is rewritten to its resolved inline form (`committedConfig` in `pkg/nic/deploy.go`).
 
 ## 7.7 Example Configs
 
@@ -142,14 +157,14 @@ The full per-provider field reference lives in [`16-configuration-reference.md`]
 
 ## 7.8 Validation
 
-`NebariConfig.Validate(opts ValidateOptions)` runs at parse time. `ValidateOptions` carries the set of valid cluster and DNS provider names, supplied by the caller (typically `cmd/nic` looking up names from `pkg/registry`). The config package itself doesn't know which provider names are valid, which keeps it decoupled from provider implementations.
+`NebariConfig.Validate(opts ValidateOptions)` runs at parse time. `ValidateOptions` carries the sets of valid cluster, DNS, and repository provider names, supplied by the caller (typically `cmd/nic` looking up names from `pkg/registry`). The config package itself doesn't know which provider names are valid, which keeps it decoupled from provider implementations.
 
 Validation enforces:
 
 - `project_name` is set and matches `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`
 - `cluster:` is present with exactly one provider key matching `opts.ClusterProviders`
 - `dns:`, if present, has exactly one provider key matching `opts.DNSProviders`
-- `git_repository:`, if present, validates per `pkg/git.Config.Validate()`
+- `repository:` is present with exactly one provider key matching `opts.RepositoryProviders`
 - `trust_bundle:`, if present, has at most one of `path` / `inline`; an inline value must contain a PEM certificate and no private key (a `path:` bundle is only read at deploy/destroy time, so `Validate()` never touches disk)
 - `certificate:` validates the type and, for `type: existing`, that exactly one of `existing_secret` / `files` / `env` is set
 - `backups:`, if present and enabled, validates the target, schedules, and credentials against the selected cluster provider name
@@ -174,4 +189,4 @@ CLOUDFLARE_API_TOKEN=...
 GIT_SSH_PRIVATE_KEY=...
 ```
 
-The `git_repository.auth.ssh_key_env` / `token_env` fields point at env-var names, not at the values. This keeps the config file safe to commit and lets the same file be used across operator machines with different credentials.
+The `repository.existing.auth.ssh.env` / `token.env` fields point at env-var names, not at the values. This keeps the config file safe to commit and lets the same file be used across operator machines with different credentials.

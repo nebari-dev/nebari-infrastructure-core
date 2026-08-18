@@ -84,7 +84,7 @@ func TestWriteAllToGit_KeycloakDBCluster(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+	if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	got, err := os.ReadFile(clusterPath(dir))
@@ -107,7 +107,7 @@ func TestWriteAllToGit_KeycloakDBCluster(t *testing.T) {
 func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+	if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	raw, err := os.ReadFile(keycloakBaseValuesPath(dir))
@@ -139,7 +139,7 @@ func TestWriteAllToGit_KeycloakUsesCNPG(t *testing.T) {
 func TestWriteAllToGit_KeycloakDBCredentialsFromSecret(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+	if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 		t.Fatalf("WriteAllToGit: %v", err)
 	}
 	raw, err := os.ReadFile(keycloakBaseValuesPath(dir))

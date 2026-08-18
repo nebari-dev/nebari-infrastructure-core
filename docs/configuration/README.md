@@ -22,8 +22,9 @@ This directory contains auto-generated documentation for Nebari Infrastructure C
 
 ### Additional Configuration
 
-- [Git Repository Configuration](git.md) - Configuration options for GitOps repository integration with ArgoCD.
 - [Trust Bundle Configuration](trust-bundle.md) - Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.
 - [Backups Configuration](backups.md) - Off-cluster backup scheduling for Longhorn volumes (S3/Azure targets, retention, keyless auth).
 - [Longhorn Storage Configuration](longhorn.md) - Distributed block storage settings shared by the cloud providers, including dedicated-node scheduling.
 - [Cloudflare DNS Configuration](cloudflare.md) - Configuration options for Cloudflare DNS provider.
+- [Existing GitOps Repository Configuration](repository-existing.md) - Configuration options for pointing ArgoCD at a GitOps repository you already host.
+- [Local GitOps Repository Configuration](repository-local.md) - Configuration options for the NIC-managed local GitOps repository ArgoCD syncs from.

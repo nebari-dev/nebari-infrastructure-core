@@ -9,14 +9,17 @@ certificate:
 
 # GitOps repository configuration (required for foundational services)
 # ArgoCD uses this repository to deploy Envoy Gateway, cert-manager, Keycloak, etc.
-git_repository:
-  url: "git@github.com:my-org/my-gitops-repo.git"
-  branch: main
-  path: "clusters/my-nebari-aws"
-  auth:
-    ssh_key_env: GIT_SSH_PRIVATE_KEY
-    # OR use token for HTTPS:
-    # token_env: GIT_TOKEN
+repository:
+  existing:
+    url: "git@github.com:my-org/my-gitops-repo.git"
+    branch: main
+    path: "clusters/my-nebari-aws"
+    auth:
+      ssh:
+        env: GIT_SSH_PRIVATE_KEY
+      # OR use a token for HTTPS:
+      # token:
+      #   env: GIT_TOKEN
 
 cluster:
   aws:

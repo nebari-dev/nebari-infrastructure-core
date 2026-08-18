@@ -10,12 +10,13 @@ This file follows the [AGENTS.md](https://agents.md) convention and is read by C
 
 NIC is organized around pluggable **providers**. A provider is a small Go interface with one implementation per backend; each provider is free to use whatever tool fits the backend best (OpenTofu, a vendor CLI, a Kubernetes-native installer, a REST API). The CLI never branches on provider names - it depends only on provider interfaces.
 
-The codebase currently has two provider categories in tree:
+The codebase currently has three provider categories in tree:
 
 - **Cluster providers** (`pkg/providers/cluster/`) - bring up the Kubernetes cluster
 - **DNS providers** (`pkg/providers/dns/`) - manage DNS records pointing at the cluster's load balancer
+- **Repository providers** (`pkg/providers/repository/`) - provision or resolve the GitOps repository that ArgoCD syncs foundational software from
 
-More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
+More categories (certificate issuers, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
 
 
 ### Cluster Providers
@@ -23,7 +24,7 @@ More categories (certificate issuers, git hosting, software installers) are plan
 | Provider | Backing tool | Status |
 | --- | --- | --- |
 | `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
-| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
+| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; resolved via `NIC_HETZNER_K3S_PATH` / `PATH` / pinned download (checksum-verified) | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
 | `local` | Kind. `nic deploy` creates the Kind cluster (reusing it if one already exists) and bootstraps it; `nic destroy` deletes it | Working |
 | `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
@@ -129,24 +130,26 @@ pkg/
   │   ├── validate.go   # Validate orchestration
   │   ├── kubeconfig.go # Kubeconfig retrieval
   │   └── status.go     # status.Update -> slog translation (StartSlogHandler)
-  ├── provider/         # Cluster provider interface + implementations
-  │   ├── provider.go   # Provider interface, InfraSettings, DeployOptions
-  │   ├── aws/          # OpenTofu-backed; templates/ holds embedded .tf files
-  │   ├── azure/        # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
-  │   ├── hetzner/      # hetzner-k3s-backed; downloads + caches the binary
-  │   ├── existing/     # Bring-your-own kubeconfig
-  │   ├── local/        # Kubeconfig validator for Kind clusters
-  │   └── gcp/          # Stub
-  ├── dnsprovider/      # DNS provider interface + implementations
-  │   ├── provider.go   # DNSProvider interface
-  │   └── cloudflare/   # Cloudflare API implementation
-  ├── registry/         # Unified registry holding both cluster and DNS providers
+  ├── providers/        # Provider interfaces + implementations, one directory per category
+  │   ├── cluster/      # Provider interface, InfraSettings, DeployOptions (provider.go)
+  │   │   ├── aws/      # OpenTofu-backed; templates/ holds embedded .tf files
+  │   │   ├── azure/    # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
+  │   │   ├── hetzner/  # hetzner-k3s-backed; downloads + caches the binary
+  │   │   ├── existing/ # Bring-your-own kubeconfig
+  │   │   ├── local/    # Kind-backed local clusters
+  │   │   └── gcp/      # Stub
+  │   ├── dns/          # DNSProvider interface (provider.go)
+  │   │   └── cloudflare/ # Cloudflare API implementation
+  │   └── repository/   # Repository provider interface + sealed Source/Auth contract (provider.go)
+  │       ├── existing/ # Pre-existing remote repository (https or ssh)
+  │       └── local/    # Directory on disk for local/dev clusters
+  ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
   │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
   ├── tofu/             # terraform-exec wrapper (used by the AWS and Azure cluster providers)
   ├── argocd/           # ArgoCD bootstrap and foundational-apps templating
   ├── config/           # YAML config parsing/validation
-  ├── git/              # Git config types and client used by ArgoCD GitOps repo
+  ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
@@ -190,12 +193,13 @@ DNS providers are stateless - domain and config are passed to each call. `cloudf
 
 ### The Provider Registry
 
-`pkg/registry/registry.go` holds both provider categories behind one thread-safe struct:
+`pkg/registry/registry.go` holds all provider categories behind one thread-safe struct:
 
 ```go
 type Registry struct {
-    ClusterProviders *ProviderList[provider.Provider]
-    DNSProviders     *ProviderList[dnsprovider.DNSProvider]
+    ClusterProviders    *ProviderList[cluster.Provider]
+    DNSProviders        *ProviderList[dns.Provider]
+    RepositoryProviders *ProviderList[repository.Provider]
 }
 ```
 
@@ -239,7 +243,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`
     DNS           *DNSConfig         `yaml:"dns,omitempty"`
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
 }
 ```
@@ -347,6 +351,15 @@ func SomeFunction(ctx context.Context, ...) error {
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
 
+### Adding a New Repository Provider
+
+1. Create `pkg/providers/repository/<name>/`.
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
+4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
+5. Update `examples/` configs with the new `repository:` provider block.
+6. Cover the provider with table-driven unit tests (see `pkg/providers/repository/existing/` for the pattern).
+
 ### Adding a New Configuration Field
 
 1. Decide whether the field is generic (top-level on `NebariConfig`) or provider-specific (decoded by the provider from `ProviderConfig()`).
@@ -395,7 +408,7 @@ Either way, a failure that can leave resources behind must surface in the exit c
 
 **Critical:** Code must respect package boundaries.
 
-- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`provider.Provider`, `dnsprovider.DNSProvider`), never on specific implementations.
+- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`cluster.Provider`, `dns.Provider`, `repository.Provider`), never on specific implementations.
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
@@ -454,7 +467,7 @@ Core libraries (see `go.mod`):
 
 Runtime dependencies (per cluster provider):
 - **AWS / Azure:** OpenTofu, resolved in order: `NIC_TOFU_PATH` override, compatible `tofu` on `PATH`, automatic download into the user cache. See `docs/operations/packaging.md` for the full contract
-- **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
+- **Hetzner:** `hetzner-k3s`, resolved in order: `NIC_HETZNER_K3S_PATH` override, `hetzner-k3s` on `PATH`, automatic download (SHA256-verified) into the user cache. Not on conda-forge/prefix.dev, so network-restricted deploys can pre-provide it - though `nic deploy` still fetches k3s release tags via `hetzner-k3s releases`, so fully air-gapped Hetzner deploys are not yet supported. See `docs/operations/packaging.md`
 - **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
 
@@ -482,6 +495,6 @@ Run before every commit:
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
 6. **Logging convention:** `slog` usage only in the application layer (`cmd/nic` / `internal/cli`), not in `pkg/`
-7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
+7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.

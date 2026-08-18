@@ -11,8 +11,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	repositorylocal "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -119,6 +121,27 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		}
 	}
 
+	// Halt Argo CD reconciliation before anything is deleted. With the
+	// application controller running, self-heal recreates deleted resources
+	// mid-teardown. An unreachable cluster is skipped, since nothing is
+	// running that could recreate resources. A reachable cluster that cannot
+	// be suspended aborts the destroy unless Force is set. This runs first
+	// because it is the most failure-prone fatal step: aborting here leaves
+	// everything, including DNS records, intact.
+	if !opts.DryRun {
+		if kubeconfigBytes, kcErr := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster); kcErr != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cluster unreachable; skipping Argo CD suspension: %v", kcErr)).
+				WithResource("argocd").WithAction("suspending"))
+		} else if err := argocd.SuspendReconciliation(ctx, kubeconfigBytes); err != nil {
+			span.RecordError(err)
+			if !opts.Force {
+				return fmt.Errorf("suspend Argo CD reconciliation: %w", err)
+			}
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to suspend Argo CD reconciliation, continuing with --force; deleted resources may be recreated during teardown: %v", err)).
+				WithResource("argocd").WithAction("suspending"))
+		}
+	}
+
 	if cfg.DNS != nil {
 		if err := c.destroyDNS(ctx, cfg, reg, opts.DryRun); err != nil {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to clean up DNS records").
@@ -169,7 +192,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	if !opts.DryRun {
-		reportRetainedGitOpsDir(ctx, cfg, clusterProvider)
+		reportRetainedGitOpsDir(ctx, cfg)
 	}
 
 	if destroyErr != nil {
@@ -182,29 +205,19 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 // left in place after a destroy so the user knows it exists and where to find
 // it. Cluster teardown does not remove this directory: it may hold local
 // commits or edits the user still wants, and it is cheap to delete manually.
-// Only local file:// directories are reported; remote git repositories have no
-// retained host directory to report. Nothing is logged when the directory no
+// Only the local repository provider retains a host directory; remote git
+// repositories have nothing to report. Nothing is logged when the directory no
 // longer exists on disk.
-func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+func reportRetainedGitOpsDir(ctx context.Context, cfg *config.NebariConfig) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.reportRetainedGitOpsDir")
 	defer span.End()
 
-	gitConfig := cfg.GitRepository
-	if gitConfig == nil {
-		// Fall back to the same auto-generated local config deploy uses, but
-		// only for providers that manage a local GitOps directory.
-		if !clusterProvider.InfraSettings(cfg.Cluster).SupportsLocalGitOps {
-			return
-		}
-		gitConfig = defaultGitConfig(cfg.ProjectName)
-	}
-
-	if !gitConfig.IsLocalPath() {
+	if cfg.Repository == nil || cfg.Repository.ProviderName() != repositorylocal.ProviderName {
 		return
 	}
 
-	localPath, err := gitConfig.GetLocalPath()
+	localPath, err := repositorylocal.ResolveDir(ctx, cfg.ProjectName, cfg.Repository)
 	if err != nil {
 		span.RecordError(err)
 		return

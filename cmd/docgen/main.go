@@ -21,12 +21,40 @@ import (
 	"unicode"
 )
 
-// providerGroups are the directories under pkg/providers/ that hold one
-// subdirectory per provider, each with its own config.go. Discovered via
-// glob rather than a hand-maintained list, so a new provider package or a
-// new struct in an existing provider's config.go is picked up automatically
-// instead of silently missing from the generated docs.
-var providerGroups = []string{"cluster", "dns"}
+// bareNameGroups are the provider categories whose pages are named after the
+// provider alone (aws.md, cloudflare.md). They predate the third category and
+// keep their existing filenames so published links don't break; every other
+// category is qualified as <group>-<name>.md. Collisions are a build error
+// either way - see checkOutputNameCollisions.
+var bareNameGroups = map[string]bool{"cluster": true, "dns": true}
+
+// discoverProviderGroups returns the category directories under pkg/providers/
+// that hold at least one provider with a config.go.
+//
+// This is deliberately not a hand-maintained list. A literal []string{"cluster",
+// "dns"} is what let pkg/providers/repository/ - a whole category with two
+// providers - land on main with no generated documentation and a green docs
+// gate, since a category nobody enumerates produces no pages and therefore no
+// diff to fail on.
+func discoverProviderGroups(rootDir string) ([]string, error) {
+	matches, err := filepath.Glob(filepath.Join(rootDir, "pkg", "providers", "*", "*", "config.go"))
+	if err != nil {
+		return nil, fmt.Errorf("globbing provider groups: %w", err)
+	}
+
+	seen := map[string]bool{}
+	var groups []string
+	for _, match := range matches {
+		group := filepath.Base(filepath.Dir(filepath.Dir(match)))
+		if !seen[group] {
+			seen[group] = true
+			groups = append(groups, group)
+		}
+	}
+
+	sort.Strings(groups)
+	return groups, nil
+}
 
 // providerDocMeta holds human-authored title/description overrides for
 // discovered provider config pages, keyed by the provider directory relative
@@ -40,6 +68,9 @@ var providerDocMeta = map[string]struct{ title, desc string }{
 	"pkg/providers/cluster/local":    {"Local Provider Configuration", "Configuration options for local Kubernetes deployments."},
 	"pkg/providers/cluster/existing": {"Existing Cluster Configuration", "Configuration options for attaching to an existing Kubernetes cluster."},
 	"pkg/providers/dns/cloudflare":   {"Cloudflare DNS Configuration", "Configuration options for Cloudflare DNS provider."},
+
+	"pkg/providers/repository/local":    {"Local GitOps Repository Configuration", "Configuration options for the NIC-managed local GitOps repository ArgoCD syncs from."},
+	"pkg/providers/repository/existing": {"Existing GitOps Repository Configuration", "Configuration options for pointing ArgoCD at a GitOps repository you already host."},
 }
 
 // configFile represents a source file and the structs to extract from it. A
@@ -63,6 +94,7 @@ var configFiles = []configFile{
 		path: "pkg/config/config.go",
 		structs: []string{
 			"NebariConfig",
+			"RepositoryConfig",
 			"CertificateConfig",
 			"ACMEConfig",
 			"ExistingSecretRef",
@@ -71,15 +103,6 @@ var configFiles = []configFile{
 		},
 		docTitle: "Core Configuration",
 		docDesc:  "Core Nebari configuration options used by all providers.",
-	},
-	{
-		path: "pkg/git/config.go",
-		structs: []string{
-			"Config",
-			"AuthConfig",
-		},
-		docTitle: "Git Repository Configuration",
-		docDesc:  "Configuration options for GitOps repository integration with ArgoCD.",
 	},
 	{
 		// TrustBundleConfig is a top-level NebariConfig field that lives in its
@@ -121,7 +144,7 @@ var configFiles = []configFile{
 // than silent: validateDocumentedRefs fails the build when a documented struct
 // references another struct in the same package with no page, which is exactly
 // what a split-out config file would produce.
-func discoverProviderConfigFiles(rootDir string) ([]configFile, error) {
+func discoverProviderConfigFiles(rootDir string, providerGroups []string) ([]configFile, error) {
 	var discovered []configFile
 
 	for _, group := range providerGroups {
@@ -181,7 +204,18 @@ func main() {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	providerFiles, err := discoverProviderConfigFiles(*rootDir)
+	providerGroups, err := discoverProviderGroups(*rootDir)
+	if err != nil {
+		log.Fatalf("Failed to discover provider groups: %v", err)
+	}
+	if len(providerGroups) == 0 {
+		log.Fatalf("No provider categories discovered under pkg/providers/*/*/config.go")
+	}
+	if *verbose {
+		log.Printf("Provider categories: %s", strings.Join(providerGroups, ", "))
+	}
+
+	providerFiles, err := discoverProviderConfigFiles(*rootDir, providerGroups)
 	if err != nil {
 		log.Fatalf("Failed to discover provider config files: %v", err)
 	}
@@ -190,6 +224,10 @@ func main() {
 	}
 
 	allConfigFiles := append(append([]configFile{}, configFiles...), providerFiles...)
+
+	if err := checkOutputNameCollisions(allConfigFiles); err != nil {
+		log.Fatalf("Documentation gap: %v", err)
+	}
 
 	var allRendered []StructDoc
 	for _, cf := range allConfigFiles {
@@ -301,6 +339,17 @@ func generateOutputName(sourcePath string) string {
 	dir := filepath.Dir(sourcePath)
 	base := filepath.Base(dir)
 
+	// pkg/providers/<group>/<name>/config.go: qualify the page with its
+	// category unless the category predates the naming rule, so that
+	// cluster/local and repository/local don't both claim local.md - which
+	// would silently overwrite one with the other.
+	if rel := filepath.ToSlash(dir); strings.HasPrefix(rel, "pkg/providers/") {
+		parts := strings.Split(strings.TrimPrefix(rel, "pkg/providers/"), "/")
+		if len(parts) == 2 && !bareNameGroups[parts[0]] {
+			return parts[0] + "-" + parts[1] + ".md"
+		}
+	}
+
 	switch base {
 	case "config":
 		// pkg/config/ holds more than one documented file (config.go plus
@@ -386,4 +435,30 @@ func writeIndexEntries(b *strings.Builder, files []configFile) {
 	for _, cf := range files {
 		fmt.Fprintf(b, "- [%s](%s) - %s\n", cf.docTitle, generateOutputName(cf.path), cf.docDesc)
 	}
+}
+
+// checkOutputNameCollisions fails when two source files would be written to the
+// same page. Nothing downstream notices otherwise: the second write overwrites
+// the first, the index still lists both, and the drift gate sees a consistent
+// tree. pkg/config hit this once already (trust_bundle.go silently replacing
+// core.md), and adding a provider category makes it reachable again via
+// same-named providers in different categories.
+func checkOutputNameCollisions(files []configFile) error {
+	claimed := map[string]string{} // output page -> source path that claimed it
+
+	var clashes []string
+	for _, cf := range files {
+		name := generateOutputName(cf.path)
+		if prev, ok := claimed[name]; ok {
+			clashes = append(clashes, fmt.Sprintf("%s is claimed by both %s and %s", name, prev, cf.path))
+			continue
+		}
+		claimed[name] = cf.path
+	}
+
+	if len(clashes) > 0 {
+		sort.Strings(clashes)
+		return fmt.Errorf("generated pages collide:\n  - %s", strings.Join(clashes, "\n  - "))
+	}
+	return nil
 }

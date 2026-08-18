@@ -13,6 +13,9 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
+// ProviderName is the registry key and config block name for this provider.
+const ProviderName = "gcp"
+
 // Provider implements the GCP provider
 type Provider struct{}
 
@@ -23,7 +26,7 @@ func NewProvider() *Provider {
 
 // Name returns the provider name
 func (p *Provider) Name() string {
-	return "gcp"
+	return ProviderName
 }
 
 // Validate validates the GCP configuration (stub implementation)

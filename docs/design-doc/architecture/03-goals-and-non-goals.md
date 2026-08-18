@@ -27,7 +27,7 @@ Status icons reflect current state, not original ambition:
 5. ⏳ Multi-cluster support (deploy multiple clusters from one CLI)
 6. ⏳ Cost optimization features (spot instances, autoscaling policies)
 7. ⏳ Compliance profiles (HIPAA, SOC2, PCI-DSS)
-8. ⏳ Auto-provisioning of Git repositories and CI workflows (consumption of an existing repo is already supported via `git_repository:`)
+8. ⏳ Auto-provisioning of Git repositories and CI workflows (consumption of an existing repo is already supported via the `repository.existing` provider)
 9. ⏳ Software pack specification - declare full stacks (databases, caching, apps) alongside foundational software
 10. ⏳ Stack templates for common use cases (data science, ML platform, web apps)
 11. ⏳ Out-of-tree provider plugins as described in [ADR-0004](../../adr/0004-out-of-tree-provider-plugins.md)

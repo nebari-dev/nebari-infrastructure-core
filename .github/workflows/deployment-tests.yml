@@ -82,7 +82,7 @@ jobs:
           token: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         env:
           GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
         with:
@@ -136,7 +136,7 @@ jobs:
           role-duration-seconds: 7200
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         # Leave around 30 minutes for the post hook to destroy the cluster
         timeout-minutes: 90
         env:
@@ -192,7 +192,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         # Leave around 30 minutes for the post hook to destroy the cluster
         timeout-minutes: 90
         env:
@@ -267,7 +267,7 @@ jobs:
           echo "seeded $(wc -l < ~/.hetzner-k3s/k3s-releases.yaml) k3s release tags"
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         # Leave around 15 minutes for the post hook to destroy the cluster
         timeout-minutes: 45
         env:
@@ -328,7 +328,7 @@ jobs:
           kubectl wait --for=condition=Ready nodes --all --timeout=60s
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         env:
           GIT_TOKEN: ${{ secrets.NIC_CI_GITOPS_TOKEN }}
         with:

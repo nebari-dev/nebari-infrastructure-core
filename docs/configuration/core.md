@@ -7,6 +7,7 @@ Core Nebari configuration options used by all providers.
 ## Table of Contents
 
 - [NebariConfig](#nebariconfig)
+- [RepositoryConfig](#repositoryconfig)
 - [CertificateConfig](#certificateconfig)
 - [ACMEConfig](#acmeconfig)
 - [ExistingSecretRef](#existingsecretref)
@@ -25,10 +26,25 @@ NebariConfig represents the parsed nebari-config.yaml structure
 | Domain | `domain` | string | No |  |
 | Cluster | `cluster` | `*ClusterConfig` | No | Cluster Provider configuration. Only one provider can be configured at a time. |
 | DNS | `dns` | `*DNSConfig` | No | DNS provider configuration (optional). Only one provider can be configured at a time. |
-| GitRepository | `git_repository` | `*git.Config` | No | GitRepository configures the GitOps repository for ArgoCD bootstrap (optional) |
+| Repository | `repository` | `*RepositoryConfig` | No | Repository configures the GitOps repository provider. Only one provider can be configured at a time. |
 | Certificate | `certificate` | `*CertificateConfig` | No | Certificate configuration (optional) |
 | TrustBundle | `trust_bundle` | `*TrustBundleConfig` | No | TrustBundle, when set, propagates an enterprise CA bundle both to worker-node OS trust stores (via the cluster provider) and into the cluster via trust-manager. Required when egress is TLS-inspecte... |
 | Backups | `backups` | `*BackupsConfig` | No | Backups configures off-cluster backup scheduling (Longhorn). Optional. |
+
+---
+
+## RepositoryConfig
+
+RepositoryConfig holds typed GitOps repository provider configuration.
+The provider name is the map key, the provider config is the map value.
+Example YAML:
+
+	repository:
+	  existing:
+	    url: "git@github.com:my-org/my-gitops-repo.git"
+	    branch: main
+
+_No documented fields._
 
 ---
 
