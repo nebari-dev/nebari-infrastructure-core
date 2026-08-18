@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
 	github.com/aws/smithy-go v1.27.2
 	github.com/cloudflare/cloudflare-go/v4 v4.6.0
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/goccy/go-yaml v1.19.2
 	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/terraform-exec v0.25.2
