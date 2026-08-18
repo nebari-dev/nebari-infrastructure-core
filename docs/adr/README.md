@@ -24,6 +24,14 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0015](0015-repository-provider-abstraction.md) | Repository Provider Abstraction for GitOps Bootstrap | Accepted | 2026-07-10 |
 | [ADR-0016](0016-opentofu-runtime-version-policy.md) | OpenTofu Runtime Version Policy (External Binaries and Compatibility Window) | Proposed | 2026-08-12 |
 
+## Argument maps
+
+An ADR records a decision and its consequences. When the reasoning behind one is too tangled to follow as prose — several arguments running at once, objections to the objections, claims that only look settled — an [Argdown](https://argdown.org/) argument map is a useful complement: each claim becomes a node, each objection an arrow, and what is still open stays visibly open. The map does not replace the ADR. It shows the working the ADR concludes from, and stays alongside it so the reasoning can be revisited when the decision is.
+
+Not every decision needs one. Reach for a map when the argument is the hard part. Each map lives in its own directory with its source, its rendered SVGs, and a README that walks the argument section by section; `make argdown` re-renders all of them.
+
+- [storage-strategy](storage-strategy/) — Nebari storage strategy: which of Longhorn's roles it should keep, and what replaces the rest
+
 ## ADR Statuses
 
 - **Proposed**: Under discussion, not yet accepted

@@ -1,0 +1,568 @@
+===
+title: Nebari storage strategy
+model:
+  mode: loose
+  removeTagsFromText: true
+color:
+  colorScheme: [ "#c3ccd4", "#c3ccd4", "#c3ccd4" ]
+  groupColorScheme: [ "#f4f5f6" ]
+  tagColors:
+    core-assumption: "#c3ccd4"
+    architecture-decision: "#c3ccd4"
+    open-decision: "#b3762f"
+  relationColors:
+    support: "#5c9e6f"
+    attack: "#c26060"
+    undercut: "#8a6bb0"
+    entails: "#5c9e6f"
+    contrary: "#c26060"
+    contradictory: "#c26060"
+selection:
+  statementSelectionMode: with-relations
+dot:
+  edge:
+    penWidth: 2.5
+    arrowSize: 1.1
+  statement:
+    lineWidth: 260
+    minWidth: 260
+    title: { fontSize: 12, charactersInLine: 34 }
+    text: { fontSize: 11, charactersInLine: 38 }
+  argument:
+    lineWidth: 260
+    minWidth: 260
+    title: { fontSize: 12, charactersInLine: 34 }
+    text: { fontSize: 11, charactersInLine: 38 }
+  graphVizSettings:
+    rankdir: BT
+    ranksep: "0.75"
+    nodesep: "0.4"
+    concentrate: "false"
+    splines: "spline"
+    ratio: ""
+    size: ""
+    pack: "true"
+    packmode: "array_c2"
+===
+
+# Legend
+
+[A claim]: A white box is a claim. A green arrow points from a supporting reason to the claim.
+
+<A reason>: A grey box is a named argument. Its premises appear in the source text.
+    +> [A claim]
+
+<An objection>: A red arrow points from an objection to the claim it disputes.
+    -> [A claim]
+
+<An undercut>: A purple arrow accepts that a claim may be true but disputes that the stated reason establishes it.
+    _> [A claim]
+
+[An open decision]: An orange border marks a question that still depends on evidence or an explicit product choice. #open-decision {isInMap: true}
+
+# Background
+
+[This is decision-support research]: This document records current requirements, measurements, modeled costs, candidate shapes, and arguments. It does not select an AWS storage architecture; provider selection and the other open choices remain for the team to evaluate against the decision gates.
+
+[NIC and packs are separate layers]: Nebari Infrastructure Core provisions Kubernetes and foundational services. Software packs add workload capabilities; the Data Science Pack supplies JupyterHub and schedules user work into pods.
+
+[DSP has several storage workloads]: DSP users need private homes, materialized environments, group-shared POSIX directories, and object storage for large datasets. These workloads have different access, latency, durability, and scheduling requirements.
+
+[Longhorn has three current roles]: On AWS, Longhorn is the default StorageClass, the RWX provider, and NIC's implemented backup path. Those roles are independently replaceable even though the current configuration couples them.
+
+[Longhorn addresses AWS topology]: EBS volumes remain in one AZ. Longhorn replicates data across nodes and masks NIC's inability to request autoscaled capacity in a particular AZ from one multi-AZ node group.
+
+[Longhorn also provides portability]: Hetzner and on-premises-style providers lack an equivalent managed RWX service, so Longhorn supplies a shared Kubernetes storage implementation across those environments.
+
+# Core platform assumption
+
+[RWX is a core platform capability]: A production Nebari deployment with DSP must provide reliable RWX storage for group collaboration. #core-assumption
+    + <DSP collaboration requires RWX>
+    + <Ray worker home access favors RWX>
+        - <Ray can distribute files explicitly>
+    - <Group co-location can emulate RWX>
+        - <Group co-location breaks scheduling>
+    - <Object storage can replace the shared directory>
+        - <Object storage changes the contract>
+    - <Shared storage can be disabled>
+        - <Collaboration remains in scope>
+
+<DSP collaboration requires RWX>: The DSP group-directory contract requires multi-node read-write access.
+
+(1) Authorized group members read and write one POSIX path under `/shared/group-name`.
+(2) Different users' pods remain independently schedulable for capacity, autoscaling, maintenance, and recovery.
+(3) Several pods may access the directory concurrently.
+(4) RWO cannot provide read-write access from pods on different nodes.
+----
+(5) [RWX is a core platform capability]
+
+<Ray worker home access favors RWX>: The agreed near-term Ray path mounts a user's home into independently scheduled workers.
+
+(1) Exploratory users need Ray workers to access local scripts, configuration, and other small files without first publishing everything to object storage.
+(2) A single-node Ray job can use one RWO home without creating a new multi-node access requirement.
+(3) Distributed Ray workers can run in another namespace and across several nodes.
+(4) RWO permits read-write mounts from only one node at a time.
+----
+(5) [Ray home access needs a portable path]: Mounting the home across a distributed Ray cluster requires RWX or an equivalent multi-node filesystem contract; single-node Ray does not.
+    +> [RWX is a core platform capability]
+    <+ [Ray environment delivery is separate]
+
+[Ray environment delivery is separate]: Dharhas Pothina proposed building a container from each user's Nebi or pixi definition before cluster launch, publishing it to Artifact Keeper or another configured registry, and having every autoscaled worker pull the same tagged image. This avoids rebuilding environments on each new worker and narrows the home mount to user files rather than environment trees. The integration and end-to-end workflow remain open design work. #open-decision
+
+<Ray can distribute files explicitly>: Ray can broadcast or copy selected files to workers instead of mounting the home, but that alternative needs its own lifecycle, consistency, and user-experience design.
+    -> [Ray home access needs a portable path]
+
+<Group co-location can emulate RWX>: Kubernetes permits several pods on one node to mount the same RWO volume, so required affinity could force every collaborating pod onto one node.
+
+(1) DSP already co-locates all pods for one user so they can share RWO home and workspace PVCs.
+(2) Extending that mechanism to a group would allow an RWO volume to serve the group.
+----
+(3) [RWO can emulate group sharing]: RWX is unnecessary if every collaborating pod remains on one node.
+
+<Group co-location breaks scheduling>: A group-wide pin is not an acceptable production constraint.
+
+(1) Users may belong to several groups, so group affinity constraints combine transitively.
+(2) One node becomes a hard capacity ceiling for all workloads in the constraint set.
+(3) Autoscaling, maintenance, and failure recovery cannot schedule those pods independently.
+----
+(4) [RWO cannot satisfy group collaboration]: Group co-location trades a storage requirement for an unsustainable compute constraint.
+    -> [RWO can emulate group sharing]
+
+<Object storage can replace the shared directory>: Object storage supports concurrent multi-node access and is the preferred medium for large datasets and immutable artifacts.
+
+(1) Data stored in S3-compatible storage is reachable from Jupyter and distributed compute without a shared PVC.
+(2) Ray workers can parallelize reads against object storage.
+----
+(3) [Object storage removes the RWX requirement]: `/shared` can be replaced with buckets.
+
+<Object storage changes the contract>: Buckets complement mounted storage but do not transparently replace a POSIX directory.
+
+(1) Filesystem applications rely on rename, locking, directories, permissions, and path semantics that object stores do not generally provide.
+(2) Existing notebooks and tools expect a normal mounted path.
+(3) Nebari has no per-user AWS identity or implemented permission layer for translating Keycloak groups into bucket access.
+----
+(4) [Object storage does not remove the RWX requirement]: Use object storage for object-native data and mounted RWX storage where POSIX sharing is required.
+    -> [Object storage removes the RWX requirement]
+
+[Object storage is the default for datasets]: Large datasets belong in object storage; homes, outputs, environments, and shared small-file workflows remain on volume storage. #architecture-decision
+    + <Distributed compute needs a scalable data plane>
+    _> <Object storage can replace the shared directory>
+
+<Distributed compute needs a scalable data plane>: Volume storage is a convenience path for exploratory, single-node, and small-scale work, not the bulk-data path for high-concurrency Ray or Dask workloads.
+
+(1) Distributed workers multiply concurrent filesystem operations.
+(2) Dharhas Pothina described a conference tutorial where large numbers of multi-node Dask clusters exhausted shared NFS, and a separate occasion where managed EFS became unresponsive even after its performance tier was raised.
+(3) Saturating a shared filesystem can also make unrelated homes and collaboration paths unavailable.
+(4) Object storage and parallel filesystems are designed for distributed data access.
+----
+(5) [Distributed data does not belong on shared NFS]: Use per-user volume storage for small user-local inputs and object storage or a parallel filesystem for the distributed data plane.
+
+[Cross-pack sharing has two research paths]: [NIC #597](https://github.com/nebari-dev/nebari-infrastructure-core/issues/597) covers cross-namespace volume access and [NIC #598](https://github.com/nebari-dev/nebari-infrastructure-core/issues/598) covers object-storage access. Cross-pack sharing uses RWX only when its product contract requires POSIX semantics. #open-decision
+
+<Shared storage can be disabled>: DSP can run without the optional shared directory, leaving only per-user RWO volumes.
+
+<Collaboration remains in scope>: Group-directory collaboration is a required DSP capability for the target production platform, so disabling it is not a storage implementation choice.
+    -> <Shared storage can be disabled>
+
+# Storage strategy
+
+[Access mode belongs to the workload]: Each pack requests the access mode its workload needs; the cluster does not impose RWX on every PVC. #architecture-decision
+    + <Capability is not implementation>
+
+[Provider-specific RWX strategy]: Nebari should standardize the RWX contract and acceptance criteria while allowing each infrastructure provider to supply the implementation. #architecture-decision
+    + <Capability is not implementation>
+    + <AWS has managed candidates>
+    + <Hetzner still needs Longhorn>
+    - <Use Longhorn universally>
+
+<Capability is not implementation>: The platform contract should describe observable behavior rather than mandate one storage product.
+
+(1) [RWX is a core platform capability]
+(2) Kubernetes PVCs and StorageClasses provide a provider-independent consumption interface.
+(3) Providers expose different storage services and operational tradeoffs.
+----
+(4) [Provider-specific RWX strategy]
+
+<AWS has managed candidates>: AWS can use a managed RWX provider when it satisfies the shared-directory gates better than Longhorn.
+
+(1) A managed filesystem removes replica placement, server lifecycle, patching, and failover from the cluster.
+(2) EFS is the lower-effort implementation because NIC and the upstream EKS module already expose its filesystem, identity integration, and StorageClass.
+(3) FSx is an optimization candidate with stronger measured single-writer performance and lower modeled cost, but it requires new NIC-owned Terraform, CSI, IAM, StorageClass, lifecycle, and backup work.
+(4) The FSx evaluation implementation on the `remove-longhorn-aws` branch proves feasibility but is not shipped on main.
+----
+(5) [Managed AWS storage is conditional]: The architecture may use any managed RWX provider that satisfies the performance, availability, operations, backup, and cost gates.
+
+[Managed-provider economics must amortize both costs]: Shapes using managed RWX do not depend on FSx. EFS avoids a new integration, while FSx has a modeled recurring-cost advantage: $122-$1,127 per month at 50 users and $814-$4,834 per month at 200 users. FSx must recover its one-time integration and continuing maintenance cost across the expected cluster fleet and lifetime; EFS must not accumulate more recurring cost over that period than the integration work it avoids. The ranges remain uncertain because shared-storage I/O and EFS lifecycle tiering are not measured. #open-decision
+    +> [Managed AWS storage is conditional]
+
+<Hetzner still needs Longhorn>: Providers without a suitable managed RWX service require an in-cluster implementation.
+
+(1) Hetzner cloud volumes are RWO block storage.
+(2) [RWX is a core platform capability]
+(3) Longhorn exports replicated volumes through NFS share-manager pods.
+----
+(4) [Longhorn remains supported]: A managed AWS path adds another implementation; it does not remove Longhorn from the project.
+
+# Longhorn everywhere
+
+<Use Longhorn universally>: One Longhorn implementation across providers reduces differences in support and recovery procedures.
+
+(1) AWS and Hetzner already use Longhorn.
+(2) One storage implementation provides one operator vocabulary and one backup interface.
+(3) Reproducing cross-provider behavior is easier when the data path is the same.
+----
+(4) [Universal Longhorn]: Nebari should use Longhorn for RWX on every provider.
+    + [Longhorn remains supported]
+    + <Longhorn masks EBS topology>
+    + <Longhorn backup is implemented>
+    - <Longhorn creates recurring operator work>
+    - <Longhorn concentrates the RWX path>
+    - <Longhorn prevents fully managed nodes>
+    - <Longhorn is not one cloud integration>
+    - <Longhorn costs more on AWS>
+
+[Longhorn performs well for low-concurrency shared data]: On operations that `/shared` actually serves, Longhorn and FSx are within benchmark noise at one writer. At four writers Longhorn is 1.2-1.4x faster on extraction and checkout. Environment creation does not belong in this comparison because it uses the per-user workspace volume.
+    +> [Universal Longhorn]
+
+# Topic: Longhorn as the default StorageClass
+
+<RWX provider and default class are separate roles>: The RWX requirement does not imply that Longhorn should back every RWO volume.
+
+(1) NIC sets Longhorn as the default StorageClass and demotes every other class during install and upgrade.
+(2) The Keycloak CNPG manifest receives NIC's cluster-wide StorageClass as an explicit value.
+(3) CNPG can replicate database instances at the application layer and does not need RWX when it is configured for multiple instances with zone-aware placement.
+(4) NIC currently configures Keycloak with `instances: 1`, so Longhorn supplies the only cross-node storage redundancy for that database.
+(5) A workload-specific class follows the principle that access mode belongs to the workload.
+----
+(6) [Longhorn should not be the default for every volume]: Longhorn can remain an RWX provider while native block storage serves single-pod workloads, provided each stateful workload has its own availability and durability design.
+    +> [Access mode belongs to the workload]
+
+<NIC lacks a per-workload class seam>: Changing the chart default does not route each workload correctly.
+
+(1) Longhorn defaulting and demotion of other classes are unconditional.
+(2) Keycloak is pinned by an explicit rendered value, while DSP homes and workspaces inherit the cluster default.
+(3) NIC needs an explicit StorageClass choice for each workload before the default can change safely.
+----
+(4) [De-defaulting requires workload routing]: The change is a configuration and rendering change, not only a Longhorn flag.
+    _> <RWX provider and default class are separate roles>
+
+<Backup coverage controls sequencing>: Moving a volume away from Longhorn also moves it out of NIC's implemented backup path.
+
+(1) NIC rejects Longhorn backup configuration when Longhorn is not the effective storage implementation.
+(2) Keycloak currently has one CNPG instance, so moving it to gp3 removes storage-layer failover without adding database-level failover.
+(3) Multi-instance CNPG can protect availability but does not protect logical durability.
+(4) No separate Keycloak backup and restore path exists.
+----
+(5) [Keycloak HA and backup precede de-defaulting]: Moving Keycloak to gp3 requires multi-instance CNPG with zone-aware placement and a backup path as part of the same change.
+    _> [Longhorn should not be the default for every volume]
+
+# Topic: backup and restore
+
+<Longhorn backup is implemented>: NIC provides a tested Longhorn backup and restore path.
+
+(1) NIC configures recurring snapshots and backups, S3 targets, keyless AWS credentials, retained buckets, and detached-volume enrollment.
+(2) A restore runbook and MinIO round-trip integration test cover the workflow.
+(3) The same Longhorn-facing configuration works across providers that run Longhorn.
+(4) No storage-agnostic backup implementation exists in NIC.
+----
+(5) [Longhorn backup is a concrete benefit]: Any shape that moves data off Longhorn replaces working machinery.
+    <_ <Longhorn backup has provider coupling>
+
+<Longhorn backup has provider coupling>: Retaining backup buckets depends on hardcoded provider Terraform state addresses that must be checked with upstream module changes.
+
+(1) The user-facing backup interface is shared.
+(2) Credentials, bucket provisioning, state addresses, and restore behavior remain provider-specific.
+----
+(3) [Backup uniformity has maintenance cost]: Longhorn provides one interface rather than one implementation-free integration.
+
+# Topic: operator burden
+
+<Longhorn creates recurring operator work>: Longhorn adds storage-specific procedures to normal cluster operations.
+
+(1) Node maintenance requires cordon, replica eviction, verification, drain, and termination rather than a normal drain.
+(2) Diagnosis requires Longhorn CRs and concepts such as engines, replicas, faulted volumes, placement, and replenishment delays.
+(3) Dedicated storage nodes add another topology and migration procedure.
+(4) A managed filesystem substitutes mount targets, service limits, and IAM but removes in-cluster replica lifecycle.
+----
+(5) [Longhorn taxes every cluster operator]: The operational unit is each cluster and its on-call team, not the number of provider implementations.
+    -> [Universal Longhorn]
+
+[Longhorn operator time is estimated at 9.3 hours per month]: The model assigns approximately 9.3 operator hours per Longhorn cluster per month and 2.3 hours to the managed-filesystem residual, a difference of about seven hours. The estimate comes from runbooks and observed incidents rather than time-tracking data. #open-decision
+    +> [Longhorn taxes every cluster operator]
+
+[Longhorn requires a storage-aware drain]: A node-group disk resize encounters the instance-manager PDB while the node holds the final replica. Maintenance therefore requires replica movement or an explicit relaxation of the data-safety policy.
+    +> [Longhorn taxes every cluster operator]
+
+[Default AWS disks cannot hold the default RWX request]: Longhorn reserves 25% of the node disk. After system use, NIC's 20 GiB default leaves roughly 2.4 GiB schedulable, so a 20 GiB Longhorn volume faults instead of provisioning. NIC can correct this through defaults or validation, but operators otherwise need to understand the hidden capacity rule.
+    -> [Universal Longhorn]
+
+# Topic: the shared data path
+
+<Longhorn concentrates the RWX path>: Longhorn RWX places one NFS server pod in front of each replicated block volume.
+
+(1) Every client mounts the share-manager export rather than the block device.
+(2) DSP uses one shared PVC with all group directories beneath it, so one server pod handles every group's shared I/O.
+(3) That pod and node form a throughput ceiling and a common recovery path.
+(4) The stock DSP chart instead uses its own NFS pod over a Longhorn RWO volume, which retains the same concentration with an additional transitional layer.
+----
+(5) [Longhorn RWX has a concentrated data path]: Replication is distributed, but access to the shared volume is not.
+    -> [Universal Longhorn]
+
+<The concentration is measurable under load>: Fixed-capacity paths slow as writers are added.
+
+(1) On untar, clone, and checkout, Longhorn slows 2.0-2.4x from one to four writers.
+(2) FSx at 160 MBps slows 2.6-2.7x.
+(3) EFS Elastic remains about 1.1x.
+(4) The 160 MBps FSx floor is the tier modeled only for a small cluster; the medium and large cost tiers buy 320 and 640 MBps, whose concurrency behavior is unmeasured.
+(5) The benchmark does not cover more than four writers.
+----
+(6) [Concurrency crossover remains open]: EFS has the flattest curve, while its crossover with Longhorn and FSx lies beyond the measured range. #open-decision
+    +> [Managed AWS storage is conditional]
+
+[Historical NFS saturation warns against extrapolation]: Nebari Classic exhausted shared NFS at conference tutorial scale, and managed EFS became unresponsive on a separate occasion even after its performance tier was raised. A managed service can therefore still become a system-wide bottleneck beyond the measured range. #open-decision
+    +> [Concurrency crossover remains open]
+
+<Local staging can narrow the filesystem requirement>: Data-intensive jobs can copy inputs to node-local storage, execute there, and save results back to durable storage.
+
+(1) This removes network filesystem latency from the inner execution loop.
+(2) It requires staging, cache invalidation, sufficient local disk, and explicit recovery behavior.
+----
+(3) [Local execution is a workload workaround]: Staging may reduce performance pressure on shared storage but does not remove the durable shared-storage contract. #open-decision
+    _> <Longhorn concentrates the RWX path>
+
+# Topic: cost
+
+<Longhorn costs more on AWS>: Longhorn's main cost is replicated capacity and supporting compute.
+
+(1) Two replicas plus a 25% reserve multiply requested capacity by 2.67.
+(2) Longhorn adds a dedicated storage node group and reserves approximately 12% of each user node's CPU for instance-manager.
+(3) The modeled monthly totals for 10, 50, and 200 users are $231, $1,045, and $6,235 for the incumbent, compared with $86, $423, and $2,466 for gp3 homes plus FSx Single-AZ shared storage.
+(4) The comparison excludes operator labor and cross-AZ Longhorn replication traffic.
+----
+(5) [AWS cost model favors managed shared storage with FSx]: The Longhorn incumbent costs 2.5-2.7x the gp3-homes plus FSx Single-AZ shared-storage shape at each modeled tier.
+    -> [Universal Longhorn]
+
+[Managed homes do not produce the same saving]: The Multi-AZ FSx shape that places both homes and `/shared` on managed RWX costs $231, $1,083, and $6,307, effectively the same as the $231, $1,045, and $6,235 Longhorn incumbent while carrying the home-latency penalty. #open-decision
+    _> <Longhorn costs more on AWS>
+
+[Right-size home requests before migration]: Every shape prices homes by requested capacity rather than actual use. Reducing oversized requests has 2.67x the effect under Longhorn and requires no backend migration. #open-decision
+    _> <Longhorn costs more on AWS>
+
+[The RWX-only shape needs a verified price]: The estimate for gp3 RWO volumes plus Longhorn only for `/shared` assumes instance-manager CPU disappears from user nodes. That placement behavior needs verification before the shape can be compared confidently. #open-decision
+
+[EFS exchanges fixed throughput for variable cost]: EFS Elastic stays flat under measured concurrency but charges per GiB read and written. FSx uses provisioned throughput with a fixed bill and a purchasable ceiling. The model places EFS $122-$1,127 per month above FSx at 50 users and $814-$4,834 above it at 200 users, but actual shared-storage I/O and EFS lifecycle tiering are required to compare them confidently. #open-decision
+    +> [Managed AWS storage is conditional]
+
+# Topic: the compute model
+
+<Longhorn prevents fully managed nodes>: Longhorn requires host capabilities that EKS Auto Mode does not expose.
+
+(1) NIC installs an iSCSI prerequisite into the node OS through a privileged DaemonSet.
+(2) Auto Mode nodes are immutable and provide no package-install path.
+(3) Forced node rotation rebuilds node-local replicas on the provider's schedule.
+----
+(4) [Longhorn and EKS Auto Mode conflict]: AWS cannot use only Auto Mode nodes while it runs Longhorn.
+    -> [Universal Longhorn]
+    +> [Managed AWS storage is conditional]
+
+<A hybrid fleet preserves both>: Traditional managed storage nodes can coexist with Auto Mode compute nodes.
+
+(1) Longhorn and its iSCSI prerequisite stay on the traditional group.
+(2) General workloads use Auto Mode.
+----
+(3) [Hybrid compute is possible]: Longhorn excludes a fully managed fleet, not every use of Auto Mode.
+    _> <Longhorn prevents fully managed nodes>
+
+<Hybrid compute retains both code paths>: The traditional launch template, node-group schema, and autoscaler remain for storage while Auto Mode adds a second compute model.
+    -> [Hybrid compute is possible]
+
+[Auto Mode has independent adoption questions]: Custom node CA trust, long-running user pods, GPU management, load balancing, and migration from Cluster Autoscaler require evaluation even without Longhorn. #open-decision
+    _> <Longhorn prevents fully managed nodes>
+
+# Topic: the other clouds
+
+<Provider-native storage weakens universal Longhorn>: The providers that do not run Longhorn expose managed RWX and cross-zone block storage.
+
+(1) NIC wires Longhorn on AWS and Hetzner, not GCP or Azure.
+(2) GKE exposes Filestore; AKS exposes Azure Files.
+(3) GKE and AKS also expose cross-zone block-storage options, so AWS's EBS topology problem does not generalize unchanged.
+(4) GKE Autopilot forbids the privileged and host access Longhorn requires.
+----
+(5) [Universal Longhorn generalizes the AWS solution]: Longhorn is least compelling on providers that already supply the required capabilities as managed services.
+    -> [Universal Longhorn]
+    +> [Provider-specific RWX strategy]
+
+<Per-provider storage multiplies integration work>: Provider-native storage creates a distinct implementation and operating surface on each cloud.
+
+(1) AWS managed RWX has two integration levels: EFS uses existing NIC and upstream-module support, while FSx requires NIC-owned Helm installation, Pod Identity and IAM wiring, and Terraform resources.
+(2) GKE exposes Filestore as a cluster-addon setting with Workload Identity; AKS includes Azure Files and uses managed identity.
+(3) POSIX ownership uses EFS access points or FSx volume-creation parameters on AWS, Filestore export policies, Azure Files mount options, and kubelet fsGroup on Longhorn.
+(4) Capacity semantics differ between AWS filesystems and their access-point or child-volume abstractions, Filestore service tiers, Azure Files share quotas, and Longhorn PVC expansion.
+(5) Backup uses AWS Backup plus provider-native snapshots where available, Filestore backups and snapshots, Azure Backup for Files, or NIC's Longhorn workflow, each with different credentials and restore behavior.
+(6) Hetzner keeps Longhorn in the project under every strategy, so each managed path is an additional permanent integration.
+----
+(7) [Provider divergence has an N-plus-one cost]: Provider-native storage improves each runtime at the cost of separate driver, identity, ownership, capacity, failure, backup, and restore surfaces.
+    -> [Provider-specific RWX strategy]
+
+<Longhorn is not one cloud integration>: One storage product does not remove cloud-specific integration work.
+
+(1) Every provider needs nodes that support iSCSI, privileged pods, and host access; managed-node offerings differ in whether those capabilities exist.
+(2) GKE Autopilot forbids the required privileged and host access, while EKS Auto Mode provides no path for installing the iSCSI prerequisite.
+(3) Backup credentials, buckets or object storage, retained-resource handling, and Terraform state integration remain provider-specific.
+(4) GCP and Azure have no Longhorn integration in NIC, so compatibility and operations on those providers are unverified.
+----
+(5) [Longhorn standardizes operations, not integration]: Longhorn provides one storage vocabulary and recovery model while retaining provider-specific node, credential, backup, and infrastructure work.
+    _> <Per-provider storage multiplies integration work>
+
+[Other-cloud evidence is vendor research]: GCP and Azure behavior is based on vendor documentation rather than Nebari deployment tests. Version, region, performance, and operational fit remain evaluation work. #open-decision
+    _> <Provider-native storage weakens universal Longhorn>
+
+# Topic: cross-AZ attachment
+
+<Longhorn masks EBS topology>: Removing Longhorn from RWO volumes exposes the fact that EBS remains bound to one AZ.
+
+(1) A dynamically provisioned EBS PV carries a hard zone requirement.
+(2) NIC uses one autoscaling group across several AZs.
+(3) Cluster Autoscaler cannot request capacity in a specific AZ from that group.
+----
+(4) [Removing Longhorn requires AZ-aware compute]: EBS-backed workloads need guaranteed capacity in their volume's AZ, through per-AZ node groups, Karpenter, or a workload-level HA design with verified zone placement.
+    +> [Universal Longhorn]
+
+[Keycloak also becomes AZ-bound on gp3]: Keycloak currently runs one CNPG instance. Any shape that moves its volume to gp3 must either supply compute in that volume's AZ or add multiple CNPG instances with verified zone placement; database backup remains a separate requirement.
+    +> [Removing Longhorn requires AZ-aware compute]
+
+<AZ-aware compute solves healthy-zone rescheduling>: The scheduler keeps the pod in the volume's AZ, and the compute layer supplies capacity there.
+
+(1) The EBS volume does not move.
+(2) The pod starts whenever its AZ has capacity.
+(3) The workload waits if the AZ itself is unavailable.
+----
+(4) [EBS topology is manageable without Longhorn]: The remaining difference is AZ-outage availability rather than cross-AZ attachment correctness.
+    _> <Longhorn masks EBS topology>
+    <- [Per-AZ capacity has a cost]
+
+[Per-AZ capacity has a cost]: Per-AZ node groups duplicate scaling bounds, labels, taints, instance choices, and headroom. Karpenter avoids that fan-out but replaces Cluster Autoscaler. #open-decision
+
+[AZ-outage tolerance is undefined]: Nebari has no stated availability objective for interactive user workloads, so the acceptability of waiting for an EBS volume's AZ cannot be derived from current requirements. #open-decision
+    +> [EBS topology is manageable without Longhorn]
+
+[Longhorn AZ durability is not guaranteed]: NIC uses two replicas with soft zone anti-affinity, so both replicas can reside in one AZ.
+    _> <Longhorn masks EBS topology>
+
+<Multi-AZ RWX removes the home AZ binding>: A regional or Multi-AZ managed RWX service remains reachable across AZs.
+
+(1) EFS is regional by design; FSx offers explicit Single-AZ and Multi-AZ deployment types.
+(2) Measured Multi-AZ FSx is about 20% slower than Single-AZ FSx on extraction and clone and indistinguishable at four writers.
+(3) Its modeled total is about 1.7x higher at the medium tier and ranges from 1.3x to 2.3x across all modeled tiers.
+----
+(4) [Multi-AZ storage turns availability into a provider and cost choice]: The architecture requires cross-AZ reachability; each managed provider supplies and prices it differently.
+    _> <Longhorn masks EBS topology>
+
+# Topic: home volume access mode
+
+[Home access mode is a product decision]: AWS homes may remain on RWO block storage or move to a managed RWX filesystem. The benchmark quantifies the trade but does not define acceptable latency. #open-decision
+    + <RWX homes remove scheduling constraints>
+    + <The current node pin causes user failures>
+    - <RWX writes are much slower>
+    - <One filesystem concentrates failures>
+
+<The current node pin causes user failures>: Required affinity makes one node the ceiling for all concurrent work by one user.
+
+(1) A GPU lab cannot schedule while another user pod pins the user to a CPU node.
+(2) An application on a GPU node prevents scale-down after the lab exits.
+(3) Free capacity elsewhere in the cluster cannot serve the user.
+----
+(4) [The RWO workaround has user-visible cost]: [DSP #221](https://github.com/nebari-dev/data-science-pack/issues/221) records scheduling failures caused by the pin.
+    +> [Home access mode is a product decision]
+
+<RWX homes remove scheduling constraints>: A managed Multi-AZ home can mount from any node or AZ.
+
+(1) User pods regain independent scheduling and bin-packing.
+(2) Per-AZ node provisioning is unnecessary for homes.
+(3) Longhorn can leave AWS when `/shared` also uses managed storage.
+(4) The workspace volume must also stop requiring RWO attachment.
+----
+(5) [RWX homes simplify AWS operations]: The shape removes the node pin, home AZ binding, and Longhorn from AWS together.
+
+<The workspace can be ephemeral>: The workspace holds materialized environments and can use node-local ephemeral storage if Nebi can reconstruct it safely.
+
+(1) DSP already builds application environments into an emptyDir on each launch.
+(2) An ephemeral workspace adds no attachment constraint and removes 20 GiB per user from persistent capacity.
+(3) Nebi stores its database in the home while workspace directories live on the workspace volume.
+(4) Local-only workspaces may contain authored work that is not present on a remote server.
+----
+(5) [Workspace durability needs confirmation]: Nebi must tolerate loss and rematerialize the workspace before this PVC becomes ephemeral. #open-decision
+    +> [RWX homes simplify AWS operations]
+
+<RWX writes are much slower>: Every tested RWX implementation adds a network round trip to metadata writes and file creation.
+
+(1) EBS gp3 completes untar, clone, and checkout in 0.39, 0.71, and 0.32 seconds.
+(2) Longhorn RWX takes 14.51, 15.31, and 15.83 seconds.
+(3) FSx Single-AZ takes 16.99, 13.32, and 15.15 seconds.
+(4) EFS Elastic takes 38.86, 33.09, and 31.77 seconds.
+(5) Metadata reads and bulk I/O do not show the same penalty; the home objection is specifically write latency.
+----
+(6) [RWX home penalties span 16-to-100x]: Holding the engine constant, Longhorn RWO to RWX costs 16-37x on untar, clone, and checkout. Against gp3, managed RWX costs 19-47x for FSx Single-AZ, 26-57x for FSx Multi-AZ, and 47-100x for EFS Elastic.
+    -> [Home access mode is a product decision]
+
+[Environment builds use the workspace volume]: The default environment is in the container image, interactive Nebi environments use the per-user workspace PVC, and application environments use node-local emptyDir. Environment-create timings do not measure home or `/shared` performance.
+    _> <RWX writes are much slower>
+
+[No home latency threshold exists]: The benchmark cannot decide whether 13-33 second Git operations are an acceptable price for free scheduling and simpler AWS storage without an explicit product threshold. #open-decision
+    _> [RWX home penalties span 16-to-100x]
+
+<One filesystem concentrates failures>: A managed filesystem can place many user homes behind one service-level failure domain.
+
+(1) Independent PVCs can still use separate child volumes, quotas, and snapshots.
+(2) The parent filesystem, throughput tier, and service endpoint remain shared.
+(3) Per-user filesystems limit a workload that saturates its home to one user; placing every home behind one parent filesystem lets one workload affect the whole deployment.
+----
+(4) [Managed homes share infrastructure risk]: The managed design trades per-volume machinery for a broader managed-service dependency.
+
+[Managed RWX lifecycle is provider-specific]: EFS access points and FSx child volumes expose different quota, resize, snapshot, and deletion behavior. For FSx, child volumes can be quota-limited or share a growable parent pool but cannot combine a hard quota with in-place growth; the filesystem grows by at least 10%, has a six-hour cooldown, and never shrinks. Each candidate needs its own StorageClass and lifecycle contract. #open-decision
+    _> [RWX homes simplify AWS operations]
+
+[NFS ownership moves into the StorageClass]: Kubelet fsGroup handling does not initialize NFS-backed volumes. FSx must set root uid, gid, permissions, and root-squash during volume creation; EFS uses access points. Each candidate must prove the DSP uid/gid model. #open-decision
+    _> [RWX homes simplify AWS operations]
+
+# AWS decision gate
+
+[AWS storage decision]: First choose between Longhorn and a managed RWX provider by applying explicit acceptance criteria to each workload; then choose EFS, FSx for OpenZFS, or another managed implementation on its measured merits and integration cost. #open-decision
+
+<POSIX behavior gate>: Verify concurrent access, locking, atomic rename, permissions, ownership, setgid propagation, subPath mounts, and recovery behavior. {isInMap: false}
+
+<Performance gate>: Set an acceptable home-write latency and test `/shared` beyond four concurrent writers. The existing benchmark covers thirteen configurations and differences below about 1.2x are treated as noise. {isInMap: false}
+
+<Availability gate>: Define behavior and recovery objectives for node failure, AZ failure, storage endpoint failure, remount, lock recovery, maintenance, and disaster recovery. {isInMap: false}
+
+<Backup and restore gate>: State coverage for every volume, retention, credential model, recovery point and time objectives, and restore into a new cluster. {isInMap: false}
+
+<Operations gate>: Compare installation, upgrades, observability, capacity management, incident response, security patching, and provider-specific NIC integration. {isInMap: false}
+
+<Cost gate>: Include storage, provisioned throughput, request charges, transfer, backups, required worker compute, operator time, and representative customer scale. Verify the RWX-only shape and actual shared-storage I/O per user. {isInMap: false}
+
+<Migration gate>: Provide a tested migration and rollback path for every user volume that changes backend or access mode. {isInMap: false}
+
+<Portability gate>: Account for maintaining Longhorn for Hetzner alongside every provider-native storage, backup, and restore implementation. {isInMap: false}
+
+# Resulting assumptions
+
+// These statements summarize the present understanding. They have no
+// relations, so they remain in the source without cluttering rendered maps.
+
+* [Assumption 1]: Production DSP includes multi-user group-directory collaboration. #core-assumption
+* [Assumption 2]: User workloads remain independently schedulable across nodes. #core-assumption
+* [Assumption 3]: RWX is a required platform capability, not a required cluster-wide default. #core-assumption
+* [Assumption 4]: Large datasets use object storage; volume storage serves POSIX homes, outputs, environments, and shared small-file work. #architecture-decision
+* [Assumption 5]: Longhorn remains supported for Hetzner and comparable environments. #core-assumption
+* [Assumption 6]: Managed RWX does not imply FSx. EFS is the existing AWS integration; the FSx evaluation on the `remove-longhorn-aws` branch establishes feasibility and benchmark data for an alternative. Selection compares FSx integration and maintenance against the recurring per-cluster EFS premium over the expected fleet lifetime. #open-decision
+* [Assumption 7]: Homes and Nebi workspaces are RWO and jointly require the per-user node pin. #core-assumption
+* [Assumption 8]: RWX homes require an ephemeral or otherwise non-pinning workspace volume to release the pin. #open-decision
+* [Assumption 9]: Holding the engine constant, RWO to RWX costs 16-37x on home-relevant operations. Against gp3, managed RWX costs 19-100x overall and the modeled Multi-AZ FSx home shape costs 26-57x; no product threshold exists for accepting it. #open-decision
+* [Assumption 10]: AWS EBS homes require per-AZ node groups or Karpenter; AZ-outage tolerance remains undefined. #open-decision
+* [Assumption 11]: Longhorn provides NIC's implemented backup path; every moved volume needs replacement coverage. #core-assumption
+* [Assumption 12]: With FSx as the managed RWX provider, the managed-shared shape is the least expensive modeled AWS shape. The EFS range is higher but depends on unmeasured I/O and lifecycle tiering, while the Longhorn-RWX-only estimate depends on unverified instance-manager placement. #open-decision
+* [Assumption 13]: Operator effort is estimated rather than measured and remains a separate cost line. #open-decision
+* [Assumption 14]: Managed filesystems reduce AWS cluster operations while increasing the number of provider-specific integrations maintained by the project. #open-decision
+* [Assumption 15]: Cross-pack sharing uses object storage unless its product contract specifically requires shared POSIX storage. #open-decision
+* [Assumption 16]: Keycloak currently runs one CNPG instance. Every shape that moves its database from Longhorn to gp3 requires an explicit multi-instance, zone-placement, and backup design. #core-assumption

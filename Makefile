@@ -1,10 +1,14 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot argdown
 
 # Variables
 BINARY_NAME=nic
 CMD_DIR=./cmd/nic
 PKG_DIRS=$(shell go list ./... | grep -v /vendor/)
 GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
+ARGDOWN_CONFIG=docs/adr/storage-strategy/argdown.config.js
+ARGDOWN_OUT=$(dir $(ARGDOWN_CONFIG))
+# process names defined in ARGDOWN_CONFIG
+ARGDOWN_MAPS=$(shell node -e 'console.log(Object.keys(require("./$(ARGDOWN_CONFIG)").config.processes).join(" "))' 2>/dev/null)
 
 # Build information
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -109,6 +113,21 @@ pre-commit: ## Install pre-commit hooks
 pre-commit-run: ## Run pre-commit hooks on all files
 	@echo "Running pre-commit hooks..."
 	pre-commit run --all-files
+
+argdown: ## Render Argdown argument maps to SVG beside their .argdown source
+	@echo "Rendering Argdown maps..."
+	@which npx > /dev/null || (echo "Error: npx is not installed. Install Node.js." && exit 1)
+	@# without the dot binary the CLI still reports success and writes only .dot
+	@which dot > /dev/null || (echo "Error: graphviz is not installed. Install with: brew install graphviz" && exit 1)
+	@# one process per map: an overview plus a map per argument direction
+	for p in $(ARGDOWN_MAPS); do \
+		npx -y @argdown/cli run $$p --config $(ARGDOWN_CONFIG) || exit 1; \
+	done
+	@# keep graphviz's width/height: an SVG with only a viewBox scales itself to
+	@# the viewport, so browser zoom re-lays it out instead of magnifying it
+	@# the CLI also drops its graphviz intermediate in ./dot; nothing consumes it
+	@rm -rf dot
+	@echo "SVGs written to $(ARGDOWN_OUT)"
 
 release-snapshot: ## Create a snapshot release (local testing)
 	@echo "Creating snapshot release..."
