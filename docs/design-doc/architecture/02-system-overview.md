@@ -42,8 +42,8 @@
 │    pkg/providers/repository)                                │
 │    - The repository provider resolves the GitOps repo:      │
 │      existing = remote (SSH/HTTPS), local = host directory  │
-│    - local requires a cluster provider with                 │
-│      InfraSettings.SupportsLocalGitOps=true (local/Kind)    │
+│    - local needs the directory visible to the cluster's     │
+│      nodes (kind mounts it; other clusters: operator does)  │
 │    - Renders ArgoCD app manifests, commits, and pushes      │
 │      (remote) or commits in place (local)                   │
 └─────────────────────────────────────────────────────────────┘
@@ -104,7 +104,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`pkg/providers/cluster/` (Cluster providers)**
 
-- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`).
+- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LonghornEnabled`).
 - One sub-package per cluster provider. `aws/`, `azure/`, `hetzner/`, `local/`, and `existing/` are implemented; `gcp/` is a registered stub (its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil` rather than provisioning anything, and `GetKubeconfig` returns "not yet implemented").
 - AWS-specific Terraform templates live under `pkg/providers/cluster/aws/templates/` and are embedded into the binary via `go:embed`.
 
@@ -153,7 +153,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 | ArgoCD for foundational software | GitOps best practices, declarative dependency management via sync waves, self-healing. |
 | Embedded Helm SDK for the ArgoCD install itself | Bootstraps the GitOps controller without requiring an out-of-band Helm CLI. After ArgoCD is up, everything else is GitOps. |
 | Out-of-tree Nebari Operator | The operator is its own product with its own release cadence. NIC just deploys it. |
-| `InfraSettings` for provider-shaped capabilities | CLI code never switches on provider name. Providers expose capabilities (e.g., `NeedsMetalLB`, `StorageClass`, `SupportsLocalGitOps`) and the rest of the system consumes them. |
+| `InfraSettings` for provider-shaped capabilities | CLI code never switches on provider name. Providers expose capabilities (e.g., `NeedsMetalLB`, `StorageClass`, `LonghornEnabled`) and the rest of the system consumes them. |
 | OpenTelemetry in library code, `slog` in CLI | Library code is reusable across CLI commands and (eventually) plugins. CLI is the only layer that emits human-facing logs. |
 
 ### 2.4 The Status Channel: pkg → cmd Seam

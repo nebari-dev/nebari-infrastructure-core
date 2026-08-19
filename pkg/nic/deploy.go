@@ -155,17 +155,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, fmt.Errorf("validate backups configuration: %w", err)
 	}
 
-	// Reject the local repository provider on a cluster that cannot host it
-	// before provisioning any infrastructure. The source-kind check after
-	// repository provisioning below remains the backstop for providers whose
-	// LocalSource cannot be predicted from the config alone.
-	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
-		span.RecordError(err)
-		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
-			WithMetadata("error", err.Error()))
-		return nil, err
-	}
-
 	// Resolve the top-level trust bundle once, here at the orchestration layer.
 	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
@@ -209,14 +198,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps repository resolution failed").
 				WithMetadata("error", err.Error()))
 			return nil, fmt.Errorf("resolve repository source: %w", err)
-		}
-		// A local repository requires a local cluster that can host it (e.g. a kind cluster).
-		if _, isLocal := repoSource.(repository.LocalSource); isLocal && !infraSettings.SupportsLocalGitOps {
-			err := fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repository provider", cfg.Cluster.ProviderName())
-			span.RecordError(err)
-			status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
-				WithMetadata("error", err.Error()))
-			return nil, err
 		}
 		if err := c.bootstrapGitOps(ctx, cfg, repoSource, opts.RegenApps, infraSettings, trustPEM); err != nil {
 			span.RecordError(err)

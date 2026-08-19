@@ -98,11 +98,6 @@ type InfraSettings struct {
 	// volumes (e.g., shared model storage for LLM serving).
 	EFSStorageClass string
 
-	// SupportsLocalGitOps indicates whether this provider can use local file:// git repos.
-	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).
-	// Cloud providers (AWS, GCP, Azure) return false - their nodes can't see the dev machine's FS.
-	SupportsLocalGitOps bool
-
 	// LonghornEnabled indicates whether the Longhorn distributed block storage
 	// (and therefore the Longhorn UI) is deployed by this provider for the given
 	// cluster config. Used by the foundational deploy flow to decide whether to

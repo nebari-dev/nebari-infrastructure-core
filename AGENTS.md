@@ -166,7 +166,7 @@ type Provider interface {
 }
 ```
 
-`InfraSettings` describes Kubernetes-level capabilities the rest of NIC needs to know about. Current fields: `StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`.
+`InfraSettings` describes Kubernetes-level capabilities the rest of NIC needs to know about. Current fields: `StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LonghornEnabled`.
 
 Cluster-shaped branching anywhere outside the cluster provider package itself **must** go through `InfraSettings` - never `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code. The same pattern is followed by `dnsprovider.DNSProvider`, and is intended to scale to certificate, git hosting, and installer categories.
 
@@ -347,7 +347,7 @@ func SomeFunction(ctx context.Context, ...) error {
 ### Adding a New Repository Provider
 
 1. Create `pkg/providers/repository/<name>/`.
-2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (ArgoCD's repo-server reads it through a hostPath mount, so it only works on a cluster whose nodes can see that path).
 3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
 4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
 5. Update `examples/` configs with the new `repository:` provider block.
@@ -405,7 +405,7 @@ Either way, a failure that can leave resources behind must surface in the exit c
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
-- **Cluster-shaped capabilities flow through `InfraSettings`.** When the CLI or `pkg/argocd` needs to branch on a cluster-provider-specific capability (MetalLB requirement, Keycloak context path, HTTPS port, local GitOps support, etc.), add a field to `InfraSettings` and set it in each provider's `InfraSettings()` method. Do not introduce `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code - those become architectural debt that make adding a new provider require changes across the codebase. Existing examples: `NeedsMetalLB`, `StorageClass`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LoadBalancerAnnotations`, `SupportsLocalGitOps`.
+- **Cluster-shaped capabilities flow through `InfraSettings`.** When the CLI or `pkg/argocd` needs to branch on a cluster-provider-specific capability (MetalLB requirement, Keycloak context path, HTTPS port, etc.), add a field to `InfraSettings` and set it in each provider's `InfraSettings()` method. Do not introduce `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code - those become architectural debt that make adding a new provider require changes across the codebase. Existing examples: `NeedsMetalLB`, `StorageClass`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LoadBalancerAnnotations`, `LonghornEnabled`.
 
 **Why this matters:**
 - Adding a new provider should not require changes to CLI commands or the config package.

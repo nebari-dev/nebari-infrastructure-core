@@ -136,8 +136,8 @@ type Config struct {
 
 The repository is where NIC renders ArgoCD `Application` manifests during deploy. ArgoCD then syncs from it.
 
-- **`repository.local`** provisions a directory on the host and is only valid on cluster providers with `InfraSettings.SupportsLocalGitOps = true` (currently only local Kind clusters). When `path` is omitted, NIC creates `~/.nic/gitops/<project_name>` (`config.DefaultLocalRepositoryPath`), falling back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved.
-- **Cloud providers** require `repository.existing`; cluster nodes cannot see the dev machine's filesystem, so a remote (SSH or HTTPS) repo is required.
+- **`repository.local`** provisions a directory on the host. ArgoCD's repo-server reads it through a hostPath mount, so it is useful on any cluster whose nodes can see that path: the local (kind) provider mounts it automatically, and a k3d or minikube cluster adopted through `cluster.existing` works when the operator mounted the directory into the nodes. When `path` is omitted, NIC creates `~/.nic/gitops/<project_name>` (`config.DefaultLocalRepositoryPath`), falling back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved.
+- **Cloud providers** need `repository.existing`; their nodes cannot see the dev machine's filesystem, so a local directory would leave the repo-server with nothing to read. NIC does not reject the pairing - it cannot tell a mounted host path from an unreachable one - so the failure surfaces at ArgoCD sync time.
 - Credentials are referenced by env-var name, never inlined, so the copy of the config NIC commits into the repo (`nic-config.yaml`) is safe as-is; only a `path:`-based trust bundle is rewritten to its resolved inline form (`committedConfig` in `pkg/nic/deploy.go`).
 
 ## 7.7 Example Configs

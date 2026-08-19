@@ -263,7 +263,7 @@ cluster:
 
 The kube context name is derived from `project_name` (`kindContextName` in `pkg/providers/cluster/local/provider.go`); there is no `kube_context:` field. There is likewise no `storage_class:` field on the local provider. `local.Config` carries an inline `AdditionalFields map[string]any`, so unrecognized keys parse **silently** rather than erroring - do not assume a key works because `nic validate` passes.
 
-The local provider sets `InfraSettings.SupportsLocalGitOps = true`, which is what permits the `repository.local` provider (a GitOps repo in a host directory, auto-created when no explicit path is given). See [§7](#7-gitops-repository) for the path.
+The local provider mounts the default `repository.local` directory (a GitOps repo in a host directory, auto-created when no explicit path is given) into the kind node container, so no extra wiring is needed to pair the two. See [§7](#7-gitops-repository) for the path.
 
 ### 2.4 `cluster.existing` (adopt a pre-provisioned cluster)
 
@@ -558,7 +558,7 @@ repository:
 Notes:
 
 - The `repository:` block is required on every provider; `nic validate` rejects a config without one.
-- The `local` provider is only valid on a cluster provider with `InfraSettings.SupportsLocalGitOps = true` (currently only the local provider); it enables a zero-credential GitOps workflow for development. Deploy fails with an incompatibility error on any other cluster provider.
+- The `local` provider enables a zero-credential GitOps workflow for development. It is accepted on every cluster provider, because NIC cannot tell whether a given cluster's nodes can read the directory: ArgoCD's repo-server reads it through a hostPath mount, which works on the local (kind) provider and on a k3d/minikube cluster adopted through `cluster.existing` whose nodes mount the directory. On a managed cloud cluster the nodes cannot see it and the repo-server fails to read the repository at sync time.
 - When `repository.local.path` is omitted, NIC auto-creates **`~/.nic/gitops/<project_name>`** and points ArgoCD at it (`config.DefaultLocalRepositoryPath`). It falls back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved. The home-directory location is deliberate: it is a host path kind and Docker Desktop can mount reliably.
 - On the local (kind) provider, NIC auto-mounts that default path into the node container. A **custom** `repository.local.path` needs a matching `cluster.local.kind.extra_mounts` entry with identical `host_path` and `container_path`, or the in-cluster ArgoCD repo-server cannot see it.
 - The copy of the config NIC commits into the repo (`nic-config.yaml`) carries only env-var names for credentials, never resolved secrets; a `path:`-based trust bundle is rewritten to its resolved inline form (`committedConfig` in `pkg/nic/deploy.go`).

@@ -122,7 +122,6 @@ The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provi
 - **`HTTPSPort`** - Gateway HTTPS listener port (`443` normalized from `0`; can be overridden e.g. for local-dev on `8443`)
 - **`LoadBalancerAnnotations`** - applied to the Gateway's provisioned `LoadBalancer` Service
 - **`EFSStorageClass`** - name of the EFS-backed `StorageClass` if available (AWS-only)
-- **`SupportsLocalGitOps`** - whether `file://` GitOps repos are acceptable (`local` only)
 
 Adding a new provider-shaped capability means adding a field to `InfraSettings` and populating it in each provider's `InfraSettings(cfg)`. There must be no `switch cfg.Cluster.ProviderName()` in `pkg/argocd` or `cmd/nic`.
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted · Amended (2026-08): the cluster-compatibility check on `LocalSource` was dropped; see [Update](#update-2026-08-local-repositories-are-not-gated-on-the-cluster-provider).
 
 Supersedes [ADR-0001](0001-git-provider-for-gitops-bootstrap.md).
 
@@ -72,7 +72,7 @@ The `repository:` block is **required**. The previous implicit modes (auto-creat
 
 ### Wiring
 
-`pkg/nic` is the only bridge between the contract and the git client: it resolves the configured provider from the registry, calls `Provision` (after cluster deploy, so future providers may target in-cluster forges), enforces cluster compatibility (a `LocalSource` requires a cluster provider with `SupportsLocalGitOps`), and type-switches the `Source` to drive the git client. `pkg/argocd` consumes the `Source` plus a working-directory string: a `LocalSource` becomes a hostPath mount into the repo-server, a `RemoteSource` becomes a repository-credentials Secret using `ArgoCDAuth()`.
+`pkg/nic` is the only bridge between the contract and the git client: it resolves the configured provider from the registry, calls `Provision` (after cluster deploy, so future providers may target in-cluster forges), enforced cluster compatibility (a `LocalSource` required a cluster provider with `SupportsLocalGitOps`; removed, see the Update below), and type-switches the `Source` to drive the git client. `pkg/argocd` consumes the `Source` plus a working-directory string: a `LocalSource` becomes a hostPath mount into the repo-server, a `RemoteSource` becomes a repository-credentials Secret using `ArgoCDAuth()`.
 
 Credentials are resolved from environment variables inside `Provision` and exist only in the returned `Source`; the config that gets committed back to the GitOps repository carries only the env-var names.
 
@@ -115,6 +115,32 @@ Credentials are resolved from environment variables inside `Provision` and exist
 
 **Cons:**
 - Breaking config change (documented in the PR migration notes).
+
+## Update (2026-08): local repositories are not gated on the cluster provider
+
+As implemented, `pkg/nic` rejected a `LocalSource` on any cluster provider whose
+`InfraSettings` did not set `SupportsLocalGitOps`, which in practice meant the
+kind-backed `local` provider and nothing else. The gate was stricter than the
+behavior it modelled and than what NIC did before this ADR, where an explicit
+`git_repository: {url: "file://..."}` was honored on any cluster and
+`SupportsLocalGitOps` only decided whether NIC would *auto-create* a default
+GitOps directory when none was configured.
+
+What the repo-server actually needs is for the directory to be readable from the
+cluster's nodes, and that is a property of how the cluster was built, not of
+which provider NIC used to reach it. A k3d or minikube cluster adopted through
+`cluster.existing` satisfies it whenever the operator mounted the directory into
+the node containers, which is what
+[action-nebari-sandbox](https://github.com/nebari-dev/action-nebari-sandbox) does
+to run the whole platform stack in CI without a remote GitOps repository. NIC
+cannot distinguish that cluster from an EKS one by inspecting config, so it now
+declines to guess: the pairing is accepted everywhere and a cluster whose nodes
+cannot see the path fails at ArgoCD sync time instead of at validation.
+
+The check (`ensureLocalRepositorySupported`, plus the post-provision source-kind
+re-check in `Deploy`) and the now-unused `InfraSettings.SupportsLocalGitOps`
+field are removed. Nothing about the provider contract or the sealed `Source`
+kinds changes.
 
 ## Links
 

@@ -303,11 +303,10 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // LonghornEnabled is false: Longhorn is not yet wired for the local provider.
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
-		StorageClass:        defaultStorageClass,
-		NeedsMetalLB:        true,
-		MetalLBAddressPool:  defaultMetalLBAddressPool,
-		SupportsLocalGitOps: true,
-		LonghornEnabled:     false,
+		StorageClass:       defaultStorageClass,
+		NeedsMetalLB:       true,
+		MetalLBAddressPool: defaultMetalLBAddressPool,
+		LonghornEnabled:    false,
 	}
 
 	localCfg, err := parseConfig(context.Background(), cfg)

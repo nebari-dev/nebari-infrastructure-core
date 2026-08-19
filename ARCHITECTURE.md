@@ -283,7 +283,7 @@ Resolves a pre-existing remote repository (SSH or HTTPS) into a `RemoteSource`. 
 
 **Location:** `pkg/providers/repository/local/`
 
-Provisions a directory on disk as a `LocalSource` - the zero-dependency, no-network option for local/dev clusters. NIC commits to it in place and ArgoCD's repo-server reads it via a hostPath mount, so it requires a cluster provider with `SupportsLocalGitOps` (e.g. kind); `pkg/nic` rejects incompatible pairings before the GitOps bootstrap runs.
+Provisions a directory on disk as a `LocalSource` - the zero-dependency, no-network option for local/dev clusters. NIC commits to it in place and ArgoCD's repo-server reads it via a hostPath mount, so the cluster's nodes have to be able to see that path. The kind-backed `local` cluster provider mounts it for you. Any other cluster provider is allowed to pair with it, but the mount is the operator's responsibility: a k3d or minikube cluster adopted through `existing` works once the directory is mounted into the node containers, while a managed cloud cluster cannot see it at all and its repo-server will fail to read the repository.
 
 | File | Purpose |
 |------|---------|

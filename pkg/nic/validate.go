@@ -8,7 +8,6 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
-	repositorylocal "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository/local"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
@@ -55,10 +54,6 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
-	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("configuration validation failed: %w", err)
-	}
 
 	return nil
 }
@@ -98,18 +93,6 @@ func validateRepositoryProvider(ctx context.Context, cfg *config.NebariConfig, r
 	}
 	if err := repoProvider.Validate(ctx, cfg.ProjectName, cfg.Repository); err != nil {
 		return fmt.Errorf("invalid repository: %w", err)
-	}
-	return nil
-}
-
-// ensureLocalRepositorySupported rejects the local repository provider on a
-// cluster that cannot host its directory (only local/kind clusters can mount
-// one). The name-based check catches this at validate time; deploy re-checks
-// the provisioned source kind, which also covers out-of-tree providers that
-// return a LocalSource.
-func ensureLocalRepositorySupported(cfg *config.NebariConfig, supportsLocalGitOps bool) error {
-	if cfg.Repository != nil && cfg.Repository.ProviderName() == repositorylocal.ProviderName && !supportsLocalGitOps {
-		return fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repository provider", cfg.Cluster.ProviderName())
 	}
 	return nil
 }

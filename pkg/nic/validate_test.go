@@ -242,52 +242,6 @@ func TestValidateRepositoryProvider(t *testing.T) {
 	}
 }
 
-func TestEnsureLocalRepositorySupported(t *testing.T) {
-	tests := []struct {
-		name                string
-		repoProviders       map[string]any
-		supportsLocalGitOps bool
-		wantErr             bool
-	}{
-		{
-			name:                "local repository on unsupported cluster rejected",
-			repoProviders:       map[string]any{"local": map[string]any{}},
-			supportsLocalGitOps: false,
-			wantErr:             true,
-		},
-		{
-			name:                "local repository on supported cluster",
-			repoProviders:       map[string]any{"local": map[string]any{}},
-			supportsLocalGitOps: true,
-			wantErr:             false,
-		},
-		{
-			name:                "existing repository never gated",
-			repoProviders:       map[string]any{"existing": map[string]any{}},
-			supportsLocalGitOps: false,
-			wantErr:             false,
-		},
-		{
-			name:                "no repository block is a no-op",
-			repoProviders:       nil,
-			supportsLocalGitOps: false,
-			wantErr:             false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ensureLocalRepositorySupported(testRepoConfig(tt.repoProviders), tt.supportsLocalGitOps)
-			if tt.wantErr && err == nil {
-				t.Fatal("ensureLocalRepositorySupported() expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("ensureLocalRepositorySupported() unexpected error: %v", err)
-			}
-		})
-	}
-}
-
 // TestStructuralValidatePermitsZoneInconsistency pins the destroy/kubeconfig
 // behavior: those commands validate via cfg.Validate(validateOptions(...))
 // only and never call validateDNSProvider, so a config whose domain is
@@ -316,5 +270,38 @@ func TestStructuralValidatePermitsZoneInconsistency(t *testing.T) {
 		if err := cfg.Validate(opts); err != nil {
 			t.Errorf("structural Validate() unexpected error for %q: %v", cfg.Domain, err)
 		}
+	}
+}
+
+// TestValidateAllowsLocalRepositoryOnNonLocalCluster pins the contract that a
+// local repository is usable with any cluster provider, not just the kind-backed
+// local one. NIC cannot tell whether a cluster's nodes can read a host path: a
+// k3d or minikube cluster reached through the `existing` provider can, when the
+// operator mounted the directory into the nodes, so the pairing is the
+// operator's call to make.
+func TestValidateAllowsLocalRepositoryOnNonLocalCluster(t *testing.T) {
+	ctx := context.Background()
+
+	client, err := NewClient(ctx)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	cfg := &config.NebariConfig{
+		ProjectName: "test-project",
+		Cluster: &config.ClusterConfig{
+			Providers: map[string]any{
+				"existing": map[string]any{"context": "k3d-test-project"},
+			},
+		},
+		Repository: &config.RepositoryConfig{
+			Providers: map[string]any{
+				"local": map[string]any{"path": t.TempDir()},
+			},
+		},
+	}
+
+	if err := client.Validate(ctx, cfg); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
 	}
 }

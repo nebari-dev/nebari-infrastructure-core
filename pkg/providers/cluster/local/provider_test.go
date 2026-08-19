@@ -117,9 +117,6 @@ func TestInfraSettings(t *testing.T) {
 			if settings.KeycloakBasePath != "" {
 				t.Errorf("KeycloakBasePath = %q, want empty", settings.KeycloakBasePath)
 			}
-			if !settings.SupportsLocalGitOps {
-				t.Error("SupportsLocalGitOps = false, want true")
-			}
 		})
 	}
 }
