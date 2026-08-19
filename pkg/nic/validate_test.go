@@ -2,8 +2,10 @@ package nic
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -316,5 +318,88 @@ func TestStructuralValidatePermitsZoneInconsistency(t *testing.T) {
 		if err := cfg.Validate(opts); err != nil {
 			t.Errorf("structural Validate() unexpected error for %q: %v", cfg.Domain, err)
 		}
+	}
+}
+
+// TestRejectPlaceholders covers the placeholder gate at the layer that owns it.
+// The end-to-end wiring is pinned by the cmd tests and by
+// TestExampleConfigsValidate; this pins the behavior itself, including the two
+// cases that have no YAML source to scan.
+func TestRejectPlaceholders(t *testing.T) {
+	tests := []struct {
+		name        string
+		raw         string
+		path        string
+		wantErr     bool
+		wantFields  []string
+		wantMention string
+	}{
+		{
+			name:        "placeholder in a scalar is rejected and names the file",
+			raw:         "project_name: CHANGEME\n",
+			path:        "/tmp/nebari-config.yaml",
+			wantErr:     true,
+			wantFields:  []string{"project_name"},
+			wantMention: "/tmp/nebari-config.yaml",
+		},
+		{
+			name:       "placeholder in a mapping key is rejected",
+			raw:        "cluster:\n  aws:\n    node_groups:\n      CHANGEME:\n        instance: m5.large\n",
+			path:       "cfg.yaml",
+			wantErr:    true,
+			wantFields: []string{"cluster.aws.node_groups.CHANGEME"},
+		},
+		{
+			name: "filled config passes",
+			raw:  "project_name: my-nebari\n",
+			path: "cfg.yaml",
+		},
+		{
+			// A config built in Go has no YAML text, so there is nothing to scan
+			// and the gate must not invent a failure.
+			name: "config with no source is a no-op",
+			raw:  "",
+			path: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg *config.NebariConfig
+			if tt.raw == "" {
+				cfg = &config.NebariConfig{ProjectName: "CHANGEME"}
+			} else {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "nebari-config.yaml")
+				if err := os.WriteFile(path, []byte(tt.raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				cfg, err = config.ParseConfig(context.Background(), path)
+				if err != nil {
+					t.Fatalf("ParseConfig() error = %v", err)
+				}
+				tt.wantMention = strings.Replace(tt.wantMention, "/tmp/nebari-config.yaml", path, 1)
+			}
+
+			err := rejectPlaceholders(cfg)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("rejectPlaceholders() = %v, want nil", err)
+				}
+				return
+			}
+
+			var placeholderErr *config.PlaceholderError
+			if !errors.As(err, &placeholderErr) {
+				t.Fatalf("rejectPlaceholders() = %v, want *config.PlaceholderError", err)
+			}
+			if !reflect.DeepEqual(placeholderErr.FieldPaths, tt.wantFields) {
+				t.Errorf("FieldPaths = %v, want %v", placeholderErr.FieldPaths, tt.wantFields)
+			}
+			if tt.wantMention != "" && !strings.Contains(err.Error(), tt.wantMention) {
+				t.Errorf("error %q does not name the config file %q", err, tt.wantMention)
+			}
+		})
 	}
 }

@@ -83,6 +83,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		}
 	}()
 
+	// Reject unfilled CHANGEME placeholders before provisioning anything, so a
+	// deploy against an unedited starter config fails fast instead of creating
+	// real infrastructure from nonsense values.
+	if err := rejectPlaceholders(cfg); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	// Validate configuration with registered providers
 	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)

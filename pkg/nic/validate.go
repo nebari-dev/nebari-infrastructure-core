@@ -20,6 +20,14 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	ctx, span := tracer.Start(ctx, "nic.Validate")
 	defer span.End()
 
+	// Reject unfilled CHANGEME placeholders before anything else looks at the
+	// values, so an unedited starter config fails naming the fields to fill in
+	// rather than failing later on a nonsense value.
+	if err := rejectPlaceholders(cfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	if err := cfg.Validate(validateOptions(ctx, c.registry)); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
@@ -60,6 +68,33 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
+	return nil
+}
+
+// rejectPlaceholders rejects a config that still carries the CHANGEME sentinel
+// in any scalar value or mapping key. It reads the YAML the config was parsed
+// from, because the sentinel can sit in places the decoded struct cannot show:
+// mapping keys such as node_groups, and values whose field is not a string.
+// A config built programmatically in Go has no source and is a no-op here.
+//
+// Called by validate and deploy only, for the same reason as the validators
+// below: destroy and kubeconfig must keep working against a config that was
+// already edited to deploy the cluster, and blocking a teardown because someone
+// reintroduced a placeholder would be the wrong trade.
+//
+// The file path is attached here rather than in pkg/config, so the error names
+// both the fields to edit and the file to edit them in.
+func rejectPlaceholders(cfg *config.NebariConfig) error {
+	raw := cfg.SourceRaw()
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := config.CheckPlaceholders(raw); err != nil {
+		if path := cfg.SourcePath(); path != "" {
+			return fmt.Errorf("%w (in config file %q)", err, path)
+		}
+		return err
+	}
 	return nil
 }
 

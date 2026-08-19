@@ -43,6 +43,13 @@ func ParseConfig(ctx context.Context, filePath string) (*NebariConfig, error) {
 		return nil, fmt.Errorf("config file %s: %w", filePath, err)
 	}
 
+	// Retain the source so checks that must read the original document rather
+	// than the decoded struct do not have to re-read the file. Keeping this on
+	// the parse seam is what lets placeholder rejection live in pkg/nic next to
+	// the other per-command validators instead of above it in cmd/nic.
+	config.sourcePath = filePath
+	config.sourceRaw = data
+
 	span.SetAttributes(
 		attribute.String("config.provider", config.Cluster.ProviderName()),
 		attribute.String("config.project_name", config.ProjectName),

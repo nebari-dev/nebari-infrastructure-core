@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
 // defaultConfigFilename is the name of the config file auto-discovered by NIC.
@@ -59,40 +57,6 @@ func checkReadable(path string) error {
 	}
 	_ = f.Close()
 	return nil
-}
-
-// rejectPlaceholders scans configFile for unfilled CHANGEME placeholders and
-// returns a *config.PlaceholderError naming every offending field, or nil.
-//
-// The scan needs the YAML source, which NebariConfig.Validate does not have, so
-// it runs here at the cmd layer for the validate and deploy commands only. It is
-// deliberately not part of Validate, so destroy/kubeconfig are not gated on it.
-// The file is re-read (cheaply) rather than threading bytes through ParseConfig,
-// keeping the placeholder concern off the shared parse path.
-func rejectPlaceholders(configFile string) error {
-	// G304: configFile is the user-supplied config path already resolved and
-	// read by ParseConfig; re-reading it here is the intended behavior.
-	raw, err := os.ReadFile(configFile) //nolint:gosec
-	if err != nil {
-		return fmt.Errorf("cannot read config file %q: %w", configFile, err)
-	}
-	return config.CheckPlaceholders(raw)
-}
-
-// annotateConfigError enriches a placeholder error with the config file path so
-// the user sees which file to edit. Placeholder errors carry only the field path
-// from the config layer; the file path is known here at the cmd layer. Other
-// errors are returned unchanged to preserve their existing wording.
-//
-// Its only source is rejectPlaceholders. The one error it modifies is
-// *config.PlaceholderError, which arrives unwrapped; the read and scan errors
-// from rejectPlaceholders already name the file themselves and pass through.
-func annotateConfigError(err error, configFile string) error {
-	var placeholderErr *config.PlaceholderError
-	if errors.As(err, &placeholderErr) {
-		return fmt.Errorf("%w (in config file %q)", err, configFile)
-	}
-	return err
 }
 
 // fileExists reports whether path points to a regular file (not a directory).

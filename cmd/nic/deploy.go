@@ -72,14 +72,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Reject unfilled CHANGEME placeholders before provisioning anything, so a
-	// deploy against an unedited starter/example config fails fast instead of
-	// creating real infrastructure from nonsense values.
-	if err := rejectPlaceholders(configFile); err != nil {
-		span.RecordError(err)
-		return annotateConfigError(err, configFile)
-	}
-
 	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)

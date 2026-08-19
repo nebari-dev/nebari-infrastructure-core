@@ -191,32 +191,6 @@ func TestFileExists_Missing(t *testing.T) {
 	}
 }
 
-// TestAnnotateConfigError verifies that placeholder errors are enriched with the
-// config file path (so the user sees both the field and the file), while other
-// errors pass through unchanged. The error is passed bare, which is the shape
-// rejectPlaceholders returns for a placeholder: the check no longer runs inside
-// NebariConfig.Validate, so no "configuration validation failed" wrapper sits
-// between the two.
-func TestAnnotateConfigError(t *testing.T) {
-	placeholderErr := error(&config.PlaceholderError{FieldPaths: []string{"cluster.aws.region"}})
-	got := annotateConfigError(placeholderErr, "/path/to/nebari-config.yaml")
-	if !strings.Contains(got.Error(), "cluster.aws.region") {
-		t.Errorf("annotated error %q does not mention the field path", got)
-	}
-	if !strings.Contains(got.Error(), "/path/to/nebari-config.yaml") {
-		t.Errorf("annotated error %q does not mention the config file", got)
-	}
-	var pErr *config.PlaceholderError
-	if !errors.As(got, &pErr) {
-		t.Errorf("annotated error no longer unwraps to *PlaceholderError")
-	}
-
-	other := errors.New("some other validation failure")
-	if got := annotateConfigError(other, "/path/to/nebari-config.yaml"); got != other {
-		t.Errorf("annotateConfigError modified a non-placeholder error: %v", got)
-	}
-}
-
 // writeTempConfigFile writes raw to a nebari-config.yaml inside dir and returns
 // the path.
 func writeTempConfigFile(t *testing.T, dir, raw string) string {
