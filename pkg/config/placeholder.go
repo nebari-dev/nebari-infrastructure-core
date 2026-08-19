@@ -53,8 +53,9 @@ func (e *PlaceholderError) Error() string {
 // independent of NebariConfig's fields: it covers provider blocks, nested maps,
 // sequences, and — unlike a struct walk — mapping KEYS. Only scalar values
 // (including the contents of "|" and ">" block scalars) and mapping keys are
-// inspected; comments are never scanned, so a CHANGEME inside a YAML comment
-// does not trip the check.
+// inspected; YAML comments are never scanned, so a CHANGEME inside a "#" comment
+// does not trip the check. A "#" line inside a block scalar is content, not a
+// comment, and is scanned like any other value.
 //
 // The check is intended for the validate and deploy paths only. It is not part
 // of NebariConfig.Validate, so destroy/kubeconfig (which only need a parseable
@@ -109,9 +110,6 @@ func scanPlaceholderNode(n ast.Node, path string, found *[]string) {
 		}
 		scanPlaceholderNode(node.Value, childPath, found)
 
-	case *ast.MappingKeyNode: // explicit "? key" form
-		scanPlaceholderNode(node.Value, path, found)
-
 	case *ast.SequenceNode:
 		for i, item := range node.Values {
 			scanPlaceholderNode(item, fmt.Sprintf("%s[%d]", path, i), found)
@@ -131,7 +129,10 @@ func scanPlaceholderNode(n ast.Node, path string, found *[]string) {
 
 	default:
 		// Scalar leaf (string, int, bool, null, ...). Only its own token text is
-		// inspected; comment tokens hang off separate fields and are ignored.
+		// inspected. Comments cannot reach here at all: ParseBytes is called
+		// with mode 0 rather than ParseComments, so the parser never attaches
+		// them to a node. Reading tok.Value rather than the node's rendered
+		// form is what keeps that true if the mode ever changes.
 		if tok := n.GetToken(); tok != nil && strings.Contains(tok.Value, PlaceholderValue) {
 			*found = append(*found, path)
 		}
@@ -140,8 +141,25 @@ func scanPlaceholderNode(n ast.Node, path string, found *[]string) {
 
 // placeholderKeyString returns the raw text of a mapping key node, used both as
 // a path segment and as a value to scan for the sentinel.
+//
+// The explicit "? key" form parses to a MappingKeyNode whose own token is the
+// "?" itself, so it has to be unwrapped to reach the key text. Without that, an
+// explicit key holding the sentinel goes undetected, and every explicit key in a
+// document reports the path "?" - which also collapses distinct fields into one
+// entry once the results are deduplicated.
 func placeholderKeyString(key ast.MapKeyNode) string {
 	if key == nil {
+		return ""
+	}
+	if mapKey, ok := key.(*ast.MappingKeyNode); ok {
+		if inner, ok := mapKey.Value.(ast.MapKeyNode); ok {
+			return placeholderKeyString(inner)
+		}
+		if mapKey.Value != nil {
+			if tok := mapKey.Value.GetToken(); tok != nil {
+				return tok.Value
+			}
+		}
 		return ""
 	}
 	if tok := key.GetToken(); tok != nil {

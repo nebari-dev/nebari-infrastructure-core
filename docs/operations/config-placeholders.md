@@ -24,8 +24,10 @@ trust_bundle:
     -----END CERTIFICATE-----
 ```
 
-Placeholders in **comments are ignored**: only scalar values and mapping keys are
-scanned, so a `# CHANGEME` reminder in a comment does not trip the check.
+Placeholders in **YAML comments are ignored**: only scalar values and mapping
+keys are scanned, so a `# CHANGEME` reminder in a comment does not trip the
+check. A `#` line *inside* a block scalar is content rather than a comment, so a
+stubbed certificate or key carrying `# TODO: CHANGEME` is still caught.
 
 When a placeholder is found, validation fails before any provider API call with a
 message naming the field path(s) and the config file, for example:
@@ -49,6 +51,9 @@ project_name: CHANGEME
 cluster:
   aws:
     region: CHANGEME
+repository:
+  existing:
+    url: CHANGEME
 ```
 
 A literal sentinel is used deliberately, rather than pattern-matching values like

@@ -183,6 +183,28 @@ cluster:
 `,
 			wantFields: []string{"cluster.hetzner.ssh.public_key_path"},
 		},
+		// --- explicit "? key" form: the node's own token is the "?" ---
+		{
+			name:       "placeholder in an explicit mapping key",
+			raw:        "? CHANGEME\n: some-value\n",
+			wantFields: []string{"CHANGEME"},
+		},
+		{
+			name:       "explicit key reports its own name, not the ? token",
+			raw:        "? real_key\n: CHANGEME\n",
+			wantFields: []string{"real_key"},
+		},
+		{
+			name:       "two explicit keys stay distinct",
+			raw:        "? a\n: CHANGEME\n? b\n: CHANGEME\n",
+			wantFields: []string{"a", "b"},
+		},
+		// --- the sentinel is case-sensitive by design ---
+		{
+			name:       "lowercase changeme is not a placeholder",
+			raw:        "domain: changeme\n",
+			wantFields: nil,
+		},
 		// --- NEW: multiple placeholders reported together ---
 		{
 			name: "multiple placeholders reported together",

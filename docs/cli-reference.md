@@ -26,6 +26,7 @@ The config file is optional. When `-f` is omitted NIC resolves it in this order:
 
 **What it does:**
 
+0. Rejects a config that still contains `CHANGEME` placeholders, before any provider API call (see [config placeholders](operations/config-placeholders.md))
 1. Provisions cloud infrastructure via the selected provider (OpenTofu)
 2. Bootstraps a GitOps repository with ArgoCD application manifests (if configured)
 3. Installs ArgoCD and foundational services (Keycloak, Envoy Gateway, cert-manager)
@@ -33,7 +34,10 @@ The config file is optional. When `-f` is omitted NIC resolves it in this order:
 
 ### `nic validate`
 
-Validate a configuration file without deploying any infrastructure.
+Validate a configuration file without deploying any infrastructure. This checks
+the file parses, is structurally valid for the selected providers, and does not
+still contain `CHANGEME` placeholders (see
+[config placeholders](operations/config-placeholders.md)).
 
 ```bash
 nic validate
