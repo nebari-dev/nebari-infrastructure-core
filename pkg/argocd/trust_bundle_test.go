@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	provider "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -73,7 +73,7 @@ func TestWriteAllToGit_TrustManager(t *testing.T) {
 	t.Run("skipped when no trust bundle", func(t *testing.T) {
 		dir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
+		if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
 			t.Fatalf("WriteAllToGit: %v", err)
 		}
 		if _, err := os.Stat(appPath(dir)); !os.IsNotExist(err) {
@@ -87,7 +87,7 @@ func TestWriteAllToGit_TrustManager(t *testing.T) {
 	t.Run("written when trust bundle set", func(t *testing.T) {
 		dir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		if err := WriteAllToGit(context.Background(), &mockGitClient{workDir: dir}, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, testCAPEM); err != nil {
+		if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, testCAPEM); err != nil {
 			t.Fatalf("WriteAllToGit: %v", err)
 		}
 		if _, err := os.Stat(appPath(dir)); err != nil {

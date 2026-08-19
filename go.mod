@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
 	github.com/aws/smithy-go v1.27.2
 	github.com/cloudflare/cloudflare-go/v4 v4.6.0
-	github.com/go-git/go-git/v5 v5.19.1
+	github.com/go-git/go-git/v5 v5.19.2
 	github.com/goccy/go-yaml v1.19.2
 	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/terraform-exec v0.25.2
@@ -35,7 +35,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/mod v0.37.0
-	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.21.1
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
@@ -193,6 +192,7 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
 	k8s.io/apiserver v0.36.2 // indirect
 	k8s.io/cli-runtime v0.36.2 // indirect
