@@ -162,14 +162,13 @@ cluster:
 			name: "placeholder inside a literal block scalar",
 			raw: `
 project_name: my-nebari
-certificate:
-  existing:
-    fullchain: |
-      -----BEGIN CERTIFICATE-----
-      CHANGEME
-      -----END CERTIFICATE-----
+trust_bundle:
+  inline: |
+    -----BEGIN CERTIFICATE-----
+    CHANGEME
+    -----END CERTIFICATE-----
 `,
-			wantFields: []string{"certificate.existing.fullchain"},
+			wantFields: []string{"trust_bundle.inline"},
 		},
 		{
 			name: "placeholder inside a folded block scalar",
@@ -177,11 +176,12 @@ certificate:
 project_name: my-nebari
 cluster:
   hetzner:
-    ssh_public_key: >
-      ssh-ed25519
-      CHANGEME
+    ssh:
+      public_key_path: >
+        /very/long/path/to/
+        CHANGEME.pub
 `,
-			wantFields: []string{"cluster.hetzner.ssh_public_key"},
+			wantFields: []string{"cluster.hetzner.ssh.public_key_path"},
 		},
 		// --- NEW: multiple placeholders reported together ---
 		{

@@ -17,12 +17,11 @@ Multi-line values written as block scalars (`|` or `>`) are scanned too, so a
 placeholder inside a stubbed certificate or SSH key is caught:
 
 ```yaml
-certificate:
-  existing:
-    fullchain: |
-      -----BEGIN CERTIFICATE-----
-      CHANGEME
-      -----END CERTIFICATE-----
+trust_bundle:
+  inline: |
+    -----BEGIN CERTIFICATE-----
+    CHANGEME
+    -----END CERTIFICATE-----
 ```
 
 Placeholders in **comments are ignored**: only scalar values and mapping keys are
