@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -156,6 +157,32 @@ cluster:
 `,
 			wantFields: nil,
 		},
+		// --- block scalars: the content hangs off LiteralNode, not its own token ---
+		{
+			name: "placeholder inside a literal block scalar",
+			raw: `
+project_name: my-nebari
+certificate:
+  existing:
+    fullchain: |
+      -----BEGIN CERTIFICATE-----
+      CHANGEME
+      -----END CERTIFICATE-----
+`,
+			wantFields: []string{"certificate.existing.fullchain"},
+		},
+		{
+			name: "placeholder inside a folded block scalar",
+			raw: `
+project_name: my-nebari
+cluster:
+  hetzner:
+    ssh_public_key: >
+      ssh-ed25519
+      CHANGEME
+`,
+			wantFields: []string{"cluster.hetzner.ssh_public_key"},
+		},
 		// --- NEW: multiple placeholders reported together ---
 		{
 			name: "multiple placeholders reported together",
@@ -226,20 +253,26 @@ func TestValidateDoesNotRejectPlaceholders(t *testing.T) {
 // singular "field" and multiple fields with the plural "fields".
 func TestPlaceholderErrorMessage(t *testing.T) {
 	single := (&PlaceholderError{FieldPaths: []string{"project_name"}}).Error()
-	if want := `field "project_name"`; !contains(single, want) {
+	if want := `field "project_name"`; !strings.Contains(single, want) {
 		t.Errorf("single-field message %q does not contain %q", single, want)
 	}
 	multi := (&PlaceholderError{FieldPaths: []string{"domain", "project_name"}}).Error()
-	if want := `fields "domain", "project_name"`; !contains(multi, want) {
+	if want := `fields "domain", "project_name"`; !strings.Contains(multi, want) {
 		t.Errorf("multi-field message %q does not contain %q", multi, want)
 	}
 }
 
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+// TestCheckPlaceholders_MalformedYAML pins the contract for unparsed input: a
+// document that does not parse yields the parse error, never a nil "no
+// placeholders" result. The cmd call sites parse first, so this cannot fire
+// there; it guards a future caller that does not.
+func TestCheckPlaceholders_MalformedYAML(t *testing.T) {
+	err := CheckPlaceholders([]byte("project_name: [unclosed\n  cluster: {\n"))
+	if err == nil {
+		t.Fatal("CheckPlaceholders() = nil on malformed YAML, want a parse error")
 	}
-	return false
+	var placeholderErr *PlaceholderError
+	if errors.As(err, &placeholderErr) {
+		t.Errorf("CheckPlaceholders() = %v, want a parse error, not *PlaceholderError", err)
+	}
 }

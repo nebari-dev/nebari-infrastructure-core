@@ -51,21 +51,25 @@ func (e *PlaceholderError) Error() string {
 //
 // It walks the parsed YAML node tree (not the Go struct) so the check is
 // independent of NebariConfig's fields: it covers provider blocks, nested maps,
-// sequences, and — unlike a struct walk — mapping KEYS. Only scalar values and
-// mapping keys are inspected; comments are never scanned, so a CHANGEME inside a
-// YAML comment does not trip the check.
+// sequences, and — unlike a struct walk — mapping KEYS. Only scalar values
+// (including the contents of "|" and ">" block scalars) and mapping keys are
+// inspected; comments are never scanned, so a CHANGEME inside a YAML comment
+// does not trip the check.
 //
 // The check is intended for the validate and deploy paths only. It is not part
 // of NebariConfig.Validate, so destroy/kubeconfig (which only need a parseable
 // config) are not gated on it.
 //
-// A malformed document yields no error here: CheckPlaceholders runs after the
-// config has already been parsed, so syntax errors are reported by ParseConfig,
-// not masked as a "no placeholders" result.
+// A malformed document is reported as a parse error rather than as a silent
+// "no placeholders" result, so a caller that passes unparsed bytes cannot read
+// garbage as clean. At the call sites in cmd/nic this cannot fire: they run
+// CheckPlaceholders only after ParseConfig has parsed the same file with the
+// same library. Note that the file is re-read between those two steps, so the
+// scanned bytes are not guaranteed to be byte-identical to the parsed ones.
 func CheckPlaceholders(raw []byte) error {
 	file, err := parser.ParseBytes(raw, 0)
 	if err != nil {
-		return nil
+		return fmt.Errorf("cannot scan config for placeholders: %w", err)
 	}
 
 	var found []string
@@ -117,6 +121,12 @@ func scanPlaceholderNode(n ast.Node, path string, found *[]string) {
 		scanPlaceholderNode(node.Value, path, found)
 
 	case *ast.TagNode:
+		scanPlaceholderNode(node.Value, path, found)
+
+	case *ast.LiteralNode:
+		// A block scalar's own token is just the "|"/">" indicator; the content
+		// hangs off Value. goccy models both literal and folded blocks as
+		// LiteralNode, so this covers each of them.
 		scanPlaceholderNode(node.Value, path, found)
 
 	default:

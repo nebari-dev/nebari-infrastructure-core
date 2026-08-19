@@ -79,10 +79,14 @@ func rejectPlaceholders(configFile string) error {
 	return config.CheckPlaceholders(raw)
 }
 
-// annotateConfigError enriches a validation error with the config file path so
+// annotateConfigError enriches a placeholder error with the config file path so
 // the user sees which file to edit. Placeholder errors carry only the field path
 // from the config layer; the file path is known here at the cmd layer. Other
 // errors are returned unchanged to preserve their existing wording.
+//
+// Its only source is rejectPlaceholders. The one error it modifies is
+// *config.PlaceholderError, which arrives unwrapped; the read and scan errors
+// from rejectPlaceholders already name the file themselves and pass through.
 func annotateConfigError(err error, configFile string) error {
 	var placeholderErr *config.PlaceholderError
 	if errors.As(err, &placeholderErr) {

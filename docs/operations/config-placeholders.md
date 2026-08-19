@@ -13,6 +13,18 @@ nested provider blocks, lists, and map keys (e.g. `node_groups: { CHANGEME: … 
 — the whole config is scanned in one pass, and every offending field is reported
 together rather than just the first.
 
+Multi-line values written as block scalars (`|` or `>`) are scanned too, so a
+placeholder inside a stubbed certificate or SSH key is caught:
+
+```yaml
+certificate:
+  existing:
+    fullchain: |
+      -----BEGIN CERTIFICATE-----
+      CHANGEME
+      -----END CERTIFICATE-----
+```
+
 Placeholders in **comments are ignored**: only scalar values and mapping keys are
 scanned, so a `# CHANGEME` reminder in a comment does not trip the check.
 

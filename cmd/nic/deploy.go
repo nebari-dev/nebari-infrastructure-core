@@ -96,7 +96,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		span.RecordError(err)
-		return annotateConfigError(err, configFile)
+		return err
 	}
 
 	// Flush pending status messages before printing the panels so they don't

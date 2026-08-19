@@ -63,7 +63,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 	if err := client.Validate(ctx, cfg); err != nil {
 		span.RecordError(err)
-		return annotateConfigError(err, configFile)
+		return err
 	}
 
 	fmt.Printf("✓ Configuration file is valid\n")
