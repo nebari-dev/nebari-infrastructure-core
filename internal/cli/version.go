@@ -29,11 +29,28 @@ var (
 	date    = "unknown"
 )
 
+// buildOption hands the ldflags-injected build identity down to pkg/nic, which
+// stamps it onto the cluster as deployment metadata.
+//
+// Every nic.NewClient call site goes through this one helper so these three
+// vars have a single consumer: what `nic version` prints and what NIC records
+// in the cluster cannot drift apart, because both read the same variables.
+func buildOption() nic.Option {
+	return nic.WithBuild(version, commit, date)
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
-	Long:  `Display the version information for Nebari Infrastructure Core (NIC).`,
-	RunE:  runVersion,
+	Long: `Display the version information for Nebari Infrastructure Core (NIC).
+
+This reports the identity of the binary in your hand. To ask which NIC build
+produced a cluster that is already running, read the ConfigMap nic deploy
+writes into it:
+
+  kubectl get cm nic-deployment-info -n kube-system \
+    -o jsonpath='{.data.nic-version}@{.data.nic-commit}'`,
+	RunE: runVersion,
 }
 
 // tofuVersionLine describes which OpenTofu binary NIC would use: an external
@@ -83,7 +100,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Built: %s\n", date)
 	fmt.Printf("OpenTofu version: %s\n", tofuVersionLine(ctx))
 
-	client, err := nic.NewClient(ctx)
+	client, err := nic.NewClient(ctx, buildOption())
 	if err != nil {
 		return err
 	}

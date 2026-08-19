@@ -51,7 +51,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := nic.NewClient(ctx)
+	client, err := nic.NewClient(ctx, buildOption())
 	if err != nil {
 		span.RecordError(err)
 		return err

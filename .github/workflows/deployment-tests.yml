@@ -334,3 +334,30 @@ jobs:
         with:
           config: .github/fixtures/deploy/existing-config.yaml
           nic-binary: nic
+
+      # The only end-to-end guard on the deploy-time wiring for the deployment
+      # metadata ConfigMap. Unit tests cover the rendering and the option
+      # plumbing, but nothing outside a real deploy proves nic actually writes
+      # it - deleting the call site in pkg/nic keeps every unit test green.
+      #
+      # Asserted on the `existing` job because it is the cheapest one holding a
+      # kubectl context (k3d on the runner, no cloud spend). The version match
+      # holds regardless of ldflags: an uninjected build reports "dev" on both
+      # sides, so this compares the two paths rather than a hardcoded value.
+      - name: Verify deployment metadata
+        run: |
+          set -euo pipefail
+          kubectl get configmap nic-deployment-info -n kube-system -o yaml
+
+          binary_version="$(./nic version | awk '/^Version:/ {print $2}')"
+          recorded_version="$(kubectl get configmap nic-deployment-info -n kube-system -o jsonpath='{.data.nic-version}')"
+          recorded_provider="$(kubectl get configmap nic-deployment-info -n kube-system -o jsonpath='{.data.cluster-provider}')"
+
+          if [ "$recorded_version" != "$binary_version" ]; then
+            echo "::error::recorded nic-version '$recorded_version' does not match the binary's '$binary_version'"
+            exit 1
+          fi
+          if [ "$recorded_provider" != "existing" ]; then
+            echo "::error::recorded cluster-provider '$recorded_provider' is not 'existing'"
+            exit 1
+          fi

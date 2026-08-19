@@ -13,11 +13,13 @@ import (
 	"github.com/goccy/go-yaml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/deployinfo"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -206,6 +208,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Stamp the NIC build onto the cluster before ArgoCD and the foundational
+	// apps go in. Ordering is deliberate: the metadata is most valuable when a
+	// later stage fails, so a deploy that dies during bootstrap still leaves
+	// behind the record of which build died. Skipped in dry-run, which has no
+	// cluster to write to.
+	if !opts.DryRun {
+		c.recordDeployInfo(ctx, cfg, clusterProvider)
+	}
+
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved
 	// source is reused by the ArgoCD install below.
@@ -336,6 +347,63 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	return result, nil
+}
+
+// recordDeployInfo writes the NIC build identity into the cluster as a
+// ConfigMap, so anyone holding kubectl can answer "which NIC produced this
+// cluster?" without access to the binary, the config, or the tofu state.
+//
+// Failures warn and continue. This is provenance metadata, not infrastructure:
+// a cluster that came up correctly must not be reported as a failed deploy
+// because a ConfigMap write was rejected. The warning names the gap so the
+// operator knows the record is missing rather than stale.
+//
+// A Client built without nic.WithBuild carries no build identity and is skipped
+// entirely - see WithBuild for why that is preferred over writing placeholders.
+func (c *Client) recordDeployInfo(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.recordDeployInfo")
+	defer span.End()
+
+	if c.build == nil {
+		span.SetAttributes(attribute.Bool("deployinfo.skipped", true))
+		return
+	}
+
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	if err != nil {
+		warnDeployInfo(ctx, span, fmt.Errorf("get kubeconfig: %w", err))
+		return
+	}
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		warnDeployInfo(ctx, span, fmt.Errorf("parse kubeconfig: %w", err))
+		return
+	}
+	k8sClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		warnDeployInfo(ctx, span, fmt.Errorf("create kubernetes client: %w", err))
+		return
+	}
+
+	info := deployinfo.Info{
+		Build:           *c.build,
+		ClusterProvider: clusterProvider.Name(),
+		ProjectName:     cfg.ProjectName,
+		LastDeploy:      time.Now(),
+	}
+	if err := deployinfo.Apply(ctx, k8sClient, info); err != nil {
+		warnDeployInfo(ctx, span, err)
+	}
+}
+
+// warnDeployInfo records the failure on the span and warns the user, naming the
+// ConfigMap so the message is actionable rather than a bare error.
+func warnDeployInfo(ctx context.Context, span trace.Span, err error) {
+	span.RecordError(err)
+	status.Send(ctx, status.NewUpdate(status.LevelWarning,
+		fmt.Sprintf("Could not record NIC deployment metadata in %s/%s; the cluster is deployed but its NIC version is not queryable from inside it", deployinfo.Namespace, deployinfo.Name)).
+		WithMetadata("error", err.Error()))
 }
 
 // resolveRepositorySource provisions the GitOps repository via the configured repo
