@@ -119,6 +119,19 @@ func GetLoadBalancerEndpoint(ctx context.Context, client kubernetes.Interface, o
 	}
 }
 
+// Check performs a single attempt to find the load balancer endpoint and
+// returns an error if it is not yet available. Unlike GetLoadBalancerEndpoint
+// it never polls, so callers that own their own retry policy (or want a
+// one-shot read) do not inherit the polling timeout. WithTimeout and
+// WithPollInterval have no effect here.
+func Check(ctx context.Context, client kubernetes.Interface, opts ...Option) (*LoadBalancerEndpoint, error) {
+	cfg := defaultOptions()
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return checkEndpoint(ctx, client, cfg)
+}
+
 // checkEndpoint performs a single attempt to find the load balancer endpoint.
 // If multiple services match the selector, the first one is used. In practice,
 // Envoy Gateway creates exactly one service per Gateway resource.

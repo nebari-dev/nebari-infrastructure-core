@@ -30,6 +30,20 @@ const (
 	// KeycloakDefaultAdminSecretName is the name of the Kubernetes secret containing Keycloak admin credentials.
 	KeycloakDefaultAdminSecretName = "keycloak-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
 
+	// KeycloakAdminPasswordKey is the key within KeycloakDefaultAdminSecretName
+	// holding the master-realm admin password. Kept as a constant because the
+	// rendered realm-setup Job and `nic outputs` both read this key.
+	KeycloakAdminPasswordKey = "admin-password"
+
+	// NebariRealmAdminSecretName is the name of the Kubernetes secret containing
+	// the credentials for the admin user of the nebari realm. Created up front by
+	// createKeycloakSecrets; the realm-setup PostSync Job only reads it.
+	NebariRealmAdminSecretName = "nebari-realm-admin-credentials" //nolint:gosec // This is a secret name reference, not a credential
+
+	// NebariRealmAdminPasswordKey is the key within NebariRealmAdminSecretName
+	// holding the nebari-realm admin password.
+	NebariRealmAdminPasswordKey = "password"
+
 	// NebariLandingRedisSecretName is the name of the Kubernetes secret containing Redis password for nebari-landing.
 	NebariLandingRedisSecretName = "nebari-landing-redis" //nolint:gosec // This is a secret name reference, not a credential
 
@@ -388,8 +402,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"admin-username": keycloakCfg.AdminUsername,
-			"admin-password": keycloakCfg.AdminPassword,
+			"admin-username":         keycloakCfg.AdminUsername,
+			KeycloakAdminPasswordKey: keycloakCfg.AdminPassword,
 		},
 	}); err != nil {
 		return err
@@ -399,7 +413,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 	if keycloakCfg.RealmAdminPassword != "" {
 		if err := createSecret(ctx, client, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "nebari-realm-admin-credentials",
+				Name:      NebariRealmAdminSecretName,
 				Namespace: namespace,
 				Labels: map[string]string{
 					PartOfLabel:    NebariFoundationalPartOf,
@@ -408,8 +422,8 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 			},
 			Type: corev1.SecretTypeOpaque,
 			StringData: map[string]string{
-				"username": keycloakCfg.RealmAdminUsername,
-				"password": keycloakCfg.RealmAdminPassword,
+				"username":                  keycloakCfg.RealmAdminUsername,
+				NebariRealmAdminPasswordKey: keycloakCfg.RealmAdminPassword,
 			},
 		}); err != nil {
 			return err
