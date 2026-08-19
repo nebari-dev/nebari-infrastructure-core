@@ -242,8 +242,12 @@ func TestValidateDoesNotRejectPlaceholders(t *testing.T) {
 	cfg := &NebariConfig{
 		ProjectName: "CHANGEME",
 		Cluster:     &ClusterConfig{Providers: map[string]any{"aws": map[string]any{"region": "CHANGEME"}}},
+		Repository:  &RepositoryConfig{Providers: map[string]any{"existing": map[string]any{"url": "CHANGEME"}}},
 	}
-	opts := ValidateOptions{ClusterProviders: []string{"aws"}}
+	opts := ValidateOptions{
+		ClusterProviders:    []string{"aws"},
+		RepositoryProviders: []string{"existing"},
+	}
 	if err := cfg.Validate(opts); err != nil {
 		t.Fatalf("Validate() = %v, want nil (placeholder check must not gate Validate)", err)
 	}
