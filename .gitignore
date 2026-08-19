@@ -55,7 +55,6 @@ local*.yaml
 # nor .github/fixtures/deploy/*.yaml
 !examples/*.yaml
 !.github/fixtures/deploy/*.yaml
-!starters/**/config.yaml
 
 # Internal design docs
 docs/plans/
@@ -65,3 +64,6 @@ docs/plans/
 
 # Test Configs
 test-configs/
+
+# Generated starter workspaces (published to a registry, never committed)
+dist/

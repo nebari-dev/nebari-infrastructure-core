@@ -1,0 +1,38 @@
+[workspace]
+name = "nebari-__PROVIDER__"
+channels = ["conda-forge", "https://prefix.dev/github-releases"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
+version = "0.1.0"
+
+[dependencies]
+# The pinned toolchain. nic resolves from the prefix.dev github-releases
+# channel; see the distribution issue for how that channel is populated.
+nebari-infrastructure-core = "__NIC_VERSION__"
+__PROVIDER_DEPS__
+
+# Optional operator convenience tools. Kept out of the required dependencies
+# because kubernetes-client (the kubectl binary) lags badly on linux-aarch64,
+# which would make the whole workspace unsolvable there. nic does not need
+# kubectl, it talks to the cluster via embedded client-go.
+# Enable with: pixi install -e tools
+[feature.tools]
+platforms = ["linux-64", "osx-arm64"]
+
+[feature.tools.dependencies]
+kubernetes-client = ">=1.30"
+k9s = ">=0.32"
+
+[environments]
+tools = ["tools"]
+
+[tasks]
+validate = "nic validate"
+deploy = { cmd = "nic deploy", depends-on = ["validate"] }
+destroy = "nic destroy"
+kubeconfig = "nic kubeconfig -o kubeconfig.yaml"
+
+# pixi.toml and pixi.lock are always bundled; include is a strict allowlist for
+# everything else, so a filled config, a kubeconfig or tfstate a user creates
+# later never leaks into a republished bundle.
+[tool.nebi.bundle]
+include = ["config.yaml", "README.md"]

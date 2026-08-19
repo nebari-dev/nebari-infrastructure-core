@@ -4,72 +4,84 @@ on:
   pull_request:
     paths:
       - "starters/**"
+      - "scripts/gen-starters.sh"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
   push:
     branches: [ main ]
     paths:
       - "starters/**"
+      - "scripts/gen-starters.sh"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Per #560: nebari_environments is reserved for nebi's own workspaces. NIC
-# starters publish under the existing nebari project with a starters/ subdir,
-# mirroring how charts live at quay.io/nebari/charts.
 env:
-  NEBI_QUAY_NAMESPACE: nebari
-  NEBI_STARTER_REPO: starters/starter-local
+  # Starters publish under the existing nebari project, in a starters/ subdir,
+  # mirroring how the charts live at quay.io/nebari/charts.
+  QUAY_NAMESPACE: nebari
+  STARTER_REPO_PREFIX: starters
 
 jobs:
-  # NOTE: the "unedited config must be rejected" assertion below only holds once
-  # #561 (PR #583) is merged to main. Until then, nic-from-main has no CHANGEME
-  # check, so `nic validate` on the placeholder config SUCCEEDS and this job goes
-  # red. That failure is expected for this draft PR.
+  # NOTE: the "unedited config is rejected" assertion below only holds once the
+  # CHANGEME check (#561) is merged to main. Until then nic-from-main accepts
+  # placeholder configs and this job goes red. Expected while that PR is open.
   validate-starters:
     name: Validate starters
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - name: Build nic
-        run: make build
+      - name: Build nic and put it on PATH
+        run: |
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
 
-      - name: Put nic on PATH
-        run: sudo mv nic /usr/local/bin/nic
+      - name: Generate starters
+        run: ./scripts/gen-starters.sh dist/starters
 
-      - name: DoD - unedited fails, filled passes (starters/local)
+      - name: Unedited starters must be rejected, filled ones must pass
         run: |
           set -euo pipefail
-          config="starters/local/config.yaml"
-
-          # 1. The unedited placeholder config MUST be rejected.
-          echo "== asserting unedited config is rejected =="
-          if err="$(nic validate -f "$config" 2>&1)"; then
-            echo "FAIL: nic validate accepted the unedited placeholder config"
+          for provider in local aws; do
+            config="dist/starters/${provider}/config.yaml"
+            echo "== ${provider}: asserting the unedited config is rejected =="
+            if err="$(nic validate -f "$config" 2>&1)"; then
+              echo "FAIL: nic validate accepted the unedited ${provider} starter"
+              echo "$err"
+              exit 1
+            fi
             echo "$err"
-            exit 1
-          fi
-          echo "$err"
-          if ! echo "$err" | grep -q "CHANGEME"; then
-            echo "FAIL: validation error did not mention CHANGEME"
-            exit 1
-          fi
-          echo "OK: unedited config rejected and error names CHANGEME"
+            echo "$err" | grep -q CHANGEME || {
+              echo "FAIL: ${provider} validation error did not mention CHANGEME"; exit 1; }
 
-          # 2. A filled copy MUST validate.
-          echo "== asserting filled config passes =="
-          filled="$(mktemp)"
-          sed 's/project_name: CHANGEME/project_name: nebari-local-ci/' "$config" > "$filled"
-          nic validate -f "$filled"
-          echo "OK: filled config passed validation"
+            echo "== ${provider}: asserting a filled config passes =="
+            filled="$(mktemp)"
+            sed -e "s|project_name: CHANGEME|project_name: nebari-${provider}-ci|" \
+                -e "s|^domain: CHANGEME|domain: nebari.example.com|" \
+                -e "s|^    email: CHANGEME|    email: admin@example.com|" \
+                -e "s|^  url: CHANGEME|  url: git@github.com:example-org/example-gitops.git|" \
+                "$config" > "$filled"
+            if grep -q CHANGEME "$filled"; then
+              echo "FAIL: ${provider} still has placeholders after filling"
+              exit 1
+            fi
+            nic validate -f "$filled"
+            echo "OK: ${provider} starter behaves correctly"
+          done
 
   publish-starters:
     name: Publish starters to quay.io
@@ -82,35 +94,35 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          fetch-depth: 0
 
-      - name: Build nic
-        run: make build
-
-      - name: Put nic on PATH
-        run: sudo mv nic /usr/local/bin/nic
-
-      - name: Install pixi and nebi
-        run: |
-          set -euo pipefail
-          curl -fsSL https://pixi.sh/install.sh | bash
-          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.pixi/bin:$PATH"
-          pixi global install "nebi>=0.10"
-
-      - name: Skip if no quay credentials
+      - name: Skip when no quay credentials are configured
         id: creds
         run: |
           if [ -z "${QUAY_TOKEN:-}" ]; then
-            echo "no quay creds, skipping publish"
+            echo "no quay credentials, skipping publish"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install pixi and nebi
+        if: steps.creds.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pixi.sh/install.sh -o /tmp/pixi-install.sh
+          sh /tmp/pixi-install.sh
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          # Asset-layer bundling (config.yaml and README travelling with the
+          # workspace) needs nebi >= 0.10; older versions silently ship only
+          # pixi.toml and pixi.lock.
+          pixi global install "nebi>=0.10"
+
+      - name: Generate starters
+        if: steps.creds.outputs.skip == 'false'
+        run: ./scripts/gen-starters.sh dist/starters
 
       - name: Configure quay registry
         if: steps.creds.outputs.skip == 'false'
@@ -119,30 +131,36 @@ jobs:
           printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
             --name quay \
             --url quay.io \
-            --namespace "$NEBI_QUAY_NAMESPACE" \
+            --namespace "$QUAY_NAMESPACE" \
             --username "$QUAY_USERNAME" \
             --password-stdin
 
-      - name: Publish starter-local
+      - name: Lock and publish each starter
         if: steps.creds.outputs.skip == 'false'
         run: |
           set -euo pipefail
-          cd starters/local
-          nebi init
-          # Let the tag auto-increment; publish straight to the registry with no
-          # nebi server.
-          nebi publish --local --registry quay --repo "$NEBI_STARTER_REPO"
+          version="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+          for provider in local aws; do
+            pushd "dist/starters/${provider}" > /dev/null
+            # Resolve the toolchain now so the published bundle carries a lock.
+            pixi lock
+            nebi init
+            nebi publish --local \
+              --registry quay \
+              --repo "${STARTER_REPO_PREFIX}/starter-${provider}" \
+              --tag "v${version}"
+            popd > /dev/null
+          done
 
-      - name: Round-trip DoD - imported unedited config still fails
+      - name: Imported starters must still be rejected unedited
         if: steps.creds.outputs.skip == 'false'
         run: |
           set -euo pipefail
-          rm -rf /tmp/imported
-          # Import the just-published starter and assert the (unedited) config it
-          # ships is still rejected by nic validate.
-          nebi import "quay.io/$NEBI_QUAY_NAMESPACE/$NEBI_STARTER_REPO:latest" -o /tmp/imported
-          if nic validate -f /tmp/imported/config.yaml; then
-            echo "FAIL: imported unedited config was accepted by nic validate"
-            exit 1
-          fi
-          echo "OK: imported unedited config is still rejected"
+          version="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+          for provider in local aws; do
+            dest="/tmp/imported-${provider}"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/starter-${provider}:v${version}" -o "$dest"
+            test -f "$dest/config.yaml"
+            grep -q CHANGEME "$dest/config.yaml"
+            echo "OK: ${provider} round-tripped with its placeholders intact"
+          done
