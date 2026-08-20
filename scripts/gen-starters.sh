@@ -12,7 +12,7 @@ set -euo pipefail
 OUT_DIR="${1:-dist/starters}"
 TEMPLATES="starters/templates"
 # Version the starter pins nic to. Defaults to the latest tag, minus the "v".
-NIC_VERSION="${NIC_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')}"
+NIC_VERSION="${NIC_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)}"
 : "${NIC_VERSION:?could not determine NIC_VERSION and none was supplied}"
 
 # Providers in scope. Extend deliberately: each one needs its placeholder
@@ -36,7 +36,8 @@ placeholder_fields() {
         'project_name: ###nebari-aws-ci' \
         'domain: ###nebari.example.com' \
         '    email: ###admin@example.com' \
-        '    url: ###git@github.com:example-org/example-gitops.git'
+        '    url: ###git@github.com:example-org/example-gitops.git' \
+        '    path: ###clusters/nebari-aws-ci'
       ;;
   esac
 }
@@ -52,48 +53,6 @@ provider_deps() {
   esac
 }
 
-provider_title() {
-  case "$1" in
-    local) printf 'local (kind)' ;;
-    aws)   printf 'AWS' ;;
-  esac
-}
-
-provider_notes() {
-  case "$1" in
-    local)
-      cat <<'EOF'
-## What you must edit
-
-Only `project_name`. The local provider runs everything in a kind cluster on
-your machine, so it needs no cloud credentials, the certificate is self-signed
-and the GitOps repository is created for you.
-EOF
-      ;;
-    aws)
-      cat <<'EOF'
-## What you must edit
-
-`project_name`, `domain`, the ACME email and the GitOps repository URL. The
-infrastructure defaults (region, availability zones, instance types, Longhorn,
-EFS) are working values, not placeholders. **If you change `region`, change
-`availability_zones` to match**: `nic validate` does not cross-check them and a
-mismatch fails mid-deploy.
-
-`nic validate` runs offline and needs no AWS credentials. It will not catch a
-bad region, a nonexistent instance type or an availability zone that does not
-exist in your region; those surface at deploy time.
-
-## Cost note
-
-This starter inherits the production-recommended shape, including dedicated
-Longhorn storage nodes with large gp3 volumes and EFS. That is a real monthly
-bill; trim the node groups for experiments.
-EOF
-      ;;
-  esac
-}
-
 mkdir -p "$OUT_DIR"
 for provider in "${PROVIDERS[@]}"; do
   src="examples/${provider}-config.yaml"
@@ -105,13 +64,15 @@ for provider in "${PROVIDERS[@]}"; do
   fill_script="${dest}/.fill-for-ci.sed"
   : > "$fill_script"
 
+  matched=0
   while IFS= read -r field; do
     [ -n "$field" ] || continue
     prefix="${field%%###*}"
     value="${field##*###}"
 
     before="$(cat "$dest/config.yaml")"
-    sed -i "s|^${prefix}.*|${prefix}CHANGEME|" "$dest/config.yaml"
+    sed "s|^${prefix}.*|${prefix}CHANGEME|" "$dest/config.yaml" > "$dest/config.yaml.tmp"
+    mv "$dest/config.yaml.tmp" "$dest/config.yaml"
     # Every field must match something. examples/ is upstream of this
     # generator, so a restructure there (a key moving or being renamed) would
     # otherwise silently ship a starter with a real value left in it.
@@ -124,18 +85,22 @@ for provider in "${PROVIDERS[@]}"; do
     # The inverse edit, so CI can prove a filled starter validates without
     # keeping its own copy of the field list.
     printf 's|^%sCHANGEME$|%s%s|\n' "$prefix" "$prefix" "$value" >> "$fill_script"
+    matched=$((matched + 1))
   done < <(placeholder_fields "$provider")
+
+  # A provider added to PROVIDERS without a placeholder_fields arm would
+  # otherwise ship a starter with every real value intact.
+  if [ "$matched" -eq 0 ]; then
+    echo "no placeholder fields declared for ${provider}" >&2
+    exit 1
+  fi
 
   sed -e "s|__PROVIDER__|${provider}|g" \
       -e "s|__NIC_VERSION__|${NIC_VERSION}|g" \
       -e "s|__PROVIDER_DEPS__|$(provider_deps "$provider")|g" \
       "$TEMPLATES/pixi.toml.tmpl" > "$dest/pixi.toml"
 
-  awk -v notes="$(provider_notes "$provider")" \
-      -v provider="$provider" \
-      -v title="$(provider_title "$provider")" \
-      '{gsub(/__PROVIDER_NOTES__/, notes); gsub(/__PROVIDER_TITLE__/, title); gsub(/__PROVIDER__/, provider); print}' \
-      "$TEMPLATES/README.md.tmpl" > "$dest/README.md"
+  cp "$TEMPLATES/README.${provider}.md" "$dest/README.md"
 
   echo "generated $dest (nic ${NIC_VERSION})"
 done

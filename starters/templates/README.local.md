@@ -1,4 +1,4 @@
-# Nebari on __PROVIDER_TITLE__ - starter workspace
+# Nebari on local (kind) - starter workspace
 
 A pinned Pixi/Nebi workspace for deploying Nebari Infrastructure Core (NIC).
 It ships the toolchain, a placeholder `config.yaml`, and the deploy tasks, so a
@@ -22,7 +22,11 @@ pixi run deploy      # runs validate first (task depends-on)
 `nic validate` rejects any value still containing `CHANGEME`, so an unedited
 workspace fails fast instead of attempting a real deploy.
 
-__PROVIDER_NOTES__
+## What you must edit
+
+Only `project_name`. The local provider runs everything in a kind cluster on
+your machine, so it needs no cloud credentials, the certificate is self-signed
+and the GitOps repository is created for you.
 
 ## Pinning
 
@@ -30,5 +34,4 @@ __PROVIDER_NOTES__
 `.terraform.lock.hcl` pins provider versions, so one lockfile transitively pins
 the whole stack. Commit `pixi.lock`.
 
-Generated from `examples/__PROVIDER__-config.yaml`. Do not edit by hand in the
-NIC repository; change the example or the templates under `starters/templates/`.
+This file is copied verbatim into the published starter. Edit it here.
