@@ -27,6 +27,9 @@ var (
 provided nebari-config.yaml file. This command will create all necessary
 resources to establish a fully functional Nebari cluster.
 
+Configs that still contain the reserved CHANGEME placeholder are rejected before
+any provider API call, so an unedited starter cannot provision infrastructure.
+
 Use --dry-run to preview changes without applying them.`,
 		RunE: runDeploy,
 	}

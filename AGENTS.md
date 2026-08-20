@@ -317,6 +317,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Exemptions:**
 - `pkg/status` is the in-process status channel. Per-line writers and helpers there are intentionally not span-instrumented; spans at that granularity would dwarf the operations they describe.
+- Inside `pkg/config`, the ctx-less validation helpers (e.g. `CheckPlaceholders` and its YAML-node walk, the `Validate` family, the trust-bundle readers) take no `context.Context`; wrapping them in spans would add a tracing dependency to leaf validation for no observability gain, and the few that touch disk do so on a local file already named in the surrounding span. The instrumented parse entrypoints (`ParseConfig`, `UnmarshalProviderConfig`) already carry the config-loading spans.
 - Inside `pkg/tofu`, the byte/line-level helpers (`streamThroughStatus`, `jsonLineMapper`, `mapStatusLevel`, the `status.Writer` methods) are similarly exempt. Operation-granularity wrapper methods on `TerraformExecutor` (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) should still be span-instrumented; this is tracked as outstanding work.
 - New code in any other `pkg/` package must be instrumented as described above.
 
@@ -368,6 +369,8 @@ func SomeFunction(ctx context.Context, ...) error {
 4. Plumb it through to the backing tool.
 5. Update example configs in `examples/`.
 6. Add tests.
+
+**Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
 
 ### Error Handling Convention
 

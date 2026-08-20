@@ -25,6 +25,12 @@ import (
 // `nic validate`. Provider-level validation (for example
 // cluster.hetzner.location is required) is not reached by Client.Validate, so a
 // green result here does not mean an example would deploy.
+//
+// Because Client.Validate rejects CHANGEME placeholders, this is also what
+// enforces the rule that files under examples/ must validate as-is: a
+// placeholder introduced here fails this test rather than waiting for a user to
+// hit it. Starter configs, which are meant to carry the sentinel, live outside
+// these globs.
 func TestExampleConfigsValidate(t *testing.T) {
 	globs := map[string]string{
 		"examples":                filepath.Join("..", "..", "examples", "*.yaml"),

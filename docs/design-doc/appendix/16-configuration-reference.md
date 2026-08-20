@@ -25,6 +25,12 @@ This is the authoritative reference for `nebari-config.yaml`.
 
 Defined by `NebariConfig` in `pkg/config/config.go`:
 
+> **Reserved token.** `CHANGEME` is reserved as the "unfilled value" marker.
+> `nic validate` and `nic deploy` reject a config where it appears in any scalar
+> value or mapping key, matched case-sensitively as a substring. No field below
+> may document a default that contains it. See
+> [config placeholders](../../operations/config-placeholders.md).
+
 ```yaml
 project_name: my-nebari        # required, [a-zA-Z0-9][a-zA-Z0-9_-]*
 domain: nebari.example.com     # optional, but needed for routable services

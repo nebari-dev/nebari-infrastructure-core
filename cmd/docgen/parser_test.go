@@ -1,8 +1,12 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -396,5 +400,40 @@ func TestGenerateOutputName(t *testing.T) {
 				t.Errorf("generateOutputName(%q) = %q, want %q", tt.sourcePath, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestParseFieldSkipsUnexported pins that unexported fields stay out of the
+// generated schema. They cannot be set from YAML, so emitting one advertises a
+// config key that does not exist.
+func TestParseFieldSkipsUnexported(t *testing.T) {
+	src := `package p
+type S struct {
+	Exported   string ` + "`yaml:\"exported\"`" + `
+	unexported string
+}`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "s.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		st, ok := n.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		for _, f := range st.Fields.List {
+			for _, d := range parseField(f) {
+				got = append(got, d.Name)
+			}
+		}
+		return true
+	})
+
+	want := []string{"Exported"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseField() names = %v, want %v", got, want)
 	}
 }
