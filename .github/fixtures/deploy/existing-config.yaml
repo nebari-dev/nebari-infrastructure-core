@@ -4,12 +4,14 @@ domain: nebari.local
 certificate:
   type: selfsigned
 
-git_repository:
-  url: "https://github.com/nebari-dev/nic-ci-gitops.git"
-  branch: existing
-  path: "clusters/existing-ci"
-  auth:
-    token_env: GIT_TOKEN
+repository:
+  existing:
+    url: "https://github.com/nebari-dev/nic-ci-gitops.git"
+    branch: existing
+    path: "clusters/existing-ci"
+    auth:
+      token:
+        env: GIT_TOKEN
 
 cluster:
   existing:

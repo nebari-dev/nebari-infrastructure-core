@@ -46,6 +46,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pin the tag being released to the one that triggered this run.
+          # Without this, GoReleaser picks the highest version-sorted tag
+          # pointing at HEAD, potentially choosing the wrong tag if multiple
+          # ones point to the same commit, which can happen when cutting a
+          # release candidate and then a release on top of it.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # Publishing the Homebrew cask pushes to nebari-dev/homebrew-tap, a
           # different repo the default GITHUB_TOKEN cannot write to.
           # HOMEBREW_TAP_TOKEN is an org-level secret with write access to the tap.

@@ -14,8 +14,7 @@ import (
 //
 // When set at the top level of NebariConfig, the bundle is propagated both to
 // worker-node OS trust stores (via the cluster provider) and into the cluster
-// via trust-manager (the in-pod half of
-// https://github.com/nebari-dev/nebari-infrastructure-core/issues/307).
+// via trust-manager (the in-pod half of the trust-bundle propagation).
 type TrustBundleConfig struct {
 	Path   string `yaml:"path,omitempty"`
 	Inline string `yaml:"inline,omitempty"`

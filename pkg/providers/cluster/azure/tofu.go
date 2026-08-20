@@ -60,11 +60,11 @@ type TFNodeGroup struct {
 	Zones        []string          `json:"zones,omitempty"`
 }
 
-// providerName is the NIC provider name returned by Provider.Name() and used
+// ProviderName is the NIC provider name returned by Provider.Name() and used
 // as the value for the "provider" OTel span attribute. Distinct from the
 // AKS "azure" network-plugin literal in TFVars (which is the upstream
 // `azurerm_kubernetes_cluster.network_profile.network_plugin` value).
-const providerName = "azure"
+const ProviderName = "azure"
 
 // modeSystem and modeUser are the AKS node-pool mode values. Each pool's
 // mode determines whether it can host critical system workloads or only

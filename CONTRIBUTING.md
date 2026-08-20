@@ -210,7 +210,8 @@ Decisions that change how NIC is structured get recorded as an Architectural Dec
 | [AGENTS.md](AGENTS.md) | Architecture and code conventions, in depth |
 | [docs/README.md](docs/README.md) | Documentation index |
 | [docs/adr/](docs/adr/) | Architectural Decision Records |
-| [docs/cli-reference.md](docs/cli-reference.md) | Command reference |
+| [docs/reference/cli/](docs/reference/cli/) | Generated CLI command reference (`make docs`) |
+| [docs/configuration/](docs/configuration/) | Generated configuration reference (`make docs`) |
 | [docs/local-kind-development.md](docs/local-kind-development.md) | Local Kind workflow |
 | [docs/design-doc/](docs/design-doc/) | Living design documents |
 

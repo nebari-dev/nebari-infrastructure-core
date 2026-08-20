@@ -14,7 +14,7 @@ Numbering note: this file is the chapter immediately following the operations se
 
 6. **Config Validation**: Today: custom Go validation in `pkg/config/config.go` (`NebariConfig.Validate`). JSON Schema export for IDE support remains open.
 7. **Config Inheritance** (`extends`): Not implemented. See [`15-future-enhancements.md`](15-future-enhancements.md).
-8. **Secrets Management**: **Resolved for MVP**: env vars via `.env` (loaded by `godotenv` in `cmd/nic/main.go`). Git auth uses env-var indirection (`ssh_key_env` / `token_env`). External Secrets Operator / Sealed Secrets / cloud secrets managers remain open as longer-term options.
+8. **Secrets Management**: **Resolved for MVP**: env vars via `.env` (loaded by `godotenv` in `cmd/nic/main.go`). Git auth uses env-var indirection (`repository.existing.auth.ssh.env` / `token.env`). External Secrets Operator / Sealed Secrets / cloud secrets managers remain open as longer-term options.
 
 ## 14.3 Deployment Questions
 
@@ -24,13 +24,13 @@ Numbering note: this file is the chapter immediately following the operations se
 
 ## 14.4 Integration Questions
 
-12. **CI/CD Templates**: Should NIC ship GitHub Actions / GitLab CI templates? Still open; the `git_repository:` consumption side is shipped, but template generation is not.
+12. **CI/CD Templates**: Should NIC ship GitHub Actions / GitLab CI templates? Still open; the `repository:` consumption side is shipped, but template generation is not.
 13. **Phone-Home Telemetry**: Should NIC emit opt-in usage telemetry? Still open.
 14. **Marketplace Integration**: AWS/GCP Marketplace listings? Future.
 
 ## 14.5 Platform Automation Questions
 
-15. **Git Repository Provisioning**: NIC **consumes** an existing GitOps repo today (`pkg/git`, `git_repository:` config). The **provisioning** side (auto-create the repo on GitHub/GitLab/Gitea, configure protections, etc.) is still open. See `15-future-enhancements.md` §2.
+15. **Git Repository Provisioning**: NIC **consumes** an existing GitOps repo today (the `repository.existing` provider in `pkg/providers/repository`). The **provisioning** side (auto-create the repo on GitHub/GitLab/Gitea, configure protections, etc.) is still open — the repository-provider seam (ADR-0015) is where a forge-backed provider would slot in. See `15-future-enhancements.md` §2.
 
 16. **CI/CD Workflow Generation**: Auto-generate validation/deploy/drift workflows. Still open.
 

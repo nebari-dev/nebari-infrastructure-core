@@ -3,7 +3,8 @@
 NIC shells out to [OpenTofu](https://opentofu.org/) for the providers that provision
 infrastructure declaratively (AWS, Azure). By default it downloads its own pinned
 OpenTofu binary on first use. This page covers how to make NIC use a pre-installed
-binary instead, which matters for OS/conda packaging, CI, and air-gapped environments.
+binary instead, and how to inject version metadata when building NIC from source --
+both of which matter for OS/conda packaging, CI, and air-gapped environments.
 
 The Hetzner provider additionally uses the
 [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary, resolved the same
@@ -124,12 +125,6 @@ cache directory. Note this covers the binary only: `nic deploy` still runs
 cluster provisioning pulls k3s onto the servers), so fully air-gapped Hetzner deploys
 are not currently supported.
 
-## Related
-
-- A shared resolution seam for both binaries (extracting the common override → `PATH` →
-  download logic behind one interface) is planned as a follow-up once
-  [ADR-0016](https://github.com/nebari-dev/nebari-infrastructure-core/pull/584) lands.
-
 ## Building from source: version metadata (ldflags)
 
 Downstream packagers (Linux distros, Nix, Homebrew, and anyone building outside
@@ -137,22 +132,27 @@ GoReleaser) can produce a binary whose `nic version` reports correct metadata
 instead of the placeholder `dev` / `none` / `unknown` defaults.
 
 Version metadata is injected at link time into three package-level string
-variables in `cmd/nic`:
+variables in package `internal/cli`:
 
-| Variable  | `-X` target    | Meaning                         |
-| --------- | -------------- | ------------------------------- |
-| `version` | `main.version` | Release version (e.g. `v1.2.3`) |
-| `commit`  | `main.commit`  | Short commit SHA                |
-| `date`    | `main.date`    | Build timestamp (RFC 3339, UTC) |
+| Variable  | `-X` target           | Meaning                         |
+| --------- | --------------------- | ------------------------------- |
+| `version` | `internal/cli.version` | Release version (e.g. `v1.2.3`) |
+| `commit`  | `internal/cli.commit`  | Short commit SHA                |
+| `date`    | `internal/cli.date`    | Build timestamp (RFC 3339, UTC) |
+
+The `-X` target is the full import path
+(`github.com/nebari-dev/nebari-infrastructure-core/internal/cli.version`, etc.),
+not `main`: the linker matches `-X` against the fully-qualified package path, so
+pointing it at `main.version` injects nothing.
 
 These variables MUST remain `var` (not `const`). The Go linker's `-X` flag can
 only override package-level string *variables*; declaring them `const` silently
 discards the injected values and the binary reports the defaults regardless of
 how it was built. See the comment in
-[`cmd/nic/version.go`](../../cmd/nic/version.go).
+[`internal/cli/version.go`](../../internal/cli/version.go).
 
-`make build` threads all three values through as overridable variables, so the
-standard, supported way to build with injected metadata is:
+`make build` threads all three values through as overridable variables, so a
+build with injected metadata looks like:
 
 ```bash
 make build \
@@ -168,23 +168,33 @@ make build \
 # OpenTofu version: ...
 ```
 
+The `VERSION`, `COMMIT` and `DATE` Make variables are declared with `?=`, so they
+can also be supplied through the **environment** -- which is what most distro and
+Nix build phases do rather than passing them on the command line:
+
+```bash
+VERSION=v1.2.3 \
+COMMIT=$(git rev-parse --short HEAD) \
+DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+  make build
+```
+
 Any of the three may be omitted; the Makefile falls back to deriving it from git
-and the current time. Packagers who do not build via `make` can invoke
+and the current time. Note that an ambient `VERSION`, `COMMIT` or `DATE` already
+exported in your shell will therefore feed into the build -- unset them for a
+clean git-derived build. NIC stamps the literal `DATE` it is given and does not
+currently read `SOURCE_DATE_EPOCH`; a reproducible-build phase should pass a
+fixed `DATE` explicitly. Packagers who do not build via `make` can invoke
 `go build` directly with the same `-ldflags` string.
 
-## Release-archive naming
+Official releases are built by GoReleaser (`.goreleaser.yml`), whose archive
+`name_template` and build matrix are the source of truth for release-asset names
+and the OS/arch combinations that ship. See
+[Verifying a NIC release](verifying-releases.md) for the archive naming used in
+`tar`/URL examples, plus checksum, signature, provenance, and SBOM verification.
 
-Official releases are built by GoReleaser (`.goreleaser.yml`). Archives follow:
+## Related
 
-```
-nebari-infrastructure-core_<version>_<os>_<arch>.tar.gz
-```
-
-- `<os>` is `linux`, `darwin`, or `windows`.
-- `<arch>` is `x86_64` (amd64), `arm64`, or `i386` (386).
-- Windows archives ship as `.zip` instead of `.tar.gz`.
-
-For example: `nebari-infrastructure-core_v1.2.3_linux_x86_64.tar.gz`.
-
-See [Verifying a NIC release](verifying-releases.md) for checksum, signature,
-provenance, and SBOM verification of these archives.
+- A shared resolution seam for both binaries (extracting the common override → `PATH` →
+  download logic behind one interface) is planned as a follow-up once
+  [ADR-0016](https://github.com/nebari-dev/nebari-infrastructure-core/pull/584) lands.

@@ -76,12 +76,20 @@ jobs:
 
       - name: Assert version injection
         run: |
-          make build VERSION=ci-test-v9.9.9 COMMIT=abcdef1 DATE=2020-01-01T00:00:00Z
-          if ! ./nic version | grep -q "Version: ci-test-v9.9.9"; then
-            echo "ldflags version injection failed: 'Version: ci-test-v9.9.9' not found in 'nic version' output" >&2
-            ./nic version >&2
-            exit 1
-          fi
+          set -o pipefail
+          # Drive the values through the ENVIRONMENT, not the command line: this
+          # is the path `?=` exists for. A command-line `make build VERSION=...`
+          # overrides a plain `=` too, so it would pass even if `?=` regressed to
+          # `=`; only the environment path actually exercises this PR's change.
+          VERSION=ci-test-v9.9.9 COMMIT=abcdef1 DATE=2020-01-01T00:00:00Z make build
+          out=$(./nic version)
+          for want in "Version: ci-test-v9.9.9" "Commit: abcdef1" "Built: 2020-01-01T00:00:00Z"; do
+            if ! grep -qF "$want" <<<"$out"; then
+              echo "ldflags version injection failed: missing '$want'" >&2
+              echo "$out" >&2
+              exit 1
+            fi
+          done
           # Restore the normally-versioned binary for the upload step.
           make build
 
@@ -112,9 +120,15 @@ jobs:
         run: chmod +x nic
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@476dee2d5d10b362a4c4eecb6cfc302406495105 # v0.1.0
+        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         with:
           nic-binary: nic
+
+      - name: Verify docs are up-to-date
+        run: |
+          make docs
+          git add -N docs/reference/cli docs/configuration
+          git diff --exit-code -- docs/reference/cli docs/configuration
 
   workflow-pins:
     name: Workflow pins & release config
