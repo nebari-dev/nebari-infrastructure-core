@@ -152,7 +152,7 @@ pkg/
   ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
-  ├── deployinfo/       # Records the NIC build identity into the cluster (kube-system ConfigMap)
+  ├── deployinfo/       # Records the NIC build identity into the cluster (nebari-system ConfigMap)
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
   ├── status/           # In-process status channel (pkg -> cmd seam)
   └── telemetry/        # OpenTelemetry tracer setup
@@ -374,7 +374,7 @@ func SomeFunction(ctx context.Context, ...) error {
 **Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
 
 **Deployment provenance.** `nic deploy` stamps the NIC build that ran it into
-`kube-system/nic-deployment-info` (`pkg/deployinfo`), so an operator holding only
+`nebari-system/nic-deployment-info` (`pkg/deployinfo`), so an operator holding only
 kubectl can tell which build produced a cluster. The ldflags-injected
 `version`/`commit`/`date` vars live in `internal/cli`, so the CLI layer hands
 them down via `nic.WithBuild`; every `nic.NewClient` call site goes through the

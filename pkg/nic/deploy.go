@@ -358,6 +358,11 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // because a ConfigMap write was rejected. The warning names the gap so the
 // operator knows the record is missing rather than stale.
 //
+// That is the fail-open half of ADR-0010's deploy-semantics ladder, which is
+// correct for the standard posture. If security_level lands as ADR-0010
+// describes, hardened mode wants this fail-closed; the choice is hardcoded here
+// only because there is no level to read yet.
+//
 // A Client built without nic.WithBuild carries no build identity and is skipped
 // entirely - see WithBuild for why that is preferred over writing placeholders.
 func (c *Client) recordDeployInfo(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {

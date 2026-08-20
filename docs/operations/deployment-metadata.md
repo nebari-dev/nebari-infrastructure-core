@@ -8,12 +8,12 @@ the binary since the last deploy.
 ## Reading it
 
 ```console
-$ kubectl get configmap nic-deployment-info -n kube-system -o yaml
+$ kubectl get configmap nic-deployment-info -n nebari-system -o yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nic-deployment-info
-  namespace: kube-system
+  namespace: nebari-system
   labels:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 data:
@@ -28,7 +28,7 @@ data:
 The version and commit alone, for pasting into an issue:
 
 ```bash
-kubectl get cm nic-deployment-info -n kube-system \
+kubectl get cm nic-deployment-info -n nebari-system \
   -o jsonpath='{.data.nic-version}@{.data.nic-commit}'
 ```
 
@@ -59,6 +59,11 @@ this repository read them.
   is missing. The warning names the ConfigMap so the gap is visible rather than
   silent.
 - **Skipped in dry-run**, which has no cluster to write to.
+- **Lives in `nebari-system`**, the namespace NIC owns and declares in the
+  foundational Argo CD AppProject, rather than `kube-system`, which is
+  deliberately outside that scope. Because the record is written before the
+  foundational install, NIC creates the namespace if it is not there yet - the
+  same namespace that install would have created.
 - `dev` / `none` / `unknown` values mean the binary was built without
   `-ldflags` version injection (a plain `go build`). `make build` and the release
   pipeline both inject; see [packaging](packaging.md).

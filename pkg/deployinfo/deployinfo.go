@@ -31,7 +31,17 @@ const (
 	// rather than configurable: the whole point is that an operator holding
 	// only kubectl can find it without knowing anything about the config that
 	// produced the cluster.
-	Namespace = "kube-system"
+	//
+	// nebari-system, not kube-system: this is NIC's own record, and
+	// nebari-system is the namespace NIC owns and already declares in the
+	// foundational ArgoCD AppProject's destinations. kube-system is
+	// deliberately outside that scope (see the cert-manager base values), so
+	// writing here keeps the record inside the boundary ADR-0010's hardened
+	// posture asks operators to whitelist, instead of in the most sensitive
+	// namespace on the cluster. Kept in step with argocd.NebariSystemNamespace
+	// by a test rather than an import, because this package writes before
+	// ArgoCD exists and must not depend on it.
+	Namespace = "nebari-system"
 	Name      = "nic-deployment-info"
 
 	// managedByLabel matches the marker every other NIC-created object carries,
@@ -120,6 +130,15 @@ func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 		attribute.String("cluster.provider", info.ClusterProvider),
 	)
 
+	// The namespace is normally created later, by the foundational-services
+	// install. This write deliberately runs earlier (so a deploy that dies
+	// during bootstrap still records which build died), so it has to stand the
+	// namespace up itself.
+	if err := ensureNamespace(ctx, client); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	cm := info.ConfigMap()
 	configMaps := client.CoreV1().ConfigMaps(Namespace)
 
@@ -151,6 +170,34 @@ func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 		return fmt.Errorf("update configmap %s/%s: %w", Namespace, Name, err)
 	}
 	sendRecorded(ctx, info, "updated")
+	return nil
+}
+
+// ensureNamespace creates the namespace if it is absent, tolerating a
+// concurrent creator. Creating it here rather than assuming it exists is what
+// lets the record be written before the foundational-services install; the
+// namespace it creates is the same one that install would have created, so the
+// two are not in conflict.
+func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
+	_, err := client.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		// As with the ConfigMap Get: a permission or transient error must not
+		// be read as "absent".
+		return fmt.Errorf("get namespace %s: %w", Namespace, err)
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: Namespace}}
+	if _, err := client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// Lost a race with the foundational install or another writer;
+			// the namespace exists, which is all this needs.
+			return nil
+		}
+		return fmt.Errorf("create namespace %s: %w", Namespace, err)
+	}
 	return nil
 }
 

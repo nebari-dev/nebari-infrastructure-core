@@ -33,7 +33,7 @@ any provider API call, so an unedited starter cannot provision infrastructure.
 Use --dry-run to preview changes without applying them.
 
 Once the cluster is up, the NIC build that deployed it is recorded in the
-kube-system/nic-deployment-info ConfigMap, so the version is queryable from
+nebari-system/nic-deployment-info ConfigMap, so the version is queryable from
 inside the cluster.`,
 		RunE: runDeploy,
 	}

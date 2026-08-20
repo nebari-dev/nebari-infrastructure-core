@@ -13,7 +13,85 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 )
+
+// TestNamespaceMatchesArgoCDNebariSystem pins this package's namespace to the
+// one pkg/argocd owns. The constant is duplicated rather than imported because
+// this package writes before ArgoCD exists and must not depend on it - so the
+// coupling is enforced here, in a test, where an import would be a design
+// mistake. If the two ever diverge, the record lands somewhere the foundational
+// AppProject does not declare.
+func TestNamespaceMatchesArgoCDNebariSystem(t *testing.T) {
+	if Namespace != argocd.NebariSystemNamespace {
+		t.Errorf("Namespace = %q, want argocd.NebariSystemNamespace (%q)", Namespace, argocd.NebariSystemNamespace)
+	}
+}
+
+// TestApplyCreatesNamespace covers the early-write requirement: the record is
+// stamped before the foundational install, so nebari-system does not exist yet
+// and Apply has to stand it up.
+func TestApplyCreatesNamespace(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	ctx := context.Background()
+
+	if err := Apply(ctx, client, testInfo()); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	if _, err := client.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
+		t.Errorf("namespace %s was not created: %v", Namespace, err)
+	}
+}
+
+// TestApplyToleratesExistingNamespace covers the ordinary redeploy path, where
+// the foundational install has already created the namespace.
+func TestApplyToleratesExistingNamespace(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: Namespace},
+	})
+
+	if err := Apply(ctx, client, testInfo()); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if _, err := client.CoreV1().ConfigMaps(Namespace).Get(ctx, Name, metav1.GetOptions{}); err != nil {
+		t.Errorf("ConfigMap not written into the existing namespace: %v", err)
+	}
+}
+
+// TestApplyToleratesNamespaceCreateRace covers losing the create race with the
+// foundational install: AlreadyExists means the namespace is there, which is all
+// this needs, so it must not fail the write.
+func TestApplyToleratesNamespaceCreateRace(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "namespaces",
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewAlreadyExists(
+				schema.GroupResource{Resource: "namespaces"}, Namespace)
+		})
+
+	if err := Apply(context.Background(), client, testInfo()); err != nil {
+		t.Errorf("Apply() error = %v, want the AlreadyExists race tolerated", err)
+	}
+}
+
+// TestApplySurfacesNamespaceGetFailure is the same reasoning as the ConfigMap
+// Get: a Forbidden must not be mistaken for "absent" and fall through to a
+// Create that fails with a worse message.
+func TestApplySurfacesNamespaceGetFailure(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Resource: "namespaces"}, Namespace, errors.New("nope"))
+	client.PrependReactor("get", "namespaces",
+		func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, forbidden })
+
+	err := Apply(context.Background(), client, testInfo())
+	if !errors.Is(err, forbidden) {
+		t.Errorf("Apply() error = %v, want it to wrap the Forbidden namespace Get", err)
+	}
+}
 
 func testInfo() Info {
 	return Info{

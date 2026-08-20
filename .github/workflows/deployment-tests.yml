@@ -347,11 +347,11 @@ jobs:
       - name: Verify deployment metadata
         run: |
           set -euo pipefail
-          kubectl get configmap nic-deployment-info -n kube-system -o yaml
+          kubectl get configmap nic-deployment-info -n nebari-system -o yaml
 
           binary_version="$(./nic version | awk '/^Version:/ {print $2}')"
-          recorded_version="$(kubectl get configmap nic-deployment-info -n kube-system -o jsonpath='{.data.nic-version}')"
-          recorded_provider="$(kubectl get configmap nic-deployment-info -n kube-system -o jsonpath='{.data.cluster-provider}')"
+          recorded_version="$(kubectl get configmap nic-deployment-info -n nebari-system -o jsonpath='{.data.nic-version}')"
+          recorded_provider="$(kubectl get configmap nic-deployment-info -n nebari-system -o jsonpath='{.data.cluster-provider}')"
 
           if [ "$recorded_version" != "$binary_version" ]; then
             echo "::error::recorded nic-version '$recorded_version' does not match the binary's '$binary_version'"

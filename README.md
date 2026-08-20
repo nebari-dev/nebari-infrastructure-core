@@ -263,7 +263,7 @@ To ask the same question of a cluster you already deployed — which NIC build
 produced it — read the record `nic deploy` leaves behind:
 
 ```bash
-kubectl get configmap nic-deployment-info -n kube-system \
+kubectl get configmap nic-deployment-info -n nebari-system \
   -o jsonpath='{.data.nic-version}@{.data.nic-commit}'
 ```
 
