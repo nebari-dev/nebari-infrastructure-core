@@ -2,10 +2,23 @@ package cluster
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
+
+// ConfigTyped is an optional capability a cluster Provider may implement to
+// expose the Go type of its configuration struct. It is deliberately NOT part
+// of the Provider interface: schema generation (cmd/docgen) and config
+// scaffolding (a future `nic init`) discover it via a type assertion, so a
+// provider self-describes its config type without a separate registry of types
+// to keep in sync, and providers that don't need it (including out-of-tree ones
+// per ADR-0004) are unaffected. Mirrors the optional-interface pattern already
+// used for provider capabilities (e.g. the backup-role resolver in pkg/nic).
+type ConfigTyped interface {
+	ConfigType() reflect.Type
+}
 
 // BackupBucketSpec describes an object-storage bucket/container the provider's
 // Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec

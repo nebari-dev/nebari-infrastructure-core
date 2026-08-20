@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,5 +341,33 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 				t.Errorf("InfraSettings().StorageClass = %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+// A `jsonschema:"default=..."` tag is a second, hand-written declaration of a
+// default that already lives in a Go const, and both generators publish it -
+// the markdown reference and schemas/. Nothing else compares the two, so the
+// tag can drift silently and ship a wrong default to every reader (it did:
+// the tag said 3.2.1 while the const said 3.4.3). Assert they agree.
+func TestChartVersionSchemaDefaultMatchesConst(t *testing.T) {
+	field, ok := reflect.TypeFor[AWSLoadBalancerControllerConfig]().FieldByName("ChartVersion")
+	if !ok {
+		t.Fatal("AWSLoadBalancerControllerConfig has no ChartVersion field")
+	}
+
+	var tagged string
+	for _, opt := range strings.Split(field.Tag.Get("jsonschema"), ",") {
+		if v, found := strings.CutPrefix(opt, "default="); found {
+			tagged = v
+		}
+	}
+	if tagged == "" {
+		t.Fatal(`ChartVersion lost its jsonschema:"default=..." tag; the generated docs and schema no longer state a default`)
+	}
+
+	if tagged != defaultLBCChartVersion {
+		t.Errorf("jsonschema default tag = %q but defaultLBCChartVersion = %q; "+
+			"the generated reference and schemas/ publish the tag, so update it alongside the const",
+			tagged, defaultLBCChartVersion)
 	}
 }

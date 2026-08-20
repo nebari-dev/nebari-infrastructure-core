@@ -1,16 +1,26 @@
 //go:generate go run .
 
-// Command docgen generates markdown documentation from Go config structs.
+// Command docgen generates NIC's reference documentation from the source of
+// truth in Go, in three flavours:
+//
+//   - docs/configuration/  - markdown config reference, parsed out of the config
+//     structs with go/ast (struct definitions, field types, yaml tags, doc comments)
+//   - docs/reference/cli/  - markdown CLI reference, walked off internal/cli's cobra tree
+//   - schemas/             - JSON Schema for nebari-config.yaml and each registered
+//     provider, reflected off the live types via the provider registry
 //
 // Usage:
 //
-//	go run ./cmd/docgen -output docs/configuration
+//	go run ./cmd/docgen              # all three
+//	make docs                        # the same, plus cleaning stale output first
 //
-// This tool parses Go source files using go/ast to extract struct definitions,
-// field types, yaml tags, and doc comments, then generates markdown documentation.
+// It is an internal build/CI tool, not a user-facing subcommand of nic. All
+// three outputs are committed in-tree and guarded by a CI drift check, so a
+// config change that isn't accompanied by regenerated output fails the build.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -181,6 +191,9 @@ func discoverProviderConfigFiles(rootDir string, providerGroups []string) ([]con
 func main() {
 	outputDir := flag.String("output", "docs/configuration", "Output directory for generated configuration documentation")
 	cliOutputDir := flag.String("cli-output", "docs/reference/cli", "Output directory for generated CLI reference documentation")
+	schemaOutputDir := flag.String("schema-output", "schemas", "Output directory for generated JSON Schema documents")
+	schemaProviders := flag.String("schema-providers", "", "Comma-separated provider subset to regenerate schemas for (default: all registered)")
+	schemaVersion := flag.String("schema-version", "", "Version string stamped into schemas/manifest.json")
 	rootDir := flag.String("root", "", "Root directory of the project (defaults to current directory)")
 	verbose := flag.Bool("verbose", false, "Enable verbose output")
 	flag.Parse()
@@ -197,6 +210,7 @@ func main() {
 		log.Printf("Project root: %s", *rootDir)
 		log.Printf("Configuration output directory: %s", *outputDir)
 		log.Printf("CLI output directory: %s", *cliOutputDir)
+		log.Printf("Schema output directory: %s", *schemaOutputDir)
 	}
 
 	outPath := filepath.Join(*rootDir, *outputDir)
@@ -257,6 +271,13 @@ func main() {
 
 	fmt.Printf("Configuration documentation generated successfully in %s\n", outPath)
 	fmt.Printf("CLI documentation generated successfully in %s\n", cliOutPath)
+
+	// Schemas are reflected off the live types rather than parsed, so this
+	// emitter shares only the project root with the two above.
+	schemaOutPath := filepath.Join(*rootDir, *schemaOutputDir)
+	if err := generateSchemas(context.Background(), *rootDir, schemaOutPath, *schemaProviders, *schemaVersion); err != nil {
+		log.Fatalf("Failed to generate schemas: %v", err)
+	}
 }
 
 // processConfigFile parses cf's source, writes its page, and returns the

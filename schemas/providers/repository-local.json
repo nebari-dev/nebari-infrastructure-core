@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/local.Config",
+  "$defs": {
+    "local.Config": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path is the directory of the repository. When empty, the provider\ndefaults to ~/.nic/gitops/\u003cproject_name\u003e, falling back to a per-project\ndirectory under the OS temp dir only when the home directory cannot be\nresolved."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch is the git branch to use (default: \"main\")."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "branch"
+      ],
+      "description": "Config holds the configuration for the local repository provider."
+    }
+  },
+  "title": "local repository provider configuration"
+}

@@ -101,11 +101,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify docs are up-to-date
+      # `git add -A` (not `-N`) so the gate also catches generated files that
+      # *disappear*: `-N` stages a tracked file's deletion, leaving nothing for
+      # the subsequent unstaged `git diff` to report. `make docs` now `rm -f`s
+      # `schemas/*.json` before regenerating them, so a generator that stops
+      # emitting a file would otherwise pass silently.
+      - name: Verify docs and schemas are up-to-date
         run: |
           make docs
-          git add -N docs/reference/cli docs/configuration
-          git diff --exit-code -- docs/reference/cli docs/configuration
+          git add -A docs/reference/cli docs/configuration schemas
+          git diff --cached --exit-code -- docs/reference/cli docs/configuration schemas
 
   build:
     name: Build
