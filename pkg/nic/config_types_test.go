@@ -3,6 +3,7 @@ package nic
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
@@ -52,7 +53,22 @@ func TestRegisteredProvidersImplementConfigTyped(t *testing.T) {
 // fields keeps the check honest without naming the categories, so it also
 // covers the next one.
 func TestConfigTypesCoversEveryRegistryCategory(t *testing.T) {
-	categories := reflect.TypeOf(registry.Registry{}).NumField()
+	// Count only the provider-list fields. Counting every field would make a
+	// future non-provider field on Registry (a mutex, a clock) fail this test
+	// with an instruction to add a category map - the wrong fix for the right
+	// alarm.
+	registryType := reflect.TypeOf(registry.Registry{})
+	var categories int
+	for i := range registryType.NumField() {
+		if isProviderList(registryType.Field(i).Type) {
+			categories++
+		}
+	}
+	if categories == 0 {
+		t.Fatal("no *registry.ProviderList fields found on registry.Registry; " +
+			"this test can no longer see the categories it is meant to count")
+	}
+
 	walked := reflect.TypeOf(ConfigTypes{}).NumField()
 
 	if walked != categories {
@@ -60,4 +76,16 @@ func TestConfigTypesCoversEveryRegistryCategory(t *testing.T) {
 			"add the missing category to ConfigTypes and to the walk in RegisteredConfigTypes, "+
 			"along with a ConfigTyped interface in its provider package", walked, categories)
 	}
+}
+
+// isProviderList reports whether t is a *registry.ProviderList[...]. Generic
+// instantiations have distinct types per parameter, so the check is on the
+// name prefix rather than an equality against a single type.
+func isProviderList(t reflect.Type) bool {
+	if t.Kind() != reflect.Pointer {
+		return false
+	}
+	elem := t.Elem()
+	return elem.PkgPath() == reflect.TypeOf(registry.Registry{}).PkgPath() &&
+		strings.HasPrefix(elem.Name(), "ProviderList[")
 }

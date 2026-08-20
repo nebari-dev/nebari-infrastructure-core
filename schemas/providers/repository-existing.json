@@ -48,8 +48,6 @@
       "type": "object",
       "required": [
         "url",
-        "branch",
-        "path",
         "auth"
       ],
       "description": "Config holds the configuration for the existing repository provider."

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
 // readSchema decodes a generated schema file into a generic map.
@@ -218,41 +220,93 @@ func TestParseFilter(t *testing.T) {
 	}
 }
 
-func TestAcceptsNilFilterAcceptsEverything(t *testing.T) {
-	if !accepts(nil, "anything") {
+func TestAccepts(t *testing.T) {
+	if !accepts(nil, "cluster", "anything") {
 		t.Error("a nil filter must accept every provider")
 	}
-	if accepts(map[string]struct{}{"aws": {}}, "hetzner") {
+	if accepts(map[string]struct{}{"aws": {}}, "cluster", "hetzner") {
 		t.Error("a filter must reject providers it doesn't list")
+	}
+
+	// A bare name cannot distinguish cluster/local from repository/local, so
+	// it selects both; qualifying it selects exactly one.
+	bare := map[string]struct{}{"local": {}}
+	if !accepts(bare, "cluster", "local") || !accepts(bare, "repository", "local") {
+		t.Error("a bare name must select the provider in every category that has it")
+	}
+	qualified := map[string]struct{}{"repository/local": {}}
+	if accepts(qualified, "cluster", "local") {
+		t.Error("a category-qualified filter must not select the other category")
+	}
+	if !accepts(qualified, "repository", "local") {
+		t.Error("a category-qualified filter must select its own category")
 	}
 }
 
-func TestCollectPackagePathsSkipsTestdataAndTestOnlyDirs(t *testing.T) {
-	root := t.TempDir()
-
-	mustWrite := func(rel, content string) {
-		t.Helper()
-		full := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+// A typo'd -schema-providers used to write nothing, exit 0, and print the full
+// provider list as though it had regenerated it.
+func TestCheckFilterMatchesRejectsUnknownNames(t *testing.T) {
+	names := map[string][]string{
+		"cluster":    {"aws", "local"},
+		"repository": {"local"},
 	}
 
-	mustWrite("real/config.go", "package real\n")
-	mustWrite("testonly/thing_test.go", "package testonly\n")
-	mustWrite("real/testdata/fixture.go", "package fixture\n")
-
-	paths, err := collectPackagePaths(root)
-	if err != nil {
-		t.Fatalf("collectPackagePaths: %v", err)
+	if err := checkFilterMatches(map[string]struct{}{"aws": {}}, names); err != nil {
+		t.Errorf("a known bare name must be accepted: %v", err)
+	}
+	if err := checkFilterMatches(map[string]struct{}{"repository/local": {}}, names); err != nil {
+		t.Errorf("a known qualified name must be accepted: %v", err)
+	}
+	if err := checkFilterMatches(nil, names); err != nil {
+		t.Errorf("an empty filter means all providers: %v", err)
 	}
 
-	want := []string{filepath.Join(root, "real")}
-	if !reflect.DeepEqual(paths, want) {
-		t.Errorf("collectPackagePaths = %v, want %v (test-only dirs and testdata are excluded)", paths, want)
+	err := checkFilterMatches(map[string]struct{}{"bogusname": {}}, names)
+	if err == nil {
+		t.Fatal("an unmatched filter entry must be an error, not a silent no-op")
+	}
+	if !strings.Contains(err.Error(), "bogusname") || !strings.Contains(err.Error(), "cluster/aws") {
+		t.Errorf("the error should name the offender and the known providers, got: %v", err)
+	}
+}
+
+// cluster and dns are both bare-named groups, so a DNS provider sharing a
+// cluster provider's name silently overwrote its schema.
+func TestCheckSchemaNameCollisions(t *testing.T) {
+	ok := map[string][]string{
+		"cluster":    {"aws", "local"},
+		"dns":        {"cloudflare"},
+		"repository": {"local", "existing"},
+	}
+	if err := checkSchemaNameCollisions(ok); err != nil {
+		t.Errorf("the shipped provider set must not collide: %v", err)
+	}
+
+	// cluster/local vs repository/local is fine - the category qualifies the
+	// filename. cluster/aws vs dns/aws is not: both are bare.
+	clash := map[string][]string{
+		"cluster": {"aws"},
+		"dns":     {"aws"},
+	}
+	err := checkSchemaNameCollisions(clash)
+	if err == nil {
+		t.Fatal("a cluster/dns name clash must be an error; one schema would overwrite the other")
+	}
+	if !strings.Contains(err.Error(), "aws.json") {
+		t.Errorf("the error should name the contested file, got: %v", err)
+	}
+}
+
+// The category table carries naming that cannot be derived from the types, so
+// it is a literal list - but a category present in ConfigTypes and missing here
+// emits no schema at all, and an absent file leaves the drift gate nothing to
+// fail on.
+func TestCategoryTableCoversConfigTypes(t *testing.T) {
+	fields := reflect.TypeOf(nic.ConfigTypes{}).NumField()
+	if got := len(categoryTable(&nic.ConfigTypes{})); got != fields {
+		t.Errorf("categoryTable has %d entries but nic.ConfigTypes has %d category maps; "+
+			"add the new category to categoryTable (group, label, and the $defs name of its "+
+			"wrapper type in the top-level schema)", got, fields)
 	}
 }
 

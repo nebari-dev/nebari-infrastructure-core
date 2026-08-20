@@ -180,15 +180,36 @@
       "description": "CertificateConfig holds TLS certificate configuration"
     },
     "config.ClusterConfig": {
-      "properties": {},
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "enum": [
+          "aws",
+          "azure",
+          "existing",
+          "gcp",
+          "hetzner",
+          "local"
+        ]
+      },
       "type": "object",
+      "maxProperties": 1,
+      "minProperties": 1,
       "description": "ClusterConfig holds typed cloud provider configuration."
     },
     "config.DNSConfig": {
-      "properties": {},
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "enum": [
+          "cloudflare"
+        ]
+      },
       "type": "object",
+      "maxProperties": 1,
+      "minProperties": 1,
       "description": "DNSConfig holds typed DNS provider configuration."
     },
     "config.ExistingSecretRef": {
@@ -273,9 +294,18 @@
       "description": "NebariConfig represents the parsed nebari-config.yaml structure"
     },
     "config.RepositoryConfig": {
-      "properties": {},
-      "additionalProperties": false,
+      "additionalProperties": {
+        "type": "object"
+      },
+      "propertyNames": {
+        "enum": [
+          "existing",
+          "local"
+        ]
+      },
       "type": "object",
+      "maxProperties": 1,
+      "minProperties": 1,
       "description": "RepositoryConfig holds typed GitOps repository provider configuration."
     },
     "config.S3BackupTarget": {

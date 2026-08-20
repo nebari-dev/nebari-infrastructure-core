@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,10 +89,12 @@ func generateSchemasInRoot(ctx context.Context, outDir, providersFlag, version s
 		return fmt.Errorf("mkdir %s: %w", outDir, err)
 	}
 
-	pkgPaths, err := collectPackagePaths(pkgRoot)
-	if err != nil {
-		return fmt.Errorf("collect package paths under %s: %w", pkgRoot, err)
-	}
+	// AddGoComments walks recursively, so the whole tree is covered by its
+	// root. Passing each package separately parsed the same files once per
+	// ancestor and made the per-directory skips below look load-bearing when
+	// they were not: a syntax error under any testdata/ still failed the run,
+	// attributed to the package that "skipped" it.
+	pkgPaths := []string{pkgRoot}
 
 	client, err := nic.NewClient(ctx)
 	if err != nil {
@@ -104,37 +105,42 @@ func generateSchemasInRoot(ctx context.Context, outDir, providersFlag, version s
 	filter := parseFilter(providersFlag)
 	emitTopLevel := len(filter) == 0
 
-	// One entry per registry category. Driven off ConfigTypes rather than
-	// written out per category, so adding a category is a single line here
-	// instead of a fourth near-identical loop that is easy to forget.
-	categories := []struct {
-		group string
-		label string
-		types map[string]reflect.Type
-	}{
-		{"cluster", "cluster provider", types.Cluster},
-		{"dns", "DNS provider", types.DNS},
-		{"repository", "repository provider", types.Repository},
-	}
-
-	if emitTopLevel {
-		if err := writeSchema(ctx, outDir, "nebari-config.json",
-			reflect.TypeFor[config.NebariConfig](),
-			"Nebari config", pkgPaths); err != nil {
-			return err
-		}
-	}
+	categories := categoryTable(types)
 
 	names := make(map[string][]string, len(categories))
 	for _, c := range categories {
 		names[c.group] = sortedKeys(c.types)
+	}
+
+	// A filter entry that matches nothing writes no file and would otherwise
+	// exit 0, having printed the full provider list as though it had
+	// regenerated it. A typo'd -schema-providers must fail, not look clean.
+	if err := checkFilterMatches(filter, names); err != nil {
+		return err
+	}
+
+	if err := checkSchemaNameCollisions(names); err != nil {
+		return err
+	}
+
+	if emitTopLevel {
+		// The provider names come from the registry, so the top-level schema
+		// describes exactly the providers this build ships - see inlineMaps.
+		if err := writeSchema(ctx, outDir, "nebari-config.json",
+			reflect.TypeFor[config.NebariConfig](),
+			"Nebari config", pkgPaths, inlineMaps(categories, names)); err != nil {
+			return err
+		}
+	}
+
+	for _, c := range categories {
 		for _, name := range names[c.group] {
-			if !accepts(filter, name) {
+			if !accepts(filter, c.group, name) {
 				continue
 			}
 			if err := writeSchema(ctx, outDir, filepath.Join("providers", schemaFileName(c.group, name)),
 				c.types[name],
-				fmt.Sprintf("%s %s configuration", name, c.label), pkgPaths); err != nil {
+				fmt.Sprintf("%s %s configuration", name, c.label), pkgPaths, nil); err != nil {
 				return err
 			}
 		}
@@ -163,10 +169,11 @@ func schemaFileName(group, name string) string {
 	return group + "-" + name + ".json"
 }
 
-func writeSchema(ctx context.Context, outDir, relPath string, t reflect.Type, title string, pkgPaths []string) error {
+func writeSchema(ctx context.Context, outDir, relPath string, t reflect.Type, title string, pkgPaths []string, maps map[string]configschema.InlineMap) error {
 	data, err := configschema.Generate(ctx, t, configschema.FormatJSON, configschema.Options{
 		Title:        title,
 		PackagePaths: pkgPaths,
+		InlineMaps:   maps,
 	})
 	if err != nil {
 		return fmt.Errorf("generate %s: %w", relPath, err)
@@ -216,46 +223,6 @@ func writeManifest(outDir, version string, names map[string][]string) error {
 	return os.WriteFile(filepath.Join(outDir, "manifest.json"), data, 0o600)
 }
 
-// collectPackagePaths walks root and returns every subdirectory that
-// contains at least one non-test .go file. These paths are passed to
-// configschema.Generate as Options.PackagePaths so invopop/jsonschema
-// can pick up godoc comments wherever the type tree leads.
-func collectPackagePaths(root string) ([]string, error) {
-	var paths []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		if strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata" {
-			return fs.SkipDir
-		}
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return err
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			n := e.Name()
-			if strings.HasSuffix(n, ".go") && !strings.HasSuffix(n, "_test.go") {
-				paths = append(paths, path)
-				return nil
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(paths)
-	return paths, nil
-}
-
 func sortedKeys(m map[string]reflect.Type) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -279,10 +246,123 @@ func parseFilter(raw string) map[string]struct{} {
 	return out
 }
 
-func accepts(filter map[string]struct{}, name string) bool {
+// accepts reports whether the filter selects this provider. A bare name selects
+// it in every category; qualifying it with the category ("repository/local")
+// selects only that one, since cluster/local and repository/local are different
+// providers that a bare "local" cannot tell apart.
+func accepts(filter map[string]struct{}, group, name string) bool {
 	if filter == nil {
 		return true
 	}
-	_, ok := filter[name]
+	if _, ok := filter[name]; ok {
+		return true
+	}
+	_, ok := filter[group+"/"+name]
 	return ok
+}
+
+// category pairs a registry provider category with what the emitters need to
+// know about it: the group name used in filenames and the manifest, a label
+// for schema titles, the $defs name of the wrapper type in the top-level
+// schema, and the provider config types themselves.
+type category struct {
+	group   string
+	label   string
+	defName string
+	types   map[string]reflect.Type
+}
+
+// categoryTable describes every category in ConfigTypes. It is a literal list
+// because each entry carries naming that cannot be derived from the type, but
+// it must stay exhaustive: a category missing here emits no schema, and an
+// absent file produces no diff for the drift gate to fail on, which is how the
+// repository category shipped undocumented. TestCategoryTableCoversConfigTypes
+// compares this list against ConfigTypes' fields so an addition there cannot be
+// silently forgotten here.
+func categoryTable(types *nic.ConfigTypes) []category {
+	return []category{
+		{"cluster", "cluster provider", "config.ClusterConfig", types.Cluster},
+		{"dns", "DNS provider", "config.DNSConfig", types.DNS},
+		{"repository", "repository provider", "config.RepositoryConfig", types.Repository},
+	}
+}
+
+// inlineMaps describes each category wrapper in the top-level schema.
+//
+// cluster, dns and repository each hold their providers in a single
+// `yaml:",inline"` map, which invopop reflects as an object with no properties;
+// closed, that schema rejects every real config. What the validator actually
+// enforces is that the block names one registered provider and no more than one
+// (pkg/config's "no provider is configured" / "only one ... at a time" errors),
+// so that is what the schema says here, with the names taken from the registry
+// rather than a list maintained alongside it.
+func inlineMaps(categories []category, names map[string][]string) map[string]configschema.InlineMap {
+	out := make(map[string]configschema.InlineMap, len(categories))
+	for _, c := range categories {
+		out[c.defName] = configschema.InlineMap{
+			AllowedKeys: names[c.group],
+			ExactlyOne:  true,
+		}
+	}
+	return out
+}
+
+// checkFilterMatches reports filter entries that match no registered provider.
+func checkFilterMatches(filter map[string]struct{}, names map[string][]string) error {
+	if len(filter) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{})
+	var flat []string
+	for group, list := range names {
+		for _, n := range list {
+			known[n] = struct{}{}
+			known[group+"/"+n] = struct{}{}
+			flat = append(flat, group+"/"+n)
+		}
+	}
+
+	var unmatched []string
+	for f := range filter {
+		if _, ok := known[f]; !ok {
+			unmatched = append(unmatched, f)
+		}
+	}
+	if len(unmatched) == 0 {
+		return nil
+	}
+	sort.Strings(unmatched)
+	sort.Strings(flat)
+	return fmt.Errorf("-schema-providers: no registered provider named %s; known providers are %s "+
+		"(a name may be qualified with its category, e.g. repository/local)",
+		strings.Join(unmatched, ", "), strings.Join(flat, ", "))
+}
+
+// checkSchemaNameCollisions fails when two providers would write the same file.
+// schemaFileName qualifies categories outside bareNameGroups, but cluster and
+// dns are both bare, so a DNS provider sharing a cluster provider's name would
+// overwrite its schema - exit 0, no warning, with the manifest advertising both.
+// The markdown emitter guards its own filenames (checkOutputNameCollisions);
+// this is the same guard over the schema filenames.
+func checkSchemaNameCollisions(names map[string][]string) error {
+	claimed := make(map[string]string)
+	groups := make([]string, 0, len(names))
+	for group := range names {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+
+	for _, group := range groups {
+		for _, name := range names[group] {
+			file := schemaFileName(group, name)
+			owner := group + "/" + name
+			if prev, ok := claimed[file]; ok {
+				return fmt.Errorf("schema filename collision: %s is claimed by both %s and %s; "+
+					"remove one from bareNameGroups so its category qualifies the filename", file, prev, owner)
+			}
+			claimed[file] = owner
+		}
+	}
+	return nil
 }

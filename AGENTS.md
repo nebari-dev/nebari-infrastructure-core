@@ -337,7 +337,7 @@ func SomeFunction(ctx context.Context, ...) error {
 ### Adding a New Cluster Provider
 
 1. Create `pkg/providers/cluster/<name>/`.
-2. Implement the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`). Also implement the optional `cluster.ConfigTyped` capability (a one-line `ConfigType() reflect.Type` in `configtype.go`) so the provider's config schema and reference docs generate themselves; `pkg/nic.TestRegisteredProvidersImplementConfigTyped` fails if you skip it.
+2. Implement the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`). Also implement the optional `cluster.ConfigTyped` capability (a one-line `ConfigType() reflect.Type` in `configtype.go`) so the provider's config schema and reference docs generate themselves; `pkg/nic.TestRegisteredProvidersImplementConfigTyped` fails if you skip it, and `make docs` is what commits its schema.
 3. Choose the right backing tool. Embed templates with `//go:embed` if you need files (see `pkg/providers/cluster/aws/templates/`).
 4. Register the provider with the `registry.Registry` built in `pkg/nic/registry.go`.
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
@@ -349,18 +349,20 @@ func SomeFunction(ctx context.Context, ...) error {
 ### Adding a New DNS Provider
 
 1. Create `pkg/providers/dns/<name>/`.
-2. Implement the `DNSProvider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`).
+2. Implement the `DNSProvider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`). Also implement the optional `dns.ConfigTyped` capability (a one-line `ConfigType() reflect.Type`) so the provider's config schema and reference docs generate themselves; `pkg/nic.TestRegisteredProvidersImplementConfigTyped` fails if you skip it.
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
+5. Run `make docs` and commit the regenerated `docs/configuration/` and `schemas/` (CI fails on drift).
 
 ### Adding a New Repository Provider
 
 1. Create `pkg/providers/repository/<name>/`.
-2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`). Also implement the optional `repository.ConfigTyped` capability (a one-line `ConfigType() reflect.Type` in `configtype.go`) so the provider's config schema and reference docs generate themselves; `pkg/nic.TestRegisteredProvidersImplementConfigTyped` fails if you skip it.
 3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
 4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
 5. Update `examples/` configs with the new `repository:` provider block.
 6. Cover the provider with table-driven unit tests (see `pkg/providers/repository/existing/` for the pattern).
+7. Run `make docs` and commit the regenerated `docs/configuration/` and `schemas/` (CI fails on drift).
 
 ### Adding a New Configuration Field
 
@@ -370,7 +372,8 @@ func SomeFunction(ctx context.Context, ...) error {
 4. Plumb it through to the backing tool.
 5. Update example configs in `examples/`.
 6. Add tests.
-7. Run `make docs` and commit the regenerated `docs/configuration/` and `schemas/`. A field's allowed values and default belong in a `jsonschema:"enum=…,default=…"` tag, not in prose - both generators read the tag, so stating it in the godoc as well just duplicates it in every output.
+7. Run `make docs` and commit the regenerated `docs/configuration/` and `schemas/`. A field's allowed values and default belong in a `jsonschema:"enum=…,default=…"` tag, not in prose - both generators read the tag, so stating it in the godoc as well just duplicates it in every output. When the default also exists as a Go const, the tag is a second declaration of it: pin the two together with a test (see `TestChartVersionSchemaDefaultMatchesConst`), because nothing else relates them and a drifted tag publishes a wrong default to every reader.
+8. **Do not add a `yaml` tag without `,omitempty` unless the field is genuinely mandatory.** Required-ness in the generated schema is inferred from the absence of `,omitempty`, so a field NIC defaults at runtime but tags without it produces a schema that rejects configs the binary accepts. `pkg/nic.TestExampleConfigsMatchGeneratedSchemas` catches this for anything an example exercises.
 
 **Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
 
