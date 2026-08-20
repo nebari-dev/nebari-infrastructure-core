@@ -19,8 +19,8 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/deployinfo"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
@@ -214,7 +214,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// behind the record of which build died. Skipped in dry-run, which has no
 	// cluster to write to.
 	if !opts.DryRun {
-		c.recordDeployInfo(ctx, cfg, clusterProvider)
+		c.recordFingerprint(ctx, cfg, clusterProvider)
 	}
 
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
@@ -349,7 +349,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	return result, nil
 }
 
-// recordDeployInfo writes the NIC build identity into the cluster as a
+// recordFingerprint writes the NIC build identity into the cluster as a
 // ConfigMap, so anyone holding kubectl can answer "which NIC produced this
 // cluster?" without access to the binary, the config, or the tofu state.
 //
@@ -365,49 +365,49 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 //
 // A Client built without nic.WithBuild carries no build identity and is skipped
 // entirely - see WithBuild for why that is preferred over writing placeholders.
-func (c *Client) recordDeployInfo(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
+func (c *Client) recordFingerprint(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "nic.recordDeployInfo")
+	ctx, span := tracer.Start(ctx, "nic.recordFingerprint")
 	defer span.End()
 
 	if c.build == nil {
-		span.SetAttributes(attribute.Bool("deployinfo.skipped", true))
+		span.SetAttributes(attribute.Bool("fingerprint.skipped", true))
 		return
 	}
 
 	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
 	if err != nil {
-		warnDeployInfo(ctx, span, fmt.Errorf("get kubeconfig: %w", err))
+		warnFingerprint(ctx, span, fmt.Errorf("get kubeconfig: %w", err))
 		return
 	}
 	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
 	if err != nil {
-		warnDeployInfo(ctx, span, fmt.Errorf("parse kubeconfig: %w", err))
+		warnFingerprint(ctx, span, fmt.Errorf("parse kubeconfig: %w", err))
 		return
 	}
 	k8sClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		warnDeployInfo(ctx, span, fmt.Errorf("create kubernetes client: %w", err))
+		warnFingerprint(ctx, span, fmt.Errorf("create kubernetes client: %w", err))
 		return
 	}
 
-	info := deployinfo.Info{
+	info := fingerprint.Info{
 		Build:           *c.build,
 		ClusterProvider: clusterProvider.Name(),
 		ProjectName:     cfg.ProjectName,
 		LastDeploy:      time.Now(),
 	}
-	if err := deployinfo.Apply(ctx, k8sClient, info); err != nil {
-		warnDeployInfo(ctx, span, err)
+	if err := fingerprint.Apply(ctx, k8sClient, info); err != nil {
+		warnFingerprint(ctx, span, err)
 	}
 }
 
-// warnDeployInfo records the failure on the span and warns the user, naming the
+// warnFingerprint records the failure on the span and warns the user, naming the
 // ConfigMap so the message is actionable rather than a bare error.
-func warnDeployInfo(ctx context.Context, span trace.Span, err error) {
+func warnFingerprint(ctx context.Context, span trace.Span, err error) {
 	span.RecordError(err)
 	status.Send(ctx, status.NewUpdate(status.LevelWarning,
-		fmt.Sprintf("Could not record NIC deployment metadata in %s/%s; the cluster is deployed but its NIC version is not queryable from inside it", deployinfo.Namespace, deployinfo.Name)).
+		fmt.Sprintf("Could not record NIC deployment metadata in %s/%s; the cluster is deployed but its NIC version is not queryable from inside it", fingerprint.Namespace, fingerprint.Name)).
 		WithMetadata("error", err.Error()))
 }
 

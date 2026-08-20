@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/deployinfo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 )
 
 // clientConstructors embeds the sources of every command that builds a
@@ -30,8 +30,8 @@ var clientConstructors embed.FS
 // the assertion is that the two paths agree, not what the values are.
 func TestBuildOptionMatchesVersionOutput(t *testing.T) {
 	// What buildOption hands to pkg/nic, rendered the way it reaches the cluster.
-	data := deployinfo.Info{
-		Build: deployinfo.Build{Version: version, Commit: commit, Date: date},
+	data := fingerprint.Info{
+		Build: fingerprint.Build{Version: version, Commit: commit, Date: date},
 	}.Data()
 
 	// What `nic version` prints, keyed by the ConfigMap field it corresponds to.

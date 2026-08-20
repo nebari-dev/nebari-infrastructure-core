@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/deployinfo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -38,17 +38,17 @@ func collectStatus(ctx context.Context, fn func(context.Context)) []status.Updat
 	return updates
 }
 
-// TestRecordDeployInfoSkippedWithoutBuild pins the WithBuild contract: a Client
+// TestRecordFingerprintSkippedWithoutBuild pins the WithBuild contract: a Client
 // built without a build identity records nothing at all, rather than stamping a
 // cluster with placeholder provenance. Asserted by the absence of a kubeconfig
 // fetch, so the test fails if the skip moves after the cluster round-trip.
-func TestRecordDeployInfoSkippedWithoutBuild(t *testing.T) {
+func TestRecordFingerprintSkippedWithoutBuild(t *testing.T) {
 	provider := &countingClusterProvider{}
 	client := &Client{}
 	cfg := &config.NebariConfig{ProjectName: "test"}
 
 	updates := collectStatus(context.Background(), func(ctx context.Context) {
-		client.recordDeployInfo(ctx, cfg, provider)
+		client.recordFingerprint(ctx, cfg, provider)
 	})
 
 	if provider.kubeconfigCalls != 0 {
@@ -59,18 +59,18 @@ func TestRecordDeployInfoSkippedWithoutBuild(t *testing.T) {
 	}
 }
 
-// TestRecordDeployInfoWarnsOnFailure pins the warn-and-continue contract. The
+// TestRecordFingerprintWarnsOnFailure pins the warn-and-continue contract. The
 // metadata write is provenance, not infrastructure: a cluster that came up must
 // not be reported as a failed deploy because the ConfigMap could not be written.
-// recordDeployInfo returns nothing, so the warning is the only signal the
+// recordFingerprint returns nothing, so the warning is the only signal the
 // operator gets and it has to name what was lost.
-func TestRecordDeployInfoWarnsOnFailure(t *testing.T) {
+func TestRecordFingerprintWarnsOnFailure(t *testing.T) {
 	provider := &countingClusterProvider{}
-	client := &Client{build: &deployinfo.Build{Version: "v0.13.0", Commit: "abc1234"}}
+	client := &Client{build: &fingerprint.Build{Version: "v0.13.0", Commit: "abc1234"}}
 	cfg := &config.NebariConfig{ProjectName: "test"}
 
 	updates := collectStatus(context.Background(), func(ctx context.Context) {
-		client.recordDeployInfo(ctx, cfg, provider)
+		client.recordFingerprint(ctx, cfg, provider)
 	})
 
 	if provider.kubeconfigCalls != 1 {
@@ -85,8 +85,8 @@ func TestRecordDeployInfoWarnsOnFailure(t *testing.T) {
 		warned = true
 		// The message must name the ConfigMap, otherwise the operator cannot
 		// tell which record is missing.
-		if !strings.Contains(u.Message, deployinfo.Name) {
-			t.Errorf("warning %q does not name the ConfigMap %q", u.Message, deployinfo.Name)
+		if !strings.Contains(u.Message, fingerprint.Name) {
+			t.Errorf("warning %q does not name the ConfigMap %q", u.Message, fingerprint.Name)
 		}
 		if got, ok := u.Metadata["error"].(string); !ok || !strings.Contains(got, "cluster unreachable") {
 			t.Errorf("warning metadata error = %v, want the underlying cause", u.Metadata["error"])
@@ -108,7 +108,7 @@ func TestWithBuildSetsIdentity(t *testing.T) {
 
 	WithBuild("v1.2.3", "deadbee", "2026-08-19T00:00:00Z")(&c)
 
-	want := deployinfo.Build{Version: "v1.2.3", Commit: "deadbee", Date: "2026-08-19T00:00:00Z"}
+	want := fingerprint.Build{Version: "v1.2.3", Commit: "deadbee", Date: "2026-08-19T00:00:00Z"}
 	if c.build == nil || *c.build != want {
 		t.Errorf("build = %v, want %v", c.build, want)
 	}

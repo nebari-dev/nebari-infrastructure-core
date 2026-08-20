@@ -1,4 +1,4 @@
-// Package deployinfo records which NIC build produced a cluster.
+// Package fingerprint records which NIC build produced a cluster.
 //
 // NIC's version and commit are injected into the binary at build time and
 // printed by `nic version`, but that only answers the question on the machine
@@ -9,7 +9,7 @@
 //
 // This package writes that answer into the cluster itself, as a ConfigMap that
 // `nic deploy` upserts on every run.
-package deployinfo
+package fingerprint
 
 import (
 	"context"
@@ -121,7 +121,7 @@ func (i Info) ConfigMap() *corev1.ConfigMap {
 // so the error is descriptive enough to explain what was lost.
 func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "deployinfo.Apply")
+	ctx, span := tracer.Start(ctx, "fingerprint.Apply")
 	defer span.End()
 
 	span.SetAttributes(

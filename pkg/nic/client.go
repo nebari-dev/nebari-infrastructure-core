@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/deployinfo"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 )
 
@@ -15,7 +15,7 @@ type Client struct {
 
 	// build is the NIC binary's identity, set via WithBuild by the cmd layer.
 	// Nil when the caller did not supply one; see WithBuild.
-	build *deployinfo.Build
+	build *fingerprint.Build
 }
 
 // NewClient returns a new NIC client. The context governs the provider
@@ -47,6 +47,6 @@ type Option func(*Client)
 // "unknown" provenance record on the cluster.
 func WithBuild(version, commit, date string) Option {
 	return func(c *Client) {
-		c.build = &deployinfo.Build{Version: version, Commit: commit, Date: date}
+		c.build = &fingerprint.Build{Version: version, Commit: commit, Date: date}
 	}
 }
