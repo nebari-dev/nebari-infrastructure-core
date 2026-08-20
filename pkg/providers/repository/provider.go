@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
@@ -118,3 +119,12 @@ func (LocalSource) isSource()           {}
 func (s LocalSource) RepoURL() string   { return "file://" + s.Dir }
 func (s LocalSource) GetBranch() string { return s.Branch }
 func (s LocalSource) RepoPath() string  { return s.Path }
+
+// ConfigTyped is an optional capability a repository Provider may implement to
+// expose the Go type of its configuration struct, discovered via a type
+// assertion by schema generation and config scaffolding. See the cluster
+// package's ConfigTyped for the rationale (kept off the Provider interface on
+// purpose).
+type ConfigTyped interface {
+	ConfigType() reflect.Type
+}

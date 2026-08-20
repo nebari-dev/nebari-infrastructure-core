@@ -16,11 +16,11 @@ type Config struct {
 	URL string `yaml:"url" json:"url"`
 
 	// Branch is the git branch to use (default: "main").
-	Branch string `yaml:"branch" json:"branch"`
+	Branch string `yaml:"branch,omitempty" json:"branch,omitempty"`
 
 	// Path is an optional subdirectory within the repository. When set, all
 	// operations are scoped to this path.
-	Path string `yaml:"path" json:"path"`
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 
 	// Auth specifies the credentials NIC uses to push to the repository
 	// (requires write access).

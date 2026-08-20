@@ -277,3 +277,62 @@ func TestMarkdownGenerator_WriteNote(t *testing.T) {
 		t.Error("note should contain the note text")
 	}
 }
+
+func TestConstraintSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		field FieldDoc
+		want  string
+	}{
+		{
+			name:  "no constraints",
+			field: FieldDoc{Name: "Region"},
+			want:  "",
+		},
+		{
+			name:  "enum only",
+			field: FieldDoc{Name: "Effect", Enum: []string{"NO_SCHEDULE", "NO_EXECUTE"}},
+			want:  " One of: `NO_SCHEDULE`, `NO_EXECUTE`.",
+		},
+		{
+			name:  "default only",
+			field: FieldDoc{Name: "ChartVersion", Default: "3.4.3"},
+			want:  " Defaults to `3.4.3`.",
+		},
+		{
+			name:  "enum and default",
+			field: FieldDoc{Name: "Mode", Enum: []string{"System", "User"}, Default: "User"},
+			want:  " One of: `System`, `User`. Defaults to `User`.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := constraintSuffix(tt.field); got != tt.want {
+				t.Errorf("constraintSuffix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A long description is truncated, but the constraints are appended after the
+// truncation so they can never be the part that gets cut.
+func TestWriteFieldRowKeepsConstraintsAfterTruncation(t *testing.T) {
+	var buf bytes.Buffer
+	g := NewMarkdownGenerator(&buf)
+	g.writeFieldRow(FieldDoc{
+		Name:    "Effect",
+		GoType:  "string",
+		YAMLKey: "effect",
+		Doc:     strings.Repeat("x", 300),
+		Enum:    []string{"NO_SCHEDULE"},
+	}, "Yes")
+
+	out := buf.String()
+	if !strings.Contains(out, "...") {
+		t.Errorf("expected the long description to be truncated, got %q", out)
+	}
+	if !strings.Contains(out, "One of: `NO_SCHEDULE`.") {
+		t.Errorf("constraints dropped by truncation: %q", out)
+	}
+}

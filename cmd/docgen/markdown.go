@@ -79,6 +79,10 @@ func (g *MarkdownGenerator) writeFieldRow(field FieldDoc, required string) {
 	if runes := []rune(desc); len(runes) > 200 {
 		desc = string(runes[:197]) + "..."
 	}
+	// Append the `jsonschema` constraints after truncation, so they are never
+	// the part that gets cut. These are short and are the field's most
+	// actionable documentation.
+	desc = strings.TrimSpace(desc + constraintSuffix(field))
 
 	yamlKey := field.YAMLKey
 	if yamlKey == "" {
@@ -90,6 +94,28 @@ func (g *MarkdownGenerator) writeFieldRow(field FieldDoc, required string) {
 
 	g.printf("| %s | `%s` | %s | %s | %s |\n",
 		field.Name, yamlKey, goType, required, desc)
+}
+
+// constraintSuffix renders a field's `jsonschema` enum/default as a sentence
+// to append to its description, so the allowed values and default a field
+// declares are visible in the markdown reference and not only in schemas/.
+// Returns "" when the field declares neither.
+func constraintSuffix(field FieldDoc) string {
+	var parts []string
+	if len(field.Enum) > 0 {
+		quoted := make([]string, len(field.Enum))
+		for i, v := range field.Enum {
+			quoted[i] = "`" + v + "`"
+		}
+		parts = append(parts, "One of: "+strings.Join(quoted, ", ")+".")
+	}
+	if field.Default != "" {
+		parts = append(parts, "Defaults to `"+field.Default+"`.")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, " ")
 }
 
 // formatType formats a Go type for markdown display.

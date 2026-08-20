@@ -105,11 +105,11 @@ jobs:
         with:
           nic-binary: nic
 
-      - name: Verify docs are up-to-date
+      - name: Verify generated docs and schemas are up-to-date
         run: |
           make docs
-          git add -N docs/reference/cli docs/configuration
-          git diff --exit-code -- docs/reference/cli docs/configuration
+          git add -N docs/reference/cli docs/configuration schemas
+          git diff --exit-code -- docs/reference/cli docs/configuration schemas
 
   workflow-pins:
     name: Workflow pins & release config
@@ -149,6 +149,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
       - name: Run vulnerability gate
         run: ./scripts/govulncheck-gate.sh

@@ -19,6 +19,13 @@ domain: nebari.example.com
 cluster:
   aws:
     region: us-west-2
+    # A cluster provider still needs a node group; the certificate settings
+    # below are what this example is about.
+    node_groups:
+      user:
+        instance: m7i.xlarge
+        min_nodes: 1
+        max_nodes: 5
 
 certificate:
   type: existing

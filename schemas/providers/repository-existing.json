@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/existing.Config",
+  "$defs": {
+    "existing.AuthConfig": {
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/existing.EnvRef",
+          "description": "Token authenticates over HTTPS with a token read from Token.Env."
+        },
+        "ssh": {
+          "$ref": "#/$defs/existing.EnvRef",
+          "description": "SSH authenticates over SSH with a private key read from SSH.Env."
+        },
+        "insecure_skip_host_key_verification": {
+          "type": "boolean",
+          "description": "InsecureSkipHostKeyVerification disables SSH host key verification,\nremoving protection against man-in-the-middle attacks. Only intended\nfor ephemeral environments (e.g. CI) where maintaining a known_hosts\nfile is impractical. Has no effect on token (HTTPS) authentication."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "AuthConfig selects exactly one authentication method."
+    },
+    "existing.Config": {
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "URL is the remote repository URL (ssh or https).\nExamples: \"git@github.com:org/repo.git\", \"https://github.com/org/repo.git\"."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch is the git branch to use (default: \"main\")."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is an optional subdirectory within the repository. When set, all\noperations are scoped to this path."
+        },
+        "auth": {
+          "$ref": "#/$defs/existing.AuthConfig",
+          "description": "Auth specifies the credentials NIC uses to push to the repository\n(requires write access)."
+        },
+        "argocd_auth": {
+          "$ref": "#/$defs/existing.AuthConfig",
+          "description": "ArgoCDAuth specifies optional separate credentials for ArgoCD's in-cluster\nread access. When unset, Auth is used."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url",
+        "auth"
+      ],
+      "description": "Config holds the configuration for the existing repository provider."
+    },
+    "existing.EnvRef": {
+      "properties": {
+        "env": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "env"
+      ],
+      "description": "EnvRef names the environment variable a secret is read from."
+    }
+  },
+  "title": "existing repository provider configuration"
+}
