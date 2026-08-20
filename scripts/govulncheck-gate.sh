@@ -8,7 +8,7 @@
 set -euo pipefail
 
 if ! command -v govulncheck >/dev/null 2>&1; then
-  echo "govulncheck not found in PATH; install with: go install golang.org/x/vuln/cmd/govulncheck@v1.4.0" >&2
+  echo "govulncheck not found in PATH; install with: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0" >&2
   exit 1
 fi
 if ! command -v jq >/dev/null 2>&1; then

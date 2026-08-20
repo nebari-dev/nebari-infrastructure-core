@@ -22,9 +22,9 @@ build: ## Build the binary
 	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BINARY_NAME) successfully"
 
-docs: ## Generate CLI and configuration reference documentation
-	@mkdir -p docs/reference/cli docs/configuration
-	@rm -f docs/reference/cli/*.md docs/configuration/*.md
+docs: ## Generate the CLI, configuration, and JSON Schema reference from the Go source
+	@mkdir -p docs/reference/cli docs/configuration schemas/providers
+	@rm -f docs/reference/cli/*.md docs/configuration/*.md schemas/*.json schemas/providers/*.json
 	go run ./cmd/docgen
 
 build-all: ## Build binaries for all platforms

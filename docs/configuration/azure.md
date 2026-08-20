@@ -59,7 +59,7 @@ NodeGroup describes one AKS node pool.
 | Instance | `instance` | string | Yes |  |
 | MinNodes | `min_nodes` | int | Yes |  |
 | MaxNodes | `max_nodes` | int | Yes |  |
-| Mode | `mode` | string | No | "System" \| "User"; defaults to "User" |
+| Mode | `mode` | string | No | One of: `System`, `User`. Defaults to `User`. |
 | OSDiskSizeGB | `os_disk_size_gb` | int | No |  |
 | Labels | `labels` | `map[string]string` | No |  |
 | Taints | `taints` | `[]string` | No | Taints in "key=value:Effect" form, e.g. "dedicated=gpu:NoSchedule". |

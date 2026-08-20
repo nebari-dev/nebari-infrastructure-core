@@ -1,6 +1,17 @@
 package dns
 
-import "context"
+import (
+	"context"
+	"reflect"
+)
+
+// ConfigTyped is an optional capability a DNS Provider may implement to expose
+// the Go type of its configuration struct, discovered via a type assertion by
+// schema generation and config scaffolding. See the cluster package's
+// ConfigTyped for the rationale (kept off the Provider interface on purpose).
+type ConfigTyped interface {
+	ConfigType() reflect.Type
+}
 
 // ValidateOptions configures provider validation behavior.
 type ValidateOptions struct {

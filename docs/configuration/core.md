@@ -54,7 +54,7 @@ CertificateConfig holds TLS certificate configuration
 
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Type | `type` | string | No | Type is the certificate type: "selfsigned", "letsencrypt", or "existing" |
+| Type | `type` | string | No | Type selects how the gateway's TLS certificate is obtained. One of: `selfsigned`, `letsencrypt`, `existing`. |
 | ACME | `acme` | `*ACMEConfig` | No | ACME configuration for Let's Encrypt |
 | SecretName | `secret_name` | string | No | SecretName overrides the name of the TLS secret the gateway references. Defaults to "nebari-gateway-tls". For type=existing with existing_secret, the gateway references ExistingSecret.Name instead. |
 | ExistingSecret | `existing_secret` | `*ExistingSecretRef` | No | ExistingSecret references a kubernetes.io/tls secret the user already created. Mutually exclusive with Files and Env. Only valid when Type=existing. |

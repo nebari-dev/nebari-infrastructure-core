@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -45,6 +46,11 @@ type Provider struct {
 func NewProvider() *Provider {
 	return &Provider{}
 }
+
+// ConfigType reports the Go type of this provider's configuration struct
+// (the optional cluster.ConfigTyped capability used by schema generation and
+// config scaffolding).
+func (p *Provider) ConfigType() reflect.Type { return reflect.TypeFor[Config]() }
 
 // Name returns the provider name
 func (p *Provider) Name() string {
