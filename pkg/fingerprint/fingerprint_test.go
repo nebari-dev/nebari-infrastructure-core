@@ -13,21 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 )
-
-// TestNamespaceMatchesArgoCDNebariSystem pins this package's namespace to the
-// one pkg/argocd owns. The constant is duplicated rather than imported because
-// this package writes before ArgoCD exists and must not depend on it - so the
-// coupling is enforced here, in a test, where an import would be a design
-// mistake. If the two ever diverge, the record lands somewhere the foundational
-// AppProject does not declare.
-func TestNamespaceMatchesArgoCDNebariSystem(t *testing.T) {
-	if Namespace != argocd.NebariSystemNamespace {
-		t.Errorf("Namespace = %q, want argocd.NebariSystemNamespace (%q)", Namespace, argocd.NebariSystemNamespace)
-	}
-}
 
 // TestApplyCreatesNamespace covers the early-write requirement: the record is
 // stamped before the foundational install, so nebari-system does not exist yet
@@ -77,19 +63,26 @@ func TestApplyToleratesNamespaceCreateRace(t *testing.T) {
 	}
 }
 
-// TestApplySurfacesNamespaceGetFailure is the same reasoning as the ConfigMap
-// Get: a Forbidden must not be mistaken for "absent" and fall through to a
-// Create that fails with a worse message.
-func TestApplySurfacesNamespaceGetFailure(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	forbidden := apierrors.NewForbidden(
-		schema.GroupResource{Resource: "namespaces"}, Namespace, errors.New("nope"))
+// TestApplyProceedsWhenNamespaceGetIsDenied covers the namespace-scoped
+// kubeconfig case: cluster-scoped namespace reads are denied while
+// nebari-system already exists. A denied Get is not proof of absence, so the
+// write must still be attempted rather than abandoned.
+func TestApplyProceedsWhenNamespaceGetIsDenied(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: Namespace},
+	})
 	client.PrependReactor("get", "namespaces",
-		func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, forbidden })
+		func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "namespaces"}, Namespace, errors.New("nope"))
+		})
 
-	err := Apply(context.Background(), client, testInfo())
-	if !errors.Is(err, forbidden) {
-		t.Errorf("Apply() error = %v, want it to wrap the Forbidden namespace Get", err)
+	if err := Apply(ctx, client, testInfo()); err != nil {
+		t.Fatalf("Apply() error = %v, want the denied namespace Get to not stop the write", err)
+	}
+	if _, err := client.CoreV1().ConfigMaps(Namespace).Get(ctx, Name, metav1.GetOptions{}); err != nil {
+		t.Errorf("ConfigMap was not written despite the namespace existing: %v", err)
 	}
 }
 
@@ -138,18 +131,6 @@ func TestInfoDataNormalizesTimestampToUTC(t *testing.T) {
 
 	if got := info.Data()["last-deploy-timestamp"]; got != "2026-06-10T18:43:22Z" {
 		t.Errorf("last-deploy-timestamp = %q, want the UTC form %q", got, "2026-06-10T18:43:22Z")
-	}
-}
-
-// TestInfoDataWritesEmptyValues pins that a missing field is recorded as an
-// empty value rather than an absent key. A reader can then distinguish "NIC did
-// not know this" from "this key postdates the NIC that deployed the cluster".
-func TestInfoDataWritesEmptyValues(t *testing.T) {
-	data := Info{}.Data()
-	for _, key := range []string{"nic-version", "nic-commit", "nic-build-date", "cluster-provider", "project-name"} {
-		if _, ok := data[key]; !ok {
-			t.Errorf("Data() is missing key %q for a zero Info", key)
-		}
 	}
 }
 

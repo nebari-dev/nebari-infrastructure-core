@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
@@ -29,14 +30,12 @@ var (
 	date    = "unknown"
 )
 
-// buildOption hands the ldflags-injected build identity down to pkg/nic, which
-// stamps it onto the cluster as deployment metadata.
-//
-// Every nic.NewClient call site goes through this one helper so these three
-// vars have a single consumer: what `nic version` prints and what NIC records
-// in the cluster cannot drift apart, because both read the same variables.
-func buildOption() nic.Option {
-	return nic.WithBuild(version, commit, date)
+// buildInfo is the single reader of the ldflags-injected build vars, shared by
+// `nic version`'s output and the fingerprint `nic deploy` writes into the
+// cluster. Routing both through one function is what keeps the printed version
+// and the recorded version from drifting apart.
+func buildInfo() fingerprint.Build {
+	return fingerprint.Build{Version: version, Commit: commit, Date: date}
 }
 
 var versionCmd = &cobra.Command{
@@ -100,7 +99,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Built: %s\n", date)
 	fmt.Printf("OpenTofu version: %s\n", tofuVersionLine(ctx))
 
-	client, err := nic.NewClient(ctx, buildOption())
+	client, err := nic.NewClient(ctx)
 	if err != nil {
 		return err
 	}

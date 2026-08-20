@@ -70,6 +70,18 @@ this repository read them.
 
 ## Limitations
 
-Cloud-resource tags do **not** carry the NIC version yet, so this record is
-reachable only with cluster access. AWS and Azure resources carry the existing
-`managed-by` markers but no version. That is tracked as a follow-up.
+Cloud-resource tags do **not** carry the NIC version. AWS and Azure resources
+carry the existing `managed-by` markers but no version, so this record is
+reachable only with cluster access to the deployed cluster.
+
+That access requirement is also the security boundary: reading the record means
+holding in-cluster API access. Anything that later widens it - putting the
+version on cloud resource tags, say, where `ec2:DescribeTags` is enough - is
+widening that boundary, not just adding a second copy.
+
+`nic destroy` does not remove the record. For the managed cloud providers this
+is moot (the cluster goes with it), but on a bring-your-own cluster the
+`existing` provider's teardown is a no-op, so the ConfigMap and the
+`nebari-system` namespace survive and keep naming a NIC build for a cluster
+Nebari no longer occupies. Treat the record as "the last NIC deploy that touched
+this cluster", not as proof that Nebari is currently installed.

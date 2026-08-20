@@ -22,6 +22,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -81,9 +83,7 @@ type Info struct {
 
 // Data renders Info as ConfigMap data. Keys are stable API: anything reading
 // this ConfigMap (runbooks, support scripts, future `nic` subcommands) depends
-// on them, so they are only ever added to, never renamed. Empty values are
-// still written, so a reader can tell "NIC did not record this" from "this key
-// belongs to a newer NIC than the one that deployed".
+// on them, so they are only ever added to, never renamed.
 func (i Info) Data() map[string]string {
 	return map[string]string{
 		"nic-version":           i.Build.Version,
@@ -95,9 +95,8 @@ func (i Info) Data() map[string]string {
 	}
 }
 
-// ConfigMap renders Info as the object Apply upserts. Exported so callers can
-// render the manifest without a cluster (and so tests can assert on it).
-func (i Info) ConfigMap() *corev1.ConfigMap {
+// configMap renders Info as the object Apply upserts.
+func (i Info) configMap() *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      Name,
@@ -139,10 +138,10 @@ func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 		return err
 	}
 
-	cm := info.ConfigMap()
+	cm := info.configMap()
 	configMaps := client.CoreV1().ConfigMaps(Namespace)
 
-	existing, err := configMaps.Get(ctx, Name, metav1.GetOptions{})
+	_, err := configMaps.Get(ctx, Name, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			// A permission or transient error must not be read as "absent":
@@ -151,22 +150,47 @@ func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 			return fmt.Errorf("get configmap %s/%s: %w", Namespace, Name, err)
 		}
 		if _, err := configMaps.Create(ctx, cm, metav1.CreateOptions{}); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("create configmap %s/%s: %w", Namespace, Name, err)
+			if !apierrors.IsAlreadyExists(err) {
+				span.RecordError(err)
+				return fmt.Errorf("create configmap %s/%s: %w", Namespace, Name, err)
+			}
+			// Lost the race with a concurrent deploy; fall through to the
+			// update path so this deploy's values still win.
+			return update(ctx, configMaps, info)
 		}
 		sendRecorded(ctx, info, "created")
 		return nil
 	}
 
-	// Reconcile data and the managed-by label, leaving any labels or
-	// annotations someone else added in place.
-	existing.Data = cm.Data
-	if existing.Labels == nil {
-		existing.Labels = map[string]string{}
-	}
-	existing.Labels[managedByLabel] = managedByValue
-	if _, err := configMaps.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+	if err := update(ctx, configMaps, info); err != nil {
 		span.RecordError(err)
+		return err
+	}
+	return nil
+}
+
+// update reconciles the existing ConfigMap's data and the managed-by label,
+// leaving any labels or annotations someone else added in place.
+//
+// Wrapped in RetryOnConflict because the read-modify-write window is real: two
+// deploys racing (or a redeploy overlapping a still-running one) would otherwise
+// give one of them a 409 and silently lose that deploy's record, which is the
+// one thing this package exists to preserve.
+func update(ctx context.Context, configMaps corev1client.ConfigMapInterface, info Info) error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := configMaps.Get(ctx, Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		existing.Data = info.Data()
+		if existing.Labels == nil {
+			existing.Labels = map[string]string{}
+		}
+		existing.Labels[managedByLabel] = managedByValue
+		_, err = configMaps.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
 		return fmt.Errorf("update configmap %s/%s: %w", Namespace, Name, err)
 	}
 	sendRecorded(ctx, info, "updated")
@@ -179,14 +203,23 @@ func Apply(ctx context.Context, client kubernetes.Interface, info Info) error {
 // namespace it creates is the same one that install would have created, so the
 // two are not in conflict.
 func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "fingerprint.ensureNamespace")
+	defer span.End()
+
 	_, err := client.CoreV1().Namespaces().Get(ctx, Namespace, metav1.GetOptions{})
 	if err == nil {
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
-		// As with the ConfigMap Get: a permission or transient error must not
-		// be read as "absent".
-		return fmt.Errorf("get namespace %s: %w", Namespace, err)
+		// Not proof of absence - a namespace-scoped kubeconfig is commonly
+		// denied cluster-scoped namespace reads while the namespace itself
+		// exists. Record it and let the ConfigMap write decide: if the
+		// namespace really is missing, that write fails with a clear error,
+		// and if it is not, this deploy still gets its record.
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("namespace.get_denied", true))
+		return nil
 	}
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: Namespace}}
@@ -196,6 +229,7 @@ func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
 			// the namespace exists, which is all this needs.
 			return nil
 		}
+		span.RecordError(err)
 		return fmt.Errorf("create namespace %s: %w", Namespace, err)
 	}
 	return nil

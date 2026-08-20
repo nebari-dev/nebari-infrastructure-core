@@ -79,7 +79,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := nic.NewClient(ctx, buildOption())
+	client, err := nic.NewClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -92,6 +92,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		DryRun:    deployDryRun,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
+		Build:     buildInfo(),
 	})
 	if err != nil {
 		span.RecordError(err)
