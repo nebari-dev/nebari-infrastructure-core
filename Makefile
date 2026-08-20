@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs
 
 # Variables
 BINARY_NAME=nic
@@ -10,7 +10,8 @@ GO_FILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+CLI_PKG=github.com/nebari-dev/nebari-infrastructure-core/internal/cli
+LDFLAGS=-ldflags "-s -w -X $(CLI_PKG).version=$(VERSION) -X $(CLI_PKG).commit=$(COMMIT) -X $(CLI_PKG).date=$(DATE)"
 
 help: ## Display this help message
 	@echo "Nebari Infrastructure Core - Makefile commands:"
@@ -20,6 +21,11 @@ build: ## Build the binary
 	@echo "Building $(BINARY_NAME)..."
 	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "Built $(BINARY_NAME) successfully"
+
+docs: ## Generate CLI and configuration reference documentation
+	@mkdir -p docs/reference/cli docs/configuration
+	@rm -f docs/reference/cli/*.md docs/configuration/*.md
+	go run ./cmd/docgen
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -19,7 +19,10 @@ var (
 		Short: "Validate configuration file",
 		Long: `Validate the nebari-config.yaml file without deploying any infrastructure.
 This command checks that the configuration file is properly formatted and contains
-all required fields.`,
+all required fields.
+
+Configs that still contain the reserved CHANGEME placeholder are rejected, naming
+every field left unfilled.`,
 		RunE: runValidate,
 	}
 )

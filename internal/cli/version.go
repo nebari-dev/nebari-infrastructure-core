@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -13,7 +13,13 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
-// These are set at build time via -ldflags "-X main.version=... -X main.commit=... -X main.date=...".
+// These are set at build time via -ldflags, e.g.
+// "-X github.com/nebari-dev/nebari-infrastructure-core/internal/cli.version=...".
+// The -X target is this package's import path, not "main": these vars live in
+// package cli, and the linker matches -X against the fully-qualified package
+// path, so pointing it at main.version (as when this lived in cmd/nic) silently
+// injects nothing. See Makefile and .goreleaser.yml, which set all three.
+//
 // They MUST be var (not const): the Go linker's -X flag can only override package-level
 // string variables, so declaring them const silently discards the injected values and the
 // binary reports these defaults regardless of how it was built.
