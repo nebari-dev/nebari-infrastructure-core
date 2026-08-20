@@ -235,9 +235,12 @@ func assertPlaceholderRejected(t *testing.T, err error, configFile string, wantF
 
 // TestRunValidate_RejectsPlaceholders exercises the validate command end to end
 // against an unedited config. It is the red step for the WIRING: deleting the
-// rejectPlaceholders call in validate.go must fail this test, which scanner-level
-// tests in pkg/config cannot catch. The command returns before nic.NewClient, so
-// no provider or network access is involved.
+// rejectPlaceholders call in pkg/nic/validate.go must fail this test, which
+// scanner-level tests in pkg/config cannot catch.
+//
+// runValidate does construct a client first, but nic.NewClient only builds the
+// provider registry (no I/O, no network), and the gate runs at the top of
+// Client.Validate, so nothing reaches a provider.
 func TestRunValidate_RejectsPlaceholders(t *testing.T) {
 	configFile := writeTempConfigFile(t, t.TempDir(), `project_name: CHANGEME
 domain: nebari.example.com

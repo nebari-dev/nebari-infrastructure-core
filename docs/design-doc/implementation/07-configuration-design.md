@@ -171,11 +171,11 @@ Validation enforces:
 
 Provider-specific validation (e.g., that `cluster.aws.region` is set, that node groups are non-empty) lives inside the provider's own `Validate(ctx, projectName, clusterConfig)` method.
 
+Separately from `Validate`, `pkg/nic` gates `validate` and `deploy` on the `CHANGEME` placeholder sentinel (`rejectPlaceholders` in `pkg/nic/validate.go`), alongside the other per-command validators. `destroy` and `kubeconfig` are not gated on it, so a cluster deployed from an edited config stays destroyable; see [config placeholders](../../operations/config-placeholders.md).
+
 ## 7.9 Auto-Discovery
 
 If `nic deploy` is invoked without `-f`, the CLI falls back to the `NIC_CONFIG_PATH` environment variable, then to `./config.yaml` in the working directory (`resolveConfigFile` in `cmd/nic/config_discovery.go`). Explicit `-f path/to/config.yaml` always wins. In every case the resolved path is checked for readability before parsing.
-
-After parsing, `nic validate` and `nic deploy` additionally reject configs that still carry unfilled `CHANGEME` placeholders (`rejectPlaceholders` in the same file). This gate lives at the cmd layer rather than in `NebariConfig.Validate`, so `destroy` and `kubeconfig` keep working against a config that was already edited to deploy the cluster; see [config placeholders](../../operations/config-placeholders.md).
 
 ## 7.10 Secrets
 

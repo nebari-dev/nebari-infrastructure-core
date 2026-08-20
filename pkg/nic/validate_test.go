@@ -361,14 +361,31 @@ func TestRejectPlaceholders(t *testing.T) {
 			raw:  "",
 			path: "",
 		},
+		{
+			// Parsed from bytes rather than from a file: the gate must still
+			// run, or a caller using ParseConfigBytes would deploy an unedited
+			// config with no check and no signal that one was skipped. There is
+			// no path to report, so the error names fields only.
+			name:       "parsed from bytes is still gated",
+			raw:        "bytes-only",
+			wantErr:    true,
+			wantFields: []string{"project_name"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var cfg *config.NebariConfig
-			if tt.raw == "" {
+			switch tt.raw {
+			case "":
 				cfg = &config.NebariConfig{ProjectName: "CHANGEME"}
-			} else {
+			case "bytes-only":
+				var err error
+				cfg, err = config.ParseConfigBytes([]byte("project_name: CHANGEME\n"))
+				if err != nil {
+					t.Fatalf("ParseConfigBytes() error = %v", err)
+				}
+			default:
 				dir := t.TempDir()
 				path := filepath.Join(dir, "nebari-config.yaml")
 				if err := os.WriteFile(path, []byte(tt.raw), 0600); err != nil {

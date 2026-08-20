@@ -24,8 +24,8 @@ const PlaceholderValue = "CHANGEME"
 // FieldPaths lists every dotted path (built from mapping keys and sequence
 // indices) whose scalar value or key contains the sentinel, e.g.
 // "cluster.aws.region" or "cluster.aws.node_groups.CHANGEME". Callers that know
-// the config file path (the cmd layer) wrap this so the user sees both the
-// fields and the file.
+// the config file path (pkg/nic, which reads it off the parsed config) wrap this
+// so the user sees both the fields and the file.
 type PlaceholderError struct {
 	// FieldPaths is the sorted set of offending paths. It always has at least
 	// one entry.
@@ -63,10 +63,9 @@ func (e *PlaceholderError) Error() string {
 //
 // A malformed document is reported as a parse error rather than as a silent
 // "no placeholders" result, so a caller that passes unparsed bytes cannot read
-// garbage as clean. At the call sites in cmd/nic this cannot fire: they run
-// CheckPlaceholders only after ParseConfig has parsed the same file with the
-// same library. Note that the file is re-read between those two steps, so the
-// scanned bytes are not guaranteed to be byte-identical to the parsed ones.
+// garbage as clean. At the call sites in pkg/nic this cannot fire: they scan the
+// bytes the config was parsed from, retained by the parser, so the scanned and
+// parsed documents are the same bytes rather than two reads of one path.
 func CheckPlaceholders(raw []byte) error {
 	file, err := parser.ParseBytes(raw, 0)
 	if err != nil {
