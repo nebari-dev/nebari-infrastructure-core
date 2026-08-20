@@ -15,10 +15,6 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "path",
-        "branch"
-      ],
       "description": "Config holds the configuration for the local repository provider."
     }
   },

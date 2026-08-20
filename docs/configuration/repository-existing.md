@@ -19,8 +19,8 @@ Config holds the configuration for the existing repository provider.
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | URL | `url` | string | Yes | URL is the remote repository URL (ssh or https). Examples: "git@github.com:org/repo.git", "https://github.com/org/repo.git". |
-| Branch | `branch` | string | Yes | Branch is the git branch to use (default: "main"). |
-| Path | `path` | string | Yes | Path is an optional subdirectory within the repository. When set, all operations are scoped to this path. |
+| Branch | `branch` | string | No | Branch is the git branch to use (default: "main"). |
+| Path | `path` | string | No | Path is an optional subdirectory within the repository. When set, all operations are scoped to this path. |
 | Auth | `auth` | AuthConfig | Yes | Auth specifies the credentials NIC uses to push to the repository (requires write access). |
 | ArgoCDAuth | `argocd_auth` | `*AuthConfig` | No | ArgoCDAuth specifies optional separate credentials for ArgoCD's in-cluster read access. When unset, Auth is used. |
 

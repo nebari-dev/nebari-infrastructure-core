@@ -296,8 +296,8 @@ func TestConstraintSuffix(t *testing.T) {
 		},
 		{
 			name:  "default only",
-			field: FieldDoc{Name: "ChartVersion", Default: "3.2.1"},
-			want:  " Defaults to `3.2.1`.",
+			field: FieldDoc{Name: "ChartVersion", Default: "3.4.3"},
+			want:  " Defaults to `3.4.3`.",
 		},
 		{
 			name:  "enum and default",
