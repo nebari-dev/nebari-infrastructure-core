@@ -259,6 +259,17 @@ Show version information and registered providers.
 ./nic version
 ```
 
+To ask the same question of a cluster you already deployed — which NIC build
+produced it — read the record `nic deploy` leaves behind:
+
+```bash
+kubectl get configmap nic-deployment-info -n nebari-system \
+  -o jsonpath='{.data.nic-version}@{.data.nic-commit}'
+```
+
+See [deployment metadata](docs/operations/deployment-metadata.md) for the full
+field list and semantics.
+
 ## Configuration
 
 NIC uses a YAML configuration file. See the `examples/` directory for sample configurations:
@@ -391,6 +402,7 @@ contributions to help shape the future of the project!
 | [Configuration Reference](docs/configuration/README.md) | All `nebari-config.yaml` options, by provider                                                                                                                                                                                                                                                                                                           |
 | [Design Doc](docs/design-doc/README.md)              | The original design document that laid the foundation for NIC's architecture and implementation. It includes detailed explanations of the core components, design decisions, and implementation details. The document is organized into sections covering architecture, design decisions, configuration reference, Nebari Operator, and testing strategy.) |
 | [Architectural Decision Records](docs/adr/README.md) | Architectural decision records recording design decisions as we build                                                                                                                                                                                                                                                                                      |
+| [Deployment Metadata](docs/operations/deployment-metadata.md) | How to find out which NIC version and commit produced a given cluster |
 
 ## Contributing
 

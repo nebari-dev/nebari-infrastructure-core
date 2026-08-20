@@ -152,6 +152,7 @@ pkg/
   ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
+  ├── fingerprint/      # Records the NIC build identity into the cluster (nebari-system ConfigMap)
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
   ├── status/           # In-process status channel (pkg -> cmd seam)
   └── telemetry/        # OpenTelemetry tracer setup
@@ -319,6 +320,7 @@ func SomeFunction(ctx context.Context, ...) error {
 - `pkg/status` is the in-process status channel. Per-line writers and helpers there are intentionally not span-instrumented; spans at that granularity would dwarf the operations they describe.
 - Inside `pkg/config`, the ctx-less validation helpers (e.g. `CheckPlaceholders` and its YAML-node walk, the `Validate` family, the trust-bundle readers) take no `context.Context`; wrapping them in spans would add a tracing dependency to leaf validation for no observability gain, and the few that touch disk do so on a local file already named in the surrounding span. The instrumented parse entrypoints (`ParseConfig`, `UnmarshalProviderConfig`) already carry the config-loading spans.
 - Inside `pkg/tofu`, the byte/line-level helpers (`streamThroughStatus`, `jsonLineMapper`, `mapStatusLevel`, the `status.Writer` methods) are similarly exempt. Operation-granularity wrapper methods on `TerraformExecutor` (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) should still be span-instrumented; this is tracked as outstanding work.
+- Across `pkg/`, two shapes are exempt by kind rather than by package: ctx-less pure value renderers (a method that maps a struct to a map or a manifest and touches nothing) and helpers whose only job is to emit a `status.Update`. Spans there describe less than they cost. This generalizes the `pkg/status` and `pkg/config` entries above; anything that performs I/O or makes a decision still gets a span, including leaf helpers like `fingerprint.ensureNamespace`.
 - New code in any other `pkg/` package must be instrumented as described above.
 
 ### Logging Convention
@@ -371,6 +373,26 @@ func SomeFunction(ctx context.Context, ...) error {
 6. Add tests.
 
 **Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
+
+**Deployment provenance.** `nic deploy` stamps the NIC build that ran it into
+`nebari-system/nic-deployment-info` (`pkg/fingerprint`), so an operator holding
+only kubectl can tell which build produced a cluster. The ldflags-injected
+`version`/`commit`/`date` vars live in `internal/cli`, and reach `pkg/nic` as
+`DeployOptions.Build` — only `Deploy` reads them, so they are not on `Client`.
+`internal/cli/version.go`'s `buildInfo()` is their single reader, shared by
+`nic version`'s output and the recorded fingerprint so the two cannot drift; a
+zero `Build` records nothing rather than writing placeholder provenance.
+
+The write is upsert-only (last deploy wins, never a history) and happens before
+Argo CD, so a failed bootstrap still leaves the record — which means it must
+clear `argocd.WaitForClusterReady` itself, because a provider returning from
+`Deploy` does not mean its API server is serving yet. It is warn-and-continue: a
+rejected ConfigMap write must never fail a deploy that otherwise succeeded. The
+record lands in `nebari-system` (the namespace NIC owns and declares in the
+foundational AppProject), not `kube-system`, and creates that namespace if the
+foundational install has not run yet. ConfigMap keys are append-only API —
+external runbooks read them. `nic destroy` does not remove the record. See
+`docs/operations/deployment-metadata.md`.
 
 ### Error Handling Convention
 

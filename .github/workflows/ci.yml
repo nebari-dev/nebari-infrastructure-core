@@ -105,6 +105,45 @@ jobs:
         with:
           nic-binary: nic
 
+      # The only guard on the deploy-time wiring for the fingerprint ConfigMap.
+      # Unit tests cover the rendering, the upsert and the version-drift check,
+      # but nothing short of a real deploy proves nic writes it - deleting the
+      # call site in pkg/nic keeps every unit test green. This lives in ci.yml
+      # rather than deployment-tests.yml on purpose: that workflow only runs on
+      # workflow_dispatch and release, so a guard there would catch a regression
+      # after a release was cut instead of before merge.
+      #
+      # The version match holds regardless of ldflags: an uninjected build
+      # reports "dev" on both sides, so this compares the two paths rather than
+      # a hardcoded value.
+      - name: Verify deployment fingerprint
+        run: |
+          set -euo pipefail
+
+          if ! kubectl get configmap nic-deployment-info -n nebari-system -o yaml; then
+            echo "::error::nic deploy did not write the nic-deployment-info ConfigMap"
+            exit 1
+          fi
+
+          binary_version="$(./nic version | awk '/^Version:/ {print $2}')"
+          recorded_version="$(kubectl get configmap nic-deployment-info -n nebari-system -o jsonpath='{.data.nic-version}')"
+          recorded_provider="$(kubectl get configmap nic-deployment-info -n nebari-system -o jsonpath='{.data.cluster-provider}')"
+
+          # Both sides read empty if the version output format changes or the key
+          # is missing, and empty == empty would pass. Assert non-empty first.
+          if [ -z "$binary_version" ]; then
+            echo "::error::could not parse a version out of 'nic version' output"
+            exit 1
+          fi
+          if [ "$recorded_version" != "$binary_version" ]; then
+            echo "::error::recorded nic-version '$recorded_version' does not match the binary's '$binary_version'"
+            exit 1
+          fi
+          if [ -z "$recorded_provider" ]; then
+            echo "::error::the fingerprint recorded no cluster-provider"
+            exit 1
+          fi
+
       - name: Verify docs are up-to-date
         run: |
           make docs

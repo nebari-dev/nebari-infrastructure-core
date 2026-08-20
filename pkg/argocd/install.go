@@ -126,7 +126,7 @@ func Install(ctx context.Context, cfg *config.NebariConfig, clusterProvider clus
 		WithResource("cluster").
 		WithAction("waiting"))
 
-	if err := waitForClusterReady(ctx, k8sClient, 5*time.Minute); err != nil {
+	if err := WaitForClusterReady(ctx, k8sClient, 5*time.Minute); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Cluster not ready").
 			WithResource("cluster").
@@ -264,7 +264,7 @@ func isClusterReady(nodes []corev1.Node) bool {
 // This function separates the polling logic from the Kubernetes client, making it testable.
 func waitForClusterReadyWithLister(ctx context.Context, listNodes NodeListFunc, timeout time.Duration) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "argocd.waitForClusterReady")
+	ctx, span := tracer.Start(ctx, "argocd.WaitForClusterReady")
 	defer span.End()
 
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Waiting for cluster to be ready").
@@ -309,8 +309,12 @@ func waitForClusterReadyWithLister(ctx context.Context, listNodes NodeListFunc, 
 	}
 }
 
-// waitForClusterReady waits for the cluster to be ready using a Kubernetes client.
-func waitForClusterReady(ctx context.Context, client *kubernetes.Clientset, timeout time.Duration) error {
+// WaitForClusterReady waits for the cluster's API server to be serving and its
+// nodes to be Ready. Exported because pkg/nic now needs the same gate before it
+// touches a freshly provisioned cluster: a provider returning from Deploy does
+// not mean the endpoint is reachable, and every caller that contacts the cluster
+// first has to clear this bar.
+func WaitForClusterReady(ctx context.Context, client *kubernetes.Clientset, timeout time.Duration) error {
 	listNodes := func(ctx context.Context) ([]corev1.Node, error) {
 		nodeList, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
