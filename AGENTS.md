@@ -88,7 +88,7 @@ See `docs/local-kind-development.md` for the full workflow.
 
 ### Running NIC
 
-NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `cmd/nic/config_discovery.go`.
+NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `internal/cli/config_discovery.go`.
 
 ```bash
 ./nic version
@@ -106,17 +106,24 @@ OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
 ### Component Structure
 
 ```
-cmd/nic/                # CLI entry point - thin cobra commands over pkg/nic
-  ├── main.go           # CLI setup, telemetry init, .env loading via godotenv
-  ├── deploy.go         # Deploy command
-  ├── destroy.go        # Destroy command
-  ├── validate.go       # Validate command
-  ├── kubeconfig.go     # Kubeconfig command
-  ├── version.go        # Version command
-  └── config_discovery.go # Resolve config file path
+cmd/nic/                # CLI entry point - thin wrapper: .env loading, telemetry, signal handling
+  └── main.go           # Calls internal/cli.Execute(ctx)
+
+cmd/docgen/              # Standalone tool: generates docs/reference/cli/ (from internal/cli.NewRootCmd())
+                          # and docs/configuration/ (from provider config structs)
+
+internal/
+  └── cli/              # Cobra command tree; imported by cmd/nic (to run) and cmd/docgen (to introspect for docs)
+      ├── root.go        # NewRootCmd() constructor, Execute(ctx), RunError
+      ├── deploy.go      # Deploy command
+      ├── destroy.go     # Destroy command
+      ├── validate.go    # Validate command
+      ├── kubeconfig.go  # Kubeconfig command
+      ├── version.go     # Version command
+      └── config_discovery.go # Resolve config file path
 
 pkg/
-  ├── nic/              # Orchestration + programmatic entrypoint; cmd/nic is a thin wrapper over this
+  ├── nic/              # Orchestration + programmatic entrypoint; internal/cli is a thin wrapper over this
   │   ├── client.go     # Client construction + default provider registry
   │   ├── deploy.go     # Deploy orchestration (provider -> argocd -> dns -> endpoint)
   │   ├── destroy.go    # Destroy orchestration
@@ -321,7 +328,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
 
-**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler` and remains the only layer that emits logs. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
+**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler`, and the application layer (`cmd/nic` and the `internal/cli` handlers) is the only place that emits logs, never `pkg/`. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
 
 ## Key Development Patterns
 
@@ -442,7 +449,8 @@ References:
   - **ADR-0003** - Software pack codegen
   - **ADR-0004** - Out-of-tree provider plugin architecture (Proposed)
 - **`docs/design-doc/`** - Living design docs (architecture / implementation / operations / appendix)
-- **`docs/cli-reference.md`** - CLI command reference
+- **`docs/reference/cli/`** - Generated CLI command reference (from `internal/cli`'s cobra tree; regenerate with `make docs`)
+- **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make docs`)
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - The human-facing contribution process
@@ -486,7 +494,7 @@ Run before every commit:
 3. **Formatting:** `make fmt`
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
-6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
+6. **Logging convention:** `slog` usage only in the application layer (`cmd/nic` / `internal/cli`), not in `pkg/`
 7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.

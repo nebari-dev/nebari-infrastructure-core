@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/cli-reference.md">CLI Reference</a> &middot; <a
+  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/reference/cli/nic.md">CLI Reference</a> &middot; <a
   href="#architecture">Architecture</a> &middot; <a href="#roadmap">Roadmap</a> &middot; <a
   href="docs/design-doc/README.md">Documentation</a>
 </p>
@@ -177,7 +177,7 @@ cp .env.example .env  # Edit with your cloud provider credentials
 ./nic deploy
 ```
 
-See the [CLI Reference](docs/cli-reference.md) for all commands and options.
+See the [CLI Reference](docs/reference/cli/nic.md) for all commands and options.
 
 ### `nic deploy`
 
@@ -387,7 +387,8 @@ contributions to help shape the future of the project!
 
 | Document                                             | Description                                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [CLI Reference](docs/cli-reference.md)               | All commands, flags, and configuration options                                                                                                                                                                                                                                                                                                             |
+| [CLI Reference](docs/reference/cli/nic.md)           | All commands and flags                                                                                                                                                                                                                                                                                                                                     |
+| [Configuration Reference](docs/configuration/README.md) | All `nebari-config.yaml` options, by provider                                                                                                                                                                                                                                                                                                           |
 | [Design Doc](docs/design-doc/README.md)              | The original design document that laid the foundation for NIC's architecture and implementation. It includes detailed explanations of the core components, design decisions, and implementation details. The document is organized into sections covering architecture, design decisions, configuration reference, Nebari Operator, and testing strategy.) |
 | [Architectural Decision Records](docs/adr/README.md) | Architectural decision records recording design decisions as we build                                                                                                                                                                                                                                                                                      |
 
