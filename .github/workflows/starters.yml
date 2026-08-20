@@ -16,6 +16,11 @@ on:
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
+    # Publishing is tag-driven: a starter tagged v<x.y.z> must keep meaning the
+    # same bytes forever, and a main push resolves to the PREVIOUS tag, so
+    # publishing from main would silently rewrite an already-released bundle.
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -31,6 +36,7 @@ jobs:
   validate-starters:
     name: Validate starters
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -43,29 +49,59 @@ jobs:
           go-version-file: go.mod
 
       - name: Build nic and put it on PATH
+        shell: bash
         run: |
+          set -euo pipefail
           make build
           echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
 
       - name: Generate starters
-        run: ./scripts/gen-starters.sh dist/starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/gen-starters.sh dist/starters
 
-      - name: Starters carry placeholders and validate once filled
+      - name: Rendered starters are complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A substitution token that failed to expand would otherwise ship to
+          # the registry, and a malformed pixi.toml would not surface until the
+          # publish job runs pixi lock.
+          if grep -rn '__[A-Z_]*__' dist/starters/; then
+            echo "FAIL: unsubstituted template tokens in the rendered starters"
+            exit 1
+          fi
+          for provider in local aws; do
+            python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' \
+              "dist/starters/${provider}/pixi.toml"
+          done
+          echo "OK: no leftover tokens, every pixi.toml parses"
+
+      - name: Unedited starters are rejected, filled ones validate
+        shell: bash
         run: |
           set -euo pipefail
           for provider in local aws; do
             config="dist/starters/${provider}/config.yaml"
 
-            # 1. The generator must have substituted placeholders.
-            echo "== ${provider}: starter carries placeholders =="
-            grep -q CHANGEME "$config" || {
-              echo "FAIL: ${provider} starter has no CHANGEME placeholder"; exit 1; }
+            echo "== ${provider}: the unedited starter must be rejected =="
+            if err="$(nic validate -f "$config" 2>&1)"; then
+              echo "FAIL: nic validate accepted the unedited ${provider} starter"
+              echo "$err"
+              exit 1
+            fi
+            echo "$err" | grep -q CHANGEME || {
+              echo "FAIL: ${provider} validation error did not mention CHANGEME"
+              echo "$err"
+              exit 1; }
 
-            # 2. A filled copy must validate. The fill script is emitted by
-            #    the generator from the same field list it used to insert the
-            #    placeholders, so CI never keeps its own copy to drift.
-            echo "== ${provider}: filled starter validates =="
+            echo "== ${provider}: a filled starter must validate =="
+            # The fill script is emitted by the generator from the same field
+            # list it used to insert the placeholders, so CI keeps no copy of
+            # its own to drift.
             filled="$(mktemp)"
+            trap 'rm -f "$filled"' EXIT
             sed -f "dist/starters/${provider}/.fill-for-ci.sed" "$config" > "$filled"
             if grep -q CHANGEME "$filled"; then
               echo "FAIL: ${provider} still has placeholders after filling"
@@ -73,73 +109,74 @@ jobs:
               exit 1
             fi
             nic validate -f "$filled"
-
-            # 3. The unedited starter must not be deployable. The CHANGEME
-            #    rejection lands with #561; until it is on main nic accepts
-            #    placeholder configs. Since step 2 just proved the only
-            #    difference is the placeholders, a passing validate here means
-            #    the feature is absent rather than that the starter is wrong,
-            #    so report it instead of failing. This starts enforcing on its
-            #    own the moment #561 merges.
-            echo "== ${provider}: unedited starter is not deployable =="
-            if err="$(nic validate -f "$config" 2>&1)"; then
-              echo "PENDING: nic on this ref does not reject placeholders yet (#561)."
-              echo "         Placeholder presence and the filled config were still checked."
-            elif echo "$err" | grep -q CHANGEME; then
-              echo "$err"
-              echo "OK: unedited ${provider} starter rejected, error names CHANGEME"
-            else
-              echo "FAIL: ${provider} unedited starter failed for an unexpected reason"
-              echo "$err"
-              exit 1
-            fi
+            echo "OK: ${provider} starter behaves correctly"
           done
 
   publish-starters:
     name: Publish starters to quay.io
     needs: validate-starters
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Tag builds only. workflow_dispatch is allowed for a manual re-publish but
+    # the environment below restricts which refs may actually run it.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    env:
-      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
-      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+    timeout-minutes: 20
+    # Approval + deployment-branch gate, matching every other credentialed job
+    # in this repo (release.yml, the deployment-tests cloud jobs).
+    environment: quay-publish
+    concurrency:
+      # Publishing mutates a shared registry; never cancel a run mid-push or a
+      # tag can end up with one starter published and the other not.
+      group: publish-starters
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
-      - name: Skip when no quay credentials are configured
-        id: creds
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
         run: |
-          if [ -z "${QUAY_TOKEN:-}" ]; then
-            echo "no quay credentials, skipping publish"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
 
       - name: Install pixi and nebi
-        if: steps.creds.outputs.skip == 'false'
+        shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://pixi.sh/install.sh -o /tmp/pixi-install.sh
-          sh /tmp/pixi-install.sh
+          # Installer pinned to the v0.77.0 tag commit; PIXI_VERSION pins the
+          # binary it fetches. Same shape as the k3d pin in deployment-tests.
+          curl -fsSL https://raw.githubusercontent.com/prefix-dev/pixi/e3c26fbf7d8294d4ddbe7c913b4f8e60bcbafe5a/install/install.sh \
+            | PIXI_VERSION=v0.77.0 bash
           echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.pixi/bin:$PATH"
-          # Asset-layer bundling (config.yaml and README travelling with the
+          # Asset-layer bundling (config.yaml and the README travelling with the
           # workspace) needs nebi >= 0.10; older versions silently ship only
-          # pixi.toml and pixi.lock.
-          pixi global install "nebi>=0.10"
+          # pixi.toml and pixi.lock. Pinned so a credentialed job never resolves
+          # a floating dependency at run time.
+          pixi global install "nebi==0.13"
 
       - name: Generate starters
-        if: steps.creds.outputs.skip == 'false'
-        run: ./scripts/gen-starters.sh dist/starters
-
-      - name: Configure quay registry
-        if: steps.creds.outputs.skip == 'false'
+        shell: bash
         run: |
           set -euo pipefail
+          ./scripts/gen-starters.sh dist/starters
+
+      - name: Configure quay registry
+        shell: bash
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_USERNAME is not set for this environment}"
+          : "${QUAY_TOKEN:?QUAY_TOKEN is not set for this environment}"
           printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
             --name quay \
             --url quay.io \
@@ -148,10 +185,10 @@ jobs:
             --password-stdin
 
       - name: Lock and publish each starter
-        if: steps.creds.outputs.skip == 'false'
+        shell: bash
         run: |
           set -euo pipefail
-          version="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+          version="${GITHUB_REF_NAME#v}"
           for provider in local aws; do
             pushd "dist/starters/${provider}" > /dev/null
             # Resolve the toolchain now so the published bundle carries a lock.
@@ -164,15 +201,22 @@ jobs:
             popd > /dev/null
           done
 
-      - name: Imported starters must still be rejected unedited
-        if: steps.creds.outputs.skip == 'false'
+      - name: Imported starters still carry their placeholders
+        shell: bash
         run: |
           set -euo pipefail
-          version="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+          version="${GITHUB_REF_NAME#v}"
           for provider in local aws; do
             dest="/tmp/imported-${provider}"
             nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/starter-${provider}:v${version}" -o "$dest"
             test -f "$dest/config.yaml"
+            test -f "$dest/README.md"
             grep -q CHANGEME "$dest/config.yaml"
-            echo "OK: ${provider} round-tripped with its placeholders intact"
+            # The published bundle must be rejected unedited, same as the
+            # freshly generated one.
+            if nic validate -f "$dest/config.yaml"; then
+              echo "FAIL: published ${provider} starter validates unedited"
+              exit 1
+            fi
+            echo "OK: ${provider} round-tripped and is still not deployable as-is"
           done
