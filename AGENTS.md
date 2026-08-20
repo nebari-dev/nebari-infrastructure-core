@@ -375,17 +375,23 @@ func SomeFunction(ctx context.Context, ...) error {
 **Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
 
 **Deployment provenance.** `nic deploy` stamps the NIC build that ran it into
-`nebari-system/nic-deployment-info` (`pkg/fingerprint`), so an operator holding only
-kubectl can tell which build produced a cluster. The ldflags-injected
-`version`/`commit`/`date` vars live in `internal/cli`, so the CLI layer hands
-them down via `nic.WithBuild`; every `nic.NewClient` call site goes through the
-single `buildOption()` helper in `internal/cli/version.go` so `nic version`
-output and the recorded metadata cannot drift. A Client built without `WithBuild` records
-nothing rather than writing placeholder provenance. The write is upsert-only
-(last deploy wins, never a history), happens before Argo CD so a failed
-bootstrap still leaves the record, and is warn-and-continue: a rejected
-ConfigMap write must never fail a deploy that otherwise succeeded. ConfigMap keys
-are append-only API — external runbooks read them. See
+`nebari-system/nic-deployment-info` (`pkg/fingerprint`), so an operator holding
+only kubectl can tell which build produced a cluster. The ldflags-injected
+`version`/`commit`/`date` vars live in `internal/cli`, and reach `pkg/nic` as
+`DeployOptions.Build` — only `Deploy` reads them, so they are not on `Client`.
+`internal/cli/version.go`'s `buildInfo()` is their single reader, shared by
+`nic version`'s output and the recorded fingerprint so the two cannot drift; a
+zero `Build` records nothing rather than writing placeholder provenance.
+
+The write is upsert-only (last deploy wins, never a history) and happens before
+Argo CD, so a failed bootstrap still leaves the record — which means it must
+clear `argocd.WaitForClusterReady` itself, because a provider returning from
+`Deploy` does not mean its API server is serving yet. It is warn-and-continue: a
+rejected ConfigMap write must never fail a deploy that otherwise succeeded. The
+record lands in `nebari-system` (the namespace NIC owns and declares in the
+foundational AppProject), not `kube-system`, and creates that namespace if the
+foundational install has not run yet. ConfigMap keys are append-only API —
+external runbooks read them. `nic destroy` does not remove the record. See
 `docs/operations/deployment-metadata.md`.
 
 ### Error Handling Convention
