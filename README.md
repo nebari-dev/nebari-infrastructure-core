@@ -146,19 +146,46 @@ Every NIC deployment includes a landing page where users discover and access all
 
 ### Prerequisites
 
-- Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
+- Go 1.26+ **only if building from source** (see [From source](#from-source-contributors) below)
 
 NIC automatically downloads and manages its own OpenTofu binary — no manual installation required. If you already have a compatible OpenTofu installed (e.g. via a package manager), NIC uses it instead: an explicit path via `NIC_TOFU_PATH`, or `tofu` found on `PATH`. See [Packaging and External Binaries](docs/operations/packaging.md).
 
 ### Install
 
-```bash
-# From source
-make build
+> [!NOTE]
+> **Draft / incomplete.** This section is a work in progress:
+> - The **pixi** path is pending #579 (nic is not on the prefix.dev channel yet).
+> - The **install-script** and **Homebrew** paths are added by #539; reconcile with that PR at merge.
+> - The docs-site mirror of this content is still TODO.
 
-# Or install to $GOPATH/bin
-make install
+Pick the path that matches how you'll use `nic`:
+
+**pixi (recommended once [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) lands).** Pins the exact `nic` build in your `pixi.lock`, so the toolchain travels with your config:
+
+```bash
+# Project-scoped (pins in pixi.lock — recommended)
+pixi add --channel https://prefix.dev/github-releases nebari-infrastructure-core
+
+# Machine-wide CLI
+pixi global install --channel https://prefix.dev/github-releases nebari-infrastructure-core
+```
+
+**Homebrew (macOS):**
+
+```bash
+brew install nebari-dev/tap/nic
+```
+
+**Release archives.** Download `nebari-infrastructure-core_<version>_<os>_<arch>.tar.gz` from the [releases page](https://github.com/nebari-dev/nebari-infrastructure-core/releases). Verify it before use: check the cosign signature over `checksums.txt`, then verify the tarball against `checksums.txt`. Checksums fetched from the same origin as the tarball prove integrity, not authenticity — the signature is what proves authenticity. Full steps in [Verifying a NIC release](docs/operations/verifying-releases.md).
+
+#### From source (contributors)
+
+Requires Go 1.26+.
+
+```bash
+make build     # builds ./nic
+make install   # installs to $GOPATH/bin
 ```
 
 ### Deploy
