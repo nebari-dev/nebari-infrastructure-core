@@ -120,9 +120,12 @@ release:
 
     #### Install script (Linux/macOS)
     ```bash
-    curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | sh
+    curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/{{ .Tag }}/scripts/install.sh | NIC_VERSION={{ .Tag }} sh
     ```
-    Pin a version with `NIC_VERSION=vX.Y.Z` or change the location with `INSTALL_DIR`.
+    These notes are attached to {{ .Tag }}, so both the script and the version it
+    installs are pinned to it. For the always-latest one-liner, see the
+    [README](https://github.com/nebari-dev/nebari-infrastructure-core#install).
+    Change the location with `INSTALL_DIR`.
 
     #### Homebrew (macOS)
     ```bash

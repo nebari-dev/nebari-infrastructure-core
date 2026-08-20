@@ -17,12 +17,15 @@
 # When cosign (>= 2.4.2) is installed, checksums.txt is additionally verified
 # against the release workflow's signing identity (authenticity); if cosign is
 # absent or too old, the GitHub build-provenance attestation is checked instead
-# when `gh` is available. Authenticity is best-effort: it is skipped, with a
-# plain warning, when neither tool can verify or a release predates signing. It
-# is NOT skipped silently on a failed signature fetch for a signed release,
-# because that is the exact tampering case verification exists to catch.
-# Integrity proves the bytes were not corrupted; authenticity proves who signed
-# them.
+# when `gh` is available. Integrity proves the bytes were not corrupted;
+# authenticity proves who signed them.
+#
+# Authenticity is best-effort in one direction only. It degrades, with a plain
+# warning, when no tool on this host can verify, or when the release predates
+# signing (below v0.10.0). It is never skipped because the signature could not
+# be fetched or did not verify for a release that is supposed to have one:
+# suppressing the signature is the cheapest attack on a piped installer, so a
+# missing or failing signature is fatal rather than a warning.
 set -eu
 
 NIC_VERSION="${NIC_VERSION:-latest}"
@@ -32,6 +35,10 @@ NIC_SKIP_SIGNATURE="${NIC_SKIP_SIGNATURE:-0}"
 
 # The minimum cosign that can read the sigstore bundle format goreleaser emits.
 COSIGN_MIN="2.4.2"
+# The first release that publishes checksums.txt.sigstore.json. Below this a
+# missing bundle is genuine; at or above it, a missing bundle means something is
+# wrong. Keep in step with when `signs:` was added to .goreleaser.yml.
+SIGNING_SINCE="0.10.0"
 # Absolute doc URL: users who ran the one-liner have no local checkout.
 DOCS_URL="https://github.com/${NIC_REPO}/blob/main/docs/operations/verifying-releases.md"
 
@@ -93,52 +100,82 @@ cosign_version() {
     sed -n 's/.*GitVersion:[[:space:]]*v\{0,1\}\([0-9][0-9.]*\).*/\1/p' | head -n1
 }
 
-cosign_too_old() {
-  # True (0) when $1 is a semver older than COSIGN_MIN (2.4.2). An empty/
-  # unparseable version returns false so verification is still attempted.
+version_lt() {
+  # True (0) when semver $1 is strictly older than semver $2, comparing
+  # component by component so it works for both the cosign floor and the
+  # release-signing cutover. An empty or unparseable $1 returns false, so every
+  # caller fails safe: an unknown version is treated as new enough to check
+  # rather than old enough to skip.
   [ -n "$1" ] || return 1
-  awk -v v="$1" 'BEGIN {
-    split(v, a, ".");
-    maj = a[1] + 0; min = a[2] + 0; pat = a[3] + 0;
-    if (maj < 2) exit 0;
-    if (maj == 2 && min < 4) exit 0;
-    if (maj == 2 && min == 4 && pat < 2) exit 0;
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    # Anything that is not a dotted numeric version is "not older", so an
+    # unrecognised cosign build still attempts verification and an unrecognised
+    # tag is still expected to carry a signature.
+    if (a !~ /^[0-9]+(\.[0-9]+)*$/) exit 1;
+    na = split(a, x, "."); nb = split(b, y, ".");
+    n = (na > nb) ? na : nb;
+    for (i = 1; i <= n; i++) {
+      ai = x[i] + 0; bi = y[i] + 0;
+      if (ai < bi) exit 0;
+      if (ai > bi) exit 1;
+    }
     exit 1;
   }'
 }
 
 # cosign verify-blob over checksums.txt with the pinned release-workflow
-# identity. A genuine 404 on the bundle (a release from before signing) degrades;
-# any other fetch failure on a signed release, or a failed verify, is fatal.
+# identity. A 404 on the bundle degrades only for releases that predate signing;
+# on a release that is supposed to have one, a 404 is treated exactly like any
+# other fetch failure, because "the signature is simply missing" is the cheapest
+# way to suppress the check.
 verify_with_cosign() {
   tmp="$1"; tag="$2"; base="$3"
+  ver="${tag#v}"
 
-  # Capture the HTTP status so a genuine 404 can degrade while any other failure
-  # stays fatal. Fetching without -f/-S keeps curl from leaking its own error.
+  # Capture the HTTP status so a pre-signing 404 can degrade while every other
+  # outcome stays fatal. Fetching without -f/-S keeps curl from leaking its own
+  # error. 4xx is not retried by --retry, so the code here is the final one.
   sig="${tmp}/checksums.txt.sigstore.json"
   code="$(fetch -sL -m 60 -o "$sig" -w '%{http_code}' "${base}/checksums.txt.sigstore.json")" || code=000
   case "$code" in
     200) ;;
     404)
-      log "warning: no signature bundle for ${tag} (HTTP 404); authenticity NOT verified."
-      log "         Only releases from before signing was enabled lack one; the checksum is still checked. See ${DOCS_URL}"
-      return 0
+      if version_lt "$ver" "$SIGNING_SINCE"; then
+        log "warning: ${tag} predates release signing (first signed release: v${SIGNING_SINCE}); authenticity NOT verified."
+        log "         The checksum is still checked. See ${DOCS_URL}"
+        return 0
+      fi
+      fail "no signature bundle for ${tag} (HTTP 404), but every release from v${SIGNING_SINCE} on publishes one; refusing to install. A missing signature on a signed release is indistinguishable from one that was removed to suppress this check. Verify manually (${DOCS_URL}), or re-run with NIC_SKIP_SIGNATURE=1 if you accept that risk."
       ;;
     *)
       fail "could not fetch the signature bundle for ${tag} (HTTP ${code}); refusing to install. If you are offline or on a network that blocks sigstore.dev, verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."
       ;;
   esac
 
-  # Pin the identity to this exact tag (defense in depth over a bare .*).
+  # Pin the identity to this exact tag (defense in depth over a bare .*), with
+  # the tag's dots escaped so v0.13.0 cannot also match v0x13y0.
+  tag_re="$(printf '%s' "$tag" | sed 's/\./\\./g')"
   if cosign verify-blob \
     --bundle "$sig" \
-    --certificate-identity-regexp "^https://github.com/${NIC_REPO}/\.github/workflows/release\.yml@refs/tags/${tag}\$" \
+    --certificate-identity-regexp "^https://github.com/${NIC_REPO}/\.github/workflows/release\.yml@refs/tags/${tag_re}\$" \
     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
     "${tmp}/checksums.txt" >/dev/null; then
     log "Authenticity verified (cosign, pinned release-workflow identity)"
-  else
-    fail "cosign could not verify the signature on checksums.txt (see cosign's error above); refusing to install. If cosign cannot reach the Sigstore trust root (air-gapped, or a proxy blocking sigstore.dev), verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."
+    return 0
   fi
+
+  # verify-blob exits 1 both when the signature is invalid and when cosign
+  # cannot reach the Sigstore trust root, and its stderr wording is not stable
+  # enough to match on. `cosign initialize` separates them structurally: it
+  # performs the same TUF refresh and nothing else, so if it succeeds the trust
+  # root is reachable and the only remaining explanation is that the signature
+  # does not verify. That distinction decides whether offering
+  # NIC_SKIP_SIGNATURE is sound advice or an invitation to install a tampered
+  # binary, so the two cases get two messages.
+  if cosign initialize >/dev/null 2>&1; then
+    fail "the signature on checksums.txt for ${tag} did NOT verify (see cosign's error above); refusing to install. The Sigstore trust root is reachable, so this is not a network problem: the release assets do not match a signature from ${NIC_REPO}'s release workflow. Do not bypass this check. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
+  fi
+  fail "cosign could not reach the Sigstore trust root to verify checksums.txt for ${tag} (see cosign's error above); refusing to install. If you are air-gapped or on a network that blocks sigstore.dev, verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."
 }
 
 # Best-effort authenticity check. Prefers cosign over checksums.txt; if cosign is
@@ -149,14 +186,21 @@ verify_with_cosign() {
 verify_authenticity() {
   tmp="$1"; tag="$2"; base="$3"
 
-  if [ "$NIC_SKIP_SIGNATURE" != "0" ]; then
-    log "note: signature verification skipped (NIC_SKIP_SIGNATURE set); only the checksum is checked."
-    return 0
-  fi
+  # Match truthy values explicitly rather than "anything but 0". Treating every
+  # non-zero string as "skip" would turn the check off for NIC_SKIP_SIGNATURE=false
+  # and =no, which are the natural spellings of leaving it on.
+  case "$NIC_SKIP_SIGNATURE" in
+    0 | false | no | off | '') ;;
+    1 | true | yes | on)
+      log "note: signature verification skipped (NIC_SKIP_SIGNATURE=${NIC_SKIP_SIGNATURE}); only the checksum is checked."
+      return 0
+      ;;
+    *) fail "NIC_SKIP_SIGNATURE must be one of 0/1, true/false, yes/no, on/off (got '${NIC_SKIP_SIGNATURE}'); refusing to guess whether you meant to disable signature verification." ;;
+  esac
 
   if command -v cosign >/dev/null 2>&1; then
     cver="$(cosign_version)"
-    if ! cosign_too_old "$cver"; then
+    if ! version_lt "$cver" "$COSIGN_MIN"; then
       verify_with_cosign "$tmp" "$tag" "$base"
       return 0
     fi
@@ -166,11 +210,16 @@ verify_authenticity() {
   fi
 
   if command -v gh >/dev/null 2>&1; then
-    if gh attestation verify "${tmp}/nic.tar.gz" --repo "${NIC_REPO}" >/dev/null 2>&1; then
-      log "Authenticity verified (gh attestation, build provenance)"
+    # --signer-workflow pins the attestation to the same release workflow the
+    # cosign branch pins its certificate identity to. Without it this accepts a
+    # provenance statement from any workflow in the repo, which is a weaker
+    # claim than the one the success message advertises.
+    if gh attestation verify "${tmp}/nic.tar.gz" --repo "${NIC_REPO}" \
+      --signer-workflow "${NIC_REPO}/.github/workflows/release.yml" >/dev/null 2>&1; then
+      log "Authenticity verified (gh attestation, build provenance from the release workflow)"
       return 0
     fi
-    log "note: authenticity NOT verified: ${cosign_note}, and gh attestation verify did not succeed (offline, or no attestation for this release)."
+    log "note: authenticity NOT verified: ${cosign_note}, and gh attestation verify did not succeed (not logged in to gh, offline, or no attestation for this release)."
   else
     log "note: authenticity NOT verified: ${cosign_note}; only the checksum is checked."
   fi
@@ -242,4 +291,11 @@ main() {
   esac
 }
 
-main
+# main is defined above and called here, on the last line, so a truncated
+# `curl | sh` download cannot execute a partial script.
+#
+# NIC_INSTALL_SH_SOURCE_ONLY lets scripts/test-installer.sh source this file to
+# exercise the functions above without performing an install. Nothing else sets
+# it, and the only thing setting it can do is make the installer a no-op, so it
+# is not a bypass of anything. Do not add other early exits here.
+[ "${NIC_INSTALL_SH_SOURCE_ONLY:-0}" = "1" ] || main
