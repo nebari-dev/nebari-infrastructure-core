@@ -15,25 +15,28 @@ TEMPLATES="starters/templates"
 NIC_VERSION="${NIC_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')}"
 : "${NIC_VERSION:?could not determine NIC_VERSION and none was supplied}"
 
-# Providers in scope. Extend deliberately: each one needs its placeholder rules
-# and any provider-specific dependencies below.
+# Providers in scope. Extend deliberately: each one needs its placeholder
+# fields and any provider-specific dependencies below.
 PROVIDERS=("local" "aws")
 
-# Which fields become CHANGEME, per provider. These are the identity-bearing
-# values a user must supply; everything else stays a working default. Applied
-# as line edits so the examples' inline comments survive intact.
-placeholder_rules() {
+# The identity-bearing fields a user must supply, declared once per provider as
+#   "<line prefix, up to and including the colon and space>###<value CI fills in>"
+# Both the CHANGEME substitution and the fill-for-CI script are derived from
+# this one list, so they cannot drift apart. Everything else in the example
+# stays a working default. Applied as line edits, so the inline comments that
+# make the examples useful survive into the starter.
+placeholder_fields() {
   case "$1" in
     local)
       printf '%s\n' \
-        's|^project_name: .*|project_name: CHANGEME|'
+        'project_name: ###nebari-local-ci'
       ;;
     aws)
       printf '%s\n' \
-        's|^project_name: .*|project_name: CHANGEME|' \
-        's|^domain: .*|domain: CHANGEME|' \
-        's|^    email: .*|    email: CHANGEME|' \
-        's|^  url: .*|  url: CHANGEME|'
+        'project_name: ###nebari-aws-ci' \
+        'domain: ###nebari.example.com' \
+        '    email: ###admin@example.com' \
+        '    url: ###git@github.com:example-org/example-gitops.git'
       ;;
   esac
 }
@@ -71,11 +74,11 @@ EOF
       cat <<'EOF'
 ## What you must edit
 
-`project_name`, `domain`, `certificate.acme.email` and `git_repository.url`.
-The infrastructure defaults (region, availability zones, instance types,
-Longhorn, EFS) are working values, not placeholders. **If you change `region`,
-change `availability_zones` to match**: `nic validate` does not cross-check
-them and a mismatch fails mid-deploy.
+`project_name`, `domain`, the ACME email and the GitOps repository URL. The
+infrastructure defaults (region, availability zones, instance types, Longhorn,
+EFS) are working values, not placeholders. **If you change `region`, change
+`availability_zones` to match**: `nic validate` does not cross-check them and a
+mismatch fails mid-deploy.
 
 `nic validate` runs offline and needs no AWS credentials. It will not catch a
 bad region, a nonexistent instance type or an availability zone that does not
@@ -98,23 +101,37 @@ for provider in "${PROVIDERS[@]}"; do
   dest="${OUT_DIR}/${provider}"
   mkdir -p "$dest"
 
-  # config.yaml: the example with identity-bearing values replaced.
   cp "$src" "$dest/config.yaml"
-  while IFS= read -r rule; do
-    [ -n "$rule" ] && sed -i "$rule" "$dest/config.yaml"
-  done < <(placeholder_rules "$provider")
+  fill_script="${dest}/.fill-for-ci.sed"
+  : > "$fill_script"
 
-  # Fail loudly rather than publishing a starter that would validate as-is.
-  grep -q CHANGEME "$dest/config.yaml" || {
-    echo "no placeholders were substituted for $provider" >&2; exit 1; }
+  while IFS= read -r field; do
+    [ -n "$field" ] || continue
+    prefix="${field%%###*}"
+    value="${field##*###}"
+
+    before="$(cat "$dest/config.yaml")"
+    sed -i "s|^${prefix}.*|${prefix}CHANGEME|" "$dest/config.yaml"
+    # Every field must match something. examples/ is upstream of this
+    # generator, so a restructure there (a key moving or being renamed) would
+    # otherwise silently ship a starter with a real value left in it.
+    if [ "$before" = "$(cat "$dest/config.yaml")" ]; then
+      echo "placeholder field matched nothing for ${provider}: '${prefix}'" >&2
+      echo "examples/${provider}-config.yaml has probably been restructured" >&2
+      exit 1
+    fi
+
+    # The inverse edit, so CI can prove a filled starter validates without
+    # keeping its own copy of the field list.
+    printf 's|^%sCHANGEME$|%s%s|\n' "$prefix" "$prefix" "$value" >> "$fill_script"
+  done < <(placeholder_fields "$provider")
 
   sed -e "s|__PROVIDER__|${provider}|g" \
       -e "s|__NIC_VERSION__|${NIC_VERSION}|g" \
       -e "s|__PROVIDER_DEPS__|$(provider_deps "$provider")|g" \
       "$TEMPLATES/pixi.toml.tmpl" > "$dest/pixi.toml"
 
-  notes="$(provider_notes "$provider")"
-  awk -v notes="$notes" \
+  awk -v notes="$(provider_notes "$provider")" \
       -v provider="$provider" \
       -v title="$(provider_title "$provider")" \
       '{gsub(/__PROVIDER_NOTES__/, notes); gsub(/__PROVIDER_TITLE__/, title); gsub(/__PROVIDER__/, provider); print}' \
