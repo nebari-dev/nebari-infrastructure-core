@@ -169,13 +169,22 @@ curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-cor
 curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
-`NIC_VERSION` defaults to `latest`; `INSTALL_DIR` defaults to `/usr/local/bin`
-(falling back to `sudo` when it is not writable, and created if it does not
-exist). When `cosign` (>= 2.4.2) is present the installer also verifies the
-release signature; on an air-gapped host or a network that blocks `sigstore.dev`
-you can set `NIC_SKIP_SIGNATURE=1` to fall back to checksum-only. For the
-strongest guarantee, verify the release yourself first, see
-[docs/operations/verifying-releases.md](docs/operations/verifying-releases.md).
+`NIC_VERSION` defaults to `latest`. `INSTALL_DIR` defaults to `/usr/local/bin`;
+the installer escalates with `sudo` when that directory exists but is not
+writable, and creates it (unprivileged) when it does not exist — so a location
+that neither exists nor is creatable as your user needs to be created first.
+`NIC_REPO` overrides the source repository, for installing from a fork.
+
+Authenticity is checked with whichever tool is available. With `cosign`
+(>= 2.4.2) the installer verifies the release signature over `checksums.txt`,
+pinned to the release workflow's signing identity. Without cosign it falls back
+to the GitHub build-provenance attestation when `gh` is installed and
+authenticated. If neither is available the install continues on the checksum
+alone, with a warning — the checksum proves the bytes were not corrupted, not
+who produced them. On an air-gapped host or a network that blocks
+`sigstore.dev`, `NIC_SKIP_SIGNATURE=1` falls back to checksum-only
+deliberately. For the strongest guarantee, verify the release yourself first,
+see [docs/operations/verifying-releases.md](docs/operations/verifying-releases.md).
 
 > The installer URL is pinned to `main`, so `scripts/install.sh` is a stable
 > published entry point: it must not be renamed or moved, and `main` must keep
