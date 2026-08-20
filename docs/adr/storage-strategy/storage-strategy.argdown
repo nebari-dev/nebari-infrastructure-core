@@ -96,7 +96,7 @@ dot:
 ----
 (5) [RWX is a core platform capability]
 
-<Ray worker home access favors RWX>: The agreed near-term Ray path mounts a user's home into independently scheduled workers.
+<Ray worker home access favors RWX>: The interim Ray path mounts a user's home into independently scheduled workers.
 
 (1) Exploratory users need Ray workers to access local scripts, configuration, and other small files without first publishing everything to object storage.
 (2) A single-node Ray job can use one RWO home without creating a new multi-node access requirement.
@@ -106,10 +106,42 @@ dot:
 (5) [Ray home access needs a portable path]: Mounting the home across a distributed Ray cluster requires RWX or an equivalent multi-node filesystem contract; single-node Ray does not.
     +> [RWX is a core platform capability]
     <+ [Ray environment delivery is separate]
+    <- [Ray is not an argument for RWX at scale]
+    <_ [The Ray integration is a direction, not a design]
 
-[Ray environment delivery is separate]: Dharhas Pothina proposed building a container from each user's Nebi or pixi definition before cluster launch, publishing it to Artifact Keeper or another configured registry, and having every autoscaled worker pull the same tagged image. This avoids rebuilding environments on each new worker and narrows the home mount to user files rather than environment trees. The integration and end-to-end workflow remain open design work. #open-decision
+[The Ray integration is a direction, not a design]: Ray has no integration design, and the gateway layer that would resolve a user's entitlements at cluster launch does not exist. Ray storage requirements should therefore be read as current intent rather than a settled contract. #open-decision
 
-<Ray can distribute files explicitly>: Ray can broadcast or copy selected files to workers instead of mounting the home, but that alternative needs its own lifecycle, consistency, and user-experience design.
+[Ray is not an argument for RWX at scale]: The mount is an interim mechanism covering small exploratory jobs. It does not extend to routing high-concurrency distributed access through any shared volume, RWX included.
+    <+ [Distributed data does not belong on shared NFS]
+
+[Per-user volumes narrow the Ray failure domain]: If each user's own volume is the only one mounted into that user's workers, a saturating job harms one user rather than every home in the deployment. Whether the architecture gives each user a separate volume or keeps one shared mount is unconfirmed. #open-decision
+    +> [Ray is not an argument for RWX at scale]
+
+<Cross-namespace RWO sharing is a trap>: Pointing PVCs in two namespaces at one Longhorn RWO volume was tested and works only while the pods stay co-located.
+
+(1) Two PVCs in different namespaces do bind to one Longhorn volume, but only via a hand-written static PV carrying the first volume's `csi.volumeHandle` — a cluster-admin construction, not something a tenant trips over.
+(2) RWO attachment is per node, so anything scheduled elsewhere fails with Multi-Attach.
+(3) Co-location therefore makes that node an implicit shared failure domain across packs: draining it takes every consumer down together.
+----
+(4) [Cross-namespace sharing needs a declared RWX contract]: Reaching a volume from a second namespace requires an RWX volume. The RWO form is a hidden co-location requirement rather than a sharing mechanism, and belongs with the ruled-out options rather than the hazards to guard against.
+    +> [Ray home access needs a portable path]
+    + [Longhorn undercounts cross-namespace consumers]
+
+[Ray environment delivery is separate]: Environment distribution does not require sharing a materialized environment tree. Nebi spec bundles over OCI and environment-baked container images are distinct mechanisms with different performance profiles. #open-decision
+    + [Ray has no usable environment mechanism today]
+    + [Nebi spec bundles use OCI today]
+    + [Environment-baked images remain proposed]
+    + [Delivery performance remains unmeasured]
+
+[Nebi spec bundles use OCI today]: Nebi publishes and imports workspace bundles through any OCI registry, with Artifact Keeper serving as another configured registry rather than a new capability. Every push creates a content-addressed tag with the `sha-` prefix, `latest`, and any user tags. A bundle carries `pixi.toml`, `pixi.lock`, and optional source, README, or data layers; it carries the spec rather than a materialized environment, so each consumer still runs `pixi install`. Nebi does not yet support the `tool.pixi` tables in `pyproject.toml` manifests.
+
+[Ray has no usable environment mechanism today]: Ray's own mechanism is a pip-install serialization command, which breaks because pip resolves differently on the worker than locally, and the team does not treat it as a long-term solution. Environment delivery is therefore an open design problem independent of the storage decision.
+
+[Environment-baked images remain proposed]: Building the materialized environment into a container image ahead of cluster launch lets each worker pull and run without an environment-materialization step. This mechanism pays image-pull time per node rather than install time per pod. It is the preferred direction rather than an agreed one, and it assumes a registry every user can publish to, which depends on the unresolved question of whether Artifact Keeper belongs in the core deployment. #open-decision
+
+[Delivery performance remains unmeasured]: End-to-end install time per pod for Nebi bundles and pull time per node for baked images have not been measured, so the mechanisms cannot yet be selected or treated as performance-equivalent. #open-decision
+
+<Ray can distribute files explicitly>: Ray can broadcast or copy selected files to workers instead of mounting the home, and job results can be copied back to the user's volume after the run, but those alternatives need their own lifecycle, consistency, and user-experience design. Whether Ray has a file-broadcast equivalent to Dask's has not been confirmed.
     -> [Ray home access needs a portable path]
 
 <Group co-location can emulate RWX>: Kubernetes permits several pods on one node to mount the same RWO volume, so required affinity could force every collaborating pod onto one node.
@@ -290,6 +322,9 @@ dot:
 [Longhorn operator time is estimated at 9.3 hours per month]: The model assigns approximately 9.3 operator hours per Longhorn cluster per month and 2.3 hours to the managed-filesystem residual, a difference of about seven hours. The estimate comes from runbooks and observed incidents rather than time-tracking data. #open-decision
     +> [Longhorn taxes every cluster operator]
 
+[Longhorn undercounts cross-namespace consumers]: The `Volume` CR's `status.kubernetesStatus` holds scalar namespace, PV, and PVC fields and a single-entry workload list, so with two namespaces bound to one volume it reproducibly reported one claim and dropped the other pod. Kubernetes itself enumerates both correctly, so this is a Longhorn bookkeeping limit: drain and maintenance checks that ask Longhorn which workloads use a volume get an incomplete answer.
+    +> [Longhorn taxes every cluster operator]
+
 [Longhorn requires a storage-aware drain]: A node-group disk resize encounters the instance-manager PDB while the node holds the final replica. Maintenance therefore requires replica movement or an explicit relaxation of the data-safety policy.
     +> [Longhorn taxes every cluster operator]
 
@@ -453,7 +488,7 @@ dot:
 
 (1) EFS is regional by design; FSx offers explicit Single-AZ and Multi-AZ deployment types.
 (2) Measured Multi-AZ FSx is about 20% slower than Single-AZ FSx on extraction and clone and indistinguishable at four writers.
-(3) Its modeled total is about 1.7x higher at the medium tier and ranges from 1.3x to 2.3x across all modeled tiers.
+(3) Its modeled total is about 1.7x the Single-AZ total at the medium tier and ranges from 1.3x to 2.3x across all modeled tiers.
 ----
 (4) [Multi-AZ storage turns availability into a provider and cost choice]: The architecture requires cross-AZ reachability; each managed provider supplies and prices it differently.
     _> <Longhorn masks EBS topology>
@@ -464,6 +499,7 @@ dot:
     + <RWX homes remove scheduling constraints>
     + <The current node pin causes user failures>
     - <RWX writes are much slower>
+    - <Nebi local SQLite cannot move to NFS>
     - <One filesystem concentrates failures>
 
 <The current node pin causes user failures>: Required affinity makes one node the ceiling for all concurrent work by one user.
@@ -474,6 +510,19 @@ dot:
 ----
 (4) [The RWO workaround has user-visible cost]: [DSP #221](https://github.com/nebari-dev/data-science-pack/issues/221) records scheduling failures caused by the pin.
     +> [Home access mode is a product decision]
+
+<A single-mount home releases the pin>: The pin exists to co-locate consumers of shared RWO volumes, not because homes sit on block storage.
+
+(1) DSP pins a user's pods to one node so they can share the RWO home and workspace PVCs; the pin has no other purpose.
+(2) Nebi bundles carry optional source and data layers, so the `nebi-pull` path that already re-materializes environments per pod can deliver authored files into app pods as well.
+(3) An app pod that mounts neither home nor the workspace store schedules freely, and a volume with one consumer never triggers EBS single-attach.
+(4) There is no read-only fallback competing with this: two pods on different nodes cannot attach one gp3 volume even read-only.
+----
+(5) [Shape F removes the pin on block homes]: Mounting home and workspace only into the JupyterLab pod, with app pods consuming published bundles, releases the pin while keeping block latency, Nebi local mode, and shape D's cost and prerequisites.
+    +> [Home access mode is a product decision]
+
+[Shape F is gated on the publish contract]: Bundles are one-directional, so shape F requires app pods to be stateless consumers of published content, with outputs going to `/shared`, object storage, or an explicit pull-back — unverified against current jhub-apps. It inherits the unresolved user publish path and unmeasured delivery performance, apps see the last publish rather than a live home, and a second concurrent Jupyter server for the same user still co-locates on the RWO home. #open-decision
+    _> <A single-mount home releases the pin>
 
 <RWX homes remove scheduling constraints>: A managed Multi-AZ home can mount from any node or AZ.
 
@@ -486,13 +535,40 @@ dot:
 
 <The workspace can be ephemeral>: The workspace holds materialized environments and can use node-local ephemeral storage if Nebi can reconstruct it safely.
 
-(1) DSP already builds application environments into an emptyDir on each launch.
+(1) Nebi stores its database in the home while workspace directories live on the workspace volume, separating coordination state from materialized workspace data.
 (2) An ephemeral workspace adds no attachment constraint and removes 20 GiB per user from persistent capacity.
-(3) Nebi stores its database in the home while workspace directories live on the workspace volume.
-(4) Local-only workspaces may contain authored work that is not present on a remote server.
+(3) The jhub-apps path already re-materializes a selected environment per pod, so the mechanism is proven in DSP, and node-local materialization is cheap: with the package cache primed, `pixi install` takes 2.83 to 3.59 seconds on block storage against 31.97 to 61.62 seconds single-pod on every tested RWX backend and 68 to 122 seconds per pod across four concurrent pods.
+(4) The measured penalty applies to the volume the environment unpacks onto, so it argues against an RWX environment store rather than against per-spawn materialization into node-local ephemeral storage.
+(5) The benchmark kept the package cache node-local while DSP sets no `PIXI\_CACHE\_DIR`, leaving it under the home directory, so materializing to node-local storage against a cache on an NFS home is an untested combination; pinning the cache to node-local storage removes the question.
+(6) A declared workspace can be reconstructed from its manifest and lockfile, but a lockfile reproduces only declared content.
+(7) Editable installs such as `pip install -e`, in-place compiled extensions, and unpublished authored files are specific loss cases.
 ----
-(5) [Workspace durability needs confirmation]: Nebi must tolerate loss and rematerialize the workspace before this PVC becomes ephemeral. #open-decision
+(8) [Workspace durability needs confirmation]: Nebi must tolerate loss and rematerialize declared workspace state before this PVC becomes ephemeral, and shape E needs an explicit durability contract for changes a lockfile cannot reproduce. #open-decision
     +> [RWX homes simplify AWS operations]
+    <- <Workspaces are shared between pods>
+        <_ [Workspace handoff is a launch-time snapshot]
+        <- <Nebi server mode replaces filesystem coordination>
+
+<Workspaces are shared between pods>: DSP mounts one workspace volume into JupyterLab and every jhub-apps pod, so both read materialized environments from the same claim.
+
+(1) A separate workspace PVC does not remove the affinity constraint because RWO still pins all consumers to one node.
+(2) RWX permits cross-node sharing but adds the small-file read and write penalty.
+(3) Per-pod ephemeral directories do not satisfy a live filesystem-sharing requirement.
+----
+(4) [Current workspace sharing challenges ephemeral storage]: Shape E cannot replace the shared workspace PVC with independent ephemeral directories without changing the coordination contract.
+
+[Environment images would remove the shared env store]: What both pods require is a way to obtain an environment, not a shared volume. Delivering materialized environments as prebuilt images, the same mechanism proposed for Ray workers, removes the environment store from the sharing question entirely. It leaves two narrower requirements: a writable local store for environments a user mutates during a session, which need not be shared or survive a node change, and a volume for authored files, which images do not carry but Nebi spec bundles can carry through their optional source layers. Kernel discovery reads the workspaces directory, so an image-per-environment model also implies selecting an environment at spawn rather than switching kernels in a session. #open-decision
+    -> <Workspaces are shared between pods>
+
+<Nebi server mode replaces filesystem coordination>: Nebi can coordinate workspace publication and retrieval through its server API instead of requiring every consumer to mount one filesystem.
+
+(1) Server mode supports OIDC, role-based per-workspace permissions, background jobs, and distributed queues through Valkey, with SQLite by default or PostgreSQL for larger deployments.
+(2) Its `workspaces\_dir` setting makes node-local workspace materialization a supported configuration.
+(3) Consumers can push and pull workspace state through the coordination service.
+----
+(4) [Server coordination can remove the shared mount]: Sharing becomes an API operation rather than simultaneous filesystem access.
+
+[Workspace handoff is a launch-time snapshot]: DSP already snapshots the workspace at launch rather than live-mounting it. A `nebi-pull` init container runs `nebi pull` and `pixi install` into a per-pod `emptyDir` at `/tmp/nebi-env`, and `NEBI\_DATA\_DIR` points every app pod at its own Nebi database, so a selected environment is re-materialized per pod rather than read from a shared filesystem. Every spawn still mounts the per-user RWO workspace PVC at `/var/lib/nebi/workspaces`, which the JupyterLab pod uses as its materialized-environment store, so that mount remains a second contributor to the node pin alongside home. Per-pod materialization exists to stop concurrent apps overwriting one another's manifest and Nebi database, not to relieve node pinning, so it survives a move to RWX homes: cross-node concurrent writes to one manifest and one SQLite file would make that conflict worse rather than better. Two live RWO mounts therefore remain on every spawn, home and the workspace store, and together they are why DSP pins app pods to the JupyterLab pod's node.
 
 <RWX writes are much slower>: Every tested RWX implementation adds a network round trip to metadata writes and file creation.
 
@@ -502,7 +578,7 @@ dot:
 (4) EFS Elastic takes 38.86, 33.09, and 31.77 seconds.
 (5) Metadata reads and bulk I/O do not show the same penalty; the home objection is specifically write latency.
 ----
-(6) [RWX home penalties span 16-to-100x]: Holding the engine constant, Longhorn RWO to RWX costs 16-37x on untar, clone, and checkout. Against gp3, managed RWX costs 19-47x for FSx Single-AZ, 26-57x for FSx Multi-AZ, and 47-100x for EFS Elastic.
+(6) [RWX home penalties span 16-to-100x]: Holding the engine constant, Longhorn RWO to RWX costs 16-38x on untar, clone, and checkout. Against gp3, managed RWX costs 19-47x for FSx Single-AZ, 26-57x for FSx Multi-AZ, and 47-100x for EFS Elastic.
     -> [Home access mode is a product decision]
 
 [Environment builds use the workspace volume]: The default environment is in the container image, interactive Nebi environments use the per-user workspace PVC, and application environments use node-local emptyDir. Environment-create timings do not measure home or `/shared` performance.
@@ -510,6 +586,21 @@ dot:
 
 [No home latency threshold exists]: The benchmark cannot decide whether 13-33 second Git operations are an acceptable price for free scheduling and simpler AWS storage without an explicit product threshold. #open-decision
     _> [RWX home penalties span 16-to-100x]
+
+<Nebi local SQLite cannot move to NFS>: Shape E removes two guarantees required by Nebi local mode at the same time.
+
+(1) Nebi local mode stores `nebi.db` at `~/.local/share/nebi/nebi.db`, inside the DSP home PVC.
+(2) Nebi opens the database with SQLite WAL journaling, a 10-second busy timeout, and `synchronous=NORMAL`.
+(3) WAL uses a memory-mapped shared-memory file and requires every process touching the database to run on the same host; SQLite does not support WAL over network filesystems.
+(4) The current RWO home plus the per-user node pin jointly keep every database client on one host.
+(5) Shape E moves the home to NFS and releases the pin, removing both guarantees.
+(6) The existing benchmark measures untar, clone, and checkout rather than concurrent database access, so it cannot detect this correctness failure.
+----
+(7) [Nebi local mode is unsupported in shape E]: This is a correctness constraint with no negotiable threshold, distinct from the measured 16-to-100x write-latency trade.
+    -> [Home access mode is a product decision]
+    <- [Relocating the Nebi data directory removes the home-resident database]
+
+[Relocating the Nebi data directory removes the home-resident database]: Pointing `NEBI\_DATA\_DIR` at node-local ephemeral storage keeps every client's database off the network filesystem, which is the correctness fix; DSP already does this for jhub-apps pods. Server mode is what makes the relocation lossless: workspace tracking moves behind one server process that keeps its own database on its own volume, so a discarded local database is a cache miss rather than lost state. SQLite remains the server default; PostgreSQL on CNPG is a separate availability and scale choice rather than a condition of the fix. DSP already runs Keycloak for OIDC. Nebi is alpha and explicitly not recommended for production use, so adopting and validating server mode remains a cost, and whether a client in server mode still keeps a local database needs confirmation against Nebi's own source. #open-decision
 
 <One filesystem concentrates failures>: A managed filesystem can place many user homes behind one service-level failure domain.
 
@@ -527,42 +618,7 @@ dot:
 
 # AWS decision gate
 
-[AWS storage decision]: First choose between Longhorn and a managed RWX provider by applying explicit acceptance criteria to each workload; then choose EFS, FSx for OpenZFS, or another managed implementation on its measured merits and integration cost. #open-decision
+[AWS storage decision]: First choose between Longhorn and a managed RWX provider by applying explicit acceptance criteria to each workload; then choose EFS, FSx for OpenZFS, or another managed implementation on its measured merits and integration cost. #open-decision {isInMap: true}
 
-<POSIX behavior gate>: Verify concurrent access, locking, atomic rename, permissions, ownership, setgid propagation, subPath mounts, and recovery behavior. {isInMap: false}
-
-<Performance gate>: Set an acceptable home-write latency and test `/shared` beyond four concurrent writers. The existing benchmark covers thirteen configurations and differences below about 1.2x are treated as noise. {isInMap: false}
-
-<Availability gate>: Define behavior and recovery objectives for node failure, AZ failure, storage endpoint failure, remount, lock recovery, maintenance, and disaster recovery. {isInMap: false}
-
-<Backup and restore gate>: State coverage for every volume, retention, credential model, recovery point and time objectives, and restore into a new cluster. {isInMap: false}
-
-<Operations gate>: Compare installation, upgrades, observability, capacity management, incident response, security patching, and provider-specific NIC integration. {isInMap: false}
-
-<Cost gate>: Include storage, provisioned throughput, request charges, transfer, backups, required worker compute, operator time, and representative customer scale. Verify the RWX-only shape and actual shared-storage I/O per user. {isInMap: false}
-
-<Migration gate>: Provide a tested migration and rollback path for every user volume that changes backend or access mode. {isInMap: false}
-
-<Portability gate>: Account for maintaining Longhorn for Hetzner alongside every provider-native storage, backup, and restore implementation. {isInMap: false}
-
-# Resulting assumptions
-
-// These statements summarize the present understanding. They have no
-// relations, so they remain in the source without cluttering rendered maps.
-
-* [Assumption 1]: Production DSP includes multi-user group-directory collaboration. #core-assumption
-* [Assumption 2]: User workloads remain independently schedulable across nodes. #core-assumption
-* [Assumption 3]: RWX is a required platform capability, not a required cluster-wide default. #core-assumption
-* [Assumption 4]: Large datasets use object storage; volume storage serves POSIX homes, outputs, environments, and shared small-file work. #architecture-decision
-* [Assumption 5]: Longhorn remains supported for Hetzner and comparable environments. #core-assumption
-* [Assumption 6]: Managed RWX does not imply FSx. EFS is the existing AWS integration; the FSx evaluation on the `remove-longhorn-aws` branch establishes feasibility and benchmark data for an alternative. Selection compares FSx integration and maintenance against the recurring per-cluster EFS premium over the expected fleet lifetime. #open-decision
-* [Assumption 7]: Homes and Nebi workspaces are RWO and jointly require the per-user node pin. #core-assumption
-* [Assumption 8]: RWX homes require an ephemeral or otherwise non-pinning workspace volume to release the pin. #open-decision
-* [Assumption 9]: Holding the engine constant, RWO to RWX costs 16-37x on home-relevant operations. Against gp3, managed RWX costs 19-100x overall and the modeled Multi-AZ FSx home shape costs 26-57x; no product threshold exists for accepting it. #open-decision
-* [Assumption 10]: AWS EBS homes require per-AZ node groups or Karpenter; AZ-outage tolerance remains undefined. #open-decision
-* [Assumption 11]: Longhorn provides NIC's implemented backup path; every moved volume needs replacement coverage. #core-assumption
-* [Assumption 12]: With FSx as the managed RWX provider, the managed-shared shape is the least expensive modeled AWS shape. The EFS range is higher but depends on unmeasured I/O and lifecycle tiering, while the Longhorn-RWX-only estimate depends on unverified instance-manager placement. #open-decision
-* [Assumption 13]: Operator effort is estimated rather than measured and remains a separate cost line. #open-decision
-* [Assumption 14]: Managed filesystems reduce AWS cluster operations while increasing the number of provider-specific integrations maintained by the project. #open-decision
-* [Assumption 15]: Cross-pack sharing uses object storage unless its product contract specifically requires shared POSIX storage. #open-decision
-* [Assumption 16]: Keycloak currently runs one CNPG instance. Every shape that moves its database from Longhorn to gp3 requires an explicit multi-instance, zone-placement, and backup design. #core-assumption
+// The eight acceptance gates this decision is tested against live in the
+// README; they carry no argument relations, so they are prose, not a map.
