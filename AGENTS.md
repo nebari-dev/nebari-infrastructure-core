@@ -397,12 +397,38 @@ Either way, a failure that can leave resources behind must surface in the exit c
 `scripts/install.sh` is a **published entry point**, not an internal helper: the
 README documents `curl ... /main/scripts/install.sh | sh`, pinned to `main`. Do
 not rename or move it, and do not merge a `main` that leaves it broken, or every
-in-flight one-liner breaks. It hand-reimplements three facts from
-`.goreleaser.yml` (the archive name template, the `amd64` -> `x86_64` rename) and
-the release workflow filename (in its cosign identity regexp); changing either
-side without the other is caught by `scripts/check-installer-contract.sh` in the
-`workflow-pins` CI job. It is POSIX `sh` (not `bash`) because it is piped into
+in-flight one-liner breaks — there is no release gate between a squash-merge and
+every user running it. It is POSIX `sh` (not `bash`) because it is piped into
 arbitrary shells.
+
+It hand-reimplements facts from `.goreleaser.yml` and the release workflow that
+`goreleaser check` does not cross-check: the project name, the archive name
+template and format, the `amd64` -> `x86_64` rename, the checksum filename, the
+signature bundle suffix, the cosign version floor (also stated in
+`docs/operations/verifying-releases.md`), and the release workflow filename baked
+into its cosign identity regexp. Changing either side without the other is caught
+by `scripts/check-installer-contract.sh` in the `workflow-pins` CI job. That job
+is advisory rather than merge-blocking, and the check greps source text, so it
+catches renames and reorderings but not a deletion that leaves the string behind
+in a comment — read the non-coverage list at the top of that script before
+relying on it.
+
+`scripts/test-installer.sh` covers the behaviour rather than the contract: it
+sources `install.sh` with `NIC_INSTALL_SH_SOURCE_ONLY=1`, stubs `fetch`/`cosign`/
+`uname`, and asserts the signature decision table — which outcomes install and
+which abort — plus the arch mapping and the `NIC_SKIP_SIGNATURE` parsing. It runs
+in the **`Test`** job specifically because that job is merge-blocking and
+`workflow-pins` is not; a check that cannot stop a merge cannot back the promise
+above. It is offline, so it does not verify a real install or real cosign
+behaviour, and its `-n` parse checks cannot see bashisms (`[[` is a valid command
+name under dash). Add a case there when you change what the installer accepts.
+
+Authenticity handling has one rule worth keeping straight: the installer degrades
+to checksum-only when *no tool on the host can verify* or when the release
+predates signing (below `SIGNING_SINCE`), and it is fatal whenever a signature
+that should exist is missing or does not verify. Suppressing the signature is the
+cheapest attack on a piped installer, so "the bundle 404'd" must never become a
+warning for a release that publishes one.
 
 ## Testing Strategy
 
