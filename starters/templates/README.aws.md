@@ -24,7 +24,8 @@ workspace fails fast instead of attempting a real deploy.
 
 ## What you must edit
 
-`project_name`, `domain`, the ACME email and the GitOps repository URL. The
+`project_name`, `domain`, the ACME email and the GitOps repository URL and
+path. The
 infrastructure defaults (region, availability zones, instance types, Longhorn,
 EFS) are working values, not placeholders. **If you change `region`, change
 `availability_zones` to match**: `nic validate` does not cross-check them and a

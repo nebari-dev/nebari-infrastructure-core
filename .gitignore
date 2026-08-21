@@ -65,5 +65,7 @@ docs/plans/
 # Test Configs
 test-configs/
 
-# Generated starter workspaces (published to a registry, never committed)
+# Generated starter workspaces (published to a registry, never committed).
+# Also GoReleaser's output dir, so `make release-snapshot` (--clean) wipes any
+# starters generated here - regenerate them with `make starters` afterwards.
 dist/

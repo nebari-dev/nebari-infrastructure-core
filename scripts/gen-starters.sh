@@ -20,24 +20,26 @@ NIC_VERSION="${NIC_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null | sed '
 PROVIDERS=("local" "aws")
 
 # The identity-bearing fields a user must supply, declared once per provider as
-#   "<line prefix, up to and including the colon and space>###<value CI fills in>"
-# Both the CHANGEME substitution and the fill-for-CI script are derived from
-# this one list, so they cannot drift apart. Everything else in the example
-# stays a working default. Applied as line edits, so the inline comments that
-# make the examples useful survive into the starter.
+# the line prefix up to and including the colon and space. Everything else in
+# the example stays a working default.
+#
+# Applied as line edits rather than a YAML round trip, so the inline comments
+# that make the examples useful survive into the starter - including the comment
+# on a replaced line, which is preserved and reattached (those five lines are
+# exactly the ones whose hint the reader needs most).
 placeholder_fields() {
   case "$1" in
     local)
       printf '%s\n' \
-        'project_name: ###nebari-local-ci'
+        'project_name: '
       ;;
     aws)
       printf '%s\n' \
-        'project_name: ###nebari-aws-ci' \
-        'domain: ###nebari.example.com' \
-        '    email: ###admin@example.com' \
-        '    url: ###git@github.com:example-org/example-gitops.git' \
-        '    path: ###clusters/nebari-aws-ci'
+        'project_name: ' \
+        'domain: ' \
+        '    email: ' \
+        '    url: ' \
+        '    path: '
       ;;
   esac
 }
@@ -49,51 +51,67 @@ provider_deps() {
     local) printf '' ;;
     # AWS runs OpenTofu. Pinning it here is the point of a pinned toolchain:
     # without it nic falls back to downloading an unpinned tofu at deploy time.
-    aws)   printf 'opentofu = ">=1.11,<2"' ;;
+    # The floor must stay >= pkg/tofu.MinVersion (1.11.3): below that,
+    # compatibleVersion rejects the PATH binary and nic downloads one anyway,
+    # silently, which defeats the pin.
+    aws)   printf 'opentofu = ">=1.11.3,<2"' ;;
   esac
 }
 
 mkdir -p "$OUT_DIR"
+
+# Report-and-block, accumulating: a restructure of examples/ usually moves more
+# than one key, and exiting on the first would make the author re-run once per
+# field to discover them. Held as a newline-delimited string rather than an
+# array so an empty accumulator is safe under `set -u` on bash 3.2 (macOS).
+errors=""
+note_error() { errors="${errors}${1}"$'\n'; }
+
 for provider in "${PROVIDERS[@]}"; do
   src="examples/${provider}-config.yaml"
-  [ -f "$src" ] || { echo "missing $src" >&2; exit 1; }
+  if [ ! -f "$src" ]; then
+    note_error "${provider}: missing ${src}"
+    continue
+  fi
   dest="${OUT_DIR}/${provider}"
   mkdir -p "$dest"
 
   cp "$src" "$dest/config.yaml"
-  fill_script="${dest}/.fill-for-ci.sed"
-  : > "$fill_script"
 
   matched=0
-  while IFS= read -r field; do
-    [ -n "$field" ] || continue
-    prefix="${field%%###*}"
-    value="${field##*###}"
+  while IFS= read -r prefix; do
+    [ -n "$prefix" ] || continue
 
-    before="$(cat "$dest/config.yaml")"
-    sed "s|^${prefix}.*|${prefix}CHANGEME|" "$dest/config.yaml" > "$dest/config.yaml.tmp"
-    mv "$dest/config.yaml.tmp" "$dest/config.yaml"
-    # Every field must match something. examples/ is upstream of this
-    # generator, so a restructure there (a key moving or being renamed) would
-    # otherwise silently ship a starter with a real value left in it.
-    if [ "$before" = "$(cat "$dest/config.yaml")" ]; then
-      echo "placeholder field matched nothing for ${provider}: '${prefix}'" >&2
-      echo "examples/${provider}-config.yaml has probably been restructured" >&2
-      exit 1
+    # Every field must match EXACTLY ONE line. examples/ is upstream of this
+    # generator, so a restructure there can break this two ways, and counting
+    # is what tells them apart: zero matches means a key was renamed or moved
+    # and a real value would ship untouched; more than one means a same-named
+    # key appeared at the same indent, and blanking both would bury a real
+    # value under a placeholder that looks correct.
+    hits="$(grep -c "^${prefix}" "$dest/config.yaml" || true)"
+    if [ "$hits" -ne 1 ]; then
+      note_error "${provider}: '${prefix}' matched ${hits} lines in examples/${provider}-config.yaml, want exactly 1"
+      continue
     fi
 
-    # The inverse edit, so CI can prove a filled starter validates without
-    # keeping its own copy of the field list.
-    printf 's|^%sCHANGEME$|%s%s|\n' "$prefix" "$prefix" "$value" >> "$fill_script"
+    # Replace the value but reattach any trailing comment, so the hint on a
+    # line the reader must edit survives (examples/aws-config.yaml's path: key
+    # documents itself as optional, and that is worth keeping in the starter).
+    sed "s|^\(${prefix}\)[^#]*\(#.*\)\{0,1\}$|\1CHANGEME  \2|" \
+      "$dest/config.yaml" > "$dest/config.yaml.tmp"
+    mv "$dest/config.yaml.tmp" "$dest/config.yaml"
     matched=$((matched + 1))
   done < <(placeholder_fields "$provider")
 
   # A provider added to PROVIDERS without a placeholder_fields arm would
   # otherwise ship a starter with every real value intact.
-  if [ "$matched" -eq 0 ]; then
-    echo "no placeholder fields declared for ${provider}" >&2
-    exit 1
+  if [ "$matched" -eq 0 ] && [ -z "$errors" ]; then
+    note_error "${provider}: no placeholder fields declared; add an arm to placeholder_fields()"
   fi
+
+  # Trailing whitespace from a replaced line that carried no comment.
+  sed 's|[[:space:]]*$||' "$dest/config.yaml" > "$dest/config.yaml.tmp"
+  mv "$dest/config.yaml.tmp" "$dest/config.yaml"
 
   sed -e "s|__PROVIDER__|${provider}|g" \
       -e "s|__NIC_VERSION__|${NIC_VERSION}|g" \
@@ -104,3 +122,9 @@ for provider in "${PROVIDERS[@]}"; do
 
   echo "generated $dest (nic ${NIC_VERSION})"
 done
+
+if [ -n "$errors" ]; then
+  echo "gen-starters failed:" >&2
+  printf '%s' "$errors" | sed 's|^|  - |' >&2
+  exit 1
+fi

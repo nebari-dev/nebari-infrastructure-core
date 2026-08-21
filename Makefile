@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters
 
 # Variables
 BINARY_NAME=nic
@@ -26,6 +26,10 @@ docs: ## Generate CLI and configuration reference documentation
 	@mkdir -p docs/reference/cli docs/configuration
 	@rm -f docs/reference/cli/*.md docs/configuration/*.md
 	go run ./cmd/docgen
+
+starters: ## Generate the Nebi starter workspaces into dist/starters
+	@echo "Generating starters..."
+	./scripts/gen-starters.sh dist/starters
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."

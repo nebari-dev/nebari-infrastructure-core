@@ -69,7 +69,7 @@ jobs:
           # the registry, and a malformed pixi.toml would not surface until the
           # publish job runs pixi lock.
           if grep -rn '__[A-Z_]*__' dist/starters/; then
-            echo "FAIL: unsubstituted template tokens in the rendered starters"
+            echo "::error::unsubstituted template tokens in the rendered starters"
             exit 1
           fi
           for provider in local aws; do
@@ -87,37 +87,56 @@ jobs:
 
             echo "== ${provider}: the unedited starter must be rejected =="
             if err="$(nic validate -f "$config" 2>&1)"; then
-              echo "FAIL: nic validate accepted the unedited ${provider} starter"
+              echo "::error::nic validate accepted the unedited ${provider} starter"
               echo "$err"
               exit 1
             fi
-            echo "$err" | grep -q CHANGEME || {
-              echo "FAIL: ${provider} validation error did not mention CHANGEME"
+            # nic logs errors as JSON, so the quotes in the message arrive
+            # backslash-escaped; drop the escapes before matching on them.
+            plain="$(printf '%s' "$err" | tr -d '\\')"
+
+            echo "$plain" | grep -q CHANGEME || {
+              echo "::error::${provider} validation error did not mention CHANGEME"
               echo "$err"
               exit 1; }
 
-            echo "== ${provider}: a filled starter must validate =="
-            # The fill script is emitted by the generator from the same field
-            # list it used to insert the placeholders, so CI keeps no copy of
-            # its own to drift.
-            filled="$(mktemp)"
-            trap 'rm -f "$filled"' EXIT
-            sed -f "dist/starters/${provider}/.fill-for-ci.sed" "$config" > "$filled"
-            if grep -q CHANGEME "$filled"; then
-              echo "FAIL: ${provider} still has placeholders after filling"
-              grep -n CHANGEME "$filled"
-              exit 1
-            fi
-            nic validate -f "$filled"
-            echo "OK: ${provider} starter behaves correctly"
+            # Rejection alone is not enough, and neither is grepping the
+            # message for CHANGEME: go-yaml quotes the offending source line in
+            # a parse error, so sed surgery that breaks the YAML produces an
+            # error that mentions CHANGEME too. "placeholder value" only comes
+            # from the placeholder gate, which runs after a successful
+            # unmarshal, so matching it proves the config still parses.
+            echo "$plain" | grep -q 'placeholder value' || {
+              echo "::error::${provider} was rejected, but not by the placeholder gate - the config probably no longer parses"
+              echo "$err"
+              exit 1; }
+
+            # The expected fields are written out here on purpose. nic derives
+            # these paths from the parsed config, so asserting them is
+            # independent of the generator's own field list - a prefix that
+            # matched the wrong line lands on a different path and fails here.
+            case "$provider" in
+              local) want='field "project_name"' ;;
+              aws)   want='fields "certificate.acme.email", "domain", "project_name", "repository.existing.path", "repository.existing.url"' ;;
+            esac
+            echo "$plain" | grep -qF "$want" || {
+              echo "::error::${provider} placeholdered the wrong fields; wanted ${want}"
+              echo "$err"
+              exit 1; }
+            echo "OK: ${provider} is rejected unedited, parses, and placeholders exactly the expected fields"
           done
 
   publish-starters:
     name: Publish starters to quay.io
     needs: validate-starters
-    # Tag builds only. workflow_dispatch is allowed for a manual re-publish but
-    # the environment below restricts which refs may actually run it.
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Tag builds only, and deliberately NOT workflow_dispatch. A dispatch can
+    # target any ref: from a branch it would publish starter-*:vmain (and pin a
+    # version from the PREVIOUS tag, since gen-starters.sh reads git describe),
+    # and from an existing tag it would overwrite a released bundle - the exact
+    # rewrite the trigger comment above says must never happen. Deployment-branch
+    # rules live in repo settings and cannot be reviewed from this file, so the
+    # guard belongs here. A manual re-publish is a re-run of the tag's own run.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Approval + deployment-branch gate, matching every other credentialed job
@@ -160,7 +179,10 @@ jobs:
           # workspace) needs nebi >= 0.10; older versions silently ship only
           # pixi.toml and pixi.lock. Pinned so a credentialed job never resolves
           # a floating dependency at run time.
-          pixi global install "nebi==0.13"
+          # Floor plus ceiling rather than ==, so patch releases are allowed.
+          # Channel pinned explicitly: this job holds the Quay push token, and
+          # an unpinned channel decides which build of nebi runs beside it.
+          pixi global install -c conda-forge "nebi>=0.13,<0.14"
 
       - name: Generate starters
         shell: bash
@@ -171,12 +193,14 @@ jobs:
       - name: Configure quay registry
         shell: bash
         env:
-          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
-          QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+          # Username is a variable, token is a secret; both scoped to the
+          # quay-publish environment.
+          QUAY_USERNAME: ${{ vars.QUAY_OCI_STARTERS_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_OCI_STARTERS_TOKEN }}
         run: |
           set -euo pipefail
-          : "${QUAY_USERNAME:?QUAY_USERNAME is not set for this environment}"
-          : "${QUAY_TOKEN:?QUAY_TOKEN is not set for this environment}"
+          : "${QUAY_USERNAME:?QUAY_OCI_STARTERS_USERNAME is not set for this environment}"
+          : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set for this environment}"
           printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
             --name quay \
             --url quay.io \
@@ -215,7 +239,7 @@ jobs:
             # The published bundle must be rejected unedited, same as the
             # freshly generated one.
             if nic validate -f "$dest/config.yaml"; then
-              echo "FAIL: published ${provider} starter validates unedited"
+              echo "::error::published ${provider} starter validates unedited"
               exit 1
             fi
             echo "OK: ${provider} round-tripped and is still not deployable as-is"

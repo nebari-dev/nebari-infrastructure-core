@@ -30,8 +30,8 @@ and the GitOps repository is created for you.
 
 ## Pinning
 
-`pixi.lock` pins the exact toolchain. `nic` pins OpenTofu, and the embedded
-`.terraform.lock.hcl` pins provider versions, so one lockfile transitively pins
-the whole stack. Commit `pixi.lock`.
+`pixi.lock` pins the exact toolchain. Commit it. The local provider drives kind
+through an embedded Go library, so there is no OpenTofu in this workspace and
+nothing else to pin.
 
 This file is copied verbatim into the published starter. Edit it here.
