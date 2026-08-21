@@ -216,7 +216,7 @@ go build -o nic ./cmd/nic        # or: make build
 ./nic destroy -f config.yaml
 ```
 
-NIC has no `status` or `plan` subcommand; the available verbs are `deploy`, `destroy`, `validate`, `kubeconfig`, and `version`.
+NIC has no `status` or `plan` subcommand; the available verbs are `deploy`, `destroy`, `validate`, `kubeconfig`, `outputs`, and `version`.
 
 ## Development
 
