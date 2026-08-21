@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
@@ -53,6 +54,38 @@ type OutputsOptions struct {
 	// how often NIC re-reads the cluster, and --timeout is the knob that
 	// matters to them. It exists so tests can poll on a millisecond scale.
 	PollInterval time.Duration
+}
+
+// DefaultOutputsTimeout is the polling window Outputs uses when
+// OutputsOptions.Timeout is zero. Exported so a caller can present it as a
+// flag default without reaching past pkg/nic for a value pkg/nic owns: if this
+// package ever picks a different default, the CLI follows automatically.
+const DefaultOutputsTimeout = endpoint.DefaultTimeout
+
+// apiRequestTimeout bounds each individual API request. Without it a request
+// to an API server whose connection has been black-holed - dropped packets,
+// no RST - blocks until the kernel gives up on the TCP connection, which can
+// outlast --timeout by minutes. CI is this command's primary consumer, so an
+// unbounded read is a hung job rather than a failed one.
+const apiRequestTimeout = 30 * time.Second
+
+// restConfigFromKubeconfig builds a client configuration whose requests are
+// individually bounded, so no single read can outlive the caller's deadline.
+func restConfigFromKubeconfig(ctx context.Context, kubeconfigBytes []byte) (*rest.Config, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "nic.restConfigFromKubeconfig")
+	defer span.End()
+
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("parse kubeconfig: %w", err)
+	}
+
+	restConfig.Timeout = apiRequestTimeout
+	span.SetAttributes(attribute.String("request_timeout", apiRequestTimeout.String()))
+
+	return restConfig, nil
 }
 
 // unresolved records one output that could not be read, with the reason it
@@ -99,10 +132,10 @@ func (c *Client) Outputs(ctx context.Context, cfg *config.NebariConfig, opts Out
 		return nil, fmt.Errorf("get kubeconfig: %w", err)
 	}
 
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	restConfig, err := restConfigFromKubeconfig(ctx, kubeconfigBytes)
 	if err != nil {
 		span.RecordError(err)
-		return nil, fmt.Errorf("parse kubeconfig: %w", err)
+		return nil, err
 	}
 
 	k8sClient, err := kubernetes.NewForConfig(restConfig)
@@ -145,7 +178,7 @@ func resolveOutputs(ctx context.Context, client kubernetes.Interface, data argoc
 
 	timeout := opts.Timeout
 	if timeout == 0 {
-		timeout = endpoint.DefaultTimeout
+		timeout = DefaultOutputsTimeout
 	}
 	pollInterval := opts.PollInterval
 	if pollInterval == 0 {
@@ -157,11 +190,18 @@ func resolveOutputs(ctx context.Context, client kubernetes.Interface, data argoc
 		attribute.String("poll_interval", pollInterval.String()),
 	)
 
-	deadline := time.After(timeout)
+	// Bound the polling window on the context, not just on a timer. A timer is
+	// only consulted between polls, so it cannot interrupt a read already in
+	// flight; a context can, because client-go cancels the underlying request
+	// when it is cancelled. Without this, --timeout is a floor rather than a
+	// ceiling whenever the API server is slow to answer.
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	outputs, missing := readOutputs(ctx, client, data)
+	outputs, missing := readOutputs(pollCtx, client, data)
 	for len(missing) > 0 {
 		if hasPermanent(missing) {
 			err := unresolvedError(missing, false, 0)
@@ -172,16 +212,22 @@ func resolveOutputs(ctx context.Context, client kubernetes.Interface, data argoc
 		status.Progressf(ctx, "Waiting for platform outputs: %s", strings.Join(fieldNames(missing), ", "))
 
 		select {
-		case <-ctx.Done():
-			err := fmt.Errorf("context cancelled while waiting for platform outputs: %w", ctx.Err())
-			span.RecordError(err)
-			return nil, err
-		case <-deadline:
+		case <-pollCtx.Done():
+			// pollCtx is done either because the operator interrupted the
+			// command or because the polling window expired. Reporting an
+			// interrupted run as "the platform never converged" would send the
+			// operator looking for a deployment fault that is not there, so
+			// consult the parent to tell the two apart.
+			if ctx.Err() != nil {
+				err := fmt.Errorf("context cancelled while waiting for platform outputs: %w", ctx.Err())
+				span.RecordError(err)
+				return nil, err
+			}
 			err := unresolvedError(missing, true, timeout)
 			span.RecordError(err)
 			return nil, err
 		case <-ticker.C:
-			outputs, missing = readOutputs(ctx, client, data)
+			outputs, missing = readOutputs(pollCtx, client, data)
 		}
 	}
 
@@ -244,6 +290,14 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 	}
 
 	for _, read := range secretReads {
+		// Once the deadline has passed there is no point issuing further
+		// reads: each would only wait out its own request timeout, turning one
+		// expired deadline into several. Report the field as unread instead.
+		if err := ctx.Err(); err != nil {
+			missing = append(missing, unresolved{field: read.field, reason: abandonedReason(err)})
+			continue
+		}
+
 		value, err := secretValue(ctx, client, read.namespace, read.name, read.key)
 		if err != nil {
 			missing = append(missing, unresolved{field: read.field, reason: err.Error()})
@@ -252,11 +306,13 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 		*read.target = value
 	}
 
-	ep, err := endpoint.Check(ctx, client)
-	switch {
-	case err != nil:
+	// The gateway address is read last, so the deadline may already have
+	// passed by the time its turn comes.
+	if err := ctx.Err(); err != nil {
+		missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
+	} else if ep, err := endpoint.Check(ctx, client); err != nil {
 		missing = append(missing, unresolved{field: "gateway_address", reason: err.Error()})
-	default:
+	} else {
 		// Prefer the hostname: cloud load balancers publish a hostname and
 		// leave the IP empty, and the hostname is what DNS should point at.
 		outputs.GatewayAddress = ep.Hostname
@@ -313,6 +369,13 @@ func secretValue(ctx context.Context, client kubernetes.Interface, namespace, na
 	}
 
 	return string(value), nil
+}
+
+// abandonedReason describes a field left unread because the deadline passed
+// before its turn came, distinguishing it from a field whose object is
+// genuinely absent.
+func abandonedReason(err error) string {
+	return fmt.Sprintf("not read: %v", err)
 }
 
 func secretKeys(data map[string][]byte) []string {

@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -28,10 +29,12 @@ func testTemplateData(domain string) argocd.TemplateData {
 	)
 }
 
+// secretObj populates Data only. The fake clientset does not perform the
+// StringData-to-Data conversion the API server does, so setting StringData as
+// well would suggest the resolver reads a field it never sees.
 func secretObj(namespace, name string, data map[string]string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		StringData: data,
 		Data:       toByteMap(data),
 	}
 }
@@ -289,5 +292,129 @@ func TestResolveOutputsWaitTimesOut(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err.Error(), want)
 		}
+	}
+}
+
+// slowSecretReads makes every secret Get take delay, so a test can observe
+// whether the polling deadline interrupts work already under way or is only
+// consulted between polls.
+func slowSecretReads(client *fake.Clientset, delay time.Duration) {
+	client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		time.Sleep(delay)
+		return false, nil, nil
+	})
+}
+
+func TestResolveOutputsTimeoutInterruptsWorkInFlight(t *testing.T) {
+	const readDelay = 80 * time.Millisecond
+
+	client := fake.NewSimpleClientset(keycloakAdminSecret(), realmAdminSecret())
+	slowSecretReads(client, readDelay)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := resolveOutputs(ctx, client, testTemplateData("nebari.example.com"), OutputsOptions{
+		Wait:         true,
+		Timeout:      30 * time.Millisecond,
+		PollInterval: 5 * time.Millisecond,
+	})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error %q does not report a timeout", err.Error())
+	}
+
+	// One read may already be under way when the deadline passes, so allow a
+	// single delay plus scheduling slack. Consulting the deadline only between
+	// polls would let a full pass of three reads complete first.
+	if limit := 2 * readDelay; elapsed > limit {
+		t.Errorf("resolveOutputs took %s, want under %s: the deadline did not stop reads already in flight",
+			elapsed, limit)
+	}
+}
+
+func TestResolveOutputsReportsCallerCancellationDistinctly(t *testing.T) {
+	client := fake.NewSimpleClientset(keycloakAdminSecret(), realmAdminSecret())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := resolveOutputs(ctx, client, testTemplateData("nebari.example.com"), OutputsOptions{
+		Wait:         true,
+		Timeout:      10 * time.Second,
+		PollInterval: 5 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "context cancelled") {
+		t.Errorf("error %q does not report caller cancellation", err.Error())
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error %q reports a timeout for a cancelled caller", err.Error())
+	}
+}
+
+func TestRestConfigFromKubeconfig(t *testing.T) {
+	const validKubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster:
+    server: https://127.0.0.1:6443
+contexts:
+- name: test
+  context:
+    cluster: test
+    user: test
+current-context: test
+users:
+- name: test
+  user: {}
+`
+
+	tests := []struct {
+		name        string
+		kubeconfig  string
+		wantErr     bool
+		wantTimeout time.Duration
+	}{
+		{
+			name:        "valid kubeconfig bounds every request",
+			kubeconfig:  validKubeconfig,
+			wantTimeout: apiRequestTimeout,
+		},
+		{
+			name:       "malformed kubeconfig",
+			kubeconfig: "\tnot: [valid",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := restConfigFromKubeconfig(context.Background(), []byte(tt.kubeconfig))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Timeout != tt.wantTimeout {
+				t.Errorf("Timeout = %s, want %s: an unbounded request can outlast --timeout",
+					got.Timeout, tt.wantTimeout)
+			}
+		})
 	}
 }

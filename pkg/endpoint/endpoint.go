@@ -125,11 +125,27 @@ func GetLoadBalancerEndpoint(ctx context.Context, client kubernetes.Interface, o
 // one-shot read) do not inherit the polling timeout. WithTimeout and
 // WithPollInterval have no effect here.
 func Check(ctx context.Context, client kubernetes.Interface, opts ...Option) (*LoadBalancerEndpoint, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "endpoint.Check")
+	defer span.End()
+
 	cfg := defaultOptions()
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	return checkEndpoint(ctx, client, cfg)
+
+	span.SetAttributes(
+		attribute.String("namespace", cfg.namespace),
+		attribute.String("label_selector", cfg.labelSelector),
+	)
+
+	ep, err := checkEndpoint(ctx, client, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	return ep, nil
 }
 
 // checkEndpoint performs a single attempt to find the load balancer endpoint.

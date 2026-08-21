@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -222,6 +225,73 @@ func TestCheck(t *testing.T) {
 			}
 			if ep.Hostname != tt.wantHost {
 				t.Errorf("hostname = %q, want %q", ep.Hostname, tt.wantHost)
+			}
+		})
+	}
+}
+
+// TestExportedFunctionsStartSpans pins the project's instrumentation
+// convention: an exported function in pkg/ that accepts a context opens a span
+// of its own. Delegating to an already-instrumented helper is not enough - the
+// caller's own frame is what makes a trace attributable to the operation the
+// operator asked for.
+func TestExportedFunctionsStartSpans(t *testing.T) {
+	client := fake.NewSimpleClientset(gatewaySvc(corev1.LoadBalancerIngress{IP: "10.89.0.2"}))
+
+	tests := []struct {
+		name     string
+		call     func(context.Context) error
+		wantSpan string
+	}{
+		{
+			name:     "Check",
+			call:     func(ctx context.Context) error { _, err := Check(ctx, client); return err },
+			wantSpan: "endpoint.Check",
+		},
+		{
+			name: "GetLoadBalancerEndpoint",
+			call: func(ctx context.Context) error {
+				_, err := GetLoadBalancerEndpoint(ctx, client)
+				return err
+			},
+			wantSpan: "endpoint.GetLoadBalancerEndpoint",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+
+			previous := otel.GetTracerProvider()
+			otel.SetTracerProvider(provider)
+			defer otel.SetTracerProvider(previous)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			if err := tt.call(ctx); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if err := provider.ForceFlush(context.Background()); err != nil {
+				t.Fatalf("flush spans: %v", err)
+			}
+
+			var names []string
+			for _, span := range recorder.Ended() {
+				names = append(names, span.Name())
+			}
+
+			found := false
+			for _, name := range names {
+				if name == tt.wantSpan {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("no span named %q was recorded; got %v", tt.wantSpan, names)
 			}
 		})
 	}
