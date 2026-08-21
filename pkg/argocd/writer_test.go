@@ -679,6 +679,67 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 	}
 }
 
+// The Keycloak secret names and keys used to be literals in the templates and
+// are now TemplateData fields, so that `nic outputs` and the manifests cannot
+// disagree about them. An unpopulated field renders as the empty string rather
+// than failing, which would leave the realm-setup Job and the Keycloak
+// StatefulSet pointing at a nameless secret key. Pin the rendered strings.
+func TestKeycloakSecretCoordinatesRender(t *testing.T) {
+	data := NewTemplateData(&config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{})
+
+	tests := []struct {
+		name     string
+		template string
+		want     []string
+	}{
+		{
+			name:     "keycloak base values reference the admin password key",
+			template: "templates/values/keycloak/base.yaml",
+			want: []string{
+				"name: " + KeycloakDefaultAdminSecretName,
+				"key: " + KeycloakAdminPasswordKey,
+			},
+		},
+		{
+			name:     "realm setup job references both secrets and keys",
+			template: "templates/manifests/keycloak/realm-setup-job.yaml",
+			want: []string{
+				"name: " + KeycloakDefaultAdminSecretName,
+				"key: " + KeycloakAdminPasswordKey,
+				"name: " + NebariRealmAdminSecretName,
+				"key: " + NebariRealmAdminPasswordKey,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.template)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.template, err)
+			}
+
+			rendered, err := processTemplate(tt.template, content, data)
+			if err != nil {
+				t.Fatalf("processTemplate(%s): %v", tt.template, err)
+			}
+
+			output := string(rendered)
+			for _, want := range tt.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("rendered %s does not contain %q:\n%s", tt.template, want, output)
+				}
+			}
+			// An unpopulated field renders as an empty value after the colon.
+			for _, empty := range []string{"name:\n", "key:\n", "name: \n", "key: \n"} {
+				if strings.Contains(output, empty) {
+					t.Errorf("rendered %s has an empty secret reference (%q):\n%s", tt.template, empty, output)
+				}
+			}
+		})
+	}
+}
+
 func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	tests := []struct {
 		name             string

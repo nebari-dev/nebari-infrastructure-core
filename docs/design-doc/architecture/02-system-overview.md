@@ -97,7 +97,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`cmd/nic/` (CLI)**
 
-- Cobra-based commands: `deploy`, `destroy`, `validate`, `kubeconfig`, `version`. There is no `status` or `plan` subcommand today.
+- Cobra-based commands: `deploy`, `destroy`, `validate`, `kubeconfig`, `outputs`, `version`. There is no `status` or `plan` subcommand today.
 - Reads `.env` via `godotenv` and initializes OpenTelemetry via `pkg/telemetry`.
 - Owns the `slog` JSON logger. Library code (under `pkg/`) does not log.
 - Wires the status channel to `slog` via `pkg/nic`'s `StartSlogHandler` (which builds the `SlogHandler` defined in `pkg/nic/status.go`); see Section 2.4.

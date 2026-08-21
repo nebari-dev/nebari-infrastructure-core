@@ -18,6 +18,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 * [nic deploy](nic_deploy.md)	 - Deploy infrastructure based on configuration file
 * [nic destroy](nic_destroy.md)	 - Destroy cloud infrastructure
 * [nic kubeconfig](nic_kubeconfig.md)	 - Generate kubeconfig for the deployed Nebari cluster
+* [nic outputs](nic_outputs.md)	 - Print the deployed platform's entry points
 * [nic validate](nic_validate.md)	 - Validate configuration file
 * [nic version](nic_version.md)	 - Show version information
 

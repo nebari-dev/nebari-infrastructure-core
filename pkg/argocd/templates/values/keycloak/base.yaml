@@ -10,7 +10,7 @@ extraEnv: |
     valueFrom:
       secretKeyRef:
         name: {{ .KeycloakAdminSecretName }}
-        key: admin-password
+        key: {{ .KeycloakAdminPasswordKey }}
   - name: KC_DB
     value: postgres
   - name: KC_DB_URL_HOST

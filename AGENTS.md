@@ -119,6 +119,7 @@ internal/
       ├── destroy.go     # Destroy command
       ├── validate.go    # Validate command
       ├── kubeconfig.go  # Kubeconfig command
+      ├── outputs.go     # Outputs command (platform entry points + bootstrap credentials)
       ├── version.go     # Version command
       └── config_discovery.go # Resolve config file path
 
@@ -129,6 +130,7 @@ pkg/
   │   ├── destroy.go    # Destroy orchestration
   │   ├── validate.go   # Validate orchestration
   │   ├── kubeconfig.go # Kubeconfig retrieval
+  │   ├── outputs.go    # Platform outputs resolution (secrets + gateway address)
   │   └── status.go     # status.Update -> slog translation (StartSlogHandler)
   ├── providers/        # Provider interfaces + implementations, one directory per category
   │   ├── cluster/      # Provider interface, InfraSettings, DeployOptions (provider.go)

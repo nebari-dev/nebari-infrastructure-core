@@ -96,6 +96,9 @@ type TemplateData struct {
 	KeycloakRealm                string // Keycloak realm name (e.g., "nebari")
 	KeycloakAdminSecretName      string // Name of the Kubernetes secret containing Keycloak admin credentials
 	KeycloakAdminSecretNamespace string // Namespace of the Kubernetes secret containing Keycloak admin credentials
+	KeycloakAdminPasswordKey     string // Key within the admin credentials secret holding the master-realm admin password
+	RealmAdminSecretName         string // Name of the Kubernetes secret containing the nebari-realm admin credentials
+	RealmAdminPasswordKey        string // Key within the realm admin credentials secret holding the password
 
 	// Longhorn backup configuration (rendered into manifests/storage/longhorn-backup)
 	LonghornBackupEnabled          bool
@@ -149,6 +152,9 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		KeycloakRealm:                "nebari",
 		KeycloakAdminSecretName:      KeycloakDefaultAdminSecretName,
 		KeycloakAdminSecretNamespace: KeycloakDefaultNamespace,
+		KeycloakAdminPasswordKey:     KeycloakAdminPasswordKey,
+		RealmAdminSecretName:         NebariRealmAdminSecretName,
+		RealmAdminPasswordKey:        NebariRealmAdminPasswordKey,
 	}
 
 	// Set git repository info
