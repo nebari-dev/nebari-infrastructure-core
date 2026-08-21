@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
@@ -69,11 +69,33 @@ func init() {
 	outputsCmd.Flags().StringVar(&outputsFormat, "format", formatTable, "Output format: table or json")
 	outputsCmd.Flags().BoolVar(&outputsShowSecrets, "show-secrets", false, "Print secret values instead of redacting them")
 	outputsCmd.Flags().BoolVar(&outputsWait, "wait", false, "Poll for outputs that are not yet available")
-	outputsCmd.Flags().DurationVar(&outputsTimeout, "timeout", endpoint.DefaultTimeout, "How long to poll when --wait is set")
+	outputsCmd.Flags().DurationVar(&outputsTimeout, "timeout", nic.DefaultOutputsTimeout, "How long to poll when --wait is set")
+}
+
+// validateOutputsFlags rejects flag combinations before any cluster work
+// begins. Both cases below are operator typos, and both are otherwise reported
+// only after the command has spent its whole polling window - a five-minute
+// wait that ends in "unsupported output format" is a poor trade.
+func validateOutputsFlags(format string, wait, timeoutChanged bool) error {
+	switch format {
+	case formatTable, formatJSON:
+	default:
+		return fmt.Errorf("unsupported output format %q: expected %q or %q", format, formatTable, formatJSON)
+	}
+
+	if timeoutChanged && !wait {
+		return fmt.Errorf("--timeout has no effect without --wait: it bounds the polling window, and without --wait the command performs a single read")
+	}
+
+	return nil
 }
 
 func runOutputs(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	if err := validateOutputsFlags(outputsFormat, outputsWait, cmd.Flags().Changed("timeout")); err != nil {
+		return err
+	}
 
 	configFile, err := resolveConfigFile(outputsConfigFile)
 	if err != nil {
@@ -132,6 +154,73 @@ func runOutputs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// outputField describes one platform output. The table renderer and the
+// redacted list are both derived from this single declaration, so a field
+// cannot be present in one and missing from the other - the drift that made
+// the downstream kubectl recipes this command replaces go stale silently.
+// Adding a field (#447's gateway trust anchor is the anticipated next one)
+// means one entry here plus its slot in outputsJSON.
+type outputField struct {
+	// key matches the JSON tag on nic.PlatformOutputs and the identifier the
+	// resolver reports for an unresolved field.
+	key   string
+	label string
+
+	// secret marks a field redacted unless --show-secrets is passed.
+	secret bool
+
+	value func(*nic.PlatformOutputs) string
+}
+
+var outputFields = []outputField{
+	{
+		key:   "domain",
+		label: "Domain",
+		value: func(o *nic.PlatformOutputs) string { return o.Domain },
+	},
+	{
+		key:   "keycloak_issuer_url",
+		label: "Keycloak issuer URL",
+		value: func(o *nic.PlatformOutputs) string { return o.KeycloakIssuerURL },
+	},
+	{
+		key:   "gateway_address",
+		label: "Gateway address",
+		value: func(o *nic.PlatformOutputs) string { return o.GatewayAddress },
+	},
+	{
+		key:    "keycloak_admin_password",
+		label:  "Keycloak admin password",
+		secret: true,
+		value:  func(o *nic.PlatformOutputs) string { return o.KeycloakAdminPassword },
+	},
+	{
+		key:    "keycloak_realm_admin_password",
+		label:  "Keycloak realm admin password",
+		secret: true,
+		value:  func(o *nic.PlatformOutputs) string { return o.KeycloakRealmAdminPassword },
+	},
+	{
+		key:    "argocd_admin_password",
+		label:  "Argo CD admin password",
+		secret: true,
+		value:  func(o *nic.PlatformOutputs) string { return o.ArgoCDAdminPassword },
+	},
+}
+
+// redactedFieldKeys lists the fields a run without --show-secrets withholds,
+// sorted so a consumer can diff the list across runs.
+func redactedFieldKeys() []string {
+	keys := make([]string, 0, len(outputFields))
+	for _, field := range outputFields {
+		if field.secret {
+			keys = append(keys, field.key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // outputsJSON mirrors nic.PlatformOutputs with pointers for the secret fields,
 // so a redacted run renders them as null rather than as a placeholder string a
 // consumer might use as a password.
@@ -170,12 +259,7 @@ func marshalOutputsJSON(outputs *nic.PlatformOutputs, showSecrets bool) ([]byte,
 		payload.KeycloakRealmAdminPassword = &outputs.KeycloakRealmAdminPassword
 		payload.ArgoCDAdminPassword = &outputs.ArgoCDAdminPassword
 	} else {
-		// Sorted, so a consumer can diff the list across runs.
-		payload.Redacted = []string{
-			"argocd_admin_password",
-			"keycloak_admin_password",
-			"keycloak_realm_admin_password",
-		}
+		payload.Redacted = redactedFieldKeys()
 	}
 
 	encoded, err := json.MarshalIndent(payload, "", "  ")
@@ -194,28 +278,20 @@ func renderOutputsTable(outputs *nic.PlatformOutputs, showSecrets bool) []byte {
 		return redactedPlaceholder
 	}
 
-	rows := []struct {
-		label string
-		value string
-	}{
-		{"Domain", outputs.Domain},
-		{"Keycloak issuer URL", outputs.KeycloakIssuerURL},
-		{"Gateway address", outputs.GatewayAddress},
-		{"Keycloak admin password", secret(outputs.KeycloakAdminPassword)},
-		{"Keycloak realm admin password", secret(outputs.KeycloakRealmAdminPassword)},
-		{"Argo CD admin password", secret(outputs.ArgoCDAdminPassword)},
-	}
-
 	width := 0
-	for _, row := range rows {
-		if len(row.label) > width {
-			width = len(row.label)
+	for _, field := range outputFields {
+		if len(field.label) > width {
+			width = len(field.label)
 		}
 	}
 
 	var b strings.Builder
-	for _, row := range rows {
-		fmt.Fprintf(&b, "%-*s  %s\n", width, row.label, row.value)
+	for _, field := range outputFields {
+		value := field.value(outputs)
+		if field.secret {
+			value = secret(value)
+		}
+		fmt.Fprintf(&b, "%-*s  %s\n", width, field.label, value)
 	}
 
 	return []byte(b.String())
