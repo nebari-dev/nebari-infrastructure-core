@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-probe
+  namespace: pack-test
+spec:
+  serviceAccountName: pack-app
+  restartPolicy: Never
+  containers:
+    - name: awscli
+      image: public.ecr.aws/aws-cli/aws-cli:latest
+      env:
+        - name: AWS_REGION
+          value: us-east-1
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        - name: BUCKET
+          value: nebari-xp-poc-apps-smokestore
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "== identity (should be the workload role via Pod Identity) =="
+          aws sts get-caller-identity
+          echo "== WRITE =="
+          echo "hello from $(hostname) at $(date -u +%FT%TZ)" > /tmp/probe.txt
+          aws s3 cp /tmp/probe.txt "s3://$BUCKET/probe/probe.txt"
+          echo "== READ BACK =="
+          aws s3 cp "s3://$BUCKET/probe/probe.txt" /tmp/out.txt
+          cat /tmp/out.txt
+          echo "== LIST =="
+          aws s3 ls "s3://$BUCKET/probe/"
+          echo "== NEGATIVE: a non-owned bucket name should be denied =="
+          aws s3 ls "s3://nebari-xp-poc-apps-smoketest/" && echo "UNEXPECTED-ALLOW" || echo "denied-as-expected"
+          echo "SMOKE-OK"

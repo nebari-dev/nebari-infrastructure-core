@@ -1,0 +1,17 @@
+# Composition functions the ObjectStore pack depends on.
+#   - go-templating renders the four managed resources from the XR fields.
+#   - auto-ready propagates composed-resource readiness up to the XR (without
+#     it a pure-function Composition never reports Ready).
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.10.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.4.2

@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"maps"
 	"testing"
 	"time"
 
@@ -45,6 +46,47 @@ func TestLonghornEnabled(t *testing.T) {
 			got := tt.config.LonghornEnabled()
 			if got != tt.expected {
 				t.Errorf("LonghornEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEnabledCrossplaneCapabilities(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *Config
+		expected map[string]bool
+	}{
+		{name: "nil config", config: nil, expected: nil},
+		{name: "zero value", config: &Config{}, expected: nil},
+		{name: "empty list", config: &Config{CrossplaneCapabilities: []string{}}, expected: nil},
+		{
+			name:     "s3 capability includes workload identity dependencies",
+			config:   &Config{CrossplaneCapabilities: []string{"s3"}},
+			expected: map[string]bool{"aws-s3": true, "aws-iam": true, "aws-eks": true},
+		},
+		{
+			name:     "rds remains independent",
+			config:   &Config{CrossplaneCapabilities: []string{"rds"}},
+			expected: map[string]bool{"aws-rds": true},
+		},
+		{
+			name:   "multiple capabilities",
+			config: &Config{CrossplaneCapabilities: []string{"s3", "rds"}},
+			expected: map[string]bool{
+				"aws-s3":  true,
+				"aws-iam": true,
+				"aws-eks": true,
+				"aws-rds": true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.EnabledCrossplaneCapabilities()
+			if !maps.Equal(got, tt.expected) {
+				t.Errorf("EnabledCrossplaneCapabilities() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
