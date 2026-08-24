@@ -69,7 +69,7 @@ func suspendReconciliation(ctx context.Context, client kubernetes.Interface, tim
 		WithResource("argocd").WithAction("suspending"))
 
 	scaleToZero := []byte(`{"spec":{"replicas":0}}`)
-	if _, err := client.AppsV1().StatefulSets(defaultNamespace).Patch(ctx, applicationControllerStatefulSet, types.StrategicMergePatchType, scaleToZero, metav1.PatchOptions{}); err != nil {
+	if _, err := client.AppsV1().StatefulSets(DefaultNamespace).Patch(ctx, applicationControllerStatefulSet, types.StrategicMergePatchType, scaleToZero, metav1.PatchOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			span.SetAttributes(attribute.String("suspend_result", "controller_absent"))
 			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Argo CD application controller not found; nothing to suspend").
@@ -82,7 +82,7 @@ func suspendReconciliation(ctx context.Context, client kubernetes.Interface, tim
 
 	deadline := time.Now().Add(timeout)
 	for {
-		pods, err := client.CoreV1().Pods(defaultNamespace).List(ctx, metav1.ListOptions{LabelSelector: applicationControllerPodSelector})
+		pods, err := client.CoreV1().Pods(DefaultNamespace).List(ctx, metav1.ListOptions{LabelSelector: applicationControllerPodSelector})
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("list Argo CD application controller pods: %w", err)

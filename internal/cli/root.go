@@ -50,6 +50,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 	root.AddCommand(validateCmd)
 	root.AddCommand(versionCmd)
 	root.AddCommand(kubeconfigCmd)
+	root.AddCommand(outputsCmd)
 
 	return root
 }

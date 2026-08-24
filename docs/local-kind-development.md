@@ -62,8 +62,8 @@ To rebuild from scratch, run `destroy` followed by `deploy`.
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 # Visit https://localhost:8080
 # Username: admin
-# Password:
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+# Password (along with the other platform entry points):
+nic outputs --show-secrets
 ```
 
 **Keycloak UI:**

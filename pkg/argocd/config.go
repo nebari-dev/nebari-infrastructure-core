@@ -18,7 +18,18 @@ const (
 	// as #26919). Downgrading below 3.4 would make overlays fail silently
 	// rather than error.
 	defaultChartVersion = "9.7.1"
-	defaultNamespace    = "argocd"
+
+	// DefaultNamespace is the namespace Argo CD is installed into.
+	DefaultNamespace = "argocd"
+
+	// ArgoCDInitialAdminSecretName is the secret the Argo CD server generates on
+	// first start, holding the bootstrap admin password under the "password" key.
+	// The name is chosen by upstream Argo CD, not by NIC.
+	ArgoCDInitialAdminSecretName = "argocd-initial-admin-secret" //nolint:gosec // Secret name reference, not a credential
+
+	// ArgoCDInitialAdminSecretKey is the key within ArgoCDInitialAdminSecretName
+	// holding the bootstrap admin password.
+	ArgoCDInitialAdminSecretKey = "password"
 
 	// Memory limits for the two components whose usage spikes far above idle,
 	// in MiB. 1024 MiB is what the API server canonicalises to the 1Gi that
@@ -151,8 +162,8 @@ g, /argocd-viewers, role:readonly`
 func DefaultConfig() Config {
 	return Config{
 		Version:     defaultChartVersion, // Chart version that installs Argo CD v3.4.4
-		Namespace:   defaultNamespace,
-		ReleaseName: defaultNamespace,
+		Namespace:   DefaultNamespace,
+		ReleaseName: DefaultNamespace,
 		Timeout:     5 * time.Minute,
 		Values: map[string]any{
 			// Run in insecure mode since TLS is terminated at the gateway
