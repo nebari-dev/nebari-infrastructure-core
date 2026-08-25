@@ -29,7 +29,7 @@ docs: ## Generate CLI and configuration reference documentation
 
 starters: ## Generate the Nebi starter workspaces into dist/starters
 	@echo "Generating starters..."
-	./scripts/gen-starters.sh dist/starters
+	go run ./cmd/starters -out dist/starters
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
