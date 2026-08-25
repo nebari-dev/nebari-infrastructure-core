@@ -63,7 +63,7 @@ func latestTag() (string, error) {
 // of examples/ usually moves more than one key, and reporting them one run at
 // a time makes the author rediscover the same problem repeatedly.
 func generate(outDir, templates, examples, version string) error {
-	pixiTmpl, err := os.ReadFile(filepath.Join(templates, "pixi.toml.tmpl"))
+	pixiTmpl, err := os.ReadFile(filepath.Clean(filepath.Join(templates, "pixi.toml.tmpl")))
 	if err != nil {
 		return fmt.Errorf("read pixi template: %w", err)
 	}
@@ -86,7 +86,7 @@ func generate(outDir, templates, examples, version string) error {
 func generateOne(outDir, templates, examples, name, version string, pixiTmpl []byte) error {
 	p := providers[name]
 
-	src, err := os.ReadFile(filepath.Join(examples, name+"-config.yaml"))
+	src, err := os.ReadFile(filepath.Clean(filepath.Join(examples, name+"-config.yaml")))
 	if err != nil {
 		return fmt.Errorf("read example: %w", err)
 	}
@@ -101,7 +101,7 @@ func generateOne(outDir, templates, examples, name, version string, pixiTmpl []b
 		return err
 	}
 
-	readme, err := os.ReadFile(filepath.Join(templates, "README."+name+".md"))
+	readme, err := os.ReadFile(filepath.Clean(filepath.Join(templates, "README."+name+".md")))
 	if err != nil {
 		return fmt.Errorf("read README: %w", err)
 	}

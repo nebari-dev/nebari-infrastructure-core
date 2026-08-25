@@ -144,7 +144,7 @@ func TestDeclaredFieldsResolveAgainstTheRealExamples(t *testing.T) {
 				t.Fatalf("%s declares no placeholder fields", name)
 			}
 
-			src, err := os.ReadFile(filepath.Join("..", "..", "examples", name+"-config.yaml"))
+			src, err := os.ReadFile(filepath.Join("..", "..", "examples", name+"-config.yaml")) //nolint:gosec // fixed repo-relative path to a checked-in example
 			if err != nil {
 				t.Fatalf("read example: %v", err)
 			}
