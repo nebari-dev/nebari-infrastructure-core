@@ -80,11 +80,45 @@ feature, not a hardening one.
 ## Packaging guidance (pixi/prefix.dev, distro packages)
 
 Declare `opentofu` as a runtime dependency and either rely on `PATH` discovery or
-set `NIC_TOFU_PATH` in an activation script. NIC itself is distributed via the
-prefix.dev `github-releases` channel (see
-[https://github.com/nebari-dev/nebari-infrastructure-core/issues/552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552)),
-and conda-forge ships `opentofu` for all platforms NIC supports, so a pixi
-workspace that pins both never has to phone home on first run.
+set `NIC_TOFU_PATH` in an activation script. conda-forge ships `opentofu` for all
+platforms NIC supports, so a pixi workspace that pins both NIC and OpenTofu never
+has to phone home on first run.
+
+### The conda channel
+
+NIC is published to the `nebari-dev/nebari` channel on prefix.dev:
+
+```bash
+pixi add --channel https://prefix.dev/nebari-dev/nebari nebari-infrastructure-core
+```
+
+Packages are repackaged from the GitHub release archives rather than rebuilt, so
+the installed binary is byte-identical to the one in the release and reports the
+release version from `nic version`. `packaging/conda/` holds the recipe and the
+build script; `.github/workflows/publish-conda.yml` runs on every published
+release and uploads over OIDC.
+
+Only stable releases are published. conda forbids `-` in a version string, so a
+prerelease tag has to be renamed (`v0.14.0-rc.1` becomes `0.14.0rc1`) before it
+can be packaged at all.
+
+**When a release does not appear on the channel**, check in this order:
+
+1. Did `Publish conda packages` run for the tag, and was its `release`
+   environment approval granted? It is a separate workflow from `Release`, so a
+   green release does not imply a published package.
+2. Does the release carry `checksums.txt` and all six archives? The build reads
+   the sha256 from `checksums.txt` and fails loudly when an entry is missing.
+3. Re-run it with `workflow_dispatch` and the tag. This is also how a release
+   published before the workflow existed gets backfilled.
+
+This channel is a bridge. The intended home is prefix.dev's shared
+[`github-releases`](https://prefix.dev/channels/github-releases) channel, which is
+populated by [octoconda](https://redirect.github.com/hunger/octoconda) from our
+published releases and needs no recipe on our side. Onboarding is a one-line
+entry in its `config.toml`, proposed upstream and not yet merged. When it lands,
+`packaging/conda/` and its workflow should be removed and the starter templates
+repointed, rather than kept as a second source of packages.
 
 ## CI
 
