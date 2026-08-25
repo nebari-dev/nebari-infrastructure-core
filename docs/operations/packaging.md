@@ -94,22 +94,34 @@ pixi add --channel https://prefix.dev/nebari-dev/nebari nebari-infrastructure-co
 
 Packages are repackaged from the GitHub release archives rather than rebuilt, so
 the installed binary is byte-identical to the one in the release and reports the
-release version from `nic version`. `packaging/conda/` holds the recipe and the
-build script; `.github/workflows/publish-conda.yml` runs on every published
-release and uploads over OIDC.
+release version from `nic version`. Before any digest is read, the release's
+`checksums.txt` is cosign-verified against the release workflow's identity, so
+the digests prove authenticity and not merely that two files fetched from the
+same place agree. `packaging/conda/` holds the recipe and the build script;
+`.github/workflows/publish-conda.yml` runs on every published release and uploads
+over OIDC trusted publishing.
 
-Only stable releases are published. conda forbids `-` in a version string, so a
-prerelease tag has to be renamed (`v0.14.0-rc.1` becomes `0.14.0rc1`) before it
-can be packaged at all.
+Only stable releases are published, and this is enforced rather than assumed: the
+tag is checked against the release API and a prerelease is refused. That applies
+to manual runs too, which is where it matters - a `release: published` filter
+alone would still let a hand-dispatched release candidate through. (conda also
+forbids `-` in a version string, so a prerelease tag could not be packaged
+unrenamed even if the policy changed.)
 
 **When a release does not appear on the channel**, check in this order:
 
 1. Did `Publish conda packages` run for the tag, and was its `release`
    environment approval granted? It is a separate workflow from `Release`, so a
    green release does not imply a published package.
-2. Does the release carry `checksums.txt` and all six archives? The build reads
-   the sha256 from `checksums.txt` and fails loudly when an entry is missing.
-3. Re-run it with `workflow_dispatch` and the tag. This is also how a release
+2. Is the prefix.dev trusted publisher still registered for this repository,
+   workflow and environment? It is configured outside the repository, so nothing
+   here fails a review when it is missing - the upload step is where it surfaces.
+3. Does the release carry `checksums.txt`, its `.sigstore.json` bundle, and all
+   six archives? The build verifies the bundle, reads the sha256 from
+   `checksums.txt`, and fails loudly when either is missing.
+4. Re-run it with `workflow_dispatch` from `main`, naming the tag. Uploads
+   skip filenames the channel already has, so a re-run after a partial upload
+   resumes rather than failing on the first one. This is also how a release
    published before the workflow existed gets backfilled.
 
 This channel is a bridge. The intended home is prefix.dev's shared

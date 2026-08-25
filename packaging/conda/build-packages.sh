@@ -3,14 +3,19 @@
 #
 # Nothing is compiled here. Each package repackages the release archive
 # GoReleaser already published, with the sha256 taken from that release's
-# checksums.txt - the file the release pipeline signs with cosign. If a
-# checksum is missing the build fails rather than producing something
-# unverified.
+# checksums.txt.
+#
+# checksums.txt is cosign-verified against the release workflow's identity
+# before any digest is read from it. Without that step the digests would only
+# prove an archive matches a manifest fetched from the same place - matching
+# bytes, not authentic ones - so the verification is what makes the provenance
+# claim in recipe.yaml.tmpl true rather than aspirational. A missing checksum
+# entry fails the build for the same reason.
 #
 # Usage:
 #   packaging/conda/build-packages.sh v0.14.0 [output-dir]
 #
-# Requires rattler-build, and gh (or a public release, for the curl fallback).
+# Requires rattler-build, cosign v3+, and gh (or a public release, for curl).
 set -euo pipefail
 
 REPO="nebari-dev/nebari-infrastructure-core"
@@ -23,10 +28,19 @@ if [[ -z "$TAG" ]]; then
   exit 1
 fi
 
-# Accept v0.14.0 or 0.14.0; the tag carries the v, the asset names do not.
+for tool in rattler-build cosign; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "ERROR: $tool not found on PATH." >&2
+    echo "  rattler-build: https://rattler.build/latest/installation/" >&2
+    echo "  cosign (v3+):  https://docs.sigstore.dev/system_config/installation/" >&2
+    exit 1; }
+done
+
+# TAG is the git tag and keeps its v - it is what the release API is queried
+# with. VERSION drops it, because the asset names do not carry one.
 VERSION="${TAG#v}"
 
-# conda-subdir : release-asset-suffix : archive-extension : binary name
+# conda-subdir : release-asset-suffix : archive-extension : binary : bin dir
 #
 # The suffixes are GoReleaser's, from .goreleaser.yml's archives.name_template
 # (goos plus a remapped goarch); the subdirs are conda's names for the same
@@ -52,13 +66,26 @@ CONDA_VERSION="$(printf '%s' "$VERSION" | tr -d '-' | sed 's/rc\./rc/; s/beta\./
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
-echo "==> fetching checksums.txt for ${TAG}"
+echo "==> fetching checksums.txt and its signature for ${TAG}"
 if command -v gh >/dev/null 2>&1; then
-  gh release download "$TAG" --repo "$REPO" --pattern checksums.txt --dir "$workdir"
+  gh release download "$TAG" --repo "$REPO" --dir "$workdir" \
+    --pattern checksums.txt --pattern checksums.txt.sigstore.json
 else
-  curl -fsSL -o "${workdir}/checksums.txt" \
-    "https://github.com/${REPO}/releases/download/${TAG}/checksums.txt"
+  for f in checksums.txt checksums.txt.sigstore.json; do
+    curl -fsSL -o "${workdir}/${f}" \
+      "https://github.com/${REPO}/releases/download/${TAG}/${f}"
+  done
 fi
+
+# Identity-pinned: a bundle-only verify checks the math, not who signed it.
+# Same invocation documented for end users in docs/operations/verifying-releases.md.
+echo "==> verifying checksums.txt against the release workflow's identity"
+cosign verify-blob \
+  --bundle "${workdir}/checksums.txt.sigstore.json" \
+  --certificate-identity-regexp \
+    "^https://github.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/.*\$" \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  "${workdir}/checksums.txt"
 
 mkdir -p "$OUTPUT_DIR"
 

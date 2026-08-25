@@ -12,11 +12,14 @@ pixi add --channel https://prefix.dev/nebari-dev/nebari nebari-infrastructure-co
 ## What this is not
 
 Nothing here builds `nic` from source. Each package unpacks the archive
-GoReleaser already published and copies the binary into the prefix, so the
-bytes a conda user runs are the bytes the release signed. The sha256 in every
-rendered recipe comes from that release's `checksums.txt`, which the release
-pipeline signs with cosign; a missing checksum fails the build rather than
-producing an unverified package.
+GoReleaser already published and copies the binary into the prefix.
+
+The sha256 in every rendered recipe comes from that release's `checksums.txt`,
+and the build cosign-verifies that file against the release workflow's identity
+before reading a digest out of it. The order is the point: without the signature
+check the digests would only show that an archive matches a manifest fetched
+from the same place, which is consistency, not authenticity. A missing checksum
+entry, or a bundle that does not verify, fails the build.
 
 ## Layout
 
@@ -52,7 +55,12 @@ cd /tmp/check && pixi add nebari-infrastructure-core && pixi run nic version
 string in a package filename, so a `v0.14.0-rc.1` tag builds an artifact whose
 own version cannot be resolved, failing at test time as an unhelpful "failed to
 setup test environment". `build-packages.sh` normalises to `0.14.0rc1`, which
-conda also sorts before `0.14.0` - the ordering a prerelease wants.
+conda also sorts before `0.14.0`.
+
+The workflow refuses prereleases outright, so that normalisation is currently
+unreachable from CI. It is kept because the policy is a decision, not a
+constraint: if release candidates are ever published, this is the part that
+would otherwise fail in a way whose error message points nowhere near the cause.
 
 **Windows differs twice.** The archives are `.zip` rather than `.tar.gz`, and
 conda expects binaries under `Library/bin` rather than `bin`. Both are handled

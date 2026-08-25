@@ -20,25 +20,70 @@ on:
         type: string
 
 permissions:
-  contents: read   # gh release download
+  contents: read   # gh release download / view
   id-token: write  # OIDC for prefix.dev trusted publishing
+
+# Serialised, never cancelled: two runs for the same tag would race on the same
+# channel filenames, and cancelling mid-loop leaves the channel half-populated.
+concurrency:
+  group: publish-conda
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Publish to prefix.dev
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Registered as the environment on the prefix.dev trusted publisher, which
-    # binds the OIDC claim to it: a run outside this environment cannot publish.
-    # Reuses release.yml's approval gate.
+    # binds the OIDC claim to it. The approval gates who approves, not what
+    # runs - the guards below are what constrain the latter.
     environment: release
+    # A dispatch can name any ref, and the approver sees only a tag string, not
+    # the branch's scripts. Restricting dispatch to main means the code this job
+    # executes has been through review.
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout code
+      # main, not the triggering ref: this job runs repo scripts against assets
+      # it fetches from the release API by tag, so the two are independent. The
+      # scripts should always be the reviewed ones on main.
+      - name: Checkout main
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
 
-      - name: Resolve release tag
+      - name: Resolve and validate the release tag
         id: tag
-        run: echo "tag=${{ inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Through env, never a GitHub expression inside the script body:
+          # the value reaches gh, sed, asset names and generated YAML, and an
+          # expression is substituted into the script text before bash parses
+          # it, so a quote in the tag would break out and execute.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::not a release tag: $TAG"
+            exit 1
+          fi
+          # The tag must name a real release. On the dispatch path no release
+          # event vouches for it, so this is also where stable-only is enforced
+          # - a `release: published` filter alone would let a dispatched rc through.
+          if ! prerelease="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease -q .isPrerelease 2>/dev/null)"; then
+            echo "::error::no such release: $TAG"
+            exit 1
+          fi
+          if [[ "$prerelease" != "false" ]]; then
+            echo "::error::$TAG is a prerelease; only stable releases are published"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.1'
 
       - name: Install rattler-build
         uses: prefix-dev/rattler-build-action@1ca5f45832f419a46d1326ccc5861d7e14d67c44 # v0.2.39
@@ -48,13 +93,25 @@ jobs:
 
       - name: Build conda packages
         env:
+          TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./packaging/conda/build-packages.sh "${{ steps.tag.outputs.tag }}" dist/conda
+        run: ./packaging/conda/build-packages.sh "$TAG" dist/conda
 
       - name: Upload to prefix.dev
         run: |
           set -euo pipefail
-          find dist/conda -name '*.conda' -print0 | while IFS= read -r -d '' pkg; do
-            echo "==> uploading $(basename "$pkg")"
-            rattler-build upload prefix -c nebari-dev/nebari "$pkg"
+          mapfile -t pkgs < <(find dist/conda -name '*.conda' | sort)
+          # A build that emitted nothing must not report a green publish.
+          if [[ ${#pkgs[@]} -eq 0 ]]; then
+            echo "::error::no packages were built"
+            exit 1
+          fi
+          echo "==> uploading ${#pkgs[@]} package(s)"
+          for pkg in "${pkgs[@]}"; do
+            echo "==> $(basename "$pkg")"
+            # --skip-existing so a re-run after a partial upload resumes instead
+            # of dying on the first already-published filename. It cannot detect
+            # different bytes under the same filename, which is why the build is
+            # reproducible from the signed release rather than from local state.
+            rattler-build upload prefix -c nebari-dev/nebari --skip-existing "$pkg"
           done
