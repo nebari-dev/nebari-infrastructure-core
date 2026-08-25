@@ -32,8 +32,10 @@ const MinVersion = "1.11.3"
 //
 // Exported alongside MinVersion because the two together are the supported
 // range a packager has to express: cmd/starters builds the starter workspaces'
-// opentofu constraint from them, so the pin a workspace ships and the range
-// this file enforces cannot drift apart.
+// opentofu constraint from them, so the release-version bounds a workspace
+// pins and the ones this file enforces cannot drift apart. The accepted sets
+// can still differ on prereleases, which compatibleVersion compares by Core()
+// while conda applies its own ordering.
 const MaxVersionExclusive = "2.0.0"
 
 // The supported range bounds, parsed once rather than on every
