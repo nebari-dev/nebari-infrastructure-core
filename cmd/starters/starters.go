@@ -8,6 +8,8 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
 
 // placeholder is the sentinel a starter ships instead of an identity-bearing
@@ -48,11 +50,22 @@ var providers = map[string]provider{
 			"$.repository.existing.path",
 		},
 		// Pinning OpenTofu is the point of a pinned toolchain: without it nic
-		// downloads an unpinned tofu at deploy time. The floor has to clear
-		// pkg/tofu.MinVersion - below that nic rejects the PATH binary and
-		// downloads one anyway, silently, which defeats the pin.
-		deps: `opentofu = ">=1.11.3,<2"`,
+		// downloads an unpinned tofu at deploy time.
+		deps: opentofuConstraint(),
 	},
+}
+
+// opentofuConstraint renders the conda dependency for OpenTofu from the range
+// nic itself enforces, rather than restating it.
+//
+// The two have to agree in both directions. A floor below pkg/tofu.MinVersion
+// lets pixi resolve a binary that compatibleVersion then rejects, so nic
+// downloads its own copy anyway - silently, and the pin the workspace exists to
+// provide is gone. A ceiling above MaxVersionExclusive fails the same way at
+// the other end. Deriving it means a bump to either constant reaches the
+// starters in the same commit instead of leaving a stale literal behind.
+func opentofuConstraint() string {
+	return fmt.Sprintf(`opentofu = ">=%s,<%s"`, tofu.MinVersion, tofu.MaxVersionExclusive)
 }
 
 // providerNames returns the providers in scope, sorted, so output ordering is
