@@ -139,7 +139,7 @@ PIXI_CACHE_DIR=/tmp/pixi-cache                                  # the package ca
 
 For the same environment in a lab pod, the operation completed in **406 ms** with both paths node-local; the home-based run exceeded two minutes and was aborted. The cache location dominates: a cold node-local cache completed in 1.78 seconds, five times faster than a fully warm EFS cache at 9.0 seconds. Cold node-local storage was 56 times faster than cold EFS, consistent with the ADR's measured 26–57x RWX write penalty. Persisting the cache offers little benefit: a local cache miss costs under two seconds, while a cache in the home consumes 0.4–1.6 GB of the user's quota.
 
-DSP should set both paths by default rather than require each user to configure them. `PIXI_CONFIG_FILE` is honored, while `PIXI_CACHE_DETACHED_ENVIRONMENTS_DIR` is not. DSP can therefore use `singleuser.extraFiles` to write the configuration from a Secret and point `PIXI_CONFIG_FILE` to it.
+DSP should set both paths by default rather than require each user to configure them. `PIXI_CONFIG_FILE` is honored, while `PIXI_CACHE_DETACHED_ENVIRONMENTS_DIR` is not. DSP can therefore use `singleuser.extraFiles` to write the configuration from a Secret and point `PIXI_CONFIG_FILE` to it. That configuration has to be scoped to the lab, because an app pod mounts the same home and inherits any global Pixi configuration in it. A `detached-environments` setting that is correct for the lab makes an app ignore the environment its init container prepared and re-solve it during the readiness window, so the init container pins `detached-environments = false` in the workspace it pulls, where workspace configuration takes precedence over global.
 
 ### Environments — the lockfile is what crosses
 
