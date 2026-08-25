@@ -10,10 +10,12 @@ version = "0.1.0"
 nebari-infrastructure-core = "__NIC_VERSION__"
 __PROVIDER_DEPS__
 
-# Optional operator convenience tools. Kept out of the required dependencies
-# because kubernetes-client (the kubectl binary) lags badly on linux-aarch64,
-# which would make the whole workspace unsolvable there. nic does not need
-# kubectl, it talks to the cluster via embedded client-go.
+# Optional operator convenience tools, and a narrower platform list than the
+# workspace above: conda-forge publishes no kubernetes-client (the kubectl
+# binary) for linux-aarch64 or osx-64 at all, so including either would make
+# the whole workspace unsolvable there. nic itself does not need kubectl - it
+# talks to the cluster via embedded client-go - which is why this is a separate
+# feature rather than a dependency.
 # Enable with: pixi install -e tools
 [feature.tools]
 platforms = ["linux-64", "osx-arm64"]
@@ -30,6 +32,7 @@ validate = "nic validate"
 deploy = { cmd = "nic deploy", depends-on = ["validate"] }
 destroy = "nic destroy"
 kubeconfig = "nic kubeconfig -o kubeconfig.yaml"
+outputs = "nic outputs"
 
 # pixi.toml and pixi.lock are always bundled; include is a strict allowlist for
 # everything else, so a filled config, a kubeconfig or tfstate a user creates
