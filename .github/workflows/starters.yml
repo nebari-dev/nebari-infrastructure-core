@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "starters/**"
-      - "scripts/gen-starters.sh"
+      - "cmd/starters/**"
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
@@ -12,7 +12,7 @@ on:
     branches: [ main ]
     paths:
       - "starters/**"
-      - "scripts/gen-starters.sh"
+      - "cmd/starters/**"
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./scripts/gen-starters.sh dist/starters
+          go run ./cmd/starters -out dist/starters
 
       - name: Rendered starters are complete
         shell: bash
@@ -131,7 +131,7 @@ jobs:
     needs: validate-starters
     # Tag builds only, and deliberately NOT workflow_dispatch. A dispatch can
     # target any ref: from a branch it would publish starter-*:vmain (and pin a
-    # version from the PREVIOUS tag, since gen-starters.sh reads git describe),
+    # version from the PREVIOUS tag, since cmd/starters reads git describe),
     # and from an existing tag it would overwrite a released bundle - the exact
     # rewrite the trigger comment above says must never happen. Deployment-branch
     # rules live in repo settings and cannot be reviewed from this file, so the
@@ -188,7 +188,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./scripts/gen-starters.sh dist/starters
+          go run ./cmd/starters -out dist/starters
 
       - name: Configure quay registry
         shell: bash
