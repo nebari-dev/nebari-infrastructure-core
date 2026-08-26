@@ -27,15 +27,22 @@ const EnvTofuPath = "NIC_TOFU_PATH"
 // binaries below this floor are rejected; see compatibleVersion.
 const MinVersion = "1.11.3"
 
-// maxVersionExclusive caps external binaries below the next major version,
+// MaxVersionExclusive caps external binaries below the next major version,
 // where breaking CLI or state format changes are fair game.
-const maxVersionExclusive = "2.0.0"
+//
+// Exported alongside MinVersion because the two together are the supported
+// range a packager has to express: cmd/starters builds the starter workspaces'
+// opentofu constraint from them, so the release-version bounds a workspace
+// pins and the ones this file enforces cannot drift apart. The accepted sets
+// can still differ on prereleases, which compatibleVersion compares by Core()
+// while conda applies its own ordering.
+const MaxVersionExclusive = "2.0.0"
 
 // The supported range bounds, parsed once rather than on every
 // compatibleVersion call.
 var (
 	minSupportedVersion   = goversion.Must(goversion.NewVersion(MinVersion))
-	maxUnsupportedVersion = goversion.Must(goversion.NewVersion(maxVersionExclusive))
+	maxUnsupportedVersion = goversion.Must(goversion.NewVersion(MaxVersionExclusive))
 )
 
 // Source identifies how the OpenTofu binary in use was obtained.
@@ -213,7 +220,7 @@ func (b *ResolvedBinary) announce(ctx context.Context) {
 	status.Infof(ctx, "Using OpenTofu %s from %s; NIC is tested against %s", b.Version, from, Version)
 }
 
-// compatibleVersion enforces the supported range [MinVersion, maxVersionExclusive)
+// compatibleVersion enforces the supported range [MinVersion, MaxVersionExclusive)
 // for external binaries.
 //
 // Pre-release versions are deliberately compared by their base version (Core):
@@ -228,7 +235,7 @@ func compatibleVersion(raw string) error {
 		return fmt.Errorf("OpenTofu %s is below the minimum supported version %s", raw, MinVersion)
 	}
 	if v.Core().GreaterThanOrEqual(maxUnsupportedVersion) {
-		return fmt.Errorf("OpenTofu %s is not supported (must be below %s)", raw, maxVersionExclusive)
+		return fmt.Errorf("OpenTofu %s is not supported (must be below %s)", raw, MaxVersionExclusive)
 	}
 	return nil
 }
