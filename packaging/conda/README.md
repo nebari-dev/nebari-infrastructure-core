@@ -49,7 +49,7 @@ pixi init --channel "file://$PWD/dist/conda" --channel conda-forge /tmp/check
 cd /tmp/check && pixi add nebari-infrastructure-core && pixi run nic version
 ```
 
-## Two things that will bite
+## Three things that will bite
 
 **conda forbids `-` in a version string.** It separates name, version and build
 string in a package filename, so a `v0.14.0-rc.1` tag builds an artifact whose
@@ -61,6 +61,14 @@ The workflow refuses prereleases outright, so that normalisation is currently
 unreachable from CI. It is kept because the policy is a decision, not a
 constraint: if release candidates are ever published, this is the part that
 would otherwise fail in a way whose error message points nowhere near the cause.
+
+**A recipe fix needs a new build number.** The package filename is
+`name-version-<varianthash>_<number>`, and the variant hash covers the variant
+configuration rather than the recipe body: adding a requirements block or editing
+`build.script` leaves the name byte-identical. Since uploads skip filenames the
+channel already has, republishing a corrected recipe for an already-published
+version would be skipped silently. Pass `BUILD_NUMBER=1`, or the workflow's
+`build_number` input, when republishing.
 
 **Windows differs twice.** The archives are `.zip` rather than `.tar.gz`, and
 conda expects binaries under `Library/bin` rather than `bin`. Both are handled

@@ -80,9 +80,18 @@ feature, not a hardening one.
 ## Packaging guidance (pixi/prefix.dev, distro packages)
 
 Declare `opentofu` as a runtime dependency and either rely on `PATH` discovery or
-set `NIC_TOFU_PATH` in an activation script. conda-forge ships `opentofu` for all
-platforms NIC supports, so a pixi workspace that pins both NIC and OpenTofu never
-has to phone home on first run.
+set `NIC_TOFU_PATH` in an activation script, so a workspace that pins both NIC and
+OpenTofu never has to phone home on first run.
+
+Declare it in the *workspace*, not in NIC's own package. NIC is provider-agnostic
+at the binary level - `local` and `existing` never invoke OpenTofu - and
+conda-forge publishes `opentofu` for `linux-64`, `linux-aarch64`, `linux-ppc64le`,
+`osx-64`, `osx-arm64` and `win-64`, but **not `win-arm64`**, a platform NIC does
+publish a package for. An unconditional run dependency would therefore trade a
+working install for an unsolvable one there. The starter workspaces scope the
+constraint to the provider that needs it and derive it from
+`pkg/tofu.MinVersion`/`MaxVersionExclusive`, which is both tighter and correct
+per-platform.
 
 ### The conda channel
 

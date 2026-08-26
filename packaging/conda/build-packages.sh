@@ -14,6 +14,7 @@
 #
 # Usage:
 #   packaging/conda/build-packages.sh v0.14.0 [output-dir]
+#   BUILD_NUMBER=1 packaging/conda/build-packages.sh v0.14.0   # republish
 #
 # Requires rattler-build, cosign v3+, and gh (or a public release, for curl).
 set -euo pipefail
@@ -21,6 +22,10 @@ set -euo pipefail
 REPO="nebari-dev/nebari-infrastructure-core"
 TAG="${1:-}"
 OUTPUT_DIR="${2:-dist/conda}"
+# Bump when republishing a corrected recipe for a version already on the
+# channel: the recipe body does not reach the variant hash, so without this the
+# rebuilt package reuses the published filename.
+BUILD_NUMBER="${BUILD_NUMBER:-0}"
 RECIPE_TMPL="$(dirname "$0")/recipe.yaml.tmpl"
 
 if [[ -z "$TAG" ]]; then
@@ -106,6 +111,7 @@ for entry in "${PLATFORMS[@]}"; do
       -e "s|__SHA256__|${sha256}|g" \
       -e "s|__BIN_SRC__|${binary}|g" \
       -e "s|__BIN_DIR__|${bindir}|g" \
+      -e "s|__BUILD_NUMBER__|${BUILD_NUMBER}|g" \
       "$RECIPE_TMPL" > "$recipe"
 
   echo "==> ${subdir}  <-  ${asset}  (${sha256:0:12})"

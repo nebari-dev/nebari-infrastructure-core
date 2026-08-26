@@ -15,7 +15,13 @@ source:
   sha256: __SHA256__
 
 build:
-  number: 0
+  # A slot, not a constant. The filename is
+  # name-version-<varianthash>_<number>, and the variant hash covers the variant
+  # configuration rather than the recipe body - adding a requirements block or
+  # editing build.script leaves it unchanged. So a fixed recipe republished for
+  # an already-published version would collide with the old filename and, under
+  # --skip-existing, be skipped silently. Bump this when republishing.
+  number: __BUILD_NUMBER__
   script:
     - mkdir -p "${PREFIX}/__BIN_DIR__"
     - cp __BIN_SRC__ "${PREFIX}/__BIN_DIR__/__BIN_SRC__"

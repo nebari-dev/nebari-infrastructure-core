@@ -11,12 +11,21 @@ name: Publish conda packages
 # cutting a new release.
 on:
   release:
-    types: [published]
+    # released, not published: `published` also fires for prereleases, so an rc
+    # would start a run and sit on the environment approval before failing the
+    # tag check. The API check below still has to stay - it is the only thing
+    # covering the dispatch path.
+    types: [released]
   workflow_dispatch:
     inputs:
       tag:
         description: 'Release tag to publish, e.g. v0.14.0'
         required: true
+        type: string
+      build_number:
+        description: 'Conda build number. Bump to republish a corrected recipe for a version already on the channel.'
+        required: false
+        default: '0'
         type: string
 
 permissions:
@@ -70,8 +79,11 @@ jobs:
           # The tag must name a real release. On the dispatch path no release
           # event vouches for it, so this is also where stable-only is enforced
           # - a `release: published` filter alone would let a dispatched rc through.
-          if ! prerelease="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease -q .isPrerelease 2>/dev/null)"; then
-            echo "::error::no such release: $TAG"
+          # stderr is kept: a rate limit, a token-scope problem or a GitHub
+          # outage must not be reported as "no such release", least of all in
+          # the step whose documented recovery is to re-run this workflow.
+          if ! prerelease="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease -q .isPrerelease 2>"$RUNNER_TEMP/gh.err")"; then
+            echo "::error::could not read release $TAG: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
             exit 1
           fi
           if [[ "$prerelease" != "false" ]]; then
@@ -94,6 +106,7 @@ jobs:
       - name: Build conda packages
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          BUILD_NUMBER: ${{ inputs.build_number || '0' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./packaging/conda/build-packages.sh "$TAG" dist/conda
 
@@ -110,8 +123,10 @@ jobs:
           for pkg in "${pkgs[@]}"; do
             echo "==> $(basename "$pkg")"
             # --skip-existing so a re-run after a partial upload resumes instead
-            # of dying on the first already-published filename. It cannot detect
-            # different bytes under the same filename, which is why the build is
-            # reproducible from the signed release rather than from local state.
+            # of dying on the first already-published filename. It compares
+            # filenames, not bytes - and the package bytes depend on the recipe
+            # as well as the signed release archive, while the recipe is mutable
+            # on main. Republishing a corrected recipe therefore needs a bumped
+            # build number, not a re-run of this step.
             rattler-build upload prefix -c nebari-dev/nebari --skip-existing "$pkg"
           done
