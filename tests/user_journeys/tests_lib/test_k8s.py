@@ -70,23 +70,58 @@ def test_run_pod_without_a_pvc_declares_no_volumes():
     assert body["spec"].get("volumes", []) == []
 
 
+def _fake_ns(name):
+    ns = MagicMock()
+    ns.metadata.name = name
+    return ns
+
+
 def test_sweep_deletes_only_labeled_namespaces():
     cluster = MagicMock()
-    stale = MagicMock()
-    stale.metadata.name = "nebari-journey-deadbeef"
+    stale = _fake_ns("nebari-journey-deadbeef")
     cluster.core.list_namespace.return_value = MagicMock(items=[stale])
 
-    deleted = sweep_stale_namespaces(cluster)
+    result = sweep_stale_namespaces(cluster)
 
     cluster.core.list_namespace.assert_called_once_with(
         label_selector=f"{constants.JOURNEY_LABEL_KEY}={constants.JOURNEY_LABEL_VALUE}"
     )
-    assert deleted == ["nebari-journey-deadbeef"]
+    assert result.deleted == ["nebari-journey-deadbeef"]
+    assert result.skipped == []
     cluster.core.delete_namespace.assert_called_once_with(name="nebari-journey-deadbeef")
 
 
 def test_sweep_is_a_noop_when_nothing_is_stale():
     cluster = MagicMock()
     cluster.core.list_namespace.return_value = MagicMock(items=[])
-    assert sweep_stale_namespaces(cluster) == []
+    result = sweep_stale_namespaces(cluster)
+    assert result.deleted == []
+    assert result.skipped == []
     cluster.core.delete_namespace.assert_not_called()
+
+
+def test_sweep_skips_a_labeled_namespace_whose_name_does_not_match_the_prefix():
+    cluster = MagicMock()
+    foreign = _fake_ns("some-other-namespace")
+    cluster.core.list_namespace.return_value = MagicMock(items=[foreign])
+
+    result = sweep_stale_namespaces(cluster)
+
+    assert result.deleted == []
+    assert result.skipped == ["some-other-namespace"]
+    cluster.core.delete_namespace.assert_not_called()
+
+
+def test_sweep_deletes_matching_and_skips_non_matching_in_a_mixed_batch():
+    cluster = MagicMock()
+    matching = _fake_ns("nebari-journey-cafef00d")
+    foreign = _fake_ns("some-other-namespace")
+    cluster.core.list_namespace.return_value = MagicMock(items=[matching, foreign])
+
+    result = sweep_stale_namespaces(cluster)
+
+    assert result.deleted == ["nebari-journey-cafef00d"]
+    assert result.skipped == ["some-other-namespace"]
+    cluster.core.delete_namespace.assert_called_once_with(name="nebari-journey-cafef00d")
+    for call in cluster.core.delete_namespace.call_args_list:
+        assert call.kwargs["name"] != "some-other-namespace"

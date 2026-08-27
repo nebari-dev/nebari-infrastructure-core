@@ -20,19 +20,47 @@ JOURNEY_LABELS = {constants.JOURNEY_LABEL_KEY: constants.JOURNEY_LABEL_VALUE}
 UTILITY_IMAGE = "busybox:1.36"
 MOUNT_PATH = "/data"
 
+# Second, independent guard for the sweep: a labeled namespace is only
+# deleted if its name also matches this prefix. One label is too thin a
+# basis for an irreversible, unattended delete against a cluster that may
+# be production; the generator and the guard both build from this constant
+# so they can never disagree.
+SCRATCH_NAMESPACE_PREFIX = "nebari-journey-"
+
 
 def scratch_namespace_name() -> str:
-    return f"nebari-journey-{uuid.uuid4().hex[:8]}"
+    return f"{SCRATCH_NAMESPACE_PREFIX}{uuid.uuid4().hex[:8]}"
 
 
-def sweep_stale_namespaces(cluster) -> list[str]:
-    """Delete journey namespaces left behind by crashed runs."""
+@dataclass
+class SweepResult:
+    """What the sweep did. No logging in library code; the caller reports."""
+
+    deleted: list[str]
+    skipped: list[str]
+
+
+def sweep_stale_namespaces(cluster) -> SweepResult:
+    """Delete journey namespaces left behind by crashed runs.
+
+    Only namespaces that carry the journey label AND whose name starts
+    with SCRATCH_NAMESPACE_PREFIX are deleted. A labeled namespace with a
+    foreign name is an anomaly: it is skipped, not deleted and not
+    silently dropped.
+    """
     selector = f"{constants.JOURNEY_LABEL_KEY}={constants.JOURNEY_LABEL_VALUE}"
     stale = cluster.core.list_namespace(label_selector=selector)
     names = [ns.metadata.name for ns in stale.items]
+
+    deleted = []
+    skipped = []
     for name in names:
-        cluster.core.delete_namespace(name=name)
-    return names
+        if name.startswith(SCRATCH_NAMESPACE_PREFIX):
+            cluster.core.delete_namespace(name=name)
+            deleted.append(name)
+        else:
+            skipped.append(name)
+    return SweepResult(deleted=deleted, skipped=skipped)
 
 
 @dataclass
