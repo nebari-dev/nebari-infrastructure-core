@@ -107,8 +107,10 @@ release version from `nic version`. Before any digest is read, the release's
 `checksums.txt` is cosign-verified against the release workflow's identity, so
 the digests prove authenticity and not merely that two files fetched from the
 same place agree. `packaging/conda/` holds the recipe and the build script;
-`.github/workflows/publish-conda.yml` runs on every published release and uploads
-over OIDC trusted publishing.
+`.github/workflows/publish-conda.yml` runs after a successful `Release` run and
+uploads over OIDC trusted publishing. It keys off the Release workflow rather
+than the release event because a release created as published fires that event
+before its assets are attached.
 
 Only stable releases are published, and this is enforced rather than assumed: the
 tag is checked against the release API and a prerelease is refused. That applies

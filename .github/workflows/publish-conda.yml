@@ -10,12 +10,15 @@ name: Publish conda packages
 # before this workflow did, and re-running an upload that failed without
 # cutting a new release.
 on:
-  release:
-    # released, not published: `published` also fires for prereleases, so an rc
-    # would start a run and sit on the environment approval before failing the
-    # tag check. The API check below still has to stay - it is the only thing
-    # covering the dispatch path.
-    types: [released]
+  # Not `release: [published|released]`. Releases here are usually created as
+  # published releases by hand, which pushes the tag and fires the release event
+  # about twenty minutes before Release finishes attaching the assets this build
+  # reads (v0.14.0: published 13:48:10, Release finished 14:09:20). Waiting for
+  # the Release run is correct on that path and on `git push --tags`, where
+  # GoReleaser drafts first and undrafts only after every upload.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -47,10 +50,13 @@ jobs:
     # binds the OIDC claim to it. The approval gates who approves, not what
     # runs - the guards below are what constrain the latter.
     environment: release
-    # A dispatch can name any ref, and the approver sees only a tag string, not
-    # the branch's scripts. Restricting dispatch to main means the code this job
-    # executes has been through review.
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # A failed or cancelled Release has nothing to repackage. And a dispatch can
+    # name any ref while the approver sees only a tag string, not the branch's
+    # scripts, so restricting it to main means the code this job executes has
+    # been through review.
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
 
     steps:
       # main, not the triggering ref: this job runs repo scripts against assets
@@ -64,7 +70,7 @@ jobs:
       - name: Resolve and validate the release tag
         id: tag
         env:
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -76,9 +82,10 @@ jobs:
             echo "::error::not a release tag: $TAG"
             exit 1
           fi
-          # The tag must name a real release. On the dispatch path no release
-          # event vouches for it, so this is also where stable-only is enforced
-          # - a `release: published` filter alone would let a dispatched rc through.
+          # The tag must name a real release, and a stable one. With the
+          # workflow_run trigger there is no release-event type to filter on at
+          # all, so this is the only thing keeping release candidates off the
+          # channel, on both the automatic and the dispatch path.
           # stderr is kept: a rate limit, a token-scope problem or a GitHub
           # outage must not be reported as "no such release", least of all in
           # the step whose documented recovery is to re-run this workflow.

@@ -114,6 +114,17 @@ for entry in "${PLATFORMS[@]}"; do
       -e "s|__BUILD_NUMBER__|${BUILD_NUMBER}|g" \
       "$RECIPE_TMPL" > "$recipe"
 
+  # Same guard starters.yml applies to rendered starters: a new slot in the
+  # template without a matching sed above would otherwise ship as a literal
+  # __TOKEN__, showing up as a bad URL or a directory named __BIN_DIR__.
+  # Comments are stripped first: the template's own header explains the
+  # __PLACEHOLDER__ convention in prose, and that is not a rendering failure.
+  if grep -v '^[[:space:]]*#' "$recipe" | grep -q '__[A-Z_]*__'; then
+    echo "ERROR: unsubstituted token in ${recipe}:" >&2
+    grep -vn '^[[:space:]]*#' "$recipe" | grep '__[A-Z_]*__' >&2
+    exit 1
+  fi
+
   echo "==> ${subdir}  <-  ${asset}  (${sha256:0:12})"
   # --test native: the smoke test executes nic, so it can only run when the
   # target platform is the build platform. rattler-build skips it elsewhere
