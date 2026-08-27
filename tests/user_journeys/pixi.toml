@@ -1,0 +1,33 @@
+[workspace]
+name = "nebari-user-journeys"
+description = "User journey (e2e) tests for Nebari foundational software"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.12"
+pytest = "*"
+kubernetes = "*"
+requests = "*"
+pytest-playwright = "*"
+playwright-python = "*"
+
+[pypi-dependencies]
+nebari_journeys = { path = ".", editable = true }
+
+[tasks]
+install-browsers = "playwright install chromium"
+test-lib = "pytest tests_lib -v"
+test-api = "pytest journeys -v -m 'not ui'"
+test = { cmd = "pytest journeys -v", depends-on = ["install-browsers"] }
+
+[feature.dev.dependencies]
+ruff = "*"
+
+[feature.dev.tasks]
+lint = "ruff check ."
+fmt = "ruff format ."
+
+[environments]
+default = { features = [] }
+dev = { features = ["dev"] }
