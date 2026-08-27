@@ -16,6 +16,8 @@ on:
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
+      # The job that publishes what this validates lives there now.
+      - ".github/workflows/publish-conda.yml"
   push:
     branches: [ main ]
     paths:
@@ -28,6 +30,8 @@ on:
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
+      # The job that publishes what this validates lives there now.
+      - ".github/workflows/publish-conda.yml"
   workflow_dispatch:
 
 permissions:

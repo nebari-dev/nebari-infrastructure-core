@@ -29,7 +29,8 @@ entry, or a bundle that does not verify, fails the build.
 | `build-packages.sh` | Renders and builds it once per conda subdir |
 
 `.github/workflows/publish-conda.yml` runs the script after a successful
-`Release` run, for stable releases only, and uploads the results.
+`Release` run, for stable releases only, uploads the results, and then publishes
+the starter workspaces in a second job gated on that upload.
 
 ## Building locally
 

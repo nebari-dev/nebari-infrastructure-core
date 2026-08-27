@@ -112,6 +112,11 @@ uploads over OIDC trusted publishing. It keys off the Release workflow rather
 than the release event because a release created as published fires that event
 before its assets are attached.
 
+The same workflow then publishes the starter workspaces to quay.io, in a second
+job gated on the conda upload succeeding and on its own `quay-publish` approval.
+The starters pin `nic` as a conda dependency, so their `pixi lock` cannot resolve
+until the package is on the channel; that ordering is why the two live together.
+
 Only stable releases are published, and this is enforced rather than assumed: the
 tag is checked against the release API and a prerelease is refused. That applies
 to manual runs too, which is where it matters - a `release: published` filter
@@ -132,7 +137,15 @@ unrenamed even if the policy changed.)
    `checksums.txt`, and fails loudly when either is missing.
 4. Re-run it with `workflow_dispatch` from `main`, naming the tag. Uploads
    skip filenames the channel already has, so a re-run after a partial upload
-   resumes rather than failing on the first one. This is also how a release
+   resumes rather than failing on the first one. Note a dispatch republishes the
+   conda package only: the starter job is deliberately restricted to the
+   automatic path, so recovering starters means re-running the failed job on the
+   original run rather than dispatching.
+
+**Package on the channel but no starter on quay** means the second job did not
+run or did not pass. Check its `quay-publish` approval first, then whether
+`pixi lock` resolved - a starter cannot lock until the package it pins is
+actually on the channel. This is also how a release
    published before the workflow existed gets backfilled.
 
 This channel is a bridge. The intended home is prefix.dev's shared

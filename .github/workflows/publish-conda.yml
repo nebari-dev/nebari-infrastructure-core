@@ -11,9 +11,9 @@ name: Publish conda packages
 # workflows it was wrong by default, since this one waits on an approval gate
 # of unbounded length.
 #
-# Separate from release.yml on purpose. Nothing here compiles: the recipe
-# repackages assets fetched from an already-published release by URL, so this
-# has to run after that release exists, and it must be able to run for a
+# Separate from release.yml on purpose. The conda job compiles nothing: the
+# recipe repackages assets fetched from an already-published release by URL, so
+# it has to run after that release exists, and it must be able to run for a
 # release cut long ago. workflow_dispatch covers backfilling versions published
 # before this workflow did, and re-running an upload that failed without
 # cutting a new release.
@@ -71,7 +71,8 @@ jobs:
     steps:
       # main, not the triggering ref: this job runs repo scripts against assets
       # it fetches from the release API by tag, so the two are independent. The
-      # scripts should always be the reviewed ones on main.
+      # scripts should always be the reviewed ones on main. That reasoning does
+      # NOT carry to publish-starters below, where the checkout is the artifact.
       - name: Checkout main
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -153,6 +154,9 @@ jobs:
     # The whole point of this file: the starters pin nic as a conda dependency,
     # so this cannot run until the upload above succeeded.
     needs: publish
+    # No OIDC here: the Quay push uses a static token from the environment.
+    permissions:
+      contents: read
     # Only on the automatic path. A dispatch exists to backfill an old tag's
     # conda package or to retry a failed upload; neither is a reason to
     # republish that tag's starter bundles, and republishing a released bundle
@@ -163,11 +167,6 @@ jobs:
     # Approval + deployment-branch gate, matching every other credentialed job
     # in this repo (release.yml, the deployment-tests cloud jobs).
     environment: quay-publish
-    concurrency:
-      # Publishing mutates a shared registry; never cancel a run mid-push or a
-      # tag can end up with one starter published and the other not.
-      group: publish-starters
-      cancel-in-progress: false
     env:
       # Starters publish under the existing nebari project, in a starters/
       # subdir, mirroring how the charts live at quay.io/nebari/charts. The
@@ -178,11 +177,18 @@ jobs:
       # Validated upstream against the release API, so it is a real stable tag.
       TAG: ${{ needs.publish.outputs.tag }}
     steps:
-      - name: Checkout main
+      # The tag, not main. Unlike the job above, which fetches its artifact from
+      # the release API and only needs scripts, here the checkout IS the
+      # artifact: cmd/starters renders from starters/templates, examples/ and
+      # the pkg/tofu constraint in the working tree. Publishing main's content
+      # under a released tag would let anything merged during the approval
+      # window change what starters/<provider>:vX means, and a re-run later
+      # would rewrite it again. The tag is validated as a real stable release
+      # above, so "the code has been through review" still holds.
+      - name: Checkout the release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: main
-          fetch-depth: 0
+          ref: ${{ needs.publish.outputs.tag }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -219,9 +225,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # -version explicitly: the checkout is pinned to main, so the git
-          # describe fallback in cmd/starters would read whatever tag main
-          # happens to be at rather than the one being published.
+          # -version explicitly even though the checkout is the tag: the git
+          # describe fallback needs tag objects a ref checkout does not fetch,
+          # and cmd/starters treats an empty -version as unset and falls back
+          # to it silently.
+          : "${TAG:?resolved tag is empty}"
           go run ./cmd/starters -out dist/starters -version "${TAG#v}"
 
       - name: Configure quay registry
