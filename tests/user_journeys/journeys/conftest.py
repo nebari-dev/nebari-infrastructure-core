@@ -110,3 +110,29 @@ def scratch_user(keycloak):
             keycloak.delete_user(user_id)
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
             print(f"failed to delete scratch user {username}: {exc}")
+
+
+@pytest.fixture(scope="session")
+def browser_type_launch_args(
+    browser_type_launch_args, platform_domain, gateway_address, dns_mapping
+):
+    """Map the platform domain for Chromium when public DNS does not."""
+    args = list(browser_type_launch_args.get("args", []))
+    args.extend(trust.chromium_args(platform_domain, gateway_address, dns_mapping))
+    return {**browser_type_launch_args, "args": args}
+
+
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args, trust_anchor):
+    """Left unchanged: `ignore_https_errors` is forbidden in this suite, and
+    `client_certificates` is for TLS *client* authentication (mTLS), not for
+    trusting a server's CA, so it does nothing for a self-signed gateway.
+
+    Chromium trusts a custom CA through the OS/NSS trust store, not through
+    any BrowserContext option. When `trust_anchor` is not None, the anchor
+    still needs to land in the trust store the browser reads at launch;
+    that installation is Task 11's job (a CI setup step), not something
+    expressible here. Do not reach for `ignore_https_errors` to work around
+    a rejected self-signed chain: fix the trust store instead.
+    """
+    return dict(browser_context_args)
