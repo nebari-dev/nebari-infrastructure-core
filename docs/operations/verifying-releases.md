@@ -51,12 +51,17 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
    reviewers. This activates the approval gate on the release job.
 
 2. **Register the prefix.dev trusted publisher** for the conda channel, under
-   the channel's settings: this repository, workflow file `publish-conda.yml`,
-   and the `release` environment. Publishing uses OIDC, so there is no token to
+   the channel's settings: this repository, workflow file `release.yml`, and
+   the `release` environment. Publishing uses OIDC, so there is no token to
    store, but there is also nothing in the repository that fails when the
    registration is missing or wrong. It surfaces only as a failed upload at the
-   end of `Publish conda packages`. See
+   end of the `Publish conda packages` job. See
    [packaging.md](packaging.md#the-conda-channel).
+
+3. **Create the `quay-publish` environment** with required reviewers, and move
+   `QUAY_OCI_STARTERS_USERNAME` and `QUAY_OCI_STARTERS_TOKEN` into it. They are
+   repository-scoped today, so the starter publish has no approval gate and any
+   job in the repository can read them.
 
 `ADD_TO_PROJECT_PAT` is already a fine-grained token with least-privilege scope
 (organization Projects: read and write; repository Issues, Pull requests, and

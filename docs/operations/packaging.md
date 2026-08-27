@@ -107,15 +107,15 @@ release version from `nic version`. Before any digest is read, the release's
 `checksums.txt` is cosign-verified against the release workflow's identity, so
 the digests prove authenticity and not merely that two files fetched from the
 same place agree. `packaging/conda/` holds the recipe and the build script;
-`.github/workflows/publish-conda.yml` runs after a successful `Release` run and
-uploads over OIDC trusted publishing. It keys off the Release workflow rather
-than the release event because a release created as published fires that event
-before its assets are attached.
+The `publish-conda` job in `.github/workflows/release.yml` runs after the release
+itself and uploads over OIDC trusted publishing. It lives in that workflow rather
+than one of its own so that it runs on the tag, after the assets exist: a release
+created as published fires the release event about twenty minutes before
+GoReleaser finishes attaching them.
 
-The same workflow then publishes the starter workspaces to quay.io, in a second
-job gated on the conda upload succeeding and on its own `quay-publish` approval.
-The starters pin `nic` as a conda dependency, so their `pixi lock` cannot resolve
-until the package is on the channel; that ordering is why the two live together.
+`publish-starters` then follows it. The starters pin `nic` as a conda dependency,
+so their `pixi lock` cannot resolve until the package is on the channel; that
+ordering is a `needs:` edge rather than an event relationship.
 
 Only stable releases are published, and this is enforced rather than assumed: the
 tag is checked against the release API and a prerelease is refused. That applies
@@ -135,12 +135,11 @@ unrenamed even if the policy changed.)
 3. Does the release carry `checksums.txt`, its `.sigstore.json` bundle, and all
    six archives? The build verifies the bundle, reads the sha256 from
    `checksums.txt`, and fails loudly when either is missing.
-4. Re-run it with `workflow_dispatch` from `main`, naming the tag. Uploads
-   skip filenames the channel already has, so a re-run after a partial upload
-   resumes rather than failing on the first one. Note a dispatch republishes the
-   conda package only: the starter job is deliberately restricted to the
-   automatic path, so recovering starters means re-running the failed job on the
-   original run rather than dispatching.
+4. Re-run the failed job on the tag's own `Release` run. Uploads skip filenames
+   the channel already has, so a re-run after a partial upload resumes rather
+   than failing on the first one. There is no dispatch path: publishing happens
+   only as part of a release, so a corrected recipe ships with a new patch
+   release rather than by republishing an existing tag.
 
 **Package on the channel but no starter on quay** means the second job did not
 run or did not pass. Check its `quay-publish` approval first, then whether

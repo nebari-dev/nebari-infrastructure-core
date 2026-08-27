@@ -1,8 +1,8 @@
 name: Starters
 
-# Validation only. Publishing lives in publish-conda.yml, as a job that runs
-# after the conda package is on the channel: the starters pin nic as a conda
-# dependency, so `pixi lock` cannot resolve until that upload has happened.
+# Validation only. Publishing lives in release.yml, as jobs that run after the
+# release itself: the starters pin nic as a conda dependency, so `pixi lock`
+# cannot resolve until the conda upload has happened.
 
 on:
   pull_request:
@@ -17,7 +17,7 @@ on:
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
       # The job that publishes what this validates lives there now.
-      - ".github/workflows/publish-conda.yml"
+      - ".github/workflows/release.yml"
   push:
     branches: [ main ]
     paths:
@@ -31,7 +31,7 @@ on:
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
       # The job that publishes what this validates lives there now.
-      - ".github/workflows/publish-conda.yml"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:

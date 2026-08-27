@@ -6,8 +6,8 @@
 // truth for config content, so there is no second copy to drift.
 //
 // Output is published as OCI bundles and deliberately not committed; see the
-// publish-starters job in .github/workflows/publish-conda.yml, which publishes
-// them after the conda package they pin reaches the channel.
+// publish-starters job in .github/workflows/release.yml, which publishes them
+// after the conda package they pin reaches the channel.
 //
 // Usage:
 //
@@ -47,8 +47,8 @@ func main() {
 
 // latestTag returns the most recent tag with its leading v stripped. On a tag
 // build this is that tag; elsewhere it is the previous one. The publish job
-// checks out the release tag and still passes -version explicitly, because a
-// ref checkout does not fetch the tag objects this needs.
+// runs on the tag and still passes -version explicitly, so the pinned version
+// never depends on what git describe can see.
 func latestTag() (string, error) {
 	out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
 	if err != nil {
