@@ -10,7 +10,7 @@ tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
   conftest.py            # only pytest_addoption for --keep-namespace
   nebari_journeys/       # the action library: constants, waits, cluster, trust, k8s, argocd, keycloak, ui
-  tests_lib/              # unit tests OF the library, 138 tests, no cluster needed
+  tests_lib/              # unit tests OF the library, 140 tests, no cluster needed
   journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py
 ```
 
@@ -207,6 +207,16 @@ installs under.
   browser journey fails with `ERR_CERT_AUTHORITY_INVALID`, fix the trust
   store or give the issuer `isCA: true`. Do not reach for
   `ignore_https_errors`: it is forbidden here.
+- **ACME challenges may cause domain derivation to fail.** Platform domain
+  discovery strips one DNS label from HTTPRoute hostnames. During ACME
+  issuance or renewal, cert-manager attaches temporary HTTP-01 challenge
+  routes to the gateway. On a cluster with `nebari.example.com`, these strip
+  to `example.com`, failing to match the other routes. `domain()` then raises
+  "more than one platform domain" and every journey errors at session setup.
+  The failure is loud, not silent, and transient (only during challenge
+  windows), but a run overlapping a renewal will fail unrelated to cluster
+  health. If this happens, modify domain discovery to ignore ACME challenge
+  paths or prefer the majority domain.
 - **The journeys have never been executed against a live cluster.** Every
   journey has been exercised in isolation with tests_lib, but the suite as a
   whole (`journeys/`) has not yet had a run against a real deployed Nebari
