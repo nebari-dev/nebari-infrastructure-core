@@ -10,6 +10,7 @@ import pytest
 from nebari_journeys import trust
 from nebari_journeys.cluster import Cluster
 from nebari_journeys.k8s import (
+    SCRATCH_NAMESPACE_PREFIX,
     ScratchNamespace,
     scratch_namespace_name,
     sweep_stale_namespaces,
@@ -79,3 +80,33 @@ def scratch_namespace(cluster, request):
             print(f"--keep-namespace set; leaving {ns.name} in place")
         else:
             ns.delete()
+
+
+@pytest.fixture(scope="session")
+def keycloak(cluster, platform_domain, trust_anchor, dns_mapping):
+    from nebari_journeys.keycloak import Keycloak
+
+    return Keycloak.for_cluster(cluster, platform_domain, trust_anchor)
+
+
+@pytest.fixture
+def scratch_user(keycloak):
+    """A throwaway realm user, deleted afterwards even when the test fails."""
+    import requests
+
+    from nebari_journeys.keycloak import generated_password
+
+    # Built from the same SCRATCH_NAMESPACE_PREFIX that scratch_namespace_name()
+    # uses, rather than a hardcoded literal, so the two cannot drift apart.
+    username = "journey-" + scratch_namespace_name().removeprefix(
+        SCRATCH_NAMESPACE_PREFIX
+    )
+    password = generated_password()
+    user_id = keycloak.create_user(username, password)
+    try:
+        yield {"id": user_id, "username": username, "password": password}
+    finally:
+        try:
+            keycloak.delete_user(user_id)
+        except requests.exceptions.RequestException as exc:
+            print(f"failed to delete scratch user {username}: {exc}")
