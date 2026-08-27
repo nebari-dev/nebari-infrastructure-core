@@ -24,6 +24,12 @@ CERTMANAGER_GROUP = "cert-manager.io"
 CERTMANAGER_VERSION = "v1"
 CERTIFICATE_PLURAL = "certificates"
 
+STORAGE_DEFAULT_ANNOTATION = "storageclass.kubernetes.io/is-default-class"
+LONGHORN_GROUP = "longhorn.io"
+LONGHORN_VERSION = "v1beta2"
+VOLUME_PLURAL = "volumes"
+FALLBACK_STORAGE_CLASS = "longhorn"
+
 
 @dataclass
 class Cluster:
@@ -31,6 +37,7 @@ class Cluster:
 
     core: client.CoreV1Api
     custom: client.CustomObjectsApi
+    storage: client.StorageV1Api = None
 
     @classmethod
     def connect(cls) -> "Cluster":
@@ -50,6 +57,7 @@ class Cluster:
         return cls(
             core=client.CoreV1Api(),
             custom=client.CustomObjectsApi(),
+            storage=client.StorageV1Api(),
         )
 
     def secret_value(self, namespace: str, name: str, key: str) -> str:
@@ -129,3 +137,21 @@ class Cluster:
         """Skip the calling test when an optional component is not installed."""
         if not self.has_app(name):
             pytest.skip(f"ArgoCD application {name!r} is not deployed on this cluster")
+
+    def default_storage_class(self) -> str:
+        """The class marked default, else Longhorn's."""
+        for sc in self.storage.list_storage_class().items:
+            annotations = sc.metadata.annotations or {}
+            if annotations.get(STORAGE_DEFAULT_ANNOTATION) == "true":
+                return sc.metadata.name
+        return FALLBACK_STORAGE_CLASS
+
+    def longhorn_volume(self, pv_name: str) -> dict:
+        """The Longhorn Volume backing a PersistentVolume."""
+        return self.custom.get_namespaced_custom_object(
+            group=LONGHORN_GROUP,
+            version=LONGHORN_VERSION,
+            namespace=constants.LONGHORN_NAMESPACE,
+            plural=VOLUME_PLURAL,
+            name=pv_name,
+        )

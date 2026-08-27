@@ -120,3 +120,23 @@ def test_connect_error_names_both_the_kubeconfig_and_incluster_failures():
         Cluster.connect()
     assert "bad kubeconfig" in str(excinfo.value)
     assert "no service host" in str(excinfo.value)
+
+
+def test_default_storage_class_prefers_the_annotated_default():
+    storage = MagicMock()
+    sc = MagicMock()
+    sc.metadata.name = "custom"
+    sc.metadata.annotations = {"storageclass.kubernetes.io/is-default-class": "true"}
+    storage.list_storage_class.return_value = MagicMock(items=[sc])
+    cluster = Cluster(core=MagicMock(), custom=MagicMock(), storage=storage)
+    assert cluster.default_storage_class() == "custom"
+
+
+def test_default_storage_class_falls_back_to_longhorn():
+    storage = MagicMock()
+    sc = MagicMock()
+    sc.metadata.name = "other"
+    sc.metadata.annotations = {}
+    storage.list_storage_class.return_value = MagicMock(items=[sc])
+    cluster = Cluster(core=MagicMock(), custom=MagicMock(), storage=storage)
+    assert cluster.default_storage_class() == "longhorn"
