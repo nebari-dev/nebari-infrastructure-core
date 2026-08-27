@@ -11,7 +11,7 @@ tests/user_journeys/
   conftest.py            # only pytest_addoption for --keep-namespace
   nebari_journeys/       # the action library: constants, waits, cluster, trust, k8s, argocd, keycloak, ui
   tests_lib/              # unit tests OF the library, 140 tests, no cluster needed
-  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py
+  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py
 ```
 
 ## Running
@@ -42,6 +42,7 @@ pixi run fmt                    # ruff format .
 | `test_smoke.py` | Every foundational ArgoCD app is Synced and Healthy. Runs first, so other failures are interpretable. |
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
+| `test_tls.py` | The gateway's certificate validates against the plain system trust store, with no cluster-derived anchor. Marked `@pytest.mark.tls`; skips (does not fail) on a self-signed cluster, since a `CA:FALSE` leaf can never pass this by design (issue #447). |
 
 ## Adding a journey
 
@@ -60,9 +61,13 @@ pixi run fmt                    # ruff format .
 4. **Work inside `scratch_namespace`.** Never create cluster-scoped resources
    and never write outside the namespace.
 5. **Never disable TLS verification.** No `verify=False`, no
-   `ignore_https_errors=True`. Use the `trust_anchor` fixture.
-6. **Mark browser journeys `@pytest.mark.ui`** and journeys over 60 seconds
-   `@pytest.mark.slow`.
+   `ignore_https_errors=True`. Use the `trust_anchor` fixture; browser
+   journeys additionally get an SPKI pin automatically (see "Chromium and
+   self-signed clusters" below) -- do not add your own certificate bypass.
+6. **Mark browser journeys `@pytest.mark.ui`**, journeys over 60 seconds
+   `@pytest.mark.slow`, and a journey whose SUBJECT is certificate validity
+   or chain trust itself `@pytest.mark.tls` (see "Chromium and self-signed
+   clusters" below) -- not a journey that merely happens to travel over TLS.
 7. **Prefer `scratch_user` over admin credentials**, so failure artifacts carry
    as little as possible.
 8. **Write the assertion message for someone reading a CI log** with no access
@@ -139,14 +144,63 @@ prefers `ca.crt` and falls back to `tls.crt` for a self-signed leaf (NOT
 publicly trusted ACME certificate) and simply falls back to the system trust
 store.
 
-Chromium does not accept a custom CA through any Playwright context option; it
-reads the OS/NSS trust store instead. CI installs the anchor into the runner's
-trust store before running the journeys (see the "Install cluster trust
-anchor for Chromium" step in `.github/workflows/ci.yml`), reusing
-`trust.trust_anchor_pem` so the CI path and the `trust_anchor` fixture agree.
-Running the suite locally against a self-signed cluster requires the same
-step: install the gateway's CA into your own OS trust store before running
-Chromium journeys, rather than reaching for `ignore_https_errors`.
+### Chromium and self-signed clusters: SPKI pinning, honestly
+
+cert-manager's default `selfsigned-issuer` issues a self-signed **leaf**
+(`CA:FALSE`), not a proper root CA (issue #447, #490). `requests`/OpenSSL
+accepts a self-signed end-entity certificate as a trust anchor via `verify=`,
+which is why the `requests`-based journeys work unmodified. Chromium/NSS does
+not: a `CA:FALSE` certificate cannot be installed as a trust anchor at all, no
+matter which NSS trust flag is used, so Chromium rejects it with
+`ERR_CERT_AUTHORITY_INVALID` regardless of any OS/NSS trust-store change.
+
+For the browser journeys, `nebari_journeys.trust.chromium_args` launches
+Chromium with `--ignore-certificate-errors-spki-list=<hash>`, where `<hash>`
+is `spki_sha256_b64()` of the same anchor PEM the `requests` journeys already
+use. Read plainly, this pins Chromium's trust to the exact public key
+(SubjectPublicKeyInfo) read from the cluster's own gateway secret over the
+kubeconfig:
+
+- A certificate presenting any other key -- a MITM, or the gateway rotating
+  to a new key without updating the pin -- is still rejected outright. In
+  that respect the anchor is not weakened.
+- But for a connection that DOES present the pinned key, Chromium suppresses
+  **every** certificate error on that connection, including ones full chain
+  validation would still catch, such as a hostname mismatch. The pin proves
+  "this is the key I read from the cluster", not "this certificate is
+  actually valid for this hostname".
+
+**This is weaker than full chain validation and is not sold as equivalent to
+it.** It is applied only when a trust anchor was actually derived from the
+cluster (a self-signed cluster); an ACME cluster gets no extra Chromium flags
+at all, so it is driven exactly as a real user's browser would be. The real
+fix is issue #447: once cert-manager issues a proper CA for the gateway,
+Chromium validates the chain like any other browser, and the SPKI pin
+(`spki_sha256_b64`, the flag it feeds, and this whole section) should be
+removed.
+
+Because the SPKI pin is table stakes for the browser journeys to run at all
+on a self-signed cluster, but it explicitly does not restore hostname or
+chain checking, a small number of journeys whose entire SUBJECT is
+certificate validity or chain trust itself are marked `@pytest.mark.tls` (see
+`pytest.ini`) and are **skipped**, not passed under a weaker guarantee, when
+the derived anchor is a self-signed leaf
+(`nebari_journeys.trust.is_self_signed_leaf`). Every other journey, including
+every browser journey that merely happens to travel over TLS to get
+somewhere, keeps running normally, pinned by the SPKI flag. The skip is
+announced once per session as a `UserWarning` reading `self signed cert
+detected, skipping tls tests`, whether or not any `tls`-marked test currently
+exists, so an operator running locally can see that certificate validation
+has been narrowed for the browser rather than discovering it only when a
+`tls` journey silently skips later.
+
+CI does not need to do anything special for Chromium: the SPKI flag comes
+from the same kubeconfig-derived anchor the `Install cluster trust anchor for
+the API journeys` step in `.github/workflows/ci.yml` reads for the
+`requests`-based journeys, and is wired up entirely inside the test process
+by `journeys/conftest.py`'s browser fixtures. Running the suite locally
+against a self-signed cluster needs no manual trust-store setup either: point
+`KUBECONFIG` at the cluster and run the journeys.
 
 ## Security posture
 
@@ -197,16 +251,21 @@ installs under.
   handler, but that has not been confirmed against a live cluster. The
   journey asserts it ended up back on the ArgoCD host and not on Keycloak, so
   a wrong path fails loudly rather than passing quietly.
-- **The CI trust step's NSS half is unverified.** With the default
-  `selfsigned-issuer`, cert-manager issues a leaf with `CA:FALSE`. OpenSSL
-  generally accepts a self-signed end-entity certificate found in the trust
-  store, so the `requests` path should be fine, but NSS is stricter and
-  Chromium reads NSS. The CI step therefore installs the anchor into BOTH
-  `/usr/local/share/ca-certificates` and the per-user NSS DB via `certutil`,
-  and the NSS half is best-effort so it cannot turn a green run red. If a
-  browser journey fails with `ERR_CERT_AUTHORITY_INVALID`, fix the trust
-  store or give the issuer `isCA: true`. Do not reach for
-  `ignore_https_errors`: it is forbidden here.
+- **Chromium trust no longer goes through the OS/NSS store at all.** An
+  earlier version of the CI trust step also imported the anchor into the
+  per-user NSS DB via `certutil -A -t "C,,"` (trusted CA). That could never
+  have worked: cert-manager's default `selfsigned-issuer` issues a leaf with
+  `CA:FALSE`, and NSS correctly refuses to use a `CA:FALSE` certificate as a
+  trust anchor under any trust flag, `-t "P,,"` (trusted peer) included,
+  because a self-signed non-CA is not a chain Chromium can walk. The failure
+  was masked because that half of the step was deliberately best-effort. The
+  CI step now only installs the anchor into the runner's system trust store
+  for the `requests`-based journeys; Chromium trust is handled entirely by
+  the SPKI pin in `nebari_journeys.trust.chromium_args` (see "Chromium and
+  self-signed clusters" above). If a browser journey fails with
+  `ERR_CERT_AUTHORITY_INVALID`, the SPKI flag is not reaching Chromium's
+  launch args -- check `browser_type_launch_args` in `journeys/conftest.py`.
+  Do not reach for `ignore_https_errors`: it is forbidden here.
 - **ACME challenges may cause domain derivation to fail.** Platform domain
   discovery strips one DNS label from HTTPRoute hostnames. During ACME
   issuance or renewal, cert-manager attaches temporary HTTP-01 challenge

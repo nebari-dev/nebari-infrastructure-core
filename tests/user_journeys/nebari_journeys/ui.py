@@ -33,6 +33,8 @@ reused.
 
 from urllib.parse import urlparse
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 KEYCLOAK_USERNAME_SELECTOR = "#username"
 KEYCLOAK_PASSWORD_SELECTOR = "#password"
 KEYCLOAK_SUBMIT_SELECTOR = "#kc-login"
@@ -82,6 +84,12 @@ LONGHORN_UI_MARKER = "Recurring Job"
 
 DENIED_STATUSES = frozenset({401, 403})
 
+# How much of the page body to include in the diagnostic raised when the
+# Keycloak form never appears. Enough to show a rendered error message
+# (ArgoCD's OIDC-discovery failure body is a couple of lines) without
+# risking a huge dump of an unrelated page landing in a CI log.
+PAGE_BODY_DIAGNOSTIC_CHARS = 2000
+
 
 def is_access_denied(response_status: int) -> bool:
     return response_status in DENIED_STATUSES
@@ -106,9 +114,29 @@ def login_via_keycloak(page, url: str, username: str, password: str) -> None:
     error page) fails on the submit click after the full Playwright timeout,
     with a message about a missing selector rather than about the redirect
     that never happened.
+
+    When the username field never appears, the raw Playwright
+    TimeoutError says only "locator #username not visible", which reads
+    like the browser itself is broken, or worse, like a TLS problem, when
+    the actual cause is usually a page that DID load: Argo CD's own error
+    body for a server-side OIDC discovery failure (argocd-server unable to
+    reach Keycloak internally), or its unredirected local login form. The
+    page's own URL and a slice of its rendered body are far more useful
+    than the selector timeout, so this catches the timeout and re-raises
+    with both attached, making clear the browser reached a host and
+    rendered something, rather than that TLS or the harness broke.
     """
     page.goto(url)
-    page.wait_for_selector(KEYCLOAK_USERNAME_SELECTOR, timeout=FORM_TIMEOUT_MS)
+    try:
+        page.wait_for_selector(KEYCLOAK_USERNAME_SELECTOR, timeout=FORM_TIMEOUT_MS)
+    except PlaywrightTimeoutError as error:
+        body = page.content()[:PAGE_BODY_DIAGNOSTIC_CHARS]
+        raise RuntimeError(
+            f"the Keycloak login form never appeared after navigating to "
+            f"{url!r}. The browser DID reach and render a page (this is not "
+            f"a TLS or harness failure): it ended up at {page.url!r} with "
+            f"this body:\n{body}"
+        ) from error
     page.fill(KEYCLOAK_USERNAME_SELECTOR, username)
     page.fill(KEYCLOAK_PASSWORD_SELECTOR, password)
     page.click(KEYCLOAK_SUBMIT_SELECTOR)

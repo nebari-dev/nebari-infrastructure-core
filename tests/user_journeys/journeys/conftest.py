@@ -5,6 +5,8 @@ outside this directory, so nothing here runs for them: an autouse
 fixture only applies beneath the conftest that defines it.
 """
 
+import warnings
+
 import pytest
 
 from nebari_journeys import trust
@@ -81,10 +83,73 @@ def gateway_reachable(platform_domain, gateway_address) -> bool:
 
 
 @pytest.fixture(scope="session")
-def trust_anchor(cluster, tmp_path_factory) -> str | None:
+def trust_anchor_pem(cluster) -> str | None:
+    """The raw anchor PEM, or None when the system trust store suffices.
+
+    Fetched once per session and shared by `trust_anchor` (the file path
+    `requests` and Playwright's context options read) and by Chromium's
+    launch args (which need the PEM itself to compute the SPKI pin), so
+    the cluster's secret is read only once.
+    """
+    return trust.trust_anchor_pem(cluster)
+
+
+@pytest.fixture(scope="session")
+def trust_anchor(trust_anchor_pem, tmp_path_factory) -> str | None:
     """Path to a CA file, or None when the system trust store suffices."""
-    pem = trust.trust_anchor_pem(cluster)
-    return trust.write_trust_anchor(pem, tmp_path_factory.mktemp("trust"))
+    return trust.write_trust_anchor(trust_anchor_pem, tmp_path_factory.mktemp("trust"))
+
+
+SELF_SIGNED_WARNING = (
+    "self signed cert detected, skipping tls tests "
+    "(see nebari_journeys.trust.is_self_signed_leaf and issue #447 for the "
+    "real fix: cert-manager issuing a proper CA for the gateway)"
+)
+
+
+@pytest.fixture(scope="session")
+def self_signed_anchor(trust_anchor_pem) -> bool:
+    """True when the derived anchor is a self-signed leaf, not a real CA.
+
+    This is the shape cert-manager's default `selfsigned-issuer` produces
+    (see the nebari_journeys.trust module docstring): a `CA:FALSE`
+    end-entity certificate that Chromium cannot accept as a trust anchor
+    by any NSS trick. Browser journeys still run, pinned to that
+    certificate's public key via chromium_args' SPKI flag; only journeys
+    whose SUBJECT is certificate validity or chain trust itself (marked
+    `tls`) are skipped, since those cannot pass against a leaf that was
+    never meant to be an anchor.
+    """
+    if trust_anchor_pem is None:
+        return False
+    return trust.is_self_signed_leaf(trust_anchor_pem)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warn_once_if_self_signed(self_signed_anchor):
+    """Surface the relaxation once per session, even if no `tls`-marked
+    journey exists yet to be skipped by it, so an operator running
+    locally can see that certificate validation has been narrowed for
+    the browser rather than discovering it later. A UserWarning, the same
+    mechanism test_smoke.py uses for drift reporting, surfaces in
+    pytest's warnings summary without needing -s, and does not fail
+    the run.
+    """
+    if self_signed_anchor:
+        warnings.warn(SELF_SIGNED_WARNING, UserWarning, stacklevel=2)
+
+
+@pytest.fixture(autouse=True)
+def skip_tls_marked_tests_on_self_signed(request, self_signed_anchor):
+    """Skip `tls`-marked journeys when the anchor is a self-signed leaf.
+
+    Scoped narrowly to tests whose SUBJECT is certificate validity or
+    chain trust itself: everything else (including every browser journey
+    that merely travels over TLS) keeps running, pinned by the SPKI flag
+    in chromium_args.
+    """
+    if self_signed_anchor and request.node.get_closest_marker("tls"):
+        pytest.skip(SELF_SIGNED_WARNING)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -145,11 +210,25 @@ def scratch_user(keycloak):
 
 @pytest.fixture(scope="session")
 def browser_type_launch_args(
-    browser_type_launch_args, platform_domain, gateway_address, dns_mapping
+    browser_type_launch_args,
+    platform_domain,
+    gateway_address,
+    dns_mapping,
+    trust_anchor_pem,
 ):
-    """Map the platform domain for Chromium when public DNS does not."""
+    """Map the platform domain for Chromium, and when a trust anchor was
+    derived from the cluster (a self-signed leaf, not a proper CA -- see
+    nebari_journeys.trust module docstring), pin Chromium's trust to its
+    exact public key via --ignore-certificate-errors-spki-list. When no
+    anchor was derived, the chain is publicly trusted (ACME) and nothing
+    extra is added: Chromium runs exactly as a real user's browser would.
+    """
     args = list(browser_type_launch_args.get("args", []))
-    args.extend(trust.chromium_args(platform_domain, gateway_address, dns_mapping))
+    args.extend(
+        trust.chromium_args(
+            platform_domain, gateway_address, dns_mapping, trust_anchor_pem
+        )
+    )
     return {**browser_type_launch_args, "args": args}
 
 
@@ -159,11 +238,11 @@ def browser_context_args(browser_context_args, trust_anchor):
     `client_certificates` is for TLS *client* authentication (mTLS), not for
     trusting a server's CA, so it does nothing for a self-signed gateway.
 
-    Chromium trusts a custom CA through the OS/NSS trust store, not through
-    any BrowserContext option. When `trust_anchor` is not None, the anchor
-    still needs to land in the trust store the browser reads at launch;
-    that installation is Task 11's job (a CI setup step), not something
-    expressible here. Do not reach for `ignore_https_errors` to work around
-    a rejected self-signed chain: fix the trust store instead.
+    Trust for a self-signed gateway certificate is established at Chromium
+    launch, via --ignore-certificate-errors-spki-list in
+    `browser_type_launch_args` (see that fixture and the nebari_journeys.trust
+    module docstring for the trade this makes), not through any
+    BrowserContext option. Do not reach for `ignore_https_errors` to work
+    around a rejected self-signed chain: the SPKI pin is the fix.
     """
     return dict(browser_context_args)

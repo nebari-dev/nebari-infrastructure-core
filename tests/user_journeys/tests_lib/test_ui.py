@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from nebari_journeys.ui import (
     ARGOCD_OIDC_LOGIN_PATH,
@@ -64,6 +65,36 @@ def test_login_waits_for_the_keycloak_form_before_filling_it():
     login_via_keycloak(page, "https://x", "u", "p")
     page.wait_for_selector.assert_called_once()
     assert page.wait_for_selector.call_args.args[0] == KEYCLOAK_USERNAME_SELECTOR
+
+
+def test_login_raises_a_diagnostic_error_naming_the_url_and_body_on_timeout():
+    """A raw Playwright TimeoutError reads like the browser or TLS is
+    broken. When the Keycloak form never appears, the actual page the
+    browser landed on (and rendered) is far more useful, for example
+    ArgoCD's own error body for a server-side OIDC discovery failure."""
+    page = MagicMock()
+    page.wait_for_selector.side_effect = PlaywrightTimeoutError("timeout")
+    page.url = "https://argocd.nebari.local/auth/login"
+    page.content.return_value = (
+        'failed to query provider "https://keycloak.nebari.local/realms/nebari": '
+        "dial tcp: lookup keycloak.nebari.local: server misbehaving"
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        login_via_keycloak(page, "https://argocd.nebari.local/auth/login", "u", "p")
+    message = str(excinfo.value)
+    assert "https://argocd.nebari.local/auth/login" in message
+    assert "failed to query provider" in message
+    assert excinfo.value.__cause__ is not None
+
+
+def test_login_error_truncates_a_very_long_page_body():
+    page = MagicMock()
+    page.wait_for_selector.side_effect = PlaywrightTimeoutError("timeout")
+    page.url = "https://x"
+    page.content.return_value = "x" * 100_000
+    with pytest.raises(RuntimeError) as excinfo:
+        login_via_keycloak(page, "https://x", "u", "p")
+    assert len(str(excinfo.value)) < 10_000
 
 
 def test_argocd_oidc_login_path_is_not_the_bare_host():

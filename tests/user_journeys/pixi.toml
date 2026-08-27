@@ -11,6 +11,7 @@ python-kubernetes = "*"
 requests = "*"
 pytest-playwright = "*"
 playwright-python = "*"
+cryptography = "*"
 
 [pypi-dependencies]
 nebari_journeys = { path = ".", editable = true }

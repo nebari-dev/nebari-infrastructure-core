@@ -9,13 +9,66 @@ from nebari_journeys.trust import (
     chromium_args,
     gateway_reachable,
     install_dns_mapping,
+    is_self_signed_leaf,
     needs_dns_mapping,
+    spki_sha256_b64,
     trust_anchor_pem,
     write_trust_anchor,
 )
 
 CA_PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
 LEAF_PEM = "-----BEGIN CERTIFICATE-----\nMIIC\n-----END CERTIFICATE-----\n"
+
+# A real, disposable RSA self-signed leaf (subject == issuer, CA:FALSE),
+# the exact shape cert-manager's default selfsigned-issuer produces. Its
+# SPKI SHA-256 hash below was computed independently with:
+#   openssl x509 -in leaf.pem -pubkey -noout \
+#     | openssl pkey -pubin -outform der \
+#     | openssl dgst -sha256 -binary | base64
+SELF_SIGNED_LEAF_PEM = """-----BEGIN CERTIFICATE-----
+MIIC+zCCAeOgAwIBAgIUA7tr1aRFNuOvVq7/tknFGZ75c8wwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMbmViYXJpLmxvY2FsMB4XDTI2MDgyNzIzNDkzMFoXDTM2
+MDgyNDIzNDkzMFowFzEVMBMGA1UEAwwMbmViYXJpLmxvY2FsMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEA87tGVT6tyWWopZTB6XOtXcsgiIrODwjqHdqG
+ZF2vIcKXutjT/EV34OdkqY1N47jRcDZvNjqOsHQue6FOrPfvRJR2t538M4KwfYNr
+jZTVsAc4xmBG8sznbXj0csIA6DKS8yrnPDvsmNdJaFFEPlp5pMy9UbJTmxgFPYQ2
+wMuhlP1sIUEYSgM853MP78cWGcsLnfazfVZczyqpHRBkqEspGdOcKPpticKTa57J
+iRybcpLM+swsxLC/QhNJgrc8MZ9yxGzxa02pidfp4x3cvWZesgZ+DmwM1WykE+xD
+96eYulj8op0fdqBIdl4k724UR5z3O0BJrJDWFAsXQAQK3u+W/QIDAQABoz8wPTAM
+BgNVHRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIFoDAdBgNVHQ4EFgQUVDttz8wvWToK
+r/Sw4pfMcmSw8ecwDQYJKoZIhvcNAQELBQADggEBADH/rnD1RVZwV7UOgSEAzajT
+b78fKJmFcvzXpo8XTNAHilBtP7uKJCa0dktB28dSvJBVg2bvIQVNuWVZmVyOL22B
+AqjEAIJIi6lvwUre2Pa8yRTRQggASMBDJVgwzuNDlVvW9HmPl/H86E37sqyh3pbI
+llXIkLpYNPrNc5hHVUMW8AIdv9frdpLfCfLueBFiOSXSW2lxFbuSwShCd1574p0c
+0e2fH/h/AYf2+pRevKmIty0dDulEZIx/dSb5rBU7qGKqxFvFZPuyy2EeRd9Ab7Vc
+LY9jl8awrLzz0nC6293sbFFnI4ZXpeROrND3uuGHPjX7d0tFyLQs0qis5745SRE=
+-----END CERTIFICATE-----
+"""
+SELF_SIGNED_LEAF_SPKI_SHA256_B64 = "wVJrYeL1K09pMlA82Zb55ttHp5Y6ux4+xgbMK1L79SY="
+
+# A real, disposable self-signed CA certificate (subject == issuer,
+# CA:TRUE), so is_self_signed_leaf() can be shown to distinguish "self
+# signed" from "not a CA" rather than conflating the two.
+SELF_SIGNED_CA_PEM = """-----BEGIN CERTIFICATE-----
+MIIDDzCCAfegAwIBAgIUP17a+5KxPfWy/PckcSsZmCujAaUwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMbmViYXJpLmxvY2FsMB4XDTI2MDgyNzIzNDkyM1oXDTM2
+MDgyNDIzNDkyM1owFzEVMBMGA1UEAwwMbmViYXJpLmxvY2FsMIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu5tOy0zURDNX702nf1N0EQnCFfBQx9gHGC6o
++gYfeZxKMitnm1HWhqCtmX9R3ofGbua3to/Jfemq9WyGO9z07Y4F/yNlXunb1tLh
+Qcvb5yGWWVQFaLGxALv408YQ5fr9JiSZzP7PX8ORLM/CyEHws8HNQpcWMA1WnNHh
+n+G/ZsUoKpEbstgLY5C1eriSEHC6QeRM7lhfzAC4AgAKg2AxGInRbTEm2PhbZacf
+Jrvbd6fNgPuxnfXNdoQJsJhEtoUQbWLNIqAYS2/qf4R1F//YYivtUwFPSTFXklvo
+1azvRbGUWjQa5+FammVJN/aky4tPFs+TYH/vo7CabhStiOGZMwIDAQABo1MwUTAd
+BgNVHQ4EFgQUgx5Xfo1YPHH1f85UbyrfnVnC+gUwHwYDVR0jBBgwFoAUgx5Xfo1Y
+PHH1f85UbyrfnVnC+gUwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAgHDcZkY3zkuHJRjyUg1H3zVUZPbZhipA8GTQ4K9fyZTZRiVZIdfEvF98+Wjz
+cN6kQnPihaDLeUEneSDpilfZhLifj3c92rZjxNR0ZWfeuNEHvJHxdVtgit4hPm+S
+B2DM8pzWAYhsEeyQxSpaKqVO9f5Xfe0WSEHDAQF7gz8DSXQEWytG6JGk7ZtTAIkc
+o4+wYZ6AflIL21c9nf1qUt2xEni6MZg1SQR+NOF/r2gFpFFBAObkOOUSz2LbpsDS
+oNLuNtVTa3AYzkQ0B0aAO+ZApJn9a8V4OGK0APqvlHe6Ro19AadYDxoidRstmdOM
+aQdmcdsYlDhHOk3SuZrKtwQWmA==
+-----END CERTIFICATE-----
+"""
 
 
 DEFAULT_REF = ("nebari-gateway-tls", "envoy-gateway-system")
@@ -129,6 +182,40 @@ def test_chromium_args_map_the_wildcard_domain():
     args = chromium_args("nebari.local", "10.0.0.5", True)
     assert args[0].startswith("--host-resolver-rules=")
     assert "MAP *.nebari.local 10.0.0.5" in args[0]
+
+
+def test_chromium_args_add_no_spki_flag_when_no_anchor_was_derived():
+    """A publicly trusted (ACME) chain gets no extra flags at all: Chromium
+    must be driven exactly as a real user's browser would be."""
+    args = chromium_args("nebari.example", "10.0.0.5", False, None)
+    assert args == []
+
+
+def test_chromium_args_pin_the_spki_hash_when_an_anchor_was_derived():
+    args = chromium_args("nebari.local", "10.0.0.5", True, SELF_SIGNED_LEAF_PEM)
+    spki_flags = [
+        a for a in args if a.startswith("--ignore-certificate-errors-spki-list=")
+    ]
+    assert spki_flags == [
+        f"--ignore-certificate-errors-spki-list={SELF_SIGNED_LEAF_SPKI_SHA256_B64}"
+    ]
+
+
+def test_spki_sha256_b64_matches_a_hash_computed_independently_with_openssl():
+    assert spki_sha256_b64(SELF_SIGNED_LEAF_PEM) == SELF_SIGNED_LEAF_SPKI_SHA256_B64
+
+
+def test_is_self_signed_leaf_true_for_a_ca_false_self_signed_certificate():
+    """The exact shape cert-manager's default selfsigned-issuer produces:
+    subject == issuer, CA:FALSE."""
+    assert is_self_signed_leaf(SELF_SIGNED_LEAF_PEM) is True
+
+
+def test_is_self_signed_leaf_false_for_a_real_ca_certificate():
+    """subject == issuer alone is not enough: a self-signed root CA (CA:TRUE)
+    is a legitimate trust anchor and must not be treated as the
+    cert-manager selfsigned-issuer leaf shape."""
+    assert is_self_signed_leaf(SELF_SIGNED_CA_PEM) is False
 
 
 def test_trust_anchor_reads_the_secret_the_gateway_actually_references():
