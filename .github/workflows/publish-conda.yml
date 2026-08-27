@@ -55,7 +55,7 @@ jobs:
     # scripts, so restricting it to main means the code this job executes has
     # been through review.
     if: >-
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && !contains(github.event.workflow_run.head_branch, '-')) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
 
     steps:
