@@ -5,6 +5,10 @@ on:
     paths:
       - "starters/**"
       - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
@@ -13,6 +17,10 @@ on:
     paths:
       - "starters/**"
       - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
       - "examples/local-config.yaml"
       - "examples/aws-config.yaml"
       - ".github/workflows/starters.yml"
@@ -28,7 +36,9 @@ permissions:
 
 env:
   # Starters publish under the existing nebari project, in a starters/ subdir,
-  # mirroring how the charts live at quay.io/nebari/charts.
+  # mirroring how the charts live at quay.io/nebari/charts. The provider alone
+  # names the repo: quay.io/nebari/starters/aws, not .../starters/starter-aws,
+  # which stutters in the reference a user actually types.
   QUAY_NAMESPACE: nebari
   STARTER_REPO_PREFIX: starters
 
@@ -220,7 +230,7 @@ jobs:
             nebi init
             nebi publish --local \
               --registry quay \
-              --repo "${STARTER_REPO_PREFIX}/starter-${provider}" \
+              --repo "${STARTER_REPO_PREFIX}/${provider}" \
               --tag "v${version}"
             popd > /dev/null
           done
@@ -232,7 +242,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           for provider in local aws; do
             dest="/tmp/imported-${provider}"
-            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/starter-${provider}:v${version}" -o "$dest"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:v${version}" -o "$dest"
             test -f "$dest/config.yaml"
             test -f "$dest/README.md"
             grep -q CHANGEME "$dest/config.yaml"
