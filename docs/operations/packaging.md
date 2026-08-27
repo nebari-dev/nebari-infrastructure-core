@@ -80,11 +80,68 @@ feature, not a hardening one.
 ## Packaging guidance (pixi/prefix.dev, distro packages)
 
 Declare `opentofu` as a runtime dependency and either rely on `PATH` discovery or
-set `NIC_TOFU_PATH` in an activation script. NIC itself is distributed via the
-prefix.dev `github-releases` channel (see
-[https://github.com/nebari-dev/nebari-infrastructure-core/issues/552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552)),
-and conda-forge ships `opentofu` for all platforms NIC supports, so a pixi
-workspace that pins both never has to phone home on first run.
+set `NIC_TOFU_PATH` in an activation script, so a workspace that pins both NIC and
+OpenTofu never has to phone home on first run.
+
+Declare it in the *workspace*, not in NIC's own package. NIC is provider-agnostic
+at the binary level - `local` and `existing` never invoke OpenTofu - and
+conda-forge publishes `opentofu` for `linux-64`, `linux-aarch64`, `linux-ppc64le`,
+`osx-64`, `osx-arm64` and `win-64`, but **not `win-arm64`**, a platform NIC does
+publish a package for. An unconditional run dependency would therefore trade a
+working install for an unsolvable one there. The starter workspaces scope the
+constraint to the provider that needs it and derive it from
+`pkg/tofu.MinVersion`/`MaxVersionExclusive`, which is both tighter and correct
+per-platform.
+
+### The conda channel
+
+NIC is published to the `nebari-dev/nebari` channel on prefix.dev:
+
+```bash
+pixi add --channel https://prefix.dev/nebari-dev/nebari nebari-infrastructure-core
+```
+
+Packages are repackaged from the GitHub release archives rather than rebuilt, so
+the installed binary is byte-identical to the one in the release and reports the
+release version from `nic version`. Before any digest is read, the release's
+`checksums.txt` is cosign-verified against the release workflow's identity, so
+the digests prove authenticity and not merely that two files fetched from the
+same place agree. `packaging/conda/` holds the recipe and the build script;
+`.github/workflows/publish-conda.yml` runs after a successful `Release` run and
+uploads over OIDC trusted publishing. It keys off the Release workflow rather
+than the release event because a release created as published fires that event
+before its assets are attached.
+
+Only stable releases are published, and this is enforced rather than assumed: the
+tag is checked against the release API and a prerelease is refused. That applies
+to manual runs too, which is where it matters - a `release: published` filter
+alone would still let a hand-dispatched release candidate through. (conda also
+forbids `-` in a version string, so a prerelease tag could not be packaged
+unrenamed even if the policy changed.)
+
+**When a release does not appear on the channel**, check in this order:
+
+1. Did `Publish conda packages` run for the tag, and was its `release`
+   environment approval granted? It is a separate workflow from `Release`, so a
+   green release does not imply a published package.
+2. Is the prefix.dev trusted publisher still registered for this repository,
+   workflow and environment? It is configured outside the repository, so nothing
+   here fails a review when it is missing - the upload step is where it surfaces.
+3. Does the release carry `checksums.txt`, its `.sigstore.json` bundle, and all
+   six archives? The build verifies the bundle, reads the sha256 from
+   `checksums.txt`, and fails loudly when either is missing.
+4. Re-run it with `workflow_dispatch` from `main`, naming the tag. Uploads
+   skip filenames the channel already has, so a re-run after a partial upload
+   resumes rather than failing on the first one. This is also how a release
+   published before the workflow existed gets backfilled.
+
+This channel is a bridge. The intended home is prefix.dev's shared
+[`github-releases`](https://prefix.dev/channels/github-releases) channel, which is
+populated by [octoconda](https://redirect.github.com/hunger/octoconda) from our
+published releases and needs no recipe on our side. Onboarding is a one-line
+entry in its `config.toml`, proposed upstream and not yet merged. When it lands,
+`packaging/conda/` and its workflow should be removed and the starter templates
+repointed, rather than kept as a second source of packages.
 
 ## CI
 
