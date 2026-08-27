@@ -31,9 +31,37 @@ credential, and why the password is generated fresh per run rather than
 reused.
 """
 
+from urllib.parse import urlparse
+
 KEYCLOAK_USERNAME_SELECTOR = "#username"
 KEYCLOAK_PASSWORD_SELECTOR = "#password"
 KEYCLOAK_SUBMIT_SELECTOR = "#kc-login"
+
+# How long to wait for the Keycloak login form to appear after navigating.
+# Distinct from the click timeout it replaces: the failure this bounds is
+# "the OIDC redirect never happened", which deserves its own message.
+FORM_TIMEOUT_MS = 30_000
+
+# Path that forces Argo CD to start an OIDC login instead of rendering its
+# own local username/password form.
+#
+# This is PROVISIONAL in the same sense as LONGHORN_UI_MARKER below: no
+# cluster was available to confirm it. The reasoning is that
+# https://argocd.{domain} lands on Argo CD's own /login page, which shows the
+# local login form plus a separate "LOG IN VIA <provider>" button and does
+# NOT auto-redirect, so the Keycloak selectors below never resolve and the
+# journey times out having tested nothing. argocd-server routes /auth/login
+# to its OIDC login handler (the same endpoint the "LOG IN VIA" button links
+# to, and the one `argocd login --sso` drives), so navigating straight there
+# should produce the Keycloak form.
+#
+# What is NOT provisional is that navigating to the bare host is wrong for
+# Argo CD: either it renders the local form (so the journey would submit a
+# Keycloak user to Argo CD's LOCAL login, which is not what it claims to
+# verify) or the click times out. Confirm the exact path on the first run
+# against a live cluster; the journey asserts it ended up back on the Argo CD
+# host and not on Keycloak, so a wrong path fails loudly rather than passing.
+ARGOCD_OIDC_LOGIN_PATH = "/auth/login"
 
 # Positive marker of a successfully rendered Longhorn UI: a nav label from
 # Longhorn's own dashboard sidebar (Dashboard / Volume / Node / Backup /
@@ -59,9 +87,28 @@ def is_access_denied(response_status: int) -> bool:
     return response_status in DENIED_STATUSES
 
 
+def page_host(url: str) -> str:
+    """Lowercased hostname of a URL, or "" when it has none.
+
+    Journeys assert on where the browser ENDED UP, not just on what is
+    rendered there. Being back on the application host, and not on the
+    identity provider's, is the only evidence available from the page that
+    the OIDC round trip actually completed.
+    """
+    return (urlparse(url).hostname or "").lower()
+
+
 def login_via_keycloak(page, url: str, username: str, password: str) -> None:
-    """Drive the Keycloak login form and wait for the redirect to settle."""
+    """Drive the Keycloak login form and wait for the redirect to settle.
+
+    Waits for the username field before filling it. Without that wait a URL
+    that does not redirect to Keycloak (Argo CD's own /login page, a gateway
+    error page) fails on the submit click after the full Playwright timeout,
+    with a message about a missing selector rather than about the redirect
+    that never happened.
+    """
     page.goto(url)
+    page.wait_for_selector(KEYCLOAK_USERNAME_SELECTOR, timeout=FORM_TIMEOUT_MS)
     page.fill(KEYCLOAK_USERNAME_SELECTOR, username)
     page.fill(KEYCLOAK_PASSWORD_SELECTOR, password)
     page.click(KEYCLOAK_SUBMIT_SELECTOR)

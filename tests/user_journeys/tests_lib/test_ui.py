@@ -1,11 +1,15 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from nebari_journeys.ui import (
+    ARGOCD_OIDC_LOGIN_PATH,
     KEYCLOAK_PASSWORD_SELECTOR,
     KEYCLOAK_SUBMIT_SELECTOR,
     KEYCLOAK_USERNAME_SELECTOR,
     is_access_denied,
     login_via_keycloak,
+    page_host,
 )
 
 
@@ -50,3 +54,36 @@ def test_access_denied_recognises_401():
 
 def test_access_denied_is_false_for_success():
     assert is_access_denied(200) is False
+
+
+def test_login_waits_for_the_keycloak_form_before_filling_it():
+    """Without this wait, a URL that does not redirect to Keycloak fails on
+    the submit click after the full Playwright timeout, reporting a missing
+    selector rather than the redirect that never happened."""
+    page = MagicMock()
+    login_via_keycloak(page, "https://x", "u", "p")
+    page.wait_for_selector.assert_called_once()
+    assert page.wait_for_selector.call_args.args[0] == KEYCLOAK_USERNAME_SELECTOR
+
+
+def test_argocd_oidc_login_path_is_not_the_bare_host():
+    """ArgoCD's own /login page renders its LOCAL username/password form and
+    does not auto-redirect to the identity provider, so the journey must
+    navigate to the path that starts the OIDC flow."""
+    assert ARGOCD_OIDC_LOGIN_PATH.startswith("/")
+    assert ARGOCD_OIDC_LOGIN_PATH != "/"
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://argocd.nebari.example/applications", "argocd.nebari.example"),
+        ("https://keycloak.nebari.example/realms/nebari", "keycloak.nebari.example"),
+        ("https://ARGOCD.Nebari.Example/", "argocd.nebari.example"),
+        ("https://longhorn.nebari.example:8443/#/dashboard", "longhorn.nebari.example"),
+        ("about:blank", ""),
+        ("", ""),
+    ],
+)
+def test_page_host_extracts_the_hostname(url, expected):
+    assert page_host(url) == expected
