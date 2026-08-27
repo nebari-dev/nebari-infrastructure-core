@@ -436,16 +436,22 @@ defer cleanup()
 
 | Location | Purpose |
 |----------|---------|
-| `.github/workflows/test.yml` | Runs tests on PRs and pushes |
-| `.github/workflows/lint.yml` | Runs golangci-lint on PRs |
-| `.github/workflows/release.yml` | Creates GitHub releases with binaries |
+| `.github/workflows/ci.yml` | Test, build, lint, vulnerability scan, and workflow/release-config checks on PRs and pushes |
+| `.github/workflows/deployment-tests.yml` | Real-cloud deploy/destroy tests, per provider |
+| `.github/workflows/release.yml` | Builds, signs, and publishes GitHub releases via GoReleaser |
+| `.github/workflows/opentofu-lockfile-pr.yml` | Opens PRs refreshing the OpenTofu lockfile |
+| `.github/workflows/stale.yml` | Labels and closes inactive pull requests |
 
 ### Scripts
 
 | Location | Purpose |
 |----------|---------|
-| `scripts/build.sh` | Multi-platform build script |
-| `scripts/install-tools.sh` | Installs golangci-lint and other dev tools |
+| `scripts/install.sh` | **Published** `curl \| sh` installer for the released `nic` binary. Its URL is a public contract — see [AGENTS.md](AGENTS.md) before renaming or moving it |
+| `scripts/check-installer-contract.sh` | Fails CI when `install.sh` drifts from the release facts it hand-reimplements from `.goreleaser.yml` |
+| `scripts/check-action-pins.sh` | Fails CI on unpinned GitHub Actions or a floating GoReleaser version |
+| `scripts/govulncheck-gate.sh` | Fails CI on vulnerabilities that have a fix available |
+| `scripts/pre-commit-tofu-lock.sh` | Keeps the OpenTofu lockfile in step with the embedded templates |
+| `scripts/verify-tls-proxy.sh` | Checks a deployment behind a TLS-inspecting corporate proxy |
 
 ## Key Architectural Principles
 

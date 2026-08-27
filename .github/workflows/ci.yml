@@ -50,6 +50,13 @@ jobs:
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      # scripts/install.sh is served straight off main to every `curl | sh`
+      # user, so a broken merge reaches them with no release in between. This
+      # lives in Test rather than in the workflow-pins job because Test is
+      # merge-blocking and workflow-pins is not. Offline: the network is stubbed.
+      - name: Test installer script
+        run: ./scripts/test-installer.sh
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
@@ -120,6 +127,9 @@ jobs:
 
       - name: Check action pins
         run: ./scripts/check-action-pins.sh
+
+      - name: Check installer contract
+        run: ./scripts/check-installer-contract.sh
 
       - name: Lint workflow files
         uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1.73.0
