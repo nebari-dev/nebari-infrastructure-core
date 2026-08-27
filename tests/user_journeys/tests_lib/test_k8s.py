@@ -1,6 +1,8 @@
 import re
 from unittest.mock import MagicMock
 
+import pytest
+
 from nebari_journeys import constants
 from nebari_journeys.k8s import (
     ScratchNamespace,
@@ -40,7 +42,9 @@ def test_create_uses_the_generated_name():
 def test_request_volume_sets_size_and_storage_class():
     cluster = MagicMock()
     _ns(cluster).request_volume("data", "5Gi", "longhorn")
-    body = cluster.core.create_namespaced_persistent_volume_claim.call_args.kwargs["body"]
+    body = cluster.core.create_namespaced_persistent_volume_claim.call_args.kwargs[
+        "body"
+    ]
     assert body["spec"]["resources"]["requests"]["storage"] == "5Gi"
     assert body["spec"]["storageClassName"] == "longhorn"
     assert body["spec"]["accessModes"] == ["ReadWriteOnce"]
@@ -49,7 +53,9 @@ def test_request_volume_sets_size_and_storage_class():
 def test_request_volume_labels_the_pvc():
     cluster = MagicMock()
     _ns(cluster).request_volume("data", "5Gi", "longhorn")
-    body = cluster.core.create_namespaced_persistent_volume_claim.call_args.kwargs["body"]
+    body = cluster.core.create_namespaced_persistent_volume_claim.call_args.kwargs[
+        "body"
+    ]
     assert body["metadata"]["labels"][constants.JOURNEY_LABEL_KEY] == "true"
 
 
@@ -88,7 +94,9 @@ def test_sweep_deletes_only_labeled_namespaces():
     )
     assert result.deleted == ["nebari-journey-deadbeef"]
     assert result.skipped == []
-    cluster.core.delete_namespace.assert_called_once_with(name="nebari-journey-deadbeef")
+    cluster.core.delete_namespace.assert_called_once_with(
+        name="nebari-journey-deadbeef"
+    )
 
 
 def test_sweep_is_a_noop_when_nothing_is_stale():
@@ -122,6 +130,75 @@ def test_sweep_deletes_matching_and_skips_non_matching_in_a_mixed_batch():
 
     assert result.deleted == ["nebari-journey-cafef00d"]
     assert result.skipped == ["some-other-namespace"]
-    cluster.core.delete_namespace.assert_called_once_with(name="nebari-journey-cafef00d")
+    cluster.core.delete_namespace.assert_called_once_with(
+        name="nebari-journey-cafef00d"
+    )
     for call in cluster.core.delete_namespace.call_args_list:
         assert call.kwargs["name"] != "some-other-namespace"
+
+
+def _pod(phase, waiting_reason=None, waiting_message=None, ready=False):
+    pod = MagicMock()
+    pod.status.phase = phase
+    pod.status.reason = None
+    condition = MagicMock()
+    condition.type = "Ready"
+    condition.status = "True" if ready else "False"
+    pod.status.conditions = [condition]
+
+    if waiting_reason is None:
+        pod.status.container_statuses = []
+        return pod
+
+    container = MagicMock()
+    container.name = "main"
+    container.state.waiting.reason = waiting_reason
+    container.state.waiting.message = waiting_message
+    container.state.terminated = None
+    pod.status.container_statuses = [container]
+    return pod
+
+
+def _ns_with_pod(pod):
+    cluster = MagicMock()
+    cluster.core.read_namespaced_pod.return_value = pod
+    return ScratchNamespace(cluster, "nebari-journey-abcd1234")
+
+
+def test_wait_pod_ready_returns_when_the_pod_is_ready():
+    ns = _ns_with_pod(_pod("Running", ready=True))
+    assert ns.wait_pod_ready("writer", timeout=1) is None
+
+
+def test_wait_pod_ready_fails_fast_on_image_pull_backoff():
+    """busybox is pulled from Docker Hub on every run. An unpullable image
+    used to surface only as a 180s "pod to be ready" timeout naming nothing."""
+    ns = _ns_with_pod(
+        _pod("Pending", waiting_reason="ImagePullBackOff", waiting_message="429")
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        ns.wait_pod_ready("writer", timeout=30)
+    message = str(excinfo.value)
+    assert "ImagePullBackOff" in message
+    assert "429" in message
+
+
+def test_wait_pod_ready_fails_fast_on_a_failed_pod():
+    ns = _ns_with_pod(_pod("Failed"))
+    with pytest.raises(RuntimeError, match="Failed"):
+        ns.wait_pod_ready("writer", timeout=30)
+
+
+def test_wait_pod_ready_names_the_pod_in_the_failure():
+    ns = _ns_with_pod(_pod("Pending", waiting_reason="CrashLoopBackOff"))
+    with pytest.raises(RuntimeError, match="nebari-journey-abcd1234/writer"):
+        ns.wait_pod_ready("writer", timeout=30)
+
+
+def test_wait_pod_ready_tolerates_a_transient_image_pull_error():
+    """ErrImagePull is the state kubelet passes through before settling into
+    ImagePullBackOff. Failing on it would make one retried pull look like an
+    outage, so it must time out rather than fail fast."""
+    ns = _ns_with_pod(_pod("Pending", waiting_reason="ErrImagePull"))
+    with pytest.raises(TimeoutError):
+        ns.wait_pod_ready("writer", timeout=0)

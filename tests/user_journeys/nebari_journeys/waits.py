@@ -7,9 +7,6 @@ almost useless; the description is the whole point.
 
 import time
 from collections.abc import Callable
-from typing import TypeVar
-
-T = TypeVar("T")
 
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_INTERVAL = 2.0

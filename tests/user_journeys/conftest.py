@@ -10,6 +10,7 @@ fixture defined here would apply to every subdirectory, including
 tests_lib/, which must stay runnable with no cluster available.
 """
 
+
 def pytest_addoption(parser):
     parser.addoption(
         "--keep-namespace",

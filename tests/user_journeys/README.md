@@ -10,7 +10,7 @@ tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
   conftest.py            # only pytest_addoption for --keep-namespace
   nebari_journeys/       # the action library: constants, waits, cluster, trust, k8s, argocd, keycloak, ui
-  tests_lib/              # unit tests OF the library, 95 tests, no cluster needed
+  tests_lib/              # unit tests OF the library, 138 tests, no cluster needed
   journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py
 ```
 
@@ -41,7 +41,7 @@ pixi run fmt                    # ruff format .
 |---|---|
 | `test_smoke.py` | Every foundational ArgoCD app is Synced and Healthy. Runs first, so other failures are interpretable. |
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). |
-| `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). |
+| `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
 
 ## Adding a journey
 
@@ -51,7 +51,12 @@ pixi run fmt                    # ruff format .
 2. **Name the test after the user's goal**, not the mechanism:
    `test_a_users_data_survives_their_pod`, not `test_pvc_rebind`.
 3. **Skip, do not fail, when an optional component is absent.** Call
-   `cluster.require_app("<argocd-app-name>")` first.
+   `cluster.require_app("<argocd-app-name>")` first. Longhorn is the
+   exception: Longhorn core is not an ArgoCD Application (there is no
+   `apps/longhorn.yaml`, only `apps/longhorn-backup.yaml`), so use
+   `cluster.require_longhorn()`, which keys off the `longhorn` StorageClass.
+   Where only part of a journey is Longhorn-specific, gate that part on
+   `cluster.has_longhorn()` so the rest still runs.
 4. **Work inside `scratch_namespace`.** Never create cluster-scoped resources
    and never write outside the namespace.
 5. **Never disable TLS verification.** No `verify=False`, no
@@ -70,6 +75,18 @@ pixi run fmt                    # ruff format .
 other fails the Go build. Add new mirrored constants to both the Python module
 and that test's table.
 
+A name that mirrors Go or a manifest template belongs in `constants.py` and
+nowhere else, so the contract test can see it. Three pinning patterns exist:
+
+| Source | Test |
+|---|---|
+| A Go constant | `TestPythonConstantsMatchGo` |
+| `metadata.name` in a manifest template | `TestPythonResourceNamesMatchTemplates` |
+| A shell literal in `realm-setup-job.yaml` | `TestPythonRealmLiteralsMatchTemplate` |
+
+`TestPythonConstantsEnrollment` fails when a constant is added without landing
+in one of them or being listed as suite-owned.
+
 ## Namespace cleanup
 
 A session-scoped, autouse fixture (`sweep_leftovers` in `journeys/conftest.py`)
@@ -80,13 +97,45 @@ namespace that carries the journey label but does not match the
 `nebari-journey-` prefix, which it deliberately refuses to delete and reports
 as an anomaly for a human to investigate.
 
-## Trust anchor
+## Optional components
 
-The suite never sets `ignore_https_errors` or `verify=False`. Where a gateway
-certificate is not publicly trusted, the trust anchor is read directly from
-the gateway's own TLS secret, `nebari-gateway-tls` in `envoy-gateway-system`
-(NOT `nebari-trust-bundle`), preferring `ca.crt` and falling back to `tls.crt`
-for a self-signed leaf. A missing secret is a legitimate cluster shape (a
+Longhorn is optional. A Nebari cluster on EKS or GKE can run entirely on the
+cloud provider's storage, in which case there is no `longhorn` StorageClass,
+no Longhorn UI, no `longhorn` OIDC client and no `longhorn-admins` group.
+None of that is a failure, so:
+
+- the three storage journeys call `cluster.require_longhorn()` and skip
+- the two Longhorn browser journeys skip
+- the realm group and OIDC client journeys assert the ArgoCD half
+  unconditionally and skip only the Longhorn-specific assertion
+
+The storage journeys request the `longhorn` StorageClass by name rather than
+`cluster.default_storage_class()`. On EKS the default is `gp2`/`gp3` and on
+GKE `standard`, so using the default would silently test the cloud provider's
+provisioner while claiming to test Longhorn's promise.
+
+## Domain and trust anchor discovery
+
+Both the platform domain and the gateway's TLS secret are discovered from the
+cluster, not assumed:
+
+- **Domain** comes from the hostnames of the HTTPRoutes attached to the
+  `nebari-gateway` Gateway (`argocd.<domain>`, `keycloak.<domain>`, ...),
+  falling back to the gateway Certificate's `commonName`. The Certificate is
+  NOT the primary source because it does not exist on every supported shape:
+  with `certificate.type: existing`, NIC never renders
+  `gateway-certificate.yaml`, and reading it first made every journey error
+  at session setup on that shape, the smoke journey included.
+- **Trust anchor** comes from the secret the Gateway's own
+  `listeners[].tls.certificateRefs` names, not from a hardcoded
+  `nebari-gateway-tls` in `envoy-gateway-system`. Both the name and the
+  namespace are operator-configurable (`certificate.secret_name`,
+  `certificate.existing_secret`), and ADR-0017 requires the anchor to follow
+  the operator's secret.
+
+The suite never sets `ignore_https_errors` or `verify=False`. The anchor
+prefers `ca.crt` and falls back to `tls.crt` for a self-signed leaf (NOT
+`nebari-trust-bundle`). A missing secret is a legitimate cluster shape (a
 publicly trusted ACME certificate) and simply falls back to the system trust
 store.
 
@@ -137,6 +186,27 @@ installs under.
   whether this marker is visible), but the marker *string* has not been
   confirmed against a real Longhorn UI. Confirm it on the first run against a
   live cluster and correct it if the sidebar copy differs.
+- **The ArgoCD OIDC login path is an unverified guess.**
+  `ARGOCD_OIDC_LOGIN_PATH = "/auth/login"` in `nebari_journeys/ui.py` is the
+  path the ArgoCD sign-in journey navigates to in order to force the OIDC
+  flow. Navigating to the bare `argocd.<domain>` host is definitely wrong:
+  ArgoCD's own `/login` page renders ArgoCD's LOCAL username/password form
+  plus a separate "LOG IN VIA <provider>" button and does not auto-redirect,
+  so the Keycloak selectors either time out or, worse, submit a Keycloak user
+  to ArgoCD's local login. `/auth/login` is argocd-server's OIDC login
+  handler, but that has not been confirmed against a live cluster. The
+  journey asserts it ended up back on the ArgoCD host and not on Keycloak, so
+  a wrong path fails loudly rather than passing quietly.
+- **The CI trust step's NSS half is unverified.** With the default
+  `selfsigned-issuer`, cert-manager issues a leaf with `CA:FALSE`. OpenSSL
+  generally accepts a self-signed end-entity certificate found in the trust
+  store, so the `requests` path should be fine, but NSS is stricter and
+  Chromium reads NSS. The CI step therefore installs the anchor into BOTH
+  `/usr/local/share/ca-certificates` and the per-user NSS DB via `certutil`,
+  and the NSS half is best-effort so it cannot turn a green run red. If a
+  browser journey fails with `ERR_CERT_AUTHORITY_INVALID`, fix the trust
+  store or give the issuer `isCA: true`. Do not reach for
+  `ignore_https_errors`: it is forbidden here.
 - **The journeys have never been executed against a live cluster.** Every
   journey has been exercised in isolation with tests_lib, but the suite as a
   whole (`journeys/`) has not yet had a run against a real deployed Nebari
