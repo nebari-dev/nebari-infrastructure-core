@@ -10,10 +10,14 @@ import socket
 from collections.abc import Callable
 from pathlib import Path
 
+from kubernetes.client.rest import ApiException
+
 from nebari_journeys import constants
 
 CA_KEY = "ca.crt"
 LEAF_KEY = "tls.crt"
+
+NOT_FOUND_STATUS = 404
 
 
 def trust_anchor_pem(cluster) -> str | None:
@@ -21,19 +25,34 @@ def trust_anchor_pem(cluster) -> str | None:
 
     Prefers ca.crt (present when an issuing CA exists), falls back to
     tls.crt (a selfSigned issuer produces a self-signed leaf, which is
-    its own anchor). Returns None when the secret cannot be read, which
-    is the normal case for a publicly trusted ACME certificate.
+    its own anchor).
+
+    A missing *key* on an existing secret (KeyError) is expected while
+    probing ca.crt before tls.crt, and is not an error. A missing
+    *secret* (ApiException 404) is also a legitimate cluster shape: an
+    operator supplying their own certificate outside cert-manager may
+    have no secret at that name at all, so this returns None and the
+    system trust store is used, the normal case for a publicly trusted
+    ACME certificate. Any other API error (RBAC denial, connection
+    failure, ...) is a real problem the operator needs to see, so it is
+    raised rather than silently downgraded to a confusing TLS failure
+    later.
     """
     for key in (CA_KEY, LEAF_KEY):
         try:
             pem = cluster.secret_value(
                 constants.GATEWAY_NAMESPACE, constants.GATEWAY_TLS_SECRET, key
             )
-        except Exception:  # noqa: BLE001, S112 - any read failure means no
-            # anchor is available (missing key, missing secret, API error);
-            # the safe default is the system trust store, the normal case
-            # for a publicly trusted ACME certificate.
+        except KeyError:
             continue
+        except ApiException as error:
+            if error.status == NOT_FOUND_STATUS:
+                return None
+            raise RuntimeError(
+                f"could not read {key!r} from secret "
+                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_TLS_SECRET}: "
+                f"{error}"
+            ) from error
         if pem and pem.strip():
             return pem
     return None

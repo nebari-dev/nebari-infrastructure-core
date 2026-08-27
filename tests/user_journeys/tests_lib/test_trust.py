@@ -2,6 +2,9 @@ import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from kubernetes.client.rest import ApiException
+
 from nebari_journeys.trust import (
     chromium_args,
     install_dns_mapping,
@@ -38,8 +41,25 @@ def test_trust_anchor_falls_back_to_tls_crt_when_no_ca_crt():
 
 def test_trust_anchor_is_none_when_the_secret_is_absent():
     cluster = MagicMock()
-    cluster.secret_value.side_effect = Exception("not found")
+    cluster.secret_value.side_effect = ApiException(status=404, reason="Not Found")
     assert trust_anchor_pem(cluster) is None
+
+
+def test_trust_anchor_403_propagates_and_names_the_secret():
+    cluster = MagicMock()
+    cluster.secret_value.side_effect = ApiException(status=403, reason="Forbidden")
+    with pytest.raises(RuntimeError) as excinfo:
+        trust_anchor_pem(cluster)
+    assert "nebari-gateway-tls" in str(excinfo.value)
+
+
+def test_trust_anchor_connection_error_propagates():
+    cluster = MagicMock()
+    cluster.secret_value.side_effect = ApiException(
+        status=500, reason="Internal Server Error"
+    )
+    with pytest.raises(RuntimeError):
+        trust_anchor_pem(cluster)
 
 
 def test_write_trust_anchor_returns_none_for_none(tmp_path):
@@ -75,6 +95,20 @@ def test_install_dns_mapping_redirects_matching_hosts_and_undoes_cleanly():
     finally:
         undo()
     assert socket.getaddrinfo is original
+
+
+def test_install_dns_mapping_does_not_capture_lookalike_domains():
+    """`nebari.local` must not match `evil-nebari.local`: a substring match
+    here would silently redirect unrelated hosts to the gateway."""
+    undo = install_dns_mapping("nebari.local", "10.0.0.5")
+    try:
+        infos = socket.getaddrinfo("evil-nebari.local", 443)
+    except socket.gaierror:
+        pass  # not resolving at all is fine; it was not mapped
+    else:
+        assert all(info[4][0] != "10.0.0.5" for info in infos)
+    finally:
+        undo()
 
 
 def test_chromium_args_are_empty_when_no_mapping_is_needed():
