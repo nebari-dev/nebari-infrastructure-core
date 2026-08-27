@@ -113,15 +113,40 @@ jobs:
       - name: Install cluster trust anchor for Chromium
         # Chromium never trusts a custom CA through a Playwright context
         # option (ignore_https_errors is forbidden in this suite); it reads
-        # the OS/NSS trust store instead. On the GitHub-hosted Ubuntu
-        # runner, update-ca-certificates also feeds NSS through p11-kit,
-        # which is what Chromium reads, so this step is what makes a
-        # selfsigned gateway certificate trusted for the browser journeys
+        # the OS/NSS trust store instead. The INTENT of this step is to make
+        # a selfsigned gateway certificate trusted for the browser journeys
         # without weakening TLS anywhere. It reuses
         # nebari_journeys.trust.trust_anchor_pem so the CI path and the
-        # trust_anchor fixture agree on which key (ca.crt, then tls.crt)
-        # is the anchor. When neither key exists, the gateway certificate
-        # is publicly trusted (ACME) and the system store is left as-is.
+        # trust_anchor fixture agree on which key (ca.crt, then tls.crt) is
+        # the anchor, and on which secret the gateway actually references.
+        # When neither key exists, the gateway certificate is publicly
+        # trusted (ACME) and the system store is left as-is.
+        #
+        # The anchor is installed in two places because it is NOT confirmed
+        # which one a bundled Playwright Chromium reads on a GitHub-hosted
+        # runner:
+        #
+        #   1. /usr/local/share/ca-certificates + update-ca-certificates,
+        #      which is what OpenSSL (and therefore the requests-based
+        #      journeys) reads. update-ca-certificates is also believed to
+        #      feed NSS via p11-kit, but that is an assumption, not a
+        #      verified fact for this image.
+        #   2. The per-user NSS DB at ~/.pki/nssdb via certutil, which is
+        #      Playwright's own documented mechanism. NSS is stricter than
+        #      OpenSSL about trusting a self-signed END-ENTITY certificate:
+        #      the default selfsigned-issuer (plain selfSigned: {}) makes
+        #      cert-manager issue a leaf with CA:FALSE, which NSS may refuse
+        #      without an explicit trust record. "C,," records it as a
+        #      trusted server CA, which is the closest available.
+        #
+        # If a browser journey still fails with ERR_CERT_AUTHORITY_INVALID,
+        # fix the trust store or give the issuer isCA: true. Do NOT reach for
+        # ignore_https_errors: it is forbidden in this suite.
+        #
+        # The NSS half is best-effort. It creates the DB when absent and
+        # warns rather than failing when certutil cannot import, so a trust
+        # mechanism that turns out to be unnecessary cannot turn a green run
+        # red.
         run: |
           set -euo pipefail
           cd tests/user_journeys
@@ -131,12 +156,31 @@ jobs:
           anchor = trust_anchor_pem(Cluster.connect())
           print(anchor or "", end="")
           ')"
-          if [ -n "$pem" ]; then
-            echo "$pem" | sudo tee /usr/local/share/ca-certificates/nebari-gateway.crt > /dev/null
-            sudo update-ca-certificates
-          else
+          if [ -z "$pem" ]; then
             echo "no gateway CA secret found; using the system trust store as-is"
+            exit 0
           fi
+
+          echo "$pem" | sudo tee /usr/local/share/ca-certificates/nebari-gateway.crt > /dev/null
+          sudo update-ca-certificates
+
+          if ! command -v certutil > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq libnss3-tools
+          fi
+
+          nssdb="$HOME/.pki/nssdb"
+          mkdir -p "$nssdb"
+          if [ ! -f "$nssdb/cert9.db" ]; then
+            certutil -d "sql:$nssdb" -N --empty-password \
+              || echo "WARNING: could not create the NSS DB at $nssdb"
+          fi
+          echo "$pem" > /tmp/nebari-gateway.crt
+          certutil -d "sql:$nssdb" -A -t "C,," -n nebari-gateway \
+            -i /tmp/nebari-gateway.crt \
+            || echo "WARNING: could not import the anchor into NSS at $nssdb; \
+          browser journeys may fail with ERR_CERT_AUTHORITY_INVALID"
+          rm -f /tmp/nebari-gateway.crt
 
       - name: Run user journey tests
         run: make test-journeys
