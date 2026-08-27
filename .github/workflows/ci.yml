@@ -142,11 +142,16 @@ jobs:
         run: make test-journeys
 
       - name: Upload journey failure artifacts
-        # Retention is deliberately short: a Playwright trace from a failed
-        # login journey can contain the throwaway user's password.
-        # Playwright has no trace redaction API, so short retention plus
-        # throwaway credentials (scratch_user, not admin credentials) are
-        # the control here, not a convenience setting.
+        # The `test` pixi task (see pixi.toml) passes --tracing=retain-on-failure,
+        # --screenshot=only-on-failure and --video=retain-on-failure, so a
+        # trace, screenshot and video land in test-results/ only for a
+        # failing browser journey. Retention is deliberately short: a
+        # Playwright trace from a failed login journey can contain the
+        # throwaway user's password, and Playwright has no trace redaction
+        # API, so short retention plus throwaway credentials (scratch_user,
+        # not admin credentials) are the actual control here, not a
+        # convenience setting. Do not raise retention-days without also
+        # solving redaction.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

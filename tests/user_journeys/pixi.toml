@@ -19,7 +19,7 @@ nebari_journeys = { path = ".", editable = true }
 install-browsers = "playwright install chromium"
 test-lib = "pytest tests_lib -v"
 test-api = "pytest journeys -v -m 'not ui'"
-test = { cmd = "pytest journeys -v", depends-on = ["install-browsers"] }
+test = { cmd = "pytest journeys -v --tracing=retain-on-failure --screenshot=only-on-failure --video=retain-on-failure", depends-on = ["install-browsers"] }
 
 [feature.dev.dependencies]
 ruff = "*"

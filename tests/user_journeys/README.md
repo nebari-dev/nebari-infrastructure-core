@@ -103,11 +103,22 @@ Chromium journeys, rather than reaching for `ignore_https_errors`.
 
 The suite needs a near-cluster-admin kubeconfig: it reads platform admin
 credentials and creates namespaces. Treat its kubeconfig as a cluster-admin
-credential. Failure artifacts are retained for three days because browser
-traces from a login journey are a credential-leak vector: Playwright has no
-trace redaction API, so short retention plus throwaway credentials
-(`scratch_user`, not admin credentials, wherever a journey can use one) are
-the actual control.
+credential.
+
+The `test` pixi task (the only one that launches a browser) runs with
+`--tracing=retain-on-failure --screenshot=only-on-failure
+--video=retain-on-failure`, so a trace, screenshot and video are captured
+only when a browser journey fails, landing in `test-results/`. In CI these
+are uploaded only when the job fails and are retained for three days, then
+deleted. `test-api` and `test-lib` never launch a browser and capture
+nothing.
+
+That short retention window is deliberate, not a default left unconsidered: a
+Playwright trace or video from a failed login journey can contain the
+throwaway user's password, and Playwright has no trace redaction API. Short
+retention plus throwaway credentials (`scratch_user`, not admin credentials,
+wherever a journey can use one) are the actual control. Do not raise
+`retention-days` without first solving redaction.
 
 ## Dependencies
 
