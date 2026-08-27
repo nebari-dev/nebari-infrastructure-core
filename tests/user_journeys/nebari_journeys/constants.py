@@ -24,6 +24,9 @@ GATEWAY_LABEL_SELECTOR = "gateway.envoyproxy.io/owning-gateway-name=nebari-gatew
 # pkg/config/config.go
 GATEWAY_TLS_SECRET = "nebari-gateway-tls"  # noqa: S105
 
+# pkg/argocd/templates/manifests/security/certificates/gateway-certificate.yaml
+GATEWAY_CERTIFICATE_NAME = "nebari-gateway-cert"
+
 # pkg/argocd/templates/manifests/keycloak/realm-setup-job.yaml
 REALM_NAME = "nebari"
 LONGHORN_ADMINS_GROUP = "longhorn-admins"

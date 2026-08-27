@@ -100,6 +100,5 @@ def test_has_app_is_false_when_absent():
 def test_require_app_skips_when_absent():
     custom = MagicMock()
     custom.list_namespaced_custom_object.return_value = {"items": []}
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(pytest.skip.Exception, match="longhorn-backup"):
         _cluster(custom=custom).require_app("longhorn-backup")
-    assert "longhorn-backup" in str(excinfo.value)

@@ -24,6 +24,7 @@ from nebari_journeys import constants
             "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway",
         ),
         ("GATEWAY_TLS_SECRET", "nebari-gateway-tls"),
+        ("GATEWAY_CERTIFICATE_NAME", "nebari-gateway-cert"),
         ("REALM_NAME", "nebari"),
         ("LONGHORN_ADMINS_GROUP", "longhorn-admins"),
         ("JOURNEY_LABEL_KEY", "nebari.dev/test-journey"),

@@ -88,6 +88,7 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 		"REALM_ADMIN_SECRET", "REALM_ADMIN_PASSWORD_KEY",
 		"LONGHORN_OIDC_CLIENT_SECRET", "PART_OF_LABEL", "FOUNDATIONAL_PART_OF",
 		"GATEWAY_NAMESPACE", "GATEWAY_LABEL_SELECTOR", "GATEWAY_TLS_SECRET",
+		"GATEWAY_CERTIFICATE_NAME",
 	} {
 		enrolled[name] = true
 	}
@@ -99,5 +100,62 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 				"Add a row so it cannot drift, or mark it suite-owned. "+
 				"See %s", name, pythonConstantsPath)
 		}
+	}
+}
+
+// extractYAMLName extracts the metadata.name literal from a manifest template.
+// The templates are Go text/template files with a static metadata.name, so a
+// simple regex is sufficient; there is no templated value in that field.
+func extractYAMLName(t *testing.T, path string) string {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	re := regexp.MustCompile(`(?m)^\s*name:\s*(\S+)\s*$`)
+	m := re.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("no metadata.name found in %s; the template may have changed", path)
+	}
+	return m[1]
+}
+
+// TestPythonGatewayCertificateNameMatchesTemplate fails when the gateway
+// Certificate's hardcoded name drifts between the manifest template that
+// deploys it and the Python constant the journey suite reads it by. The
+// suite has no other way to find the Certificate: it is looked up by this
+// exact name, so a silent rename here breaks domain() on every real cluster.
+func TestPythonGatewayCertificateNameMatchesTemplate(t *testing.T) {
+	tests := []struct {
+		name         string
+		templatePath string
+		pythonName   string
+	}{
+		{
+			name:         "gateway certificate name",
+			templatePath: "templates/manifests/security/certificates/gateway-certificate.yaml",
+			pythonName:   "GATEWAY_CERTIFICATE_NAME",
+		},
+	}
+
+	python := parsePythonConstants(t, pythonConstantsPath)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			templateName := extractYAMLName(t, tt.templatePath)
+
+			pythonValue, ok := python[tt.pythonName]
+			if !ok {
+				t.Fatalf("%s missing from %s", tt.pythonName, pythonConstantsPath)
+			}
+
+			if templateName != pythonValue {
+				t.Errorf("%s = %q in %s, %q in %s",
+					tt.pythonName, templateName, tt.templatePath,
+					pythonValue, pythonConstantsPath)
+			}
+		})
 	}
 }

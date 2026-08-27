@@ -10,7 +10,8 @@ import base64
 from dataclasses import dataclass
 
 import pytest
-from kubernetes import client, config as kubeconfig
+from kubernetes import client
+from kubernetes import config as kubeconfig
 
 from nebari_journeys import constants
 from nebari_journeys.waits import wait_for_value
@@ -22,7 +23,6 @@ ARGOCD_PLURAL = "applications"
 CERTMANAGER_GROUP = "cert-manager.io"
 CERTMANAGER_VERSION = "v1"
 CERTIFICATE_PLURAL = "certificates"
-GATEWAY_CERTIFICATE_NAME = "nebari-gateway-cert"
 
 
 @dataclass
@@ -36,7 +36,7 @@ class Cluster:
     def connect(cls) -> "Cluster":
         try:
             kubeconfig.load_kube_config()
-        except Exception:
+        except kubeconfig.ConfigException:
             kubeconfig.load_incluster_config()
         return cls(core=client.CoreV1Api(), custom=client.CustomObjectsApi())
 
@@ -91,12 +91,12 @@ class Cluster:
             version=CERTMANAGER_VERSION,
             namespace=constants.GATEWAY_NAMESPACE,
             plural=CERTIFICATE_PLURAL,
-            name=GATEWAY_CERTIFICATE_NAME,
+            name=constants.GATEWAY_CERTIFICATE_NAME,
         )
         common_name = cert.get("spec", {}).get("commonName")
         if not common_name:
             raise ValueError(
-                f"{GATEWAY_CERTIFICATE_NAME} has no spec.commonName; "
+                f"{constants.GATEWAY_CERTIFICATE_NAME} has no spec.commonName; "
                 "cannot determine the platform domain"
             )
         return common_name
