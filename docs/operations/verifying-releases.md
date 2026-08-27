@@ -55,7 +55,7 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
    the `release` environment. Publishing uses OIDC, so there is no token to
    store, but there is also nothing in the repository that fails when the
    registration is missing or wrong. It surfaces only as a failed upload at the
-   end of the `Publish conda packages` job. See
+   end of the `Publish to prefix.dev` job. See
    [packaging.md](packaging.md#the-conda-channel).
 
 3. **Create the `quay-publish` environment** with required reviewers, and move

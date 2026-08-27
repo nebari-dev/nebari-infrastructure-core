@@ -69,8 +69,8 @@ jobs:
   # executes on the default branch, so the tag has to be threaded through and the
   # checkout pinned by hand; as jobs in this run, github.ref IS the tag and the
   # ordering is a `needs:` edge rather than an event relationship.
-  publish-conda:
-    name: Publish conda packages
+  publish-prefix-dev:
+    name: Publish to prefix.dev
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -145,7 +145,7 @@ jobs:
     name: Publish starters to quay.io
     # The starters pin nic as a conda dependency, so `pixi lock` below cannot
     # resolve until the upload above has happened.
-    needs: publish-conda
+    needs: publish-prefix-dev
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # NOTE: this environment does not exist yet, and the Quay credentials are

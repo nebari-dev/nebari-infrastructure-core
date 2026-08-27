@@ -107,7 +107,7 @@ release version from `nic version`. Before any digest is read, the release's
 `checksums.txt` is cosign-verified against the release workflow's identity, so
 the digests prove authenticity and not merely that two files fetched from the
 same place agree. `packaging/conda/` holds the recipe and the build script;
-The `publish-conda` job in `.github/workflows/release.yml` runs after the release
+The `publish-prefix-dev` job in `.github/workflows/release.yml` runs after the release
 itself and uploads over OIDC trusted publishing. It lives in that workflow rather
 than one of its own so that it runs on the tag, after the assets exist: a release
 created as published fires the release event about twenty minutes before
@@ -126,7 +126,7 @@ unrenamed even if the policy changed.)
 
 **When a release does not appear on the channel**, check in this order:
 
-1. Did `Publish conda packages` run for the tag, and was its `release`
+1. Did `Publish to prefix.dev` run for the tag, and was its `release`
    environment approval granted? It is a separate workflow from `Release`, so a
    green release does not imply a published package.
 2. Is the prefix.dev trusted publisher still registered for this repository,

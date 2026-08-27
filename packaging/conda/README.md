@@ -28,7 +28,7 @@ entry, or a bundle that does not verify, fails the build.
 | `recipe.yaml.tmpl` | The recipe, with `__PLACEHOLDER__` slots. Not a standalone recipe |
 | `build-packages.sh` | Renders and builds it once per conda subdir |
 
-The `publish-conda` job in `.github/workflows/release.yml` runs the script on
+The `publish-prefix-dev` job in `.github/workflows/release.yml` runs the script on
 every stable release, uploads the results, and is followed by `publish-starters`,
 which cannot lock until that upload has happened.
 
