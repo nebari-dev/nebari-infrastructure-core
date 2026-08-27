@@ -140,7 +140,7 @@ jobs:
     name: Publish starters to quay.io
     needs: validate-starters
     # Tag builds only, and deliberately NOT workflow_dispatch. A dispatch can
-    # target any ref: from a branch it would publish starter-*:vmain (and pin a
+    # target any ref: from a branch it would publish starters/*:vmain (and pin a
     # version from the PREVIOUS tag, since cmd/starters reads git describe),
     # and from an existing tag it would overwrite a released bundle - the exact
     # rewrite the trigger comment above says must never happen. Deployment-branch
