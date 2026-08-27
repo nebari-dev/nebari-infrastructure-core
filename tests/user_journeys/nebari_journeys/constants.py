@@ -9,11 +9,11 @@ without the other fails the build. Do not add logic to this module.
 KEYCLOAK_NAMESPACE = "keycloak"
 NEBARI_SYSTEM_NAMESPACE = "nebari-system"
 LONGHORN_NAMESPACE = "longhorn-system"
-KEYCLOAK_ADMIN_SECRET = "keycloak-admin-credentials"  # noqa: S105
-KEYCLOAK_ADMIN_PASSWORD_KEY = "admin-password"  # noqa: S105
-REALM_ADMIN_SECRET = "nebari-realm-admin-credentials"  # noqa: S105
-REALM_ADMIN_PASSWORD_KEY = "password"  # noqa: S105
-LONGHORN_OIDC_CLIENT_SECRET = "longhorn-oidc-client-secret"  # noqa: S105
+KEYCLOAK_ADMIN_SECRET = "keycloak-admin-credentials"
+KEYCLOAK_ADMIN_PASSWORD_KEY = "admin-password"
+REALM_ADMIN_SECRET = "nebari-realm-admin-credentials"
+REALM_ADMIN_PASSWORD_KEY = "password"
+LONGHORN_OIDC_CLIENT_SECRET = "longhorn-oidc-client-secret"
 PART_OF_LABEL = "app.kubernetes.io/part-of"
 FOUNDATIONAL_PART_OF = "nebari-foundational"
 
@@ -22,7 +22,7 @@ GATEWAY_NAMESPACE = "envoy-gateway-system"
 GATEWAY_LABEL_SELECTOR = "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway"
 
 # pkg/config/config.go
-GATEWAY_TLS_SECRET = "nebari-gateway-tls"  # noqa: S105
+GATEWAY_TLS_SECRET = "nebari-gateway-tls"
 
 # pkg/argocd/templates/manifests/security/certificates/gateway-certificate.yaml
 GATEWAY_CERTIFICATE_NAME = "nebari-gateway-cert"

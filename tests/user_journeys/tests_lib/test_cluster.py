@@ -1,7 +1,8 @@
 import base64
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+from kubernetes.config import ConfigException
 
 from nebari_journeys import constants
 from nebari_journeys.cluster import Cluster
@@ -102,3 +103,20 @@ def test_require_app_skips_when_absent():
     custom.list_namespaced_custom_object.return_value = {"items": []}
     with pytest.raises(pytest.skip.Exception, match="longhorn-backup"):
         _cluster(custom=custom).require_app("longhorn-backup")
+
+
+def test_connect_error_names_both_the_kubeconfig_and_incluster_failures():
+    with (
+        patch(
+            "nebari_journeys.cluster.kubeconfig.load_kube_config",
+            side_effect=ConfigException("bad kubeconfig"),
+        ),
+        patch(
+            "nebari_journeys.cluster.kubeconfig.load_incluster_config",
+            side_effect=ConfigException("no service host"),
+        ),
+        pytest.raises(ConfigException) as excinfo,
+    ):
+        Cluster.connect()
+    assert "bad kubeconfig" in str(excinfo.value)
+    assert "no service host" in str(excinfo.value)

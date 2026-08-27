@@ -36,9 +36,21 @@ class Cluster:
     def connect(cls) -> "Cluster":
         try:
             kubeconfig.load_kube_config()
-        except kubeconfig.ConfigException:
-            kubeconfig.load_incluster_config()
-        return cls(core=client.CoreV1Api(), custom=client.CustomObjectsApi())
+        except kubeconfig.ConfigException as kubeconfig_error:
+            # Running inside the cluster is legitimate, so fall back. But if
+            # that fails too, the kubeconfig problem is almost always the
+            # real cause, and reporting only the in-cluster failure hides it.
+            try:
+                kubeconfig.load_incluster_config()
+            except kubeconfig.ConfigException as incluster_error:
+                raise kubeconfig.ConfigException(
+                    f"could not load a kubeconfig ({kubeconfig_error}) and no "
+                    f"in-cluster config is available ({incluster_error})"
+                ) from kubeconfig_error
+        return cls(
+            core=client.CoreV1Api(),
+            custom=client.CustomObjectsApi(),
+        )
 
     def secret_value(self, namespace: str, name: str, key: str) -> str:
         secret = self.core.read_namespaced_secret(name=name, namespace=namespace)

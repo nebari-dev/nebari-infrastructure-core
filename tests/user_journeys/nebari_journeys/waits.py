@@ -6,7 +6,8 @@ almost useless; the description is the whole point.
 """
 
 import time
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -33,7 +34,7 @@ def wait_for_condition(
         time.sleep(interval)
 
 
-def wait_for_value(
+def wait_for_value[T](
     fetch: Callable[[], T | None],
     *,
     timeout: float = DEFAULT_TIMEOUT,
