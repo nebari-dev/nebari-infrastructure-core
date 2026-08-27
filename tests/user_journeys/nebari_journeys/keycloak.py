@@ -127,10 +127,15 @@ class Keycloak:
             timeout=30,
         )
         response.raise_for_status()
+        location = response.headers.get("Location")
+        if location is None:
+            raise RuntimeError(
+                f"Keycloak did not return a Location header when creating user "
+                f"{username!r}, so the new user id could not be determined"
+            )
         # Keycloak's Location header may or may not carry a trailing slash
         # depending on version/proxy; strip it before taking the last segment.
-        location = response.headers["Location"].rstrip("/")
-        return location.rsplit("/", 1)[-1]
+        return location.rstrip("/").rsplit("/", 1)[-1]
 
     def delete_user(self, user_id: str) -> None:
         response = self.session.delete(

@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from nebari_journeys.keycloak import Keycloak, generated_password
 
 
@@ -98,6 +100,46 @@ def test_client_returns_none_when_absent():
     session = MagicMock()
     session.get.return_value.json.return_value = []
     assert _kc(session).client("missing") is None
+
+
+def test_group_id_returns_the_matching_groups_id():
+    session = MagicMock()
+    session.get.return_value.json.return_value = [
+        {"name": "everyone", "id": "group-1"},
+        {"name": "longhorn-admins", "id": "group-2"},
+    ]
+    kc = _kc(session)
+    assert kc.group_id("longhorn-admins") == "group-2"
+
+
+def test_group_id_returns_none_when_absent():
+    session = MagicMock()
+    session.get.return_value.json.return_value = [
+        {"name": "everyone", "id": "group-1"},
+    ]
+    kc = _kc(session)
+    assert kc.group_id("missing") is None
+
+
+def test_add_user_to_group_puts_to_the_resolved_group_url():
+    session = MagicMock()
+    session.get.return_value.json.return_value = [
+        {"name": "longhorn-admins", "id": "group-2"},
+    ]
+    kc = _kc(session)
+    kc.add_user_to_group("user-123", "longhorn-admins")
+    url = session.put.call_args.args[0]
+    assert url.endswith("/users/user-123/groups/group-2")
+    assert session.put.call_args.kwargs["verify"] == "/tmp/ca.pem"
+
+
+def test_add_user_to_group_raises_value_error_naming_the_group_when_absent():
+    session = MagicMock()
+    session.get.return_value.json.return_value = []
+    kc = _kc(session)
+    with pytest.raises(ValueError, match="missing-group"):
+        kc.add_user_to_group("user-123", "missing-group")
+    session.put.assert_not_called()
 
 
 def test_repr_never_exposes_the_password():

@@ -108,5 +108,5 @@ def scratch_user(keycloak):
     finally:
         try:
             keycloak.delete_user(user_id)
-        except requests.exceptions.RequestException as exc:
+        except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
             print(f"failed to delete scratch user {username}: {exc}")
