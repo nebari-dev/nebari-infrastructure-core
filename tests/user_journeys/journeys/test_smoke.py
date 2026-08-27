@@ -4,6 +4,8 @@ Runs first. If this fails alongside a journey, the cluster is broken;
 if only a journey fails, that feature is broken.
 """
 
+import warnings
+
 from nebari_journeys.argocd import foundational_applications
 
 
@@ -17,7 +19,7 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
 
     Plain `OutOfSync` does NOT fail this journey: ArgoCD reports it for
     trivial, insignificant drift while the app is genuinely Healthy and
-    working (see ADR-0017). Drift is still made visible, printed rather
+    working (see ADR-0017). Drift is still made visible via a warning rather
     than asserted on, so it stays discoverable every run without training
     people to ignore a red suite. A GENUINE sync error -- the sync
     operation itself erroring or failing, or ArgoCD being unable to even
@@ -33,9 +35,11 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
 
     drifted = [a.name for a in apps if not a.is_synced()]
     if drifted:
-        print(
+        warnings.warn(
             "foundational applications are OutOfSync (not failing this journey; "
-            "see ADR-0017): " + ", ".join(drifted)
+            "see ADR-0017): " + ", ".join(drifted),
+            UserWarning,
+            stacklevel=2,
         )
 
     unhealthy = [
