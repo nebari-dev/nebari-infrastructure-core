@@ -56,3 +56,13 @@ def test_timeout_is_enforced_not_merely_counted():
             lambda: False, timeout=0.1, interval=0.01, description="bounded"
         )
     assert time.monotonic() - start < 1.0
+
+
+@pytest.mark.parametrize("falsy", [0, "", False, []])
+def test_wait_for_value_returns_falsy_values_that_are_not_none(falsy):
+    """A regression guard: `if value:` instead of `if value is not None:`
+    would silently treat these as not-ready and time out."""
+    got = wait_for_value(
+        lambda: falsy, timeout=0.05, interval=0.01, description="falsy value"
+    )
+    assert got == falsy
