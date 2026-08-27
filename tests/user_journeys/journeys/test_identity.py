@@ -7,7 +7,7 @@ before any journey that assumes a working sign-in.
 import pytest
 
 from nebari_journeys import constants
-from nebari_journeys.ui import is_access_denied, login_via_keycloak
+from nebari_journeys.ui import LONGHORN_UI_MARKER, is_access_denied, login_via_keycloak
 
 
 def test_platform_promises_a_configured_nebari_realm(keycloak):
@@ -72,26 +72,33 @@ def test_longhorn_ui_refuses_a_user_outside_the_admins_group(
     When they drift, this fails open, which is a security problem rather than
     an outage, so nothing else would catch it.
 
-    Denial detection here is PROVISIONAL. No live cluster was available to
-    observe how Envoy's SecurityPolicy actually renders a denial for this
-    platform: it may respond with a 401/403 status somewhere in the
-    navigation chain, or it may return 200 with a redirect to an error page
-    or a denial message rendered in the body. Both shapes are checked below
-    so the first person to run this against a real cluster can see which
-    one fires and tighten the assertion in one pass. There is no
-    `page.context.last_status`; status has to come from the Response object
-    `page.goto()` returns.
+    Detection is keyed off a POSITIVE marker of the Longhorn UI having
+    rendered (`LONGHORN_UI_MARKER`), not off guessing the wording of a
+    denial. A substring search for "denied" in `page.content()` (raw HTML,
+    including bundled JavaScript) was tried first and rejected: Longhorn's
+    SPA bundle can plausibly contain that word in its own client-side error
+    handling even when the page renders normally for an admitted user, so
+    that check could pass while access was in fact granted -- exactly the
+    fail-open this journey exists to catch. Asserting the marker's ABSENCE
+    means a fail-open (the UI actually rendering) makes the marker appear
+    and the test correctly fails.
 
-    `login_via_keycloak` performs its own internal navigation and, per its
-    documented signature, returns None, so it cannot hand back the response
-    from whatever redirect happens after a denied login. `status` below is
-    therefore only the response to the *pre-login* request, which for a
-    working OIDC flow is ordinarily a 200 (the Keycloak login page). If the
-    platform denies access with an HTTP status rather than a rendered
-    message, it most likely appears on the post-login redirect instead,
-    which this cannot observe without a live cluster to confirm the shape
-    against. The body-content check is the more load-bearing half of this
-    assertion until that is confirmed.
+    The marker is matched against `page.inner_text("body")` (visible
+    rendered text), not raw HTML, so a string sitting in an unrendered
+    script bundle can never satisfy it.
+
+    Only the exact marker STRING in `LONGHORN_UI_MARKER` is provisional and
+    needs confirming against a live Longhorn UI on first run; the detection
+    logic itself (assert absence of a real positive signal) is sound
+    regardless of that string.
+
+    `status` is NOT part of the pass/fail decision: `login_via_keycloak`
+    returns None and performs its own internal navigation, so `status`
+    below only ever reflects the pre-login response (ordinarily 200, the
+    Keycloak login page), not whatever happens on any post-login redirect.
+    It is structurally incapable of independently signalling denial. It is
+    kept only as extra diagnostic evidence in the failure message. There is
+    no `page.context.last_status`; the Response comes from `page.goto()`.
     """
     response = page.goto(f"https://longhorn.{platform_domain}")
     login_via_keycloak(
@@ -101,13 +108,13 @@ def test_longhorn_ui_refuses_a_user_outside_the_admins_group(
         scratch_user["password"],
     )
     status = response.status if response is not None else None
-    content = page.content().lower()
+    visible_text = page.inner_text("body")
 
-    denied = (status is not None and is_access_denied(status)) or "denied" in content
-    assert denied, (
+    assert LONGHORN_UI_MARKER not in visible_text, (
         f"a user outside {constants.LONGHORN_ADMINS_GROUP} reached the Longhorn UI "
-        f"(final url={page.url!r}, status={status!r}, "
-        f"body excerpt={content[:200]!r})"
+        f"(final url={page.url!r}, pre-login status={status!r} "
+        f"[diagnostic only, likely denied={is_access_denied(status) if status else 'n/a'}], "
+        f"body excerpt={visible_text[:200]!r})"
     )
 
 
@@ -115,6 +122,13 @@ def test_longhorn_ui_refuses_a_user_outside_the_admins_group(
 def test_longhorn_ui_admits_a_user_in_the_admins_group(
     page, platform_domain, scratch_user, keycloak
 ):
+    """Asserts the POSITIVE marker is present, so a failed login, a stuck
+    Keycloak page, or a network error page -- none of which contain
+    "denied" either -- now fail this test instead of silently passing it.
+    See the sibling denial test for why a positive marker was chosen over
+    a substring search, and why the marker string needs confirming against
+    a live Longhorn UI on first run.
+    """
     keycloak.add_user_to_group(scratch_user["id"], constants.LONGHORN_ADMINS_GROUP)
 
     login_via_keycloak(
@@ -124,6 +138,8 @@ def test_longhorn_ui_admits_a_user_in_the_admins_group(
         scratch_user["password"],
     )
 
-    assert "denied" not in page.content().lower(), (
-        f"a member of {constants.LONGHORN_ADMINS_GROUP} was refused the Longhorn UI"
+    visible_text = page.inner_text("body")
+    assert LONGHORN_UI_MARKER in visible_text, (
+        f"a member of {constants.LONGHORN_ADMINS_GROUP} was refused the Longhorn UI "
+        f"(final url={page.url!r}, body excerpt={visible_text[:200]!r})"
     )

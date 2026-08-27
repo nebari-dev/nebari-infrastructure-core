@@ -35,6 +35,23 @@ KEYCLOAK_USERNAME_SELECTOR = "#username"
 KEYCLOAK_PASSWORD_SELECTOR = "#password"
 KEYCLOAK_SUBMIT_SELECTOR = "#kc-login"
 
+# Positive marker of a successfully rendered Longhorn UI: a nav label from
+# Longhorn's own dashboard sidebar (Dashboard / Volume / Node / Backup /
+# Recurring Job / Setting), chosen because "Recurring Job" is an unusual
+# two-word compound that a Keycloak login page, a gateway error page, or a
+# generic "access denied" message is very unlikely to contain by accident.
+#
+# The STRING is provisional and MUST be confirmed against a live Longhorn
+# UI on first real run: no cluster was available while writing this, so
+# this is a reasoned guess about Longhorn's actual sidebar copy, not an
+# observation. What is NOT provisional is the detection logic itself
+# (assert the marker's presence for an admitted user, assert its absence
+# for a denied one) -- that shape is sound regardless of which exact
+# string ends up being right, and is deliberately keyed off a real,
+# positive signal of Longhorn having rendered rather than off guessing the
+# wording of a denial.
+LONGHORN_UI_MARKER = "Recurring Job"
+
 DENIED_STATUSES = frozenset({401, 403})
 
 
