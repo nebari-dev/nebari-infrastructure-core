@@ -50,6 +50,37 @@ def platform_domain(cluster) -> str:
 
 
 @pytest.fixture(scope="session")
+def gateway_reachable(platform_domain, gateway_address) -> bool:
+    """Probe the gateway ONCE per session and fail every journey that
+    needs it with a single precise diagnosis, instead of letting each one
+    independently burn a 30 second connect timeout discovering the same
+    unreachable address.
+
+    Deliberately NOT autouse: test_smoke.py and the storage journeys talk
+    to the Kubernetes API only and must keep running when the gateway is
+    unroutable. Only fixtures that actually need gateway HTTP access
+    (keycloak, and anything downstream of it) depend on this.
+
+    Fails rather than skips: an unreachable gateway means a real user
+    cannot reach Keycloak either, so this is a platform failure, not an
+    environment quirk to shrug off.
+    """
+    port = 443
+    if not trust.gateway_reachable(gateway_address, port=port):
+        pytest.fail(
+            f"gateway for platform domain {platform_domain!r} is not reachable: "
+            f"TCP connect to {gateway_address}:{port} failed. Every journey that "
+            "needs Keycloak, ArgoCD, or the Longhorn UI cannot proceed, since a "
+            "real user could not reach them either. A gateway address that is "
+            "not routable from this host is a common cause -- for example a "
+            "MetalLB address pool that does not overlap the kind cluster's "
+            "Docker network (see issue #612) -- so confirm the gateway address "
+            "is actually reachable from this host before re-running."
+        )
+    return True
+
+
+@pytest.fixture(scope="session")
 def trust_anchor(cluster, tmp_path_factory) -> str | None:
     """Path to a CA file, or None when the system trust store suffices."""
     pem = trust.trust_anchor_pem(cluster)
@@ -83,7 +114,7 @@ def scratch_namespace(cluster, request):
 
 
 @pytest.fixture(scope="session")
-def keycloak(cluster, platform_domain, trust_anchor, dns_mapping):
+def keycloak(cluster, platform_domain, trust_anchor, dns_mapping, gateway_reachable):
     from nebari_journeys.keycloak import Keycloak
 
     return Keycloak.for_cluster(cluster, platform_domain, trust_anchor)

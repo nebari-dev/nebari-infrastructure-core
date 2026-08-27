@@ -7,6 +7,7 @@ from kubernetes.client.rest import ApiException
 
 from nebari_journeys.trust import (
     chromium_args,
+    gateway_reachable,
     install_dns_mapping,
     needs_dns_mapping,
     trust_anchor_pem,
@@ -149,6 +150,27 @@ def test_trust_anchor_error_names_the_secret_it_actually_read():
     with pytest.raises(RuntimeError) as excinfo:
         trust_anchor_pem(cluster)
     assert "platform-certs/operator-supplied-tls" in str(excinfo.value)
+
+
+def test_gateway_reachable_true_when_connect_succeeds():
+    with patch("socket.create_connection") as create_connection:
+        create_connection.return_value.__enter__ = MagicMock()
+        create_connection.return_value.__exit__ = MagicMock(return_value=False)
+        assert gateway_reachable("10.0.0.5") is True
+    create_connection.assert_called_once_with(("10.0.0.5", 443), timeout=5)
+
+
+def test_gateway_reachable_false_when_connect_raises_os_error():
+    with patch("socket.create_connection", side_effect=OSError("connect timed out")):
+        assert gateway_reachable("192.168.1.100") is False
+
+
+def test_gateway_reachable_uses_the_given_port_and_timeout():
+    with patch("socket.create_connection") as create_connection:
+        create_connection.return_value.__enter__ = MagicMock()
+        create_connection.return_value.__exit__ = MagicMock(return_value=False)
+        gateway_reachable("10.0.0.5", port=8443, timeout=2)
+    create_connection.assert_called_once_with(("10.0.0.5", 8443), timeout=2)
 
 
 def test_chromium_args_map_the_bare_apex_as_well_as_the_wildcard():

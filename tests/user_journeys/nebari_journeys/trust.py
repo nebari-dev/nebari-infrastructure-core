@@ -73,6 +73,23 @@ def write_trust_anchor(pem: str | None, directory) -> str | None:
     return str(path)
 
 
+def gateway_reachable(address: str, port: int = 443, timeout: float = 5) -> bool:
+    """Plain TCP connect check: a liveness probe, not a request.
+
+    Meant to run once per session, before anything else touches the
+    gateway. The timeout is deliberately short: this only answers "is
+    anything listening here", not "does TLS work" or "does the app
+    respond", so it should fail fast rather than eat a connect timeout
+    for every journey that would otherwise discover the same thing on
+    its own.
+    """
+    try:
+        with socket.create_connection((address, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def needs_dns_mapping(domain: str, gateway_address: str) -> bool:
     """True when public DNS does not already point the domain at the gateway."""
     try:
