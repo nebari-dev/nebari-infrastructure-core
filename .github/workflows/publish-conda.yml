@@ -1,7 +1,15 @@
 name: Publish conda packages
 
 # Publishes the release archives to the prefix.dev channel as conda packages,
-# so `nic` can be installed with pixi.
+# so `nic` can be installed with pixi, and then publishes the starter
+# workspaces that depend on that package.
+#
+# The two are one workflow because the ordering is a hard dependency, not a
+# preference: a starter pins `nebari-infrastructure-core` as a conda dependency,
+# so `pixi lock` cannot resolve until the upload below has happened. Expressing
+# that as `needs:` makes it impossible to get wrong; as two tag-triggered
+# workflows it was wrong by default, since this one waits on an approval gate
+# of unbounded length.
 #
 # Separate from release.yml on purpose. Nothing here compiles: the recipe
 # repackages assets fetched from an already-published release by URL, so this
@@ -50,6 +58,8 @@ jobs:
     # binds the OIDC claim to it. The approval gates who approves, not what
     # runs - the guards below are what constrain the latter.
     environment: release
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     # A failed or cancelled Release has nothing to repackage. And a dispatch can
     # name any ref while the approver sees only a tag string, not the branch's
     # scripts, so restricting it to main means the code this job executes has
@@ -136,4 +146,133 @@ jobs:
             # on main. Republishing a corrected recipe therefore needs a bumped
             # build number, not a re-run of this step.
             rattler-build upload prefix -c nebari-dev/nebari --skip-existing "$pkg"
+          done
+
+  publish-starters:
+    name: Publish starters to quay.io
+    # The whole point of this file: the starters pin nic as a conda dependency,
+    # so this cannot run until the upload above succeeded.
+    needs: publish
+    # Only on the automatic path. A dispatch exists to backfill an old tag's
+    # conda package or to retry a failed upload; neither is a reason to
+    # republish that tag's starter bundles, and republishing a released bundle
+    # is the one thing the old tag-only guard existed to prevent.
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Approval + deployment-branch gate, matching every other credentialed job
+    # in this repo (release.yml, the deployment-tests cloud jobs).
+    environment: quay-publish
+    concurrency:
+      # Publishing mutates a shared registry; never cancel a run mid-push or a
+      # tag can end up with one starter published and the other not.
+      group: publish-starters
+      cancel-in-progress: false
+    env:
+      # Starters publish under the existing nebari project, in a starters/
+      # subdir, mirroring how the charts live at quay.io/nebari/charts. The
+      # provider alone names the repo: quay.io/nebari/starters/aws, not
+      # .../starters/starter-aws, which stutters in the reference a user types.
+      QUAY_NAMESPACE: nebari
+      STARTER_REPO_PREFIX: starters
+      # Validated upstream against the release API, so it is a real stable tag.
+      TAG: ${{ needs.publish.outputs.tag }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Install pixi and nebi
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installer pinned to the v0.77.0 tag commit; PIXI_VERSION pins the
+          # binary it fetches. Same shape as the k3d pin in deployment-tests.
+          curl -fsSL https://raw.githubusercontent.com/prefix-dev/pixi/e3c26fbf7d8294d4ddbe7c913b4f8e60bcbafe5a/install/install.sh \
+            | PIXI_VERSION=v0.77.0 bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          # Asset-layer bundling (config.yaml and the README travelling with the
+          # workspace) needs nebi >= 0.10; older versions silently ship only
+          # pixi.toml and pixi.lock. Pinned so a credentialed job never resolves
+          # a floating dependency at run time.
+          # Floor plus ceiling rather than ==, so patch releases are allowed.
+          # Channel pinned explicitly: this job holds the Quay push token, and
+          # an unpinned channel decides which build of nebi runs beside it.
+          pixi global install -c conda-forge "nebi>=0.13,<0.14"
+
+      - name: Generate starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          # -version explicitly: the checkout is pinned to main, so the git
+          # describe fallback in cmd/starters would read whatever tag main
+          # happens to be at rather than the one being published.
+          go run ./cmd/starters -out dist/starters -version "${TAG#v}"
+
+      - name: Configure quay registry
+        shell: bash
+        env:
+          # Username is a variable, token is a secret; both scoped to the
+          # quay-publish environment.
+          QUAY_USERNAME: ${{ vars.QUAY_OCI_STARTERS_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_OCI_STARTERS_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_OCI_STARTERS_USERNAME is not set for this environment}"
+          : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set for this environment}"
+          printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
+            --name quay \
+            --url quay.io \
+            --namespace "$QUAY_NAMESPACE" \
+            --username "$QUAY_USERNAME" \
+            --password-stdin
+
+      - name: Lock and publish each starter
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            pushd "dist/starters/${provider}" > /dev/null
+            # Resolves against the channel the job above just published to.
+            pixi lock
+            nebi init
+            nebi publish --local \
+              --registry quay \
+              --repo "${STARTER_REPO_PREFIX}/${provider}" \
+              --tag "$TAG"
+            popd > /dev/null
+          done
+
+      - name: Imported starters still carry their placeholders
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            dest="/tmp/imported-${provider}"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
+            test -f "$dest/config.yaml"
+            test -f "$dest/README.md"
+            grep -q CHANGEME "$dest/config.yaml"
+            # The published bundle must be rejected unedited, same as the
+            # freshly generated one.
+            if nic validate -f "$dest/config.yaml"; then
+              echo "::error::published ${provider} starter validates unedited"
+              exit 1
+            fi
+            echo "OK: ${provider} round-tripped and is still not deployable as-is"
           done
