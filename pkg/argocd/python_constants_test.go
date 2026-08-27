@@ -54,6 +54,7 @@ func TestPythonConstantsMatchGo(t *testing.T) {
 		{"GATEWAY_NAMESPACE", endpoint.DefaultNamespace},
 		{"GATEWAY_LABEL_SELECTOR", endpoint.DefaultLabelSelector},
 		{"GATEWAY_TLS_SECRET", config.DefaultGatewayTLSSecretName},
+		{"ARGOCD_NAMESPACE", DefaultNamespace},
 	}
 
 	for _, tt := range tests {
@@ -74,11 +75,8 @@ func TestPythonConstantsMatchGo(t *testing.T) {
 // drift unnoticed. Suite-owned constants are exempt by explicit listing.
 func TestPythonConstantsEnrollment(t *testing.T) {
 	suiteOwned := map[string]bool{
-		"JOURNEY_LABEL_KEY":     true,
-		"JOURNEY_LABEL_VALUE":   true,
-		"ARGOCD_NAMESPACE":      true,
-		"REALM_NAME":            true,
-		"LONGHORN_ADMINS_GROUP": true,
+		"JOURNEY_LABEL_KEY":   true,
+		"JOURNEY_LABEL_VALUE": true,
 	}
 
 	enrolled := map[string]bool{}
@@ -88,7 +86,11 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 		"REALM_ADMIN_SECRET", "REALM_ADMIN_PASSWORD_KEY",
 		"LONGHORN_OIDC_CLIENT_SECRET", "PART_OF_LABEL", "FOUNDATIONAL_PART_OF",
 		"GATEWAY_NAMESPACE", "GATEWAY_LABEL_SELECTOR", "GATEWAY_TLS_SECRET",
-		"GATEWAY_CERTIFICATE_NAME",
+		"ARGOCD_NAMESPACE",
+		"GATEWAY_CERTIFICATE_NAME", "GATEWAY_NAME", "ROOT_APP_NAME",
+		"LONGHORN_BACKUP_APP",
+		"REALM_NAME", "ARGOCD_ADMINS_GROUP", "ARGOCD_VIEWERS_GROUP",
+		"LONGHORN_ADMINS_GROUP", "ARGOCD_OIDC_CLIENT", "LONGHORN_OIDC_CLIENT",
 	} {
 		enrolled[name] = true
 	}
@@ -103,9 +105,26 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 	}
 }
 
-// extractYAMLName extracts the metadata.name literal from a manifest template.
-// The templates are Go text/template files with a static metadata.name, so a
-// simple regex is sufficient; there is no templated value in that field.
+// yamlNamePattern matches the first `name: <literal>` line of a manifest. The
+// templates are Go text/template files whose metadata.name is the first such
+// line and is a static literal, so a simple regex is sufficient; there is no
+// templated value in that field.
+var yamlNamePattern = regexp.MustCompile(`(?m)^\s*name:\s*(\S+)\s*$`)
+
+// extractYAMLNameFrom extracts the metadata.name literal from manifest source.
+// source is described by origin, which is only used in failure messages.
+func extractYAMLNameFrom(t *testing.T, source, origin string) string {
+	t.Helper()
+
+	m := yamlNamePattern.FindStringSubmatch(source)
+	if m == nil {
+		t.Fatalf("no metadata.name found in %s; it may have changed", origin)
+	}
+	return m[1]
+}
+
+// extractYAMLName extracts the metadata.name literal from a manifest template
+// on disk.
 func extractYAMLName(t *testing.T, path string) string {
 	t.Helper()
 
@@ -113,21 +132,16 @@ func extractYAMLName(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-
-	re := regexp.MustCompile(`(?m)^\s*name:\s*(\S+)\s*$`)
-	m := re.FindStringSubmatch(string(raw))
-	if m == nil {
-		t.Fatalf("no metadata.name found in %s; the template may have changed", path)
-	}
-	return m[1]
+	return extractYAMLNameFrom(t, string(raw), path)
 }
 
-// TestPythonGatewayCertificateNameMatchesTemplate fails when the gateway
-// Certificate's hardcoded name drifts between the manifest template that
-// deploys it and the Python constant the journey suite reads it by. The
-// suite has no other way to find the Certificate: it is looked up by this
-// exact name, so a silent rename here breaks domain() on every real cluster.
-func TestPythonGatewayCertificateNameMatchesTemplate(t *testing.T) {
+// TestPythonResourceNamesMatchTemplates fails when a resource name hardcoded in
+// a manifest template drifts from the Python constant the journey suite looks
+// it up by. The suite has no other way to find these objects: each is fetched
+// by this exact name, so a silent rename breaks a journey on every real
+// cluster, and the failure looks like broken infrastructure rather than a
+// renamed resource.
+func TestPythonResourceNamesMatchTemplates(t *testing.T) {
 	tests := []struct {
 		name         string
 		templatePath string
@@ -137,6 +151,16 @@ func TestPythonGatewayCertificateNameMatchesTemplate(t *testing.T) {
 			name:         "gateway certificate name",
 			templatePath: "templates/manifests/security/certificates/gateway-certificate.yaml",
 			pythonName:   "GATEWAY_CERTIFICATE_NAME",
+		},
+		{
+			name:         "gateway name",
+			templatePath: "templates/manifests/networking/gateway.yaml",
+			pythonName:   "GATEWAY_NAME",
+		},
+		{
+			name:         "longhorn backup application name",
+			templatePath: "templates/apps/longhorn-backup.yaml",
+			pythonName:   "LONGHORN_BACKUP_APP",
 		},
 	}
 
@@ -156,6 +180,96 @@ func TestPythonGatewayCertificateNameMatchesTemplate(t *testing.T) {
 					tt.pythonName, templateName, tt.templatePath,
 					pythonValue, pythonConstantsPath)
 			}
+		})
+	}
+}
+
+// TestPythonRootAppNameMatchesTemplate pins ROOT_APP_NAME against the
+// app-of-apps Application that bootstrap.go actually creates. The suite
+// excludes this name from the foundational set, so a rename here would make
+// foundational_applications() start asserting on the app-of-apps, whose sync
+// status is not a foundational-software fault.
+func TestPythonRootAppNameMatchesTemplate(t *testing.T) {
+	python := parsePythonConstants(t, pythonConstantsPath)
+
+	templateName := extractYAMLNameFrom(t, rootAppOfAppsTemplate,
+		"rootAppOfAppsTemplate in bootstrap.go")
+
+	pythonValue, ok := python["ROOT_APP_NAME"]
+	if !ok {
+		t.Fatalf("ROOT_APP_NAME missing from %s", pythonConstantsPath)
+	}
+	if templateName != pythonValue {
+		t.Errorf("ROOT_APP_NAME = %q in rootAppOfAppsTemplate, %q in %s",
+			templateName, pythonValue, pythonConstantsPath)
+	}
+}
+
+// realmSetupJobPath is the manifest template whose shell script creates the
+// realm, its groups and its OIDC clients. Those names are shell literals, not
+// Go constants, so they are pinned against the template text directly.
+const realmSetupJobPath = "templates/manifests/keycloak/realm-setup-job.yaml"
+
+// TestPythonRealmLiteralsMatchTemplate pins the realm name, the group names and
+// the OIDC client ids the journey suite asserts on against the kcadm
+// invocations that create them. Each row extracts the set of literals the
+// template passes to a particular kcadm flag and requires the Python constant
+// to be one of them, so a rename on either side is caught. Containment rather
+// than equality is deliberate: adding a new group or client to the platform is
+// a legitimate change that must not fail this test, while renaming one the
+// suite depends on must.
+func TestPythonRealmLiteralsMatchTemplate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Clean(realmSetupJobPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", realmSetupJobPath, err)
+	}
+	template := string(raw)
+
+	python := parsePythonConstants(t, pythonConstantsPath)
+
+	realmPattern := regexp.MustCompile(`-s realm=(\S+)`)
+	groupPattern := regexp.MustCompile(`create groups -r \S+ -s name=(\S+)`)
+	clientPattern := regexp.MustCompile(`-s clientId=(\S+)`)
+
+	tests := []struct {
+		pythonName string
+		pattern    *regexp.Regexp
+		what       string
+	}{
+		{"REALM_NAME", realmPattern, "realm created by kcadm"},
+		{"ARGOCD_ADMINS_GROUP", groupPattern, "group created by kcadm"},
+		{"ARGOCD_VIEWERS_GROUP", groupPattern, "group created by kcadm"},
+		{"LONGHORN_ADMINS_GROUP", groupPattern, "group created by kcadm"},
+		{"ARGOCD_OIDC_CLIENT", clientPattern, "OIDC client created by kcadm"},
+		{"LONGHORN_OIDC_CLIENT", clientPattern, "OIDC client created by kcadm"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pythonName, func(t *testing.T) {
+			matches := tt.pattern.FindAllStringSubmatch(template, -1)
+			if len(matches) == 0 {
+				t.Fatalf("no %s found in %s; the template may have changed",
+					tt.what, realmSetupJobPath)
+			}
+
+			found := make([]string, 0, len(matches))
+			for _, m := range matches {
+				found = append(found, m[1])
+			}
+
+			pythonValue, ok := python[tt.pythonName]
+			if !ok {
+				t.Fatalf("%s missing from %s", tt.pythonName, pythonConstantsPath)
+			}
+
+			for _, candidate := range found {
+				if candidate == pythonValue {
+					return
+				}
+			}
+			t.Errorf("%s = %q in %s, but the %ss in %s are %q",
+				tt.pythonName, pythonValue, pythonConstantsPath,
+				tt.what, realmSetupJobPath, found)
 		})
 	}
 }
