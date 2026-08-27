@@ -5,8 +5,10 @@ platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
 version = "0.1.0"
 
 [dependencies]
-# The pinned toolchain. nic resolves from the prefix.dev github-releases
-# channel; see the distribution issue for how that channel is populated.
+# The pinned toolchain. nic is not on a public conda channel yet, so this
+# dependency does not resolve until one carries it; run with nic on PATH until
+# then. Which channel to add, once there is one, is documented at
+# https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/docs/operations/packaging.md
 nebari-infrastructure-core = "__NIC_VERSION__"
 __PROVIDER_DEPS__
 
