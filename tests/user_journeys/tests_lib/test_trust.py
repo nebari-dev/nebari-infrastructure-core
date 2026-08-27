@@ -17,8 +17,17 @@ CA_PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
 LEAF_PEM = "-----BEGIN CERTIFICATE-----\nMIIC\n-----END CERTIFICATE-----\n"
 
 
-def _cluster_with_tls_secret(data):
+DEFAULT_REF = ("nebari-gateway-tls", "envoy-gateway-system")
+
+
+def _cluster(ref=DEFAULT_REF):
     cluster = MagicMock()
+    cluster.gateway_tls_secret_ref.return_value = ref
+    return cluster
+
+
+def _cluster_with_tls_secret(data, ref=DEFAULT_REF):
+    cluster = _cluster(ref)
     cluster.secret_value.side_effect = lambda ns, name, key: data[key]
     return cluster
 
@@ -34,19 +43,19 @@ def test_trust_anchor_falls_back_to_tls_crt_when_no_ca_crt():
             raise KeyError("ca.crt")
         return LEAF_PEM
 
-    cluster = MagicMock()
+    cluster = _cluster()
     cluster.secret_value.side_effect = side_effect
     assert trust_anchor_pem(cluster) == LEAF_PEM
 
 
 def test_trust_anchor_is_none_when_the_secret_is_absent():
-    cluster = MagicMock()
+    cluster = _cluster()
     cluster.secret_value.side_effect = ApiException(status=404, reason="Not Found")
     assert trust_anchor_pem(cluster) is None
 
 
 def test_trust_anchor_403_propagates_and_names_the_secret():
-    cluster = MagicMock()
+    cluster = _cluster()
     cluster.secret_value.side_effect = ApiException(status=403, reason="Forbidden")
     with pytest.raises(RuntimeError) as excinfo:
         trust_anchor_pem(cluster)
@@ -54,7 +63,7 @@ def test_trust_anchor_403_propagates_and_names_the_secret():
 
 
 def test_trust_anchor_connection_error_propagates():
-    cluster = MagicMock()
+    cluster = _cluster()
     cluster.secret_value.side_effect = ApiException(
         status=500, reason="Internal Server Error"
     )
@@ -117,4 +126,36 @@ def test_chromium_args_are_empty_when_no_mapping_is_needed():
 
 def test_chromium_args_map_the_wildcard_domain():
     args = chromium_args("nebari.local", "10.0.0.5", True)
-    assert "--host-resolver-rules=MAP *.nebari.local 10.0.0.5" in args
+    assert args[0].startswith("--host-resolver-rules=")
+    assert "MAP *.nebari.local 10.0.0.5" in args[0]
+
+
+def test_trust_anchor_reads_the_secret_the_gateway_actually_references():
+    """The gateway's TLS secret name and namespace are both operator
+    configurable. Reading the default name on a cluster that renamed it 404s
+    and silently degrades to system trust, which is the degradation this
+    function promises cannot happen."""
+    cluster = _cluster(ref=("operator-supplied-tls", "platform-certs"))
+    cluster.secret_value.side_effect = lambda ns, name, key: CA_PEM
+
+    assert trust_anchor_pem(cluster) == CA_PEM
+    namespace, name, _ = cluster.secret_value.call_args.args
+    assert (name, namespace) == ("operator-supplied-tls", "platform-certs")
+
+
+def test_trust_anchor_error_names_the_secret_it_actually_read():
+    cluster = _cluster(ref=("operator-supplied-tls", "platform-certs"))
+    cluster.secret_value.side_effect = ApiException(status=403, reason="Forbidden")
+    with pytest.raises(RuntimeError) as excinfo:
+        trust_anchor_pem(cluster)
+    assert "platform-certs/operator-supplied-tls" in str(excinfo.value)
+
+
+def test_chromium_args_map_the_bare_apex_as_well_as_the_wildcard():
+    """`MAP *.domain` does not match the apex, but install_dns_mapping() maps
+    it. The two mapping paths must agree or a journey that reaches the apex
+    passes under requests and fails under Chromium."""
+    args = chromium_args("nebari.local", "10.0.0.5", True)
+    assert len(args) == 1
+    assert "MAP nebari.local 10.0.0.5" in args[0]
+    assert "MAP *.nebari.local 10.0.0.5" in args[0]

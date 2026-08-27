@@ -12,8 +12,6 @@ from pathlib import Path
 
 from kubernetes.client.rest import ApiException
 
-from nebari_journeys import constants
-
 CA_KEY = "ca.crt"
 LEAF_KEY = "tls.crt"
 
@@ -22,6 +20,16 @@ NOT_FOUND_STATUS = 404
 
 def trust_anchor_pem(cluster) -> str | None:
     """PEM to verify the gateway against, or None to use the system store.
+
+    The secret is the one the Gateway's own listener references
+    (`cluster.gateway_tls_secret_ref()`), NOT a hardcoded
+    `nebari-gateway-tls` in `envoy-gateway-system`. Both the name and the
+    namespace are operator-configurable via `certificate.secret_name` and
+    `certificate.existing_secret` (pkg/config/config.go,
+    CertificateConfig.GatewaySecretRef), and ADR-0017 requires the anchor to
+    follow the operator's secret. Reading the default name on a cluster that
+    renamed it would 404, return None, and silently degrade to system trust,
+    which is exactly the degradation this function promises cannot happen.
 
     Prefers ca.crt (present when an issuing CA exists), falls back to
     tls.crt (a selfSigned issuer produces a self-signed leaf, which is
@@ -38,20 +46,18 @@ def trust_anchor_pem(cluster) -> str | None:
     raised rather than silently downgraded to a confusing TLS failure
     later.
     """
+    name, namespace = cluster.gateway_tls_secret_ref()
+
     for key in (CA_KEY, LEAF_KEY):
         try:
-            pem = cluster.secret_value(
-                constants.GATEWAY_NAMESPACE, constants.GATEWAY_TLS_SECRET, key
-            )
+            pem = cluster.secret_value(namespace, name, key)
         except KeyError:
             continue
         except ApiException as error:
             if error.status == NOT_FOUND_STATUS:
                 return None
             raise RuntimeError(
-                f"could not read {key!r} from secret "
-                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_TLS_SECRET}: "
-                f"{error}"
+                f"could not read {key!r} from secret {namespace}/{name}: {error}"
             ) from error
         if pem and pem.strip():
             return pem
@@ -103,7 +109,15 @@ def chromium_args(domain: str, address: str, mapping_needed: bool) -> list[str]:
     --host-resolver-rules is an unsupported Chromium flag, used only when
     public DNS does not resolve. It maps names without weakening TLS: SNI
     and certificate validation still apply.
+
+    Two rules, comma-separated in the one flag Chromium accepts: `MAP
+    *.domain` does NOT match the bare apex, so without the second rule the
+    apex would resolve differently in Chromium than in the Python client,
+    where install_dns_mapping() explicitly handles `host == domain`. The two
+    mapping paths must agree, or a journey that reaches the apex passes under
+    requests and fails under Chromium for reasons that look like a platform
+    fault.
     """
     if not mapping_needed:
         return []
-    return [f"--host-resolver-rules=MAP *.{domain} {address}"]
+    return [f"--host-resolver-rules=MAP *.{domain} {address},MAP {domain} {address}"]

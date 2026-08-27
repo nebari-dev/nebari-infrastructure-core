@@ -2,10 +2,11 @@ import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
+from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
 
 from nebari_journeys import constants
-from nebari_journeys.cluster import Cluster
+from nebari_journeys.cluster import LONGHORN_STORAGE_CLASS, Cluster
 
 
 def _secret(data: dict[str, str]):
@@ -140,3 +141,204 @@ def test_default_storage_class_falls_back_to_longhorn():
     storage.list_storage_class.return_value = MagicMock(items=[sc])
     cluster = Cluster(core=MagicMock(), custom=MagicMock(), storage=storage)
     assert cluster.default_storage_class() == "longhorn"
+
+
+def _storage(names):
+    storage = MagicMock()
+    classes = []
+    for name in names:
+        sc = MagicMock()
+        sc.metadata.name = name
+        sc.metadata.annotations = {}
+        classes.append(sc)
+    storage.list_storage_class.return_value = MagicMock(items=classes)
+    return storage
+
+
+def _longhorn_cluster(names):
+    return Cluster(core=MagicMock(), custom=MagicMock(), storage=_storage(names))
+
+
+def test_has_longhorn_is_true_when_the_longhorn_storage_class_exists():
+    cluster = _longhorn_cluster(["gp3", LONGHORN_STORAGE_CLASS])
+    assert cluster.has_longhorn() is True
+
+
+def test_has_longhorn_is_false_on_a_cluster_without_it():
+    """Longhorn core is not an ArgoCD Application (there is no
+    apps/longhorn.yaml, only apps/longhorn-backup.yaml), so require_app cannot
+    answer this and the StorageClass is the signal."""
+    cluster = _longhorn_cluster(["gp2", "gp3"])
+    assert cluster.has_longhorn() is False
+
+
+def test_require_longhorn_skips_and_names_what_was_missing():
+    cluster = _longhorn_cluster(["gp2"])
+    with pytest.raises(pytest.skip.Exception, match=LONGHORN_STORAGE_CLASS):
+        cluster.require_longhorn()
+
+
+def test_require_longhorn_does_not_skip_when_longhorn_is_present():
+    cluster = _longhorn_cluster([LONGHORN_STORAGE_CLASS])
+    assert cluster.require_longhorn() is None
+
+
+def _gateway(listeners):
+    return {"spec": {"listeners": listeners}}
+
+
+def _https_listener(name="tls-secret", namespace=None):
+    ref = {"name": name, "kind": "Secret"}
+    if namespace is not None:
+        ref["namespace"] = namespace
+    return {"name": "https", "tls": {"mode": "Terminate", "certificateRefs": [ref]}}
+
+
+def test_gateway_tls_secret_ref_reads_the_gateways_certificate_ref():
+    custom = MagicMock()
+    custom.get_namespaced_custom_object.return_value = _gateway(
+        [{"name": "http"}, _https_listener(name="operator-supplied-tls")]
+    )
+    cluster = _cluster(custom=custom)
+    assert cluster.gateway_tls_secret_ref() == (
+        "operator-supplied-tls",
+        constants.GATEWAY_NAMESPACE,
+    )
+
+
+def test_gateway_tls_secret_ref_honours_a_cross_namespace_secret():
+    custom = MagicMock()
+    custom.get_namespaced_custom_object.return_value = _gateway(
+        [_https_listener(name="platform-tls", namespace="platform-certs")]
+    )
+    cluster = _cluster(custom=custom)
+    assert cluster.gateway_tls_secret_ref() == ("platform-tls", "platform-certs")
+
+
+def test_gateway_tls_secret_ref_falls_back_to_the_default_without_a_gateway():
+    custom = MagicMock()
+    custom.get_namespaced_custom_object.side_effect = ApiException(
+        status=404, reason="Not Found"
+    )
+    cluster = _cluster(custom=custom)
+    assert cluster.gateway_tls_secret_ref() == (
+        constants.GATEWAY_TLS_SECRET,
+        constants.GATEWAY_NAMESPACE,
+    )
+
+
+def test_gateway_tls_secret_ref_falls_back_when_no_listener_terminates_tls():
+    custom = MagicMock()
+    custom.get_namespaced_custom_object.return_value = _gateway([{"name": "http"}])
+    cluster = _cluster(custom=custom)
+    assert cluster.gateway_tls_secret_ref() == (
+        constants.GATEWAY_TLS_SECRET,
+        constants.GATEWAY_NAMESPACE,
+    )
+
+
+def _route(hostnames, parent=None):
+    return {
+        "spec": {
+            "parentRefs": [{"name": parent or constants.GATEWAY_NAME}],
+            "hostnames": hostnames,
+        }
+    }
+
+
+def _routes_cluster(routes, certificate=None):
+    custom = MagicMock()
+    custom.list_cluster_custom_object.return_value = {"items": routes}
+    if certificate is None:
+        custom.get_namespaced_custom_object.side_effect = ApiException(
+            status=404, reason="Not Found"
+        )
+    else:
+        custom.get_namespaced_custom_object.return_value = certificate
+    return _cluster(custom=custom)
+
+
+def test_domain_comes_from_the_httproutes_attached_to_the_gateway():
+    """The default shape: cert-manager mints the certificate and the routes
+    are argocd./keycloak./longhorn. of the platform domain."""
+    cluster = _routes_cluster(
+        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])]
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_works_with_an_operator_supplied_certificate():
+    """certificate.type: existing means gateway-certificate.yaml is never
+    rendered (pkg/argocd/writer.go, skipCertificateTemplate), so the
+    Certificate does not exist. Reading it first made every journey error at
+    session setup on this supported shape."""
+    cluster = _routes_cluster([_route(["argocd.nebari.example"])])
+    assert cluster.domain() == "nebari.example"
+    cluster.custom.get_namespaced_custom_object.assert_not_called()
+
+
+def test_domain_ignores_routes_attached_to_another_gateway():
+    cluster = _routes_cluster(
+        [
+            _route(["argocd.nebari.example"]),
+            _route(["app.someone-elses.example"], parent="other-gateway"),
+        ]
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_ignores_wildcard_hostnames():
+    cluster = _routes_cluster(
+        [_route(["*.nebari.example"]), _route(["argocd.nebari.example"])]
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_falls_back_to_the_certificate_when_no_route_names_a_domain():
+    cluster = _routes_cluster(
+        [], certificate={"spec": {"commonName": "nebari.example"}}
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_error_names_what_it_looked_for_instead_of_raising_a_bare_404():
+    cluster = _routes_cluster([])
+    with pytest.raises(ValueError) as excinfo:
+        cluster.domain()
+    message = str(excinfo.value)
+    assert constants.GATEWAY_NAME in message
+    assert constants.GATEWAY_CERTIFICATE_NAME in message
+    assert "HTTPRoute" in message
+
+
+def test_domain_refuses_to_guess_between_two_domains():
+    cluster = _routes_cluster(
+        [_route(["argocd.one.example"]), _route(["argocd.two.example"])]
+    )
+    with pytest.raises(ValueError, match="more than one platform domain"):
+        cluster.domain()
+
+
+def test_domain_error_is_clear_when_the_httproute_crd_is_absent():
+    """A cluster without the Gateway API must produce the same named error,
+    not a raw 404 from the API server."""
+    custom = MagicMock()
+    custom.list_cluster_custom_object.side_effect = ApiException(
+        status=404, reason="Not Found"
+    )
+    custom.get_namespaced_custom_object.side_effect = ApiException(
+        status=404, reason="Not Found"
+    )
+    cluster = _cluster(custom=custom)
+    with pytest.raises(ValueError, match="HTTPRoute"):
+        cluster.domain()
+
+
+def test_domain_propagates_a_permissions_error_on_httproutes():
+    custom = MagicMock()
+    custom.list_cluster_custom_object.side_effect = ApiException(
+        status=403, reason="Forbidden"
+    )
+    cluster = _cluster(custom=custom)
+    with pytest.raises(ApiException):
+        cluster.domain()
