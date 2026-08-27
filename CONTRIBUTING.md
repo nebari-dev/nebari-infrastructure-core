@@ -89,6 +89,13 @@ Some conventions the linter cannot enforce, but reviewers will:
 
 These and the rest of the code conventions live in [AGENTS.md](AGENTS.md), which applies to human contributors just as much as to agents.
 
+### User journey tests
+
+End-to-end journeys verifying deployed foundational software live in
+[`tests/user_journeys/`](tests/user_journeys/README.md). They need a kubeconfig
+for a deployed Nebari cluster and run via `make test-journeys`. They are not
+part of `go test ./...` and do not run on a unit-test-only change.
+
 ## Branches and commits
 
 Branch from `main` with a prefix matching the change:

@@ -85,7 +85,7 @@ jobs:
     name: Deploy
     runs-on: ubuntu-latest
     needs: build
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -104,6 +104,57 @@ jobs:
         uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
         with:
           nic-binary: nic
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+        with:
+          manifest-path: tests/user_journeys/pixi.toml
+
+      - name: Install cluster trust anchor for Chromium
+        # Chromium never trusts a custom CA through a Playwright context
+        # option (ignore_https_errors is forbidden in this suite); it reads
+        # the OS/NSS trust store instead. On the GitHub-hosted Ubuntu
+        # runner, update-ca-certificates also feeds NSS through p11-kit,
+        # which is what Chromium reads, so this step is what makes a
+        # selfsigned gateway certificate trusted for the browser journeys
+        # without weakening TLS anywhere. It reuses
+        # nebari_journeys.trust.trust_anchor_pem so the CI path and the
+        # trust_anchor fixture agree on which key (ca.crt, then tls.crt)
+        # is the anchor. When neither key exists, the gateway certificate
+        # is publicly trusted (ACME) and the system store is left as-is.
+        run: |
+          set -euo pipefail
+          cd tests/user_journeys
+          pem="$(pixi run python -c '
+          from nebari_journeys.cluster import Cluster
+          from nebari_journeys.trust import trust_anchor_pem
+          anchor = trust_anchor_pem(Cluster.connect())
+          print(anchor or "", end="")
+          ')"
+          if [ -n "$pem" ]; then
+            echo "$pem" | sudo tee /usr/local/share/ca-certificates/nebari-gateway.crt > /dev/null
+            sudo update-ca-certificates
+          else
+            echo "no gateway CA secret found; using the system trust store as-is"
+          fi
+
+      - name: Run user journey tests
+        run: make test-journeys
+
+      - name: Upload journey failure artifacts
+        # Retention is deliberately short: a Playwright trace from a failed
+        # login journey can contain the throwaway user's password.
+        # Playwright has no trace redaction API, so short retention plus
+        # throwaway credentials (scratch_user, not admin credentials) are
+        # the control here, not a convenience setting.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: journey-artifacts
+          path: |
+            tests/user_journeys/test-results/
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Verify docs are up-to-date
         run: |
