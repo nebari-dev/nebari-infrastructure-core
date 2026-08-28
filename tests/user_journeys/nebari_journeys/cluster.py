@@ -198,39 +198,70 @@ class Cluster:
         supported certificate shape. The gateway Certificate does not: with
         `certificate.type: existing` NIC never renders
         gateway-certificate.yaml (pkg/argocd/writer.go,
-        skipCertificateTemplate), so reading the Certificate first made every
-        journey error at session setup on that shape, including journeys with
-        nothing to do with certificates.
+        skipCertificateTemplate), so a Certificate that does not exist is not
+        fatal, and its absence never blocks derivation.
 
-        Nebari's own HTTPRoutes are all `<service>.<domain>` (argocd,
-        keycloak, longhorn), so the domain is the hostname with its first
-        label removed. Wildcards and any hostname without a subdomain label
-        are ignored rather than guessed at.
+        The domain is the longest common suffix, by DNS label, of every
+        hostname served by an HTTPRoute attached to the gateway. Nebari's own
+        routes are `<service>.<domain>` (argocd, keycloak, longhorn) *and*
+        the landing page route, which serves the bare apex `<domain>` with no
+        service label at all. Stripping a fixed number of labels from every
+        hostname therefore does not work: the apex has one fewer label than
+        the rest. The longest-common-suffix rule handles both shapes
+        uniformly and, as a side effect, also absorbs a transient cert-manager
+        ACME challenge route for the apex, since that is just another
+        apex hostname sharing the same suffix.
+
+        Comparison is done label-by-label from the right, never
+        character-wise: `evil-openteams.dev` must not be treated as sharing
+        the `openteams.dev` suffix just because the characters overlap.
         """
-        candidates: set[str] = set()
-        for hostname in self.gateway_route_hostnames():
-            if hostname.startswith("*"):
-                continue
-            labels = hostname.split(".")
-            if len(labels) < 3:
-                # Not `<service>.<domain>`; nothing to strip with confidence.
-                continue
-            candidates.add(".".join(labels[1:]))
+        hostnames = [
+            hostname
+            for hostname in self.gateway_route_hostnames()
+            if hostname and not hostname.startswith("*")
+        ]
 
-        if len(candidates) == 1:
-            return candidates.pop()
-        if len(candidates) > 1:
+        if not hostnames:
+            return self._domain_from_certificate(hostnames)
+
+        label_lists = [hostname.split(".") for hostname in hostnames]
+        common: list[str] = []
+        for labels_from_the_right in zip(*(reversed(labels) for labels in label_lists)):
+            if len(set(labels_from_the_right)) != 1:
+                break
+            common.append(labels_from_the_right[0])
+        common.reverse()
+
+        if len(common) < 2:
             raise ValueError(
                 "HTTPRoutes attached to Gateway "
-                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} name more "
-                f"than one platform domain ({sorted(candidates)}); cannot determine "
-                "which one this cluster is"
+                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} do not "
+                "share a common platform domain of at least two DNS labels "
+                f"(hostnames seen: {sorted(hostnames)}); cannot determine which "
+                "domain this cluster is"
             )
 
-        return self._domain_from_certificate()
+        derived = ".".join(common)
+        return self._domain_from_certificate(hostnames, derived)
 
-    def _domain_from_certificate(self) -> str:
-        """Fallback for a cluster whose HTTPRoutes are not readable."""
+    def _domain_from_certificate(
+        self, hostnames: list[str], derived: str | None = None
+    ) -> str:
+        """Fall back to, or cross-check against, the gateway Certificate.
+
+        `hostnames` is only used for error messages, so a caller with no
+        route hostnames at all can still say what it looked at. `derived` is
+        the domain already computed from HTTPRoutes, or None when there were
+        none to compute it from.
+
+        A missing Certificate is not fatal: with `certificate.type: existing`
+        NIC never renders gateway-certificate.yaml (pkg/argocd/writer.go,
+        skipCertificateTemplate), so on that shape `derived` (when present) is
+        used as-is. When both a derived domain and a Certificate commonName
+        are available and they disagree, that is a genuine inconsistency and
+        this raises naming both rather than silently preferring one.
+        """
         try:
             cert = self.custom.get_namespaced_custom_object(
                 group=CERTMANAGER_GROUP,
@@ -242,11 +273,13 @@ class Cluster:
         except ApiException as error:
             if error.status != NOT_FOUND_STATUS:
                 raise
+            if derived is not None:
+                return derived
             raise ValueError(
                 "could not determine the platform domain: no HTTPRoute attached to "
                 f"Gateway {constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} "
-                "carries a <service>.<domain> hostname, and Certificate "
-                f"{constants.GATEWAY_NAMESPACE}/"
+                f"carries any hostname (hostnames seen: {sorted(hostnames)}), and "
+                f"Certificate {constants.GATEWAY_NAMESPACE}/"
                 f"{constants.GATEWAY_CERTIFICATE_NAME} does not exist "
                 "(expected on a cluster deployed with certificate.type: existing). "
                 "Is this a Nebari cluster, and does the kubeconfig have read access "
@@ -255,11 +288,24 @@ class Cluster:
 
         common_name = cert.get("spec", {}).get("commonName")
         if not common_name:
+            if derived is not None:
+                return derived
             raise ValueError(
                 f"{constants.GATEWAY_CERTIFICATE_NAME} has no spec.commonName; "
-                "cannot determine the platform domain"
+                "cannot determine the platform domain "
+                f"(hostnames seen: {sorted(hostnames)})"
             )
-        return common_name
+
+        if derived is not None and common_name != derived:
+            raise ValueError(
+                "platform domain is ambiguous: HTTPRoutes attached to Gateway "
+                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} derive "
+                f"{derived!r}, but Certificate {constants.GATEWAY_NAMESPACE}/"
+                f"{constants.GATEWAY_CERTIFICATE_NAME} spec.commonName is "
+                f"{common_name!r}; these disagree and cannot both be right"
+            )
+
+        return derived if derived is not None else common_name
 
     def applications(self) -> list[dict]:
         result = self.custom.list_namespaced_custom_object(

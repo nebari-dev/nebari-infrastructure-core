@@ -262,34 +262,95 @@ def test_domain_comes_from_the_httproutes_attached_to_the_gateway():
     """The default shape: cert-manager mints the certificate and the routes
     are argocd./keycloak./longhorn. of the platform domain."""
     cluster = _routes_cluster(
-        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])]
+        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])],
+        certificate={"spec": {"commonName": "nebari.example"}},
     )
     assert cluster.domain() == "nebari.example"
+
+
+def test_domain_includes_the_bare_apex_landing_route():
+    """The real-world shape that broke the old strip-one-label heuristic: the
+    landing page route serves the bare apex (no service label), one fewer
+    label than argocd./keycloak./longhorn., so the domain must be computed as
+    the longest common suffix, not by stripping a fixed number of labels."""
+    cluster = _routes_cluster(
+        [
+            _route(["argocd.dcmcand-333.openteams.dev"]),
+            _route(["keycloak.dcmcand-333.openteams.dev"]),
+            _route(["longhorn.dcmcand-333.openteams.dev"]),
+            _route(["dcmcand-333.openteams.dev"]),
+            _route([], parent=constants.GATEWAY_NAME),  # http-to-https-redirect
+        ],
+        certificate={"spec": {"commonName": "dcmcand-333.openteams.dev"}},
+    )
+    assert cluster.domain() == "dcmcand-333.openteams.dev"
+
+
+def test_domain_works_on_local_kind_with_no_apex_route():
+    cluster = _routes_cluster(
+        [
+            _route(["argocd.nebari.local"]),
+            _route(["keycloak.nebari.local"]),
+            _route(["longhorn.nebari.local"]),
+        ],
+        certificate={"spec": {"commonName": "nebari.local"}},
+    )
+    assert cluster.domain() == "nebari.local"
+
+
+def test_domain_apex_only_single_hostname_yields_itself():
+    cluster = _routes_cluster(
+        [_route(["dcmcand-333.openteams.dev"])],
+        certificate={"spec": {"commonName": "dcmcand-333.openteams.dev"}},
+    )
+    assert cluster.domain() == "dcmcand-333.openteams.dev"
 
 
 def test_domain_works_with_an_operator_supplied_certificate():
     """certificate.type: existing means gateway-certificate.yaml is never
     rendered (pkg/argocd/writer.go, skipCertificateTemplate), so the
-    Certificate does not exist. Reading it first made every journey error at
-    session setup on this supported shape."""
-    cluster = _routes_cluster([_route(["argocd.nebari.example"])])
+    Certificate does not exist. That must not be fatal: the derived domain is
+    used as-is."""
+    cluster = _routes_cluster(
+        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])]
+    )
     assert cluster.domain() == "nebari.example"
-    cluster.custom.get_namespaced_custom_object.assert_not_called()
 
 
 def test_domain_ignores_routes_attached_to_another_gateway():
     cluster = _routes_cluster(
         [
             _route(["argocd.nebari.example"]),
+            _route(["keycloak.nebari.example"]),
             _route(["app.someone-elses.example"], parent="other-gateway"),
-        ]
+        ],
+        certificate={"spec": {"commonName": "nebari.example"}},
     )
     assert cluster.domain() == "nebari.example"
 
 
 def test_domain_ignores_wildcard_hostnames():
     cluster = _routes_cluster(
-        [_route(["*.nebari.example"]), _route(["argocd.nebari.example"])]
+        [
+            _route(["*.nebari.example"]),
+            _route(["argocd.nebari.example"]),
+            _route(["keycloak.nebari.example"]),
+        ],
+        certificate={"spec": {"commonName": "nebari.example"}},
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_skips_a_route_with_no_hostnames():
+    """The http-to-https-redirect HTTPRoute attaches to the gateway but
+    carries no hostnames at all; it must not affect the result."""
+    cluster = _routes_cluster(
+        [
+            _route(["argocd.nebari.example"]),
+            _route(["keycloak.nebari.example"]),
+            _route([]),
+        ],
+        certificate={"spec": {"commonName": "nebari.example"}},
     )
     assert cluster.domain() == "nebari.example"
 
@@ -311,12 +372,59 @@ def test_domain_error_names_what_it_looked_for_instead_of_raising_a_bare_404():
     assert "HTTPRoute" in message
 
 
-def test_domain_refuses_to_guess_between_two_domains():
+def test_domain_refuses_to_guess_when_a_route_is_from_a_foreign_domain():
+    """An operator route under a completely different domain collapses the
+    common suffix to fewer than two labels; the message must list the
+    hostnames it saw so the cause is obvious."""
     cluster = _routes_cluster(
-        [_route(["argocd.one.example"]), _route(["argocd.two.example"])]
+        [
+            _route(["argocd.nebari.example"]),
+            _route(["keycloak.nebari.example"]),
+            _route(["something.example.org"]),
+        ]
     )
-    with pytest.raises(ValueError, match="more than one platform domain"):
+    with pytest.raises(ValueError) as excinfo:
         cluster.domain()
+    message = str(excinfo.value)
+    assert "argocd.nebari.example" in message
+    assert "something.example.org" in message
+
+
+def test_domain_character_wise_suffix_confusion_is_rejected():
+    """`evil-openteams.dev` must not be treated as sharing the
+    `openteams.dev` suffix beyond the shared `dev` label: comparison is by
+    DNS label, not by character."""
+    cluster = _routes_cluster(
+        [
+            _route(["argocd.dcmcand-333.openteams.dev"]),
+            _route(["evil-openteams.dev"]),
+        ]
+    )
+    with pytest.raises(ValueError) as excinfo:
+        cluster.domain()
+    message = str(excinfo.value)
+    assert "argocd.dcmcand-333.openteams.dev" in message
+    assert "evil-openteams.dev" in message
+
+
+def test_domain_agrees_with_a_matching_certificate_common_name():
+    cluster = _routes_cluster(
+        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])],
+        certificate={"spec": {"commonName": "nebari.example"}},
+    )
+    assert cluster.domain() == "nebari.example"
+
+
+def test_domain_raises_when_the_certificate_disagrees_with_the_derived_domain():
+    cluster = _routes_cluster(
+        [_route(["argocd.nebari.example"]), _route(["keycloak.nebari.example"])],
+        certificate={"spec": {"commonName": "someone-elses.example"}},
+    )
+    with pytest.raises(ValueError) as excinfo:
+        cluster.domain()
+    message = str(excinfo.value)
+    assert "nebari.example" in message
+    assert "someone-elses.example" in message
 
 
 def test_domain_error_is_clear_when_the_httproute_crd_is_absent():

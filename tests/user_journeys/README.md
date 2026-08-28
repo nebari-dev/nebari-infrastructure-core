@@ -266,16 +266,20 @@ installs under.
   `ERR_CERT_AUTHORITY_INVALID`, the SPKI flag is not reaching Chromium's
   launch args -- check `browser_type_launch_args` in `journeys/conftest.py`.
   Do not reach for `ignore_https_errors`: it is forbidden here.
-- **ACME challenges may cause domain derivation to fail.** Platform domain
-  discovery strips one DNS label from HTTPRoute hostnames. During ACME
-  issuance or renewal, cert-manager attaches temporary HTTP-01 challenge
-  routes to the gateway. On a cluster with `nebari.example.com`, these strip
-  to `example.com`, failing to match the other routes. `domain()` then raises
-  "more than one platform domain" and every journey errors at session setup.
-  The failure is loud, not silent, and transient (only during challenge
-  windows), but a run overlapping a renewal will fail unrelated to cluster
-  health. If this happens, modify domain discovery to ignore ACME challenge
-  paths or prefer the majority domain.
+- **Platform domain is derived by longest common suffix, not by stripping a
+  fixed number of labels.** An earlier version of `domain()` stripped exactly
+  one DNS label from every HTTPRoute hostname and required the results to
+  agree. That broke on every real cluster: the landing page route
+  (`nebari-system/nebari-landing-route`) serves the bare apex domain with no
+  service label at all, one fewer label than `argocd.<domain>`,
+  `keycloak.<domain>`, and `longhorn.<domain>`, so stripping one label from
+  the apex produced a different (and wrong) value and `domain()` raised on
+  every session setup. `domain()` now computes the longest common suffix, by
+  DNS label, across every hostname served by an HTTPRoute attached to the
+  gateway, which handles the apex route and any subdomain route uniformly. A
+  transient cert-manager ACME challenge route for the apex is just another
+  apex hostname and is absorbed by the same rule, so it is not a special
+  case.
 - **The journeys have never been executed against a live cluster.** Every
   journey has been exercised in isolation with tests_lib, but the suite as a
   whole (`journeys/`) has not yet had a run against a real deployed Nebari
