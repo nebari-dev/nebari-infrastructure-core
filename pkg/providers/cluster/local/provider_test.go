@@ -134,6 +134,26 @@ func TestValidateKindMode(t *testing.T) {
 			},
 			wantErr: "must be absolute",
 		},
+		{
+			name: "https_port above the port range is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"https_port": 99999999},
+			},
+			wantErr: "https_port must be between 1 and 65535",
+		},
+		{
+			name: "negative http_port is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": -1},
+			},
+			wantErr: "http_port must be between 1 and 65535",
+		},
+		{
+			name: "valid custom ports pass",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 8080, "https_port": 8443},
+			},
+		},
 	}
 
 	for _, tt := range tests {

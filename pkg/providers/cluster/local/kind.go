@@ -24,6 +24,11 @@ const (
 	// on purpose and not wired through DeployOptions.Timeout which is meant to be
 	// used for the whole deploy.
 	kindReadyTimeout = 90 * time.Second
+
+	// Default host ports publishing the gateway's listeners, used when
+	// http_port / https_port are unset.
+	defaultHTTPPort  int32 = 80
+	defaultHTTPSPort int32 = 443
 )
 
 // kindContextName returns the kubeconfig context kind generates for a cluster.
@@ -55,28 +60,32 @@ func kindClusterExists(ctx context.Context, kp *cluster.Provider, name string) (
 	return slices.Contains(clusters, name), nil
 }
 
+// hostPort narrows a config port to int32 for kind's PortMapping. Zero (the
+// unset value) becomes def, and out-of-range values also fall back to def as
+// a safety net: Validate has already rejected them by the time Deploy runs.
+func hostPort(port int, def int32) int32 {
+	if port <= 0 || port > 65535 {
+		return def
+	}
+	return int32(port)
+}
+
 // gatewayPortMappings publishes the gateway's fixed NodePorts on host ports,
 // so the platform is reachable at 127.0.0.1 without a routable load-balancer
 // IP (which Docker Desktop on macOS/Windows cannot provide). The listen
 // address is loopback on purpose: a local development cluster should not be
 // exposed to the LAN.
-func gatewayPortMappings(httpPort, httpsPort int32) []v1alpha4.PortMapping {
-	if httpPort == 0 {
-		httpPort = 80
-	}
-	if httpsPort == 0 {
-		httpsPort = 443
-	}
+func gatewayPortMappings(httpPort, httpsPort int) []v1alpha4.PortMapping {
 	return []v1alpha4.PortMapping{
 		{
 			ContainerPort: clusterapi.GatewayHTTPNodePort,
-			HostPort:      httpPort,
+			HostPort:      hostPort(httpPort, defaultHTTPPort),
 			ListenAddress: "127.0.0.1",
 			Protocol:      v1alpha4.PortMappingProtocolTCP,
 		},
 		{
 			ContainerPort: clusterapi.GatewayHTTPSNodePort,
-			HostPort:      httpsPort,
+			HostPort:      hostPort(httpsPort, defaultHTTPSPort),
 			ListenAddress: "127.0.0.1",
 			Protocol:      v1alpha4.PortMappingProtocolTCP,
 		},
@@ -86,7 +95,7 @@ func gatewayPortMappings(httpPort, httpsPort int32) []v1alpha4.PortMapping {
 // createKindCluster creates a kind cluster with the configured node image and mounts.
 // httpPort and httpsPort are the host ports publishing the gateway's listeners
 // (0 means the defaults, 80 and 443).
-func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig, httpPort, httpsPort int32) error {
+func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig, httpPort, httpsPort int) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.createKindCluster")
 	defer span.End()

@@ -77,6 +77,14 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 	}
 
+	for name, port := range map[string]int{"http_port": localCfg.HTTPPort, "https_port": localCfg.HTTPSPort} {
+		if port < 0 || port > 65535 {
+			err := fmt.Errorf("%s must be between 1 and 65535, got %d", name, port)
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Successfully validated local provider configuration").
 		WithResource("provider").
 		WithAction("validate").
@@ -140,7 +148,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("gitops_path", config.DefaultLocalRepositoryPath(projectName)))
 
-		if err := createKindCluster(ctx, kp, projectName, kindCfg, int32(localCfg.HTTPPort), int32(localCfg.HTTPSPort)); err != nil {
+		if err := createKindCluster(ctx, kp, projectName, kindCfg, localCfg.HTTPPort, localCfg.HTTPSPort); err != nil {
 			span.RecordError(err)
 			return err
 		}

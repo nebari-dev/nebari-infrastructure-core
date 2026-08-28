@@ -11,8 +11,8 @@ import (
 func TestGatewayPortMappings(t *testing.T) {
 	tests := []struct {
 		name          string
-		httpPort      int32
-		httpsPort     int32
+		httpPort      int
+		httpsPort     int
 		wantHostHTTP  int32
 		wantHostHTTPS int32
 	}{
