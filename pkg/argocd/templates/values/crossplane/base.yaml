@@ -1,0 +1,21 @@
+function:
+  packages:
+    - xpkg.upbound.io/crossplane-contrib/function-go-templating:v0.12.4
+    - xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.7.0
+    - xpkg.upbound.io/crossplane-contrib/function-sequencer:v0.6.0
+
+resourcesCrossplane:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+resourcesRBACManager:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi
