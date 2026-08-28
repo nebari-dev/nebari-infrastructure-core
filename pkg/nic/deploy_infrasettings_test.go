@@ -121,7 +121,7 @@ func TestDeployUsesPostDeployInfraSettings(t *testing.T) {
 			}
 
 			poolManifest := filepath.Join(repoDir, "manifests", "metallb", "ipaddresspool.yaml")
-			contents, err := os.ReadFile(poolManifest)
+			contents, err := os.ReadFile(filepath.Clean(poolManifest))
 			if err != nil {
 				t.Fatalf("read written metallb manifest: %v", err)
 			}
