@@ -1,10 +1,3 @@
-# DataScienceSpin — the spin API surface for issue #551. A cluster-scoped
-# composite resource that asks for the pre-wired Nebi + data science pack
-# pair. Cluster scope because a spin is a platform-level unit that spans
-# namespaces: its Applications live in argocd while shared resources between
-# packs (#597) live in pack namespaces, and a namespaced XR can only compose
-# into its own namespace. Pack-facing capability XRDs (e.g. ObjectStore)
-# stay namespaced per the Crossplane recommendation.
 apiVersion: apiextensions.crossplane.io/v1
 kind: CompositeResourceDefinition
 metadata:

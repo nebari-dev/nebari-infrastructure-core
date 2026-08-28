@@ -1,16 +1,3 @@
-# Composition for DataScienceSpin: two ArgoCD Applications (nebi-pack, then
-# the data science pack) with the cross-pack wiring rendered by the
-# composition instead of hardcoded in either chart's values.
-#
-# Ordering: the go-template marks each Application ready only once ArgoCD
-# reports it Healthy, and function-sequencer holds the DSP Application back
-# until the Nebi one is ready. That exercises the mount-time ordering path
-# even though DSP's nebi wiring is read at spawn time and would tolerate any
-# order (issue #551, viniciusdc's finding).
-#
-# Function names are the ones the Crossplane chart's package installer
-# derives from the package refs in values/crossplane/base.yaml
-# (crossplane-contrib/<repo> -> crossplane-contrib-<repo>).
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
