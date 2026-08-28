@@ -30,7 +30,7 @@ func NewProvider() *Provider {
 }
 
 // Name returns the provider name used in cluster.azure: dispatch.
-func (p *Provider) Name() string { return providerName }
+func (p *Provider) Name() string { return ProviderName }
 
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
 	raw := clusterConfig.ProviderConfig()
@@ -50,7 +50,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	ctx, span := tracer.Start(ctx, "azure.Validate")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -109,7 +109,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	ctx, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 		attribute.Bool("dry_run", opts.DryRun),
 	)
@@ -127,6 +127,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	subID := os.Getenv(subscriptionIDEnv)
 	if subID == "" {
 		err := fmt.Errorf("%s environment variable is required", subscriptionIDEnv)
+		span.RecordError(err)
+		return err
+	}
+
+	// Fail fast on a bad NIC_TOFU_PATH before any cloud resources (like the
+	// state backend) are created; the check is purely local.
+	if err := tofu.ValidateOverride(ctx); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -152,7 +159,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName, opts.BackupBucket))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu setup: %w", err)
@@ -217,7 +224,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	ctx, span := tracer.Start(ctx, "azure.Destroy")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 		attribute.Bool("dry_run", opts.DryRun),
 	)
@@ -266,7 +273,11 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
-	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName))
+	// Destroy never provisions the Longhorn backup container; the spec is
+	// omitted (nil) from toTFVars so tofu does not try to recreate it. When
+	// retain_on_destroy is on, opts.BackupBucket drives retainBackupBucket
+	// below to drop it from state before destroy.
+	tf, err := tofu.Setup(ctx, tofuTemplates, cfg.toTFVars(projectName, nil))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("tofu setup: %w", err)
@@ -307,6 +318,13 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
+	// Preserve a retained Longhorn backup storage account + container: drop
+	// them from Terraform state so `tofu destroy` leaves them — and their
+	// backups — intact. Only when NIC provisioned them and retain_on_destroy is
+	// on (opts.BackupBucket non-nil and ForceDestroy false). Best-effort: never
+	// fails teardown, even if the storage was never created.
+	cluster.RetainBackupResources(ctx, span, tf, opts.BackupBucket, backupStateAddrs(opts.BackupBucket))
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Terraform-managed resources").
 		WithResource("tofu").
 		WithAction("destroy").
@@ -337,7 +355,7 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, cluste
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.GetKubeconfig")
 	defer span.End()
-	span.SetAttributes(attribute.String("provider", providerName), attribute.String("project_name", projectName))
+	span.SetAttributes(attribute.String("provider", ProviderName), attribute.String("project_name", projectName))
 
 	cfg, err := p.parseConfig(ctx, clusterConfig)
 	if err != nil {

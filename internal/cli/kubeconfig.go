@@ -1,0 +1,85 @@
+package cli
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
+)
+
+var (
+	kubeconfigConfigFile string
+	kubeconfigOutputFile string
+
+	kubeconfigCmd = &cobra.Command{
+		Use:   "kubeconfig",
+		Short: "Generate kubeconfig for the deployed Nebari cluster",
+		Long: `Generate and output the kubeconfig file for accessing the Kubernetes
+cluster deployed by Nebari. This command retrieves the necessary cluster
+information and constructs a kubeconfig file that can be used with kubectl
+or other Kubernetes clients.`,
+		RunE: runKubeconfig,
+	}
+)
+
+func init() {
+	kubeconfigCmd.Flags().StringVarP(&kubeconfigConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
+	kubeconfigCmd.Flags().StringVarP(&kubeconfigOutputFile, "output", "o", "", "Path to output kubeconfig file (defaults to stdout)")
+}
+
+func runKubeconfig(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
+	configFile, err := resolveConfigFile(kubeconfigConfigFile)
+	if err != nil {
+		return err
+	}
+
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "cmd.kubeconfig")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("config.file", configFile))
+
+	cfg, err := config.ParseConfig(ctx, configFile)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	client, err := nic.NewClient(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
+	defer cleanup()
+
+	kubeconfigBytes, err := client.Kubeconfig(ctx, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if kubeconfigOutputFile != "" {
+		if err := os.WriteFile(kubeconfigOutputFile, kubeconfigBytes, 0600); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("write kubeconfig file %q: %w", kubeconfigOutputFile, err)
+		}
+		slog.Info("Kubeconfig written successfully", "file", kubeconfigOutputFile)
+		return nil
+	}
+
+	if _, err := os.Stdout.Write(kubeconfigBytes); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("write kubeconfig to stdout: %w", err)
+	}
+	return nil
+}

@@ -5,10 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
 func TestGenerateSecurePassword(t *testing.T) {
@@ -88,113 +87,23 @@ func TestGenerateSecurePasswordError(t *testing.T) {
 	})
 }
 
-func TestScrubbedConfig(t *testing.T) {
-	t.Run("zeros Auth and nils ArgoCDAuth in GitRepository", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-		gitConfig := &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "main",
-			Path:   "clusters/prod",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{
-				TokenEnv: "ARGOCD_TOKEN",
-			},
-		}
-
-		scrubbed := scrubbedConfig(cfg, gitConfig, "")
-
-		if scrubbed.GitRepository.Auth != (git.AuthConfig{}) {
-			t.Errorf("Auth should be zeroed, got %+v", scrubbed.GitRepository.Auth)
-		}
-		if scrubbed.GitRepository.ArgoCDAuth != nil {
-			t.Errorf("ArgoCDAuth should be nil, got %+v", scrubbed.GitRepository.ArgoCDAuth)
-		}
-		if scrubbed.GitRepository.URL != "git@github.com:org/repo.git" {
-			t.Errorf("URL altered: %q", scrubbed.GitRepository.URL)
-		}
-		if scrubbed.GitRepository.Branch != "main" {
-			t.Errorf("Branch altered: %q", scrubbed.GitRepository.Branch)
-		}
-		if scrubbed.GitRepository.Path != "clusters/prod" {
-			t.Errorf("Path altered: %q", scrubbed.GitRepository.Path)
-		}
-		if scrubbed.ProjectName != "test" {
-			t.Errorf("ProjectName altered: %q", scrubbed.ProjectName)
-		}
-	})
-
-	t.Run("does not mutate the input cfg or gitConfig", func(t *testing.T) {
-		cfg := &config.NebariConfig{}
-		gitConfig := &git.Config{
-			URL: "git@github.com:org/repo.git",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{TokenEnv: "ARGOCD_TOKEN"},
-		}
-
-		_ = scrubbedConfig(cfg, gitConfig, "")
-
-		if cfg.GitRepository != nil {
-			t.Errorf("input cfg.GitRepository should remain nil, got %+v", cfg.GitRepository)
-		}
-		if gitConfig.Auth.SSHKeyEnv != "MY_SSH_KEY" {
-			t.Errorf("input gitConfig.Auth.SSHKeyEnv mutated: %q", gitConfig.Auth.SSHKeyEnv)
-		}
-		if gitConfig.Auth.TokenEnv != "MY_TOKEN" {
-			t.Errorf("input gitConfig.Auth.TokenEnv mutated: %q", gitConfig.Auth.TokenEnv)
-		}
-		if gitConfig.ArgoCDAuth == nil || gitConfig.ArgoCDAuth.TokenEnv != "ARGOCD_TOKEN" {
-			t.Errorf("input gitConfig.ArgoCDAuth mutated")
-		}
-	})
-
-	t.Run("handles nil gitConfig", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-
-		scrubbed := scrubbedConfig(cfg, nil, "")
-
-		if scrubbed.GitRepository != nil {
-			t.Errorf("GitRepository should be nil, got %+v", scrubbed.GitRepository)
-		}
-		if scrubbed.ProjectName != "test" {
-			t.Errorf("ProjectName altered: %q", scrubbed.ProjectName)
-		}
-	})
-
-	t.Run("ignores cfg.GitRepository in favor of gitConfig argument", func(t *testing.T) {
-		cfg := &config.NebariConfig{
-			GitRepository: &git.Config{URL: "should-be-overridden"},
-		}
-		gitConfig := &git.Config{URL: "effective"}
-
-		scrubbed := scrubbedConfig(cfg, gitConfig, "")
-
-		if scrubbed.GitRepository == nil || scrubbed.GitRepository.URL != "effective" {
-			t.Errorf("scrubbed.GitRepository.URL = %+v, want %q", scrubbed.GitRepository, "effective")
-		}
-	})
-
+func TestCommittedConfig(t *testing.T) {
 	t.Run("rewrites path-based trust_bundle to resolved inline", func(t *testing.T) {
 		const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
 		cfg := &config.NebariConfig{
 			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
 		}
 
-		scrubbed := scrubbedConfig(cfg, nil, pem)
+		committed := committedConfig(cfg, pem)
 
-		if scrubbed.TrustBundle == nil {
+		if committed.TrustBundle == nil {
 			t.Fatal("TrustBundle should be preserved as inline, got nil")
 		}
-		if scrubbed.TrustBundle.Path != "" {
-			t.Errorf("machine-local path should be dropped, got %q", scrubbed.TrustBundle.Path)
+		if committed.TrustBundle.Path != "" {
+			t.Errorf("machine-local path should be dropped, got %q", committed.TrustBundle.Path)
 		}
-		if scrubbed.TrustBundle.Inline != pem {
-			t.Errorf("Inline = %q, want resolved PEM", scrubbed.TrustBundle.Inline)
+		if committed.TrustBundle.Inline != pem {
+			t.Errorf("Inline = %q, want resolved PEM", committed.TrustBundle.Inline)
 		}
 		// Input must not be mutated.
 		if cfg.TrustBundle.Path != "/home/operator/org-ca.pem" || cfg.TrustBundle.Inline != "" {
@@ -207,18 +116,50 @@ func TestScrubbedConfig(t *testing.T) {
 			TrustBundle: &config.TrustBundleConfig{Path: "   "},
 		}
 
-		scrubbed := scrubbedConfig(cfg, nil, "")
+		committed := committedConfig(cfg, "")
 
-		if scrubbed.TrustBundle != nil {
-			t.Errorf("TrustBundle should be stripped when resolved PEM is empty, got %+v", scrubbed.TrustBundle)
+		if committed.TrustBundle != nil {
+			t.Errorf("TrustBundle should be stripped when resolved PEM is empty, got %+v", committed.TrustBundle)
 		}
 	})
 
 	t.Run("leaves unset trust_bundle nil", func(t *testing.T) {
-		scrubbed := scrubbedConfig(&config.NebariConfig{}, nil, "")
+		committed := committedConfig(&config.NebariConfig{}, "")
 
-		if scrubbed.TrustBundle != nil {
-			t.Errorf("TrustBundle should stay nil, got %+v", scrubbed.TrustBundle)
+		if committed.TrustBundle != nil {
+			t.Errorf("TrustBundle should stay nil, got %+v", committed.TrustBundle)
+		}
+	})
+
+	t.Run("auth env-var names are committed verbatim", func(t *testing.T) {
+		// Deliberate: the config references credentials only by environment
+		// variable name, never by value, so the auth block is safe to commit
+		// as-is and the committed record stays a single source of truth with
+		// the operator's config. This reverses the pre-repository-provider
+		// scrub, which recorded a false empty auth block (see ADR-0015).
+		cfg := &config.NebariConfig{
+			ProjectName: "test",
+			Repository: &config.RepositoryConfig{
+				Providers: map[string]any{
+					"existing": map[string]any{
+						"url":         "git@github.com:org/repo.git",
+						"auth":        map[string]any{"ssh": map[string]any{"env": "MY_SSH_KEY"}},
+						"argocd_auth": map[string]any{"token": map[string]any{"env": "ARGOCD_TOKEN"}},
+					},
+				},
+			},
+		}
+
+		out, err := yaml.Marshal(committedConfig(cfg, ""))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		s := string(out)
+
+		for _, want := range []string{"MY_SSH_KEY", "ARGOCD_TOKEN", "argocd_auth"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("committed output should contain %q:\n%s", want, s)
+			}
 		}
 	})
 
@@ -229,51 +170,17 @@ func TestScrubbedConfig(t *testing.T) {
 			TrustBundle: &config.TrustBundleConfig{Path: "/home/operator/org-ca.pem"},
 		}
 
-		out, err := yaml.Marshal(scrubbedConfig(cfg, nil, pem))
+		out, err := yaml.Marshal(committedConfig(cfg, pem))
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
 		s := string(out)
 
 		if strings.Contains(s, "/home/operator/org-ca.pem") {
-			t.Errorf("scrubbed output should not contain the local path:\n%s", s)
+			t.Errorf("committed output should not contain the local path:\n%s", s)
 		}
 		if !strings.Contains(s, "-----BEGIN CERTIFICATE-----") {
-			t.Errorf("scrubbed output should contain the resolved inline PEM:\n%s", s)
-		}
-	})
-
-	t.Run("marshalled output excludes sensitive strings", func(t *testing.T) {
-		cfg := &config.NebariConfig{ProjectName: "test"}
-		gitConfig := &git.Config{
-			URL:    "git@github.com:org/repo.git",
-			Branch: "main",
-			Auth: git.AuthConfig{
-				SSHKeyEnv: "MY_SSH_KEY",
-				TokenEnv:  "MY_TOKEN",
-			},
-			ArgoCDAuth: &git.AuthConfig{
-				TokenEnv: "ARGOCD_TOKEN",
-			},
-		}
-
-		out, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig, ""))
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		s := string(out)
-
-		// Sensitive env-var names and the ArgoCDAuth block must not appear.
-		for _, forbidden := range []string{"MY_SSH_KEY", "MY_TOKEN", "ARGOCD_TOKEN", "argocd_auth"} {
-			if strings.Contains(s, forbidden) {
-				t.Errorf("scrubbed output should not contain %q:\n%s", forbidden, s)
-			}
-		}
-		// Non-sensitive fields preserved.
-		for _, kept := range []string{"git@github.com:org/repo.git", "branch: main"} {
-			if !strings.Contains(s, kept) {
-				t.Errorf("scrubbed output should contain %q:\n%s", kept, s)
-			}
+			t.Errorf("committed output should contain the resolved inline PEM:\n%s", s)
 		}
 	})
 }

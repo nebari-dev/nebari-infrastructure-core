@@ -49,7 +49,12 @@ CLAUDE.md
 
 # User config files (contain environment-specific values)
 config*.yaml
+local*.yaml
+# Keep the committed sample configs and fixtures visible; this negation must stay last in
+# this block so the patterns above cannot re-ignore examples/local-config.yaml
+# nor .github/fixtures/deploy/*.yaml
 !examples/*.yaml
+!.github/fixtures/deploy/*.yaml
 
 # Internal design docs
 docs/plans/
@@ -59,3 +64,8 @@ docs/plans/
 
 # Test Configs
 test-configs/
+
+# Generated starter workspaces (published to a registry, never committed).
+# Also GoReleaser's output dir, so `make release-snapshot` (--clean) wipes any
+# starters generated here - regenerate them with `make starters` afterwards.
+dist/

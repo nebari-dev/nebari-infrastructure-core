@@ -1,5 +1,15 @@
 name: Release
 
+# Cuts the release, then publishes what depends on it: the conda package to
+# prefix.dev, and then the starter workspaces that pin that package.
+#
+# All three are jobs in one run rather than separate workflows keyed off each
+# other. A workflow_run-triggered run executes on the default branch, so the tag
+# would have to be threaded through as an output and the checkout pinned by
+# hand; here github.ref is the tag for all three and the ordering is a `needs:`
+# edge. Publishing therefore happens only as part of a release: a corrected
+# recipe ships with a new patch release rather than by republishing a tag.
+
 on:
   push:
     tags:
@@ -46,6 +56,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pin the tag being released to the one that triggered this run.
+          # Without this, GoReleaser picks the highest version-sorted tag
+          # pointing at HEAD, potentially choosing the wrong tag if multiple
+          # ones point to the same commit, which can happen when cutting a
+          # release candidate and then a release on top of it.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # Publishing the Homebrew cask pushes to nebari-dev/homebrew-tap, a
           # different repo the default GITHUB_TOKEN cannot write to.
           # HOMEBREW_TAP_TOKEN is an org-level secret with write access to the tap.
@@ -57,3 +73,213 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: 'dist/*.tar.gz, dist/*.zip, dist/checksums.txt'
+
+  # Publishing the conda package and the starter workspaces lives here, not in a
+  # workflow of its own keyed off this one. A workflow_run-triggered run always
+  # executes on the default branch, so the tag has to be threaded through and the
+  # checkout pinned by hand; as jobs in this run, github.ref IS the tag and the
+  # ordering is a `needs:` edge rather than an event relationship.
+  publish-prefix-dev:
+    name: Publish to prefix.dev
+    needs: release
+    # Skipped, not failed, on a release candidate. This workflow runs on every
+    # v* tag and conda forbids `-` in a version string, so an rc has nothing to
+    # publish - and a red Release run on every rc is a colour nobody reads after
+    # the third time. The API check inside the job is the enforcement; this is
+    # the cheap first layer that keeps the run green.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      # Distinct tags produce distinct filenames, so the only real race is a
+      # manual re-run while a prior attempt is still uploading.
+      group: publish-prefix-dev-${{ github.ref_name }}
+      cancel-in-progress: false
+    # Bound to the prefix.dev trusted publisher: repository + this workflow file
+    # + this environment. Changing the filename or the environment breaks OIDC
+    # publishing, and nothing in the repository fails when that happens - it
+    # surfaces only as a failed upload here.
+    environment: release
+    permissions:
+      contents: read   # gh release view
+      id-token: write  # OIDC for prefix.dev trusted publishing
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Second layer. The job-level if: already skipped an rc by tag shape; this
+      # catches a release marked prerelease in the API without a `-` in its tag.
+      - name: Refuse prereleases
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # This workflow runs on every v* tag, release candidates included, and
+          # conda forbids `-` in a version string so an rc cannot be packaged
+          # under its own name anyway. stderr is kept: a rate limit or an outage
+          # must not be reported as "no such release".
+          if ! prerelease="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease -q .isPrerelease 2>"$RUNNER_TEMP/gh.err")"; then
+            echo "::error::could not read release $TAG: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
+            exit 1
+          fi
+          if [[ "$prerelease" != "false" ]]; then
+            echo "::error::$TAG is a prerelease; only stable releases are published"
+            exit 1
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.1'
+
+      - name: Install rattler-build
+        uses: prefix-dev/rattler-build-action@1ca5f45832f419a46d1326ccc5861d7e14d67c44 # v0.2.39
+        with:
+          rattler-build-version: v0.74.0
+          setup-only: 'true'
+
+      - name: Build conda packages
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./packaging/conda/build-packages.sh "$TAG" dist/conda
+
+      - name: Upload to prefix.dev
+        run: |
+          set -euo pipefail
+          mapfile -t pkgs < <(find dist/conda -name '*.conda' | sort)
+          # A build that emitted nothing must not report a green publish.
+          if [[ ${#pkgs[@]} -eq 0 ]]; then
+            echo "::error::no packages were built"
+            exit 1
+          fi
+          echo "==> uploading ${#pkgs[@]} package(s)"
+          for pkg in "${pkgs[@]}"; do
+            echo "==> $(basename "$pkg")"
+            # Resumes a partially-uploaded release rather than dying on the first
+            # filename the channel already has. It compares filenames, not bytes,
+            # so a corrected recipe ships with a new patch release rather than by
+            # re-running this job.
+            rattler-build upload prefix -c nebari-dev/nebari --skip-existing "$pkg"
+          done
+
+  publish-starters:
+    name: Publish starters to quay.io
+    # The starters pin nic as a conda dependency, so `pixi lock` below cannot
+    # resolve until the upload above has happened.
+    needs: publish-prefix-dev
+    # Same rc skip as above. `needs:` alone would not do it: a skipped
+    # dependency skips this too, but stating it keeps the two jobs' conditions
+    # readable side by side rather than implied.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: publish-starters-${{ github.ref_name }}
+      cancel-in-progress: false
+    # NOTE: this environment does not exist yet, and the Quay credentials are
+    # currently repository-scoped rather than scoped to it. Create it with
+    # required reviewers and move them, or this push has no approval gate.
+    environment: quay-publish
+    permissions:
+      contents: read  # no OIDC here; the Quay push uses a static token
+    env:
+      # Starters publish under the existing nebari project in a starters/ subdir,
+      # mirroring how the charts live at quay.io/nebari/charts.
+      QUAY_NAMESPACE: nebari
+      STARTER_REPO_PREFIX: starters
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Install pixi and nebi
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installer pinned to the v0.77.0 tag commit; PIXI_VERSION pins the
+          # binary it fetches. Same shape as the k3d pin in deployment-tests.
+          curl -fsSL https://raw.githubusercontent.com/prefix-dev/pixi/e3c26fbf7d8294d4ddbe7c913b4f8e60bcbafe5a/install/install.sh \
+            | PIXI_VERSION=v0.77.0 bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          # Asset-layer bundling (config.yaml and the README travelling with the
+          # workspace) needs nebi >= 0.10; older versions silently ship only
+          # pixi.toml and pixi.lock. Floor plus ceiling rather than ==, so patch
+          # releases are allowed. Channel pinned explicitly: this job holds the
+          # Quay push token, and an unpinned channel decides which build of nebi
+          # runs beside it.
+          pixi global install -c conda-forge "nebi>=0.13,<0.14"
+
+      - name: Generate starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          # -version explicitly rather than cmd/starters' git describe fallback,
+          # which needs tag objects and treats an empty value as unset.
+          : "${TAG:?ref_name is empty}"
+          go run ./cmd/starters -out dist/starters -version "${TAG#v}"
+
+      - name: Configure quay registry
+        shell: bash
+        env:
+          QUAY_USERNAME: ${{ vars.QUAY_OCI_STARTERS_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_OCI_STARTERS_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_OCI_STARTERS_USERNAME is not set}"
+          : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set}"
+          printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
+            --name quay \
+            --url quay.io \
+            --namespace "$QUAY_NAMESPACE" \
+            --username "$QUAY_USERNAME" \
+            --password-stdin
+
+      - name: Lock and publish each starter
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            pushd "dist/starters/${provider}" > /dev/null
+            # Resolves against the channel the job above just published to.
+            pixi lock
+            nebi init
+            nebi publish --local \
+              --registry quay \
+              --repo "${STARTER_REPO_PREFIX}/${provider}" \
+              --tag "$TAG"
+            popd > /dev/null
+          done
+
+      - name: Imported starters still carry their placeholders
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            dest="/tmp/imported-${provider}"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
+            test -f "$dest/config.yaml"
+            test -f "$dest/README.md"
+            grep -q CHANGEME "$dest/config.yaml"
+            # The published bundle must be rejected unedited, same as the
+            # freshly generated one.
+            if nic validate -f "$dest/config.yaml"; then
+              echo "::error::published ${provider} starter validates unedited"
+              exit 1
+            fi
+            echo "OK: ${provider} round-tripped and is still not deployable as-is"
+          done

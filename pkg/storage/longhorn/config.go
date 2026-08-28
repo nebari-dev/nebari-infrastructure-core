@@ -12,6 +12,13 @@ const (
 	// Namespace is the Kubernetes namespace Longhorn is installed into.
 	Namespace = "longhorn-system"
 
+	// ServiceAccountName is the service account the Longhorn Helm chart creates
+	// and that longhorn-manager / instance-manager pods run under. Keyless S3
+	// backups bind an EKS Pod Identity association to this SA so Longhorn's AWS
+	// SDK resolves credentials from the cluster role. Must match the account name
+	// the association targets in the terraform-aws-eks-cluster module.
+	ServiceAccountName = "longhorn-service-account"
+
 	// ReleaseName is the Helm release name used for Longhorn.
 	ReleaseName = "longhorn"
 
@@ -30,7 +37,9 @@ const (
 	CreateDefaultDiskLabel = "node.longhorn.io/create-default-disk"
 
 	// ChartVersion pins the upstream Longhorn Helm chart version. Bump
-	// together with iscsiDaemonSetYAML when upgrading.
+	// together with iscsiDaemonSetYAML when upgrading, and verify that
+	// settingsResource (uninstall.go) still matches the Settings API version
+	// the new Longhorn serves.
 	// v1.11.2 (released 2026-05-05) includes the (*Controller).Snapshot
 	// nil-pointer panic fix from longhorn/longhorn#12081.
 	ChartVersion = "1.11.2"
@@ -72,8 +81,8 @@ type Config struct {
 	//     replicas off the storage nodes (evict, wait for rebuild) BEFORE removing
 	//     the group.
 	//
-	// Before switching modes, take a fresh OFF-CLUSTER backup (the
-	// nebari-longhorn-backup-pack provides scheduled S3 backups; trigger an
+	// Before switching modes, take a fresh OFF-CLUSTER backup (NIC's
+	// `backups.longhorn` config provisions scheduled S3 backups; trigger an
 	// on-demand one right before the switch). In-cluster snapshots do not survive
 	// the destructive true->false case since they live on the disks being removed;
 	// only the S3 backup does, and you can restore onto the new topology.
@@ -97,6 +106,14 @@ type Config struct {
 	// must mount - is covered regardless of what you set here. This selector only
 	// controls which nodes are labeled as the storage (replica) pool.
 	NodeSelector map[string]string `yaml:"node_selector,omitempty"`
+
+	// InstanceManagerCPUPercent overrides Longhorn's "Guaranteed Instance
+	// Manager CPU" setting: the percentage (0-40) of each node's allocatable
+	// CPU reserved for every instance-manager pod, per node. Longhorn's
+	// default is 12, which on a 4 vCPU node silently reserves ~480m per node
+	// before any volume exists (#456). Applied to both v1 and v2 data engines.
+	// Nil keeps Longhorn's default; 0 removes the reservation entirely.
+	InstanceManagerCPUPercent *int `yaml:"instance_manager_cpu_percent,omitempty"`
 
 	// ClusterAutoscalerEnabled tells Longhorn whether the cluster runs the
 	// Kubernetes Cluster Autoscaler. It is not user-facing so providers set it

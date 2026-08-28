@@ -1,0 +1,132 @@
+name: Starters
+
+# Validation only. Publishing lives in release.yml, as jobs that run after the
+# release itself: the starters pin nic as a conda dependency, so `pixi lock`
+# cannot resolve until the conda upload has happened.
+
+on:
+  pull_request:
+    paths:
+      - "starters/**"
+      - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
+      - ".github/workflows/starters.yml"
+      # The job that publishes what this validates lives there now.
+      - ".github/workflows/release.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "starters/**"
+      - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
+      - ".github/workflows/starters.yml"
+      # The job that publishes what this validates lives there now.
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-starters:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Generate starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/starters -out dist/starters
+
+      - name: Rendered starters are complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A substitution token that failed to expand would otherwise ship to
+          # the registry, and a malformed pixi.toml would not surface until the
+          # publish job runs pixi lock.
+          if grep -rn '__[A-Z_]*__' dist/starters/; then
+            echo "::error::unsubstituted template tokens in the rendered starters"
+            exit 1
+          fi
+          for provider in local aws; do
+            python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' \
+              "dist/starters/${provider}/pixi.toml"
+          done
+          echo "OK: no leftover tokens, every pixi.toml parses"
+
+      - name: Unedited starters are rejected, filled ones validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            config="dist/starters/${provider}/config.yaml"
+
+            echo "== ${provider}: the unedited starter must be rejected =="
+            if err="$(nic validate -f "$config" 2>&1)"; then
+              echo "::error::nic validate accepted the unedited ${provider} starter"
+              echo "$err"
+              exit 1
+            fi
+            # nic logs errors as JSON, so the quotes in the message arrive
+            # backslash-escaped; drop the escapes before matching on them.
+            plain="$(printf '%s' "$err" | tr -d '\\')"
+
+            echo "$plain" | grep -q CHANGEME || {
+              echo "::error::${provider} validation error did not mention CHANGEME"
+              echo "$err"
+              exit 1; }
+
+            # Rejection alone is not enough, and neither is grepping the
+            # message for CHANGEME: go-yaml quotes the offending source line in
+            # a parse error, so sed surgery that breaks the YAML produces an
+            # error that mentions CHANGEME too. "placeholder value" only comes
+            # from the placeholder gate, which runs after a successful
+            # unmarshal, so matching it proves the config still parses.
+            echo "$plain" | grep -q 'placeholder value' || {
+              echo "::error::${provider} was rejected, but not by the placeholder gate - the config probably no longer parses"
+              echo "$err"
+              exit 1; }
+
+            # The expected fields are written out here on purpose. nic derives
+            # these paths from the parsed config, so asserting them is
+            # independent of the generator's own field list - a prefix that
+            # matched the wrong line lands on a different path and fails here.
+            case "$provider" in
+              local) want='field "project_name"' ;;
+              aws)   want='fields "certificate.acme.email", "domain", "project_name", "repository.existing.path", "repository.existing.url"' ;;
+            esac
+            echo "$plain" | grep -qF "$want" || {
+              echo "::error::${provider} placeholdered the wrong fields; wanted ${want}"
+              echo "$err"
+              exit 1; }
+            echo "OK: ${provider} is rejected unedited, parses, and placeholders exactly the expected fields"
+          done
