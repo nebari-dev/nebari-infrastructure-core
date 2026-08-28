@@ -183,6 +183,43 @@ def test_require_longhorn_does_not_skip_when_longhorn_is_present():
     assert cluster.require_longhorn() is None
 
 
+def _longhorn_node(ready=True, allow_scheduling=True):
+    conditions = []
+    if ready is not None:
+        conditions.append({"type": "Ready", "status": "True" if ready else "False"})
+    return {
+        "spec": {"allowScheduling": allow_scheduling},
+        "status": {"conditions": conditions},
+    }
+
+
+@pytest.mark.parametrize(
+    "nodes,expected",
+    [
+        ([], 0),
+        ([_longhorn_node(ready=True, allow_scheduling=True)], 1),
+        (
+            [
+                _longhorn_node(ready=True, allow_scheduling=True),
+                _longhorn_node(ready=True, allow_scheduling=True),
+            ],
+            2,
+        ),
+        # NotReady but schedulable does not count: about to be evicted.
+        ([_longhorn_node(ready=False, allow_scheduling=True)], 0),
+        # Ready but not schedulable does not count: disabled for maintenance.
+        ([_longhorn_node(ready=True, allow_scheduling=False)], 0),
+        # No Ready condition at all does not count.
+        ([_longhorn_node(ready=None, allow_scheduling=True)], 0),
+    ],
+)
+def test_schedulable_longhorn_node_count(nodes, expected):
+    custom = MagicMock()
+    custom.list_namespaced_custom_object.return_value = {"items": nodes}
+    cluster = _cluster(custom=custom)
+    assert cluster.schedulable_longhorn_node_count() == expected
+
+
 def _gateway(listeners):
     return {"spec": {"listeners": listeners}}
 

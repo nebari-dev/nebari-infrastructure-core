@@ -34,6 +34,7 @@ STORAGE_DEFAULT_ANNOTATION = "storageclass.kubernetes.io/is-default-class"
 LONGHORN_GROUP = "longhorn.io"
 LONGHORN_VERSION = "v1beta2"
 VOLUME_PLURAL = "volumes"
+LONGHORN_NODE_PLURAL = "nodes"
 
 # Longhorn's own default StorageClass name, created by the Longhorn chart
 # itself rather than by NIC, which is why it is not a mirrored constant and
@@ -373,3 +374,34 @@ class Cluster:
             plural=VOLUME_PLURAL,
             name=pv_name,
         )
+
+    def schedulable_longhorn_node_count(self) -> int:
+        """How many Longhorn nodes can currently take a replica.
+
+        A `nodes.longhorn.io` object counts only when it is both Ready
+        (status.conditions has a Ready condition with status "True") and
+        schedulable (spec.allowScheduling is true). Neither alone is
+        enough: a node can be marked schedulable while NotReady (about to
+        be evicted), or Ready while an operator has disabled scheduling on
+        it for maintenance. This is a plain count, not an assertion -
+        callers decide what a shortfall means for the volume they are
+        looking at.
+        """
+        nodes = self.custom.list_namespaced_custom_object(
+            group=LONGHORN_GROUP,
+            version=LONGHORN_VERSION,
+            namespace=constants.LONGHORN_NAMESPACE,
+            plural=LONGHORN_NODE_PLURAL,
+        ).get("items", [])
+
+        count = 0
+        for node in nodes:
+            if not (node.get("spec") or {}).get("allowScheduling"):
+                continue
+            conditions = (node.get("status") or {}).get("conditions") or []
+            if any(
+                c.get("type") == "Ready" and c.get("status") == "True"
+                for c in conditions
+            ):
+                count += 1
+        return count
