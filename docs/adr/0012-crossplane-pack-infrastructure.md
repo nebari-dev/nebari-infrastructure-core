@@ -2,11 +2,28 @@
 
 ## Status
 
-Proposed (2026-07-20)
+Rejected (2026-08-26)
 
-Acceptance is conditional on the bounded AWS proof of concept and decision gates in
-the [Validation Plan](#validation-plan). This ADR chooses a direction to test; it
-does not approve an in-cluster cloud provisioner for production.
+Crossplane is not adopted for infrastructure provisioning at this time. The
+analysis below is retained as the record of what was evaluated and why, and the
+capability-boundary framing remains relevant if the conditions in
+[Decision](#decision-2026-08-26) are later met. Crossplane remains under
+exploration for software-pack integration and spins.
+
+## Decision (2026-08-26)
+
+- **User-managed infrastructure is not a goal yet** — least of all shared,
+  critical resources such as a cross-pack bucket.
+- **The bar is two conditions together**, and neither holds today: cluster admin
+  has become a bottleneck to creating resources, *and* the resources created have
+  a scoped blast radius (a user or group admin owning their own bucket).
+- **Bootstrap problem.** `nic` already creates cluster resources with OpenTofu and
+  always will; Crossplane's own IAM must itself be bootstrapped and expanded as
+  needs grow. Crossplane adds a second path rather than replacing the first.
+- **Container escape / blast radius.** Anyone reaching the Crossplane pod gets
+  cloud admin. Sandbox escape is common and getting easier
+  ([Trail of Bits, 2026-08-26](https://blog.trailofbits.com/2026/08/26/vms-wont-contain-cyber-capable-agents/)).
+  Managed nodes (EKS Auto) mitigate this.
 
 ## Date
 
@@ -144,6 +161,9 @@ central Crossplane management cluster (better survival/isolation but adds a shar
 control plane — reconsider if NIC operates fleets).
 
 ## Decision Outcome
+
+*The direction below is what was evaluated against the validation plan. It was not
+adopted — see [Decision (2026-08-26)](#decision-2026-08-26).*
 
 Adopt the **capability boundary** now and validate **Option 4** as the preferred
 managed implementation, with **Option 2** as the fallback. The first deliverable is
