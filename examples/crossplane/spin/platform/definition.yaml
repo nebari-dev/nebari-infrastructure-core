@@ -1,0 +1,87 @@
+# DataScienceSpin — the spin API surface for issue #551. A cluster-scoped
+# composite resource that asks for the pre-wired Nebi + data science pack
+# pair. Cluster scope because a spin is a platform-level unit that spans
+# namespaces: its Applications live in argocd while shared resources between
+# packs (#597) live in pack namespaces, and a namespaced XR can only compose
+# into its own namespace. Pack-facing capability XRDs (e.g. ObjectStore)
+# stay namespaced per the Crossplane recommendation.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: datasciencespins.platform.nebari.dev
+  annotations:
+    # Sync order when deployed via an ArgoCD Application: XRD first, then
+    # Composition, then instances.
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  group: platform.nebari.dev
+  names:
+    kind: DataScienceSpin
+    plural: datasciencespins
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # Base domain of the platform. Everything derives from it by
+                # the packs' own conventions: Keycloak at keycloak.<domain>,
+                # Nebi at nebi.<domain>, the hub at hub.<domain>.
+                domain:
+                  type: string
+                  minLength: 1
+                nebi:
+                  type: object
+                  default: {}
+                  properties:
+                    namespace:
+                      type: string
+                      default: nebi
+                    # Drives the operator-provisioned OIDC client id
+                    # (nebi-<releaseName>-nebari-nebi-pack) and the in-cluster
+                    # service name DSP derives. The DSP defaults assume
+                    # nebi-pack, so change both sides together.
+                    releaseName:
+                      type: string
+                      default: nebi-pack
+                    version:
+                      type: string
+                      default: 0.1.3
+                    # Extra Helm values passed through to the chart. The
+                    # wiring keys the composition owns (nebariapp.hostname)
+                    # win over anything set here.
+                    values:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                dataScience:
+                  type: object
+                  default: {}
+                  properties:
+                    namespace:
+                      type: string
+                      default: data-science
+                    # Load-bearing: the chart hardcodes the OIDC client
+                    # Secret name as <release>-nebari-data-science-pack, so a
+                    # different release name silently falls back to dummy
+                    # auth unless the values override both hub mounts.
+                    releaseName:
+                      type: string
+                      default: data-science-pack
+                    version:
+                      type: string
+                      default: 0.1.5
+                    # Extra Helm values passed through to the chart. The
+                    # wiring keys the composition owns (keycloak.hostname,
+                    # nebi.namespace, nebi.releaseName) win over anything
+                    # set here.
+                    values:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+              required:
+                - domain

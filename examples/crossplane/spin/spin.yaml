@@ -1,0 +1,38 @@
+apiVersion: platform.nebari.dev/v1alpha1
+kind: DataScienceSpin
+metadata:
+  name: ds
+  annotations:
+    # The DataScienceSpin CRD is created asynchronously by Crossplane after
+    # the XRD syncs, so ArgoCD must skip the dry run for the unknown kind on
+    # the first sync. The sync retry covers the establishment window.
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  domain: nebari.local
+  crossplane:
+    compositionRef:
+      name: datasciencespin-packs
+  nebi:
+    values:
+      # Chart 0.1.3 pins sha-bd25921, which is amd64-only and cannot run on
+      # arm64 local clusters (Apple Silicon). sha-256da80 is multi-arch.
+      image:
+        tag: sha-256da80
+      # Trust the self-signed gateway certificate for backchannel OIDC calls
+      orgCABundle:
+        configMapName: nebari-trust-bundle
+  dataScience:
+    values:
+      # The hub's OAuth client (tornado/pycurl) ignores the CA env vars the
+      # chart sets (libcurl reads no env), so point it at the merged bundle
+      # the merge-ca-bundle init container writes. DSP chart bug: its trust
+      # mechanism misses its own authenticator.
+      jupyterhub:
+        hub:
+          config:
+            GenericOAuthenticator:
+              http_request_kwargs:
+                ca_certs: /etc/ssl/certs-extra/ca-bundle.crt
+      sharedStorage:
+        enabled: false
