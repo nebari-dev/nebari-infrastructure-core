@@ -6,10 +6,9 @@ version = "0.1.0"
 
 [dependencies]
 # The pinned toolchain. nic is published to the channel above by this repo's
-# release pipeline; the channel is empty until the first release publishes to
-# it, and until then this dependency does not resolve and nic has to be on
-# PATH. Moving to prefix.dev's shared github-releases channel is tracked
-# separately; see
+# release pipeline, so `pixi install` resolves it the same way it resolves
+# anything else. Moving to prefix.dev's shared github-releases channel is
+# tracked separately; see
 # https://github.com/nebari-dev/nebari-infrastructure-core/blob/main/docs/operations/packaging.md
 nebari-infrastructure-core = "__NIC_VERSION__"
 __PROVIDER_DEPS__
