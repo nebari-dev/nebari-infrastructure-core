@@ -117,18 +117,17 @@ GoReleaser finishes attaching them.
 so their `pixi lock` cannot resolve until the package is on the channel; that
 ordering is a `needs:` edge rather than an event relationship.
 
-Only stable releases are published, and this is enforced rather than assumed: the
-tag is checked against the release API and a prerelease is refused. That applies
-to manual runs too, which is where it matters - a `release: published` filter
-alone would still let a hand-dispatched release candidate through. (conda also
-forbids `-` in a version string, so a prerelease tag could not be packaged
-unrenamed even if the policy changed.)
+Only stable releases are published. `Release` runs on every `v*` tag, so both
+publish jobs skip a tag containing `-`, and the job then re-checks the release
+API in case something is marked prerelease without saying so in its tag. conda
+forbids `-` in a version string anyway, so a release candidate could not be
+packaged under its own name even if the policy changed.
 
 **When a release does not appear on the channel**, check in this order:
 
 1. Did `Publish to prefix.dev` run for the tag, and was its `release`
-   environment approval granted? It is a separate workflow from `Release`, so a
-   green release does not imply a published package.
+   environment approval granted? It is a separate job in the `Release` run with
+   its own approval, so a green release job does not imply a published package.
 2. Is the prefix.dev trusted publisher still registered for this repository,
    workflow and environment? It is configured outside the repository, so nothing
    here fails a review when it is missing - the upload step is where it surfaces.
@@ -141,19 +140,24 @@ unrenamed even if the policy changed.)
    only as part of a release, so a corrected recipe ships with a new patch
    release rather than by republishing an existing tag.
 
-**Package on the channel but no starter on quay** means the second job did not
-run or did not pass. Check its `quay-publish` approval first, then whether
-`pixi lock` resolved - a starter cannot lock until the package it pins is
-actually on the channel. This is also how a release
-   published before the workflow existed gets backfilled.
+**Package on the channel but no starter on quay** means `Publish starters to
+quay.io` did not run or did not pass. Check its `quay-publish` approval first,
+then whether `pixi lock` resolved - a starter cannot lock until the package it
+pins is actually on the channel.
+
+**Nothing published for a release cut before this pipeline existed.** There is no
+backfill path: publishing happens only as part of a release run. v0.14.0 and
+earlier are not on the channel and will not be, so `pixi add` against this channel
+starts working with the first stable release cut after this landed.
 
 This channel is a bridge. The intended home is prefix.dev's shared
 [`github-releases`](https://prefix.dev/channels/github-releases) channel, which is
 populated by [octoconda](https://redirect.github.com/hunger/octoconda) from our
 published releases and needs no recipe on our side. Onboarding is a one-line
 entry in its `config.toml`, proposed upstream and not yet merged. When it lands,
-`packaging/conda/` and its workflow should be removed and the starter templates
-repointed, rather than kept as a second source of packages.
+`packaging/conda/` and the two publish jobs in `release.yml` should be removed
+and the starter templates repointed, rather than kept as a second source of
+packages.
 
 ## CI
 

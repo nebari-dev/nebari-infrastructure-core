@@ -1,5 +1,15 @@
 name: Release
 
+# Cuts the release, then publishes what depends on it: the conda package to
+# prefix.dev, and then the starter workspaces that pin that package.
+#
+# All three are jobs in one run rather than separate workflows keyed off each
+# other. A workflow_run-triggered run executes on the default branch, so the tag
+# would have to be threaded through as an output and the checkout pinned by
+# hand; here github.ref is the tag for all three and the ordering is a `needs:`
+# edge. Publishing therefore happens only as part of a release: a corrected
+# recipe ships with a new patch release rather than by republishing a tag.
+
 on:
   push:
     tags:
@@ -72,8 +82,19 @@ jobs:
   publish-prefix-dev:
     name: Publish to prefix.dev
     needs: release
+    # Skipped, not failed, on a release candidate. This workflow runs on every
+    # v* tag and conda forbids `-` in a version string, so an rc has nothing to
+    # publish - and a red Release run on every rc is a colour nobody reads after
+    # the third time. The API check inside the job is the enforcement; this is
+    # the cheap first layer that keeps the run green.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      # Distinct tags produce distinct filenames, so the only real race is a
+      # manual re-run while a prior attempt is still uploading.
+      group: publish-prefix-dev-${{ github.ref_name }}
+      cancel-in-progress: false
     # Bound to the prefix.dev trusted publisher: repository + this workflow file
     # + this environment. Changing the filename or the environment breaks OIDC
     # publishing, and nothing in the repository fails when that happens - it
@@ -86,6 +107,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Second layer. The job-level if: already skipped an rc by tag shape; this
+      # catches a release marked prerelease in the API without a `-` in its tag.
       - name: Refuse prereleases
         env:
           TAG: ${{ github.ref_name }}
@@ -146,8 +169,15 @@ jobs:
     # The starters pin nic as a conda dependency, so `pixi lock` below cannot
     # resolve until the upload above has happened.
     needs: publish-prefix-dev
+    # Same rc skip as above. `needs:` alone would not do it: a skipped
+    # dependency skips this too, but stating it keeps the two jobs' conditions
+    # readable side by side rather than implied.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: publish-starters-${{ github.ref_name }}
+      cancel-in-progress: false
     # NOTE: this environment does not exist yet, and the Quay credentials are
     # currently repository-scoped rather than scoped to it. Create it with
     # required reviewers and move them, or this push has no approval gate.

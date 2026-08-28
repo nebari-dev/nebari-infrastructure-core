@@ -48,11 +48,16 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
 ## Maintainer prerequisites (one-time repo-admin setup)
 
 1. **Create the `release` environment** (Settings -> Environments) with required
-   reviewers. This activates the approval gate on the release job.
+   reviewers. Two jobs in `release.yml` use it - `Release` and `Publish to
+   prefix.dev` - so a release asks for approval twice, once before cutting and
+   once before publishing to the channel.
 
 2. **Register the prefix.dev trusted publisher** for the conda channel, under
    the channel's settings: this repository, workflow file `release.yml`, and
-   the `release` environment. Publishing uses OIDC, so there is no token to
+   the `release` environment. If a registration against an older workflow
+   filename exists, this is a cutover rather than a one-time setup: it has to
+   happen between merging the workflow and cutting the next tag, or that
+   release fails at upload. Publishing uses OIDC, so there is no token to
    store, but there is also nothing in the repository that fails when the
    registration is missing or wrong. It surfaces only as a failed upload at the
    end of the `Publish to prefix.dev` job. See
