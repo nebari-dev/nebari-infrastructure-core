@@ -72,6 +72,19 @@ spec:
     refreshToken: true
     forwardAccessToken: true
   jwt:
+    # A browser arrives with no token at all and MUST be allowed past JWT
+    # authentication so the oidc filter above can redirect it to Keycloak.
+    # Without this, Envoy Gateway's JWT authentication rejects every tokenless
+    # request before the OIDC filter ever runs, and a human can never log in:
+    # every browser gets a bare "Jwt is missing" 401.
+    #
+    # This relaxes AUTHENTICATION only, not authorization. The request still
+    # fails closed, because spec.authorization.defaultAction is Deny and the one
+    # allow rule requires a JWT claim, so a tokenless request that reaches the
+    # authorization stage matches no rule and is denied. `optional: true` exists
+    # only to let a tokenless request survive long enough to be redirected; it
+    # grants it nothing.
+    optional: true
     providers:
       - name: keycloak
         issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}"

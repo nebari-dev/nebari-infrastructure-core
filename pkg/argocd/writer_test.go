@@ -953,6 +953,7 @@ type longhornSecurityPolicyShape struct {
 			ForwardAccessToken bool   `yaml:"forwardAccessToken"`
 		} `yaml:"oidc"`
 		JWT struct {
+			Optional  bool `yaml:"optional"`
 			Providers []struct {
 				Name       string `yaml:"name"`
 				Issuer     string `yaml:"issuer"`
@@ -1065,6 +1066,16 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		}
 		if !sp.Spec.OIDC.ForwardAccessToken {
 			t.Errorf("oidc.forwardAccessToken: got false, want true")
+		}
+
+		// jwt.optional MUST be true. A browser arrives with no token, and Envoy
+		// Gateway runs JWT authentication before the OIDC filter, so without this
+		// every tokenless request is rejected with a bare "Jwt is missing" 401
+		// and a human can never reach the Keycloak login page. It relaxes
+		// authentication only: authorization.defaultAction below is still Deny
+		// and the allow rule still requires a JWT claim.
+		if !sp.Spec.JWT.Optional {
+			t.Error("jwt.optional: got false, want true (a tokenless browser must reach the OIDC redirect)")
 		}
 
 		// JWT provider — issuer MUST be public (opposite of oidc.provider.issuer)
