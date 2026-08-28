@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spins
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-foundational
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nebari-apps
+
+  source:
+    repoURL: {{ .GitRepoURL }}
+    targetRevision: {{ .GitBranch }}
+    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}spins
+    directory:
+      recurse: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      # A fresh platform has no spins yet: the directory holds only the
+      # seeded README, which renders zero resources.
+      allowEmpty: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
