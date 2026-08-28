@@ -1,10 +1,3 @@
-# Grants Crossplane the right to manage ArgoCD Applications, which spin
-# Compositions create as composed resources. Crossplane v2 composes arbitrary
-# Kubernetes resources but only receives RBAC for types explicitly aggregated
-# into its role: the rbac-manager folds every ClusterRole carrying the
-# aggregate-to-crossplane label into the crossplane ClusterRole. Without this,
-# the first spin reconcile fails with
-# 'applications.argoproj.io is forbidden' before any Application is created.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
