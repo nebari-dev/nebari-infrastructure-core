@@ -109,13 +109,13 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name                    string
-		settings                cluster.InfraSettings
-		wantStorageClass        string
-		wantLBAnnotationCount   int
-		wantKeycloakBasePath    string
-		wantMetalLBAddressRange string
-		wantHTTPSPort           int
+		name                  string
+		settings              cluster.InfraSettings
+		wantStorageClass      string
+		wantLBAnnotationCount int
+		wantKeycloakBasePath  string
+		wantGatewayHostPorts  bool
+		wantHTTPSPort         int
 	}{
 		{
 			name:             "aws defaults",
@@ -134,15 +134,14 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			wantHTTPSPort:         443,
 		},
 		{
-			name: "local with MetalLB",
+			name: "local with host-port gateway",
 			settings: cluster.InfraSettings{
-				StorageClass:       "standard",
-				NeedsMetalLB:       true,
-				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+				StorageClass:     "standard",
+				GatewayHostPorts: true,
 			},
-			wantStorageClass:        "standard",
-			wantMetalLBAddressRange: "192.168.1.100-192.168.1.110",
-			wantHTTPSPort:           443,
+			wantStorageClass:     "standard",
+			wantGatewayHostPorts: true,
+			wantHTTPSPort:        443,
 		},
 		{
 			name: "custom HTTPS port",
@@ -167,11 +166,14 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
 				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.MetalLBAddressRange != tt.wantMetalLBAddressRange {
-				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMetalLBAddressRange)
+			if data.GatewayHostPorts != tt.wantGatewayHostPorts {
+				t.Errorf("GatewayHostPorts = %v, want %v", data.GatewayHostPorts, tt.wantGatewayHostPorts)
 			}
 			if data.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
+			}
+			if data.GatewayHTTPNodePort != cluster.GatewayHTTPNodePort || data.GatewayHTTPSNodePort != cluster.GatewayHTTPSNodePort {
+				t.Errorf("gateway NodePorts = %d/%d, want %d/%d", data.GatewayHTTPNodePort, data.GatewayHTTPSNodePort, cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort)
 			}
 		})
 	}
@@ -1234,7 +1236,6 @@ var helmValueFilesApps = []struct {
 	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
 	{"cert-manager", "installCRDs: true"},
 	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
-	{"metallb", "speaker:"},
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
@@ -1401,56 +1402,46 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// Seed a user overlay and a stale base.yaml from a previous
-		// enabled-state run for both gated apps.
-		for _, app := range []string{"metallb", "trust-manager"} {
-			overlayDir := filepath.Join(tmpDir, "values", app, "overlays")
-			if err := os.MkdirAll(overlayDir, 0o750); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(tmpDir, "values", app, "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+		// enabled-state run.
+		overlayDir := filepath.Join(tmpDir, "values", "trust-manager", "overlays")
+		if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
+			t.Fatal(err)
 		}
 
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := cluster.InfraSettings{StorageClass: "gp2"}                     // NeedsMetalLB=false
+		settings := cluster.InfraSettings{StorageClass: "gp2"}
 		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
-		for _, app := range []string{"metallb", "trust-manager"} {
-			basePath := filepath.Join(tmpDir, "values", app, "base.yaml")
-			if _, err := os.Stat(basePath); !os.IsNotExist(err) {
-				t.Errorf("%s: stale base.yaml should be removed when the app is disabled", app)
-			}
-			overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", app, "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
-			if err != nil {
-				t.Fatalf("%s: user overlay was destroyed: %v", app, err)
-			}
-			if string(overlay) != "user: overlay\n" {
-				t.Errorf("%s: user overlay content changed: %q", app, overlay)
-			}
+		basePath := filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")
+		if _, err := os.Stat(basePath); !os.IsNotExist(err) {
+			t.Error("stale base.yaml should be removed when the app is disabled")
+		}
+		overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", "trust-manager", "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("user overlay was destroyed: %v", err)
+		}
+		if string(overlay) != "user: overlay\n" {
+			t.Errorf("user overlay content changed: %q", overlay)
 		}
 	})
 
 	t.Run("enabled gates write base.yaml", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := cluster.InfraSettings{
-			StorageClass:       "gp2",
-			NeedsMetalLB:       true,
-			MetalLBAddressPool: "10.0.0.100-10.0.0.110",
-		}
+		settings := cluster.InfraSettings{StorageClass: "gp2"}
 		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, testCAPEM); err != nil { // PEM => TrustManagerEnabled=true
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
-		for _, app := range []string{"metallb", "trust-manager"} {
-			if _, err := os.Stat(filepath.Join(tmpDir, "values", app, "base.yaml")); err != nil {
-				t.Errorf("%s: expected values/%s/base.yaml to be written: %v", app, app, err)
-			}
+		if _, err := os.Stat(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")); err != nil {
+			t.Errorf("expected values/trust-manager/base.yaml to be written: %v", err)
 		}
 	})
 }
@@ -1545,7 +1536,7 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 // repeated regeneration runs.
 //
 // Scope note: this covers only the UNGATED case. envoy-gateway is never matched
-// by isMetalLBPath/isTrustBundlePath, so this test does not exercise the
+// by isTrustBundlePath/isLonghornOnlyPath, so this test does not exercise the
 // gated-off removal path at all. The file-versus-directory gating regression is
 // pinned by TestWriteAllToGit_GatedValuesBase, and the structural guard behind
 // it by TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not de-scope
@@ -1704,15 +1695,6 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 			template: "templates/values/envoy-gateway/base.yaml",
 			want: []string{
 				"    resources:\n      requests:\n        cpu: 50m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 512Mi",
-			},
-		},
-		{
-			name:     "metallb controller, speaker, and frr sidecar",
-			template: "templates/values/metallb/base.yaml",
-			want: []string{
-				"controller:\n  replicas: 1\n  resources:\n    requests:\n      cpu: 25m\n      memory: 64Mi\n    limits:\n      cpu: 100m\n      memory: 128Mi",
-				"speaker:\n  enabled: true\n  resources:\n    requests:\n      cpu: 50m\n      memory: 128Mi\n    limits:\n      cpu: 200m\n      memory: 256Mi",
-				"  frr:\n    resources:\n      requests:\n        cpu: 25m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 256Mi",
 			},
 		},
 		{

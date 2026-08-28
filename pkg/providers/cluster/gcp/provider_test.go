@@ -24,7 +24,7 @@ func TestInfraSettings(t *testing.T) {
 		want any
 	}{
 		{"StorageClass", settings.StorageClass, "standard-rwo"},
-		{"NeedsMetalLB", settings.NeedsMetalLB, false},
+		{"GatewayHostPorts", settings.GatewayHostPorts, false},
 		{"LoadBalancerAnnotations is empty", len(settings.LoadBalancerAnnotations), 0},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
 	}

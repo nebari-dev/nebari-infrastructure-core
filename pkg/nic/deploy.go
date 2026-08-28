@@ -308,11 +308,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
 				},
-				// Enable MetalLB only for providers that need it
-				MetalLB: argocd.MetalLBConfig{
-					Enabled:     infraSettings.NeedsMetalLB,
-					AddressPool: infraSettings.MetalLBAddressPool,
-				},
 				Backups:       cfg.Backups.LonghornConfig(),
 				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
@@ -330,9 +325,19 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		status.Info(ctx, "Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Look up LB endpoint and provision DNS records if configured
+	// Look up the LB endpoint and provision DNS records if configured. With a
+	// host-port gateway (local kind clusters) there is no load balancer: the
+	// platform is published on 127.0.0.1, so report that directly and skip DNS
+	// provisioning (public DNS records pointing at loopback are never useful).
 	if cfg.Domain != "" && !opts.DryRun {
-		result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		if infraSettings.GatewayHostPorts {
+			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: "127.0.0.1"}
+			if cfg.DNS != nil {
+				status.Warning(ctx, "Skipping DNS provisioning: the local gateway is published on 127.0.0.1")
+			}
+		} else {
+			result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		}
 	}
 
 	return result, nil

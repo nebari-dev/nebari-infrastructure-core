@@ -2,68 +2,58 @@ package local
 
 import (
 	"testing"
+
+	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
+
+	clusterapi "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
-func TestDeriveAddressPool(t *testing.T) {
+func TestGatewayPortMappings(t *testing.T) {
 	tests := []struct {
-		name    string
-		subnet  string
-		want    string
-		wantErr bool
+		name          string
+		httpPort      int32
+		httpsPort     int32
+		wantHostHTTP  int32
+		wantHostHTTPS int32
 	}{
 		{
-			name:   "kind default /16",
-			subnet: "172.18.0.0/16",
-			want:   "172.18.255.100-172.18.255.110",
+			name:          "default ports",
+			wantHostHTTP:  80,
+			wantHostHTTPS: 443,
 		},
 		{
-			name:   "/24 subnet",
-			subnet: "192.168.1.0/24",
-			want:   "192.168.1.100-192.168.1.110",
-		},
-		{
-			// kindNodeAddressPool feeds "<nodeIP>/16"; ParseCIDR must mask the
-			// host bits so a node IP yields the same pool as the bare network.
-			name:   "node IP with host bits is masked to the network",
-			subnet: "172.19.0.2/16",
-			want:   "172.19.255.100-172.19.255.110",
-		},
-		{
-			name:   "/12 subnet",
-			subnet: "10.96.0.0/12",
-			want:   "10.111.255.100-10.111.255.110",
-		},
-		{
-			name:    "smaller than /24",
-			subnet:  "192.168.1.0/25",
-			wantErr: true,
-		},
-		{
-			name:    "IPv6 subnet",
-			subnet:  "fc00:f853:ccd:e793::/64",
-			wantErr: true,
-		},
-		{
-			name:    "not a CIDR",
-			subnet:  "172.18.0.0",
-			wantErr: true,
+			name:          "custom ports for occupied 80/443 or rootless runtimes",
+			httpPort:      8080,
+			httpsPort:     8443,
+			wantHostHTTP:  8080,
+			wantHostHTTPS: 8443,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := deriveAddressPool(tt.subnet)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("deriveAddressPool(%q) = %q, want error", tt.subnet, got)
+			mappings := gatewayPortMappings(tt.httpPort, tt.httpsPort)
+			if len(mappings) != 2 {
+				t.Fatalf("gatewayPortMappings(%d, %d) returned %d mappings, want 2", tt.httpPort, tt.httpsPort, len(mappings))
+			}
+
+			http, https := mappings[0], mappings[1]
+			if http.ContainerPort != clusterapi.GatewayHTTPNodePort || http.HostPort != tt.wantHostHTTP {
+				t.Errorf("http mapping = %d->%d, want %d->%d", http.HostPort, http.ContainerPort, tt.wantHostHTTP, clusterapi.GatewayHTTPNodePort)
+			}
+			if https.ContainerPort != clusterapi.GatewayHTTPSNodePort || https.HostPort != tt.wantHostHTTPS {
+				t.Errorf("https mapping = %d->%d, want %d->%d", https.HostPort, https.ContainerPort, tt.wantHostHTTPS, clusterapi.GatewayHTTPSNodePort)
+			}
+
+			for _, m := range mappings {
+				// Loopback on purpose: a development cluster must not be
+				// published on the LAN.
+				if m.ListenAddress != "127.0.0.1" {
+					t.Errorf("mapping %d->%d listens on %q, want 127.0.0.1", m.HostPort, m.ContainerPort, m.ListenAddress)
 				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("deriveAddressPool(%q) returned error: %v", tt.subnet, err)
-			}
-			if got != tt.want {
-				t.Errorf("deriveAddressPool(%q) = %q, want %q", tt.subnet, got, tt.want)
+				if m.Protocol != v1alpha4.PortMappingProtocolTCP {
+					t.Errorf("mapping %d->%d protocol = %q, want TCP", m.HostPort, m.ContainerPort, m.Protocol)
+				}
 			}
 		})
 	}

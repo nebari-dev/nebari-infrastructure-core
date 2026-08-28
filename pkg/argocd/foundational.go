@@ -83,9 +83,6 @@ type FoundationalConfig struct {
 	// LandingPage configuration
 	LandingPage LandingPageConfig
 
-	// MetalLB configuration (local deployments only)
-	MetalLB MetalLBConfig
-
 	// Backups configures Longhorn backup credentials (nil when disabled).
 	Backups *config.LonghornBackupConfig
 
@@ -108,12 +105,6 @@ type KeycloakConfig struct {
 // LandingPageConfig holds landing page-specific configuration
 type LandingPageConfig struct {
 	RedisPassword string // Password for Redis used by nebari-landing
-}
-
-// MetalLBConfig holds MetalLB-specific configuration
-type MetalLBConfig struct {
-	Enabled     bool
-	AddressPool string // e.g., "192.168.1.100-192.168.1.110"
 }
 
 // ArgoCDSSOConfig holds ArgoCD SSO configuration

@@ -25,7 +25,6 @@ func TestProvider_InfraSettings(t *testing.T) {
 		wantSC  string
 		wantLBA map[string]string
 		wantKBP string
-		wantMLB bool
 	}{
 		{
 			name: "default settings with location use longhorn",
@@ -39,7 +38,6 @@ func TestProvider_InfraSettings(t *testing.T) {
 			wantSC:  "longhorn",
 			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
-			wantMLB: false,
 		},
 		{
 			name: "empty provider config defaults to longhorn",
@@ -48,7 +46,6 @@ func TestProvider_InfraSettings(t *testing.T) {
 			},
 			wantSC:  "longhorn",
 			wantKBP: "",
-			wantMLB: false,
 		},
 		{
 			name: "longhorn explicitly disabled falls back to hcloud-volumes",
@@ -63,7 +60,6 @@ func TestProvider_InfraSettings(t *testing.T) {
 			wantSC:  "hcloud-volumes",
 			wantLBA: map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 			wantKBP: "",
-			wantMLB: false,
 		},
 	}
 	for _, tt := range tests {
@@ -72,8 +68,8 @@ func TestProvider_InfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantSC)
 			}
-			if settings.NeedsMetalLB != tt.wantMLB {
-				t.Errorf("NeedsMetalLB = %v, want %v", settings.NeedsMetalLB, tt.wantMLB)
+			if settings.GatewayHostPorts {
+				t.Error("GatewayHostPorts = true, want false")
 			}
 			if settings.KeycloakBasePath != tt.wantKBP {
 				t.Errorf("KeycloakBasePath = %q, want %q", settings.KeycloakBasePath, tt.wantKBP)

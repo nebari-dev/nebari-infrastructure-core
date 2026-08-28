@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -112,8 +113,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printDNSGuidance prints instructions for manual DNS configuration
+// printDNSGuidance prints instructions for manual DNS configuration. When the
+// endpoint is loopback (local kind clusters publish the gateway on host ports
+// of 127.0.0.1), it prints /etc/hosts guidance instead: public DNS records
+// pointing at loopback make no sense, and /etc/hosts is the whole setup.
 func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
+	if lb != nil && net.ParseIP(lb.IP).IsLoopback() {
+		printHostsFileGuidance(cfg, lb.IP)
+		return
+	}
+
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  DNS CONFIGURATION REQUIRED")
@@ -161,6 +170,28 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 	fmt.Println("    dns:")
 	fmt.Println("      cloudflare:")
 	fmt.Println("        zone_name: example.com")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// printHostsFileGuidance prints /etc/hosts instructions for clusters whose
+// gateway is published on loopback host ports (local kind clusters).
+func printHostsFileGuidance(cfg *config.NebariConfig, ip string) {
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  HOSTS FILE CONFIGURATION REQUIRED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Printf("  The platform is published on host ports of %s.\n", ip)
+	fmt.Println("  Point the platform hostnames at it by adding this line to /etc/hosts:")
+	fmt.Println()
+	fmt.Printf("    %s %s keycloak.%s argocd.%s\n", ip, cfg.Domain, cfg.Domain, cfg.Domain)
+	fmt.Println()
+	fmt.Printf("  Then open https://%s in your browser.\n", cfg.Domain)
+	fmt.Println()
+	fmt.Println("  /etc/hosts has no wildcard support: services exposed later on other")
+	fmt.Println("  subdomains need their hostname appended to the same line.")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()

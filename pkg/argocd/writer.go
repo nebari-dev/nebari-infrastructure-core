@@ -68,8 +68,15 @@ type TemplateData struct {
 	// envoy-gateway-system, requiring a namespace on certificateRefs and a ReferenceGrant.
 	GatewayTLSCrossNamespace bool
 
-	// MetalLB configuration (for local provider)
-	MetalLBAddressRange string
+	// GatewayHostPorts pins the gateway's Envoy service to fixed NodePorts in
+	// the rendered EnvoyProxy resource, so the cluster provider can publish
+	// them on host ports (local kind clusters only).
+	GatewayHostPorts bool
+	// GatewayHTTPNodePort and GatewayHTTPSNodePort are the pinned NodePorts,
+	// threaded from the cluster package constants so the provider's host port
+	// mappings and the rendered service cannot drift.
+	GatewayHTTPNodePort  int
+	GatewayHTTPSNodePort int
 
 	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
 	// when a top-level trust_bundle is configured.
@@ -139,7 +146,9 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		Domain:                  cfg.Domain,
 		StorageClass:            settings.StorageClass,
 		HTTPSPort:               httpsPort,
-		MetalLBAddressRange:     settings.MetalLBAddressPool,
+		GatewayHostPorts:        settings.GatewayHostPorts,
+		GatewayHTTPNodePort:     cluster.GatewayHTTPNodePort,
+		GatewayHTTPSNodePort:    cluster.GatewayHTTPSNodePort,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 		LonghornEnabled:         settings.LonghornEnabled,
@@ -378,11 +387,6 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 		// deletes its manifests and lets ArgoCD prune the resources, instead
 		// of leaving them orphaned in git.
 
-		// MetalLB templates only apply to providers that need it
-		if isMetalLBPath(relPath) && !settings.NeedsMetalLB {
-			return removeStaleTemplate(relPath, destPath, d)
-		}
-
 		// Longhorn-only templates are gated on LonghornEnabled. The
 		// securitypolicies Application targets manifests/networking/policies,
 		// whose only content is the Longhorn SecurityPolicy; writing the app
@@ -496,18 +500,6 @@ func removeStaleTemplate(relPath, destPath string, d fs.DirEntry) error {
 	return nil
 }
 
-// isMetalLBPath returns true if the relative path is a MetalLB-related template.
-// values/metallb is matched at its base.yaml FILE rather than at the directory,
-// so the gate removes only the file NIC owns. Overlay safety does not rest on
-// that choice: removeStaleTemplate refuses recursive deletion under values/
-// outright, so the broader directory-matching form would also be safe.
-func isMetalLBPath(relPath string) bool {
-	return relPath == "apps/metallb.yaml" ||
-		relPath == "apps/metallb-config.yaml" ||
-		relPath == "values/metallb/base.yaml" ||
-		strings.HasPrefix(relPath, "manifests/metallb")
-}
-
 // isLonghornOnlyPath returns true if the relative path is a template that only
 // produces Longhorn resources and must be skipped entirely when Longhorn is
 // disabled.
@@ -519,8 +511,8 @@ func isLonghornOnlyPath(relPath string) bool {
 // isTrustBundlePath returns true if the relative path is a trust-manager-related
 // template (the chart Application, the Bundle Application, the Bundle manifest,
 // or the chart's base values). values/trust-manager is matched at its base.yaml
-// FILE rather than at the directory, for the same reason as isMetalLBPath, and
-// with the same removeStaleTemplate guard underneath it.
+// FILE rather than at the directory, so the gate removes only the file NIC
+// owns, with the removeStaleTemplate values/ guard underneath it.
 func isTrustBundlePath(relPath string) bool {
 	return relPath == "apps/trust-manager.yaml" ||
 		relPath == "apps/trust-bundle.yaml" ||

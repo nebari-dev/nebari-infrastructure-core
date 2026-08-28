@@ -210,6 +210,31 @@ func TestResolveOutputs(t *testing.T) {
 	}
 }
 
+// TestResolveOutputsHostPortGateway pins that a host-port gateway (local kind
+// clusters) reports 127.0.0.1 without inspecting any LoadBalancer status: a
+// NodePort service never gets ingress entries, so the LB path would fail (and
+// --wait would poll to timeout) on a healthy local cluster.
+func TestResolveOutputsHostPortGateway(t *testing.T) {
+	// No gateway service object at all: the address must not come from the cluster.
+	client := fake.NewSimpleClientset(without(fullyDeployed(), 3)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	data := argocd.NewTemplateData(
+		&config.NebariConfig{Domain: "nebari.local"},
+		nil,
+		cluster.InfraSettings{GatewayHostPorts: true},
+	)
+
+	got, err := resolveOutputs(ctx, client, data, OutputsOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.GatewayAddress != "127.0.0.1" {
+		t.Errorf("gateway address = %q, want 127.0.0.1", got.GatewayAddress)
+	}
+}
+
 func TestResolveOutputsWaitsForAsyncFields(t *testing.T) {
 	// The Argo CD server writes argocd-initial-admin-secret itself, some
 	// seconds after the Helm release lands; the gateway address arrives when

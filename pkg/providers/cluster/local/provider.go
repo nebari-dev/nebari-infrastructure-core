@@ -18,28 +18,10 @@ const (
 	ProviderName = "local"
 	// defaultStorageClass is the StorageClass kind installs by default
 	defaultStorageClass = "standard"
-	// defaultMetalLBAddressPool is the fallback MetalLB pool used only when
-	// the kind node network cannot be inspected (e.g. dry-run, or no
-	// container runtime). The normal path derives the pool from the node IP.
-	defaultMetalLBAddressPool = "192.168.1.100-192.168.1.110"
 )
 
 // Provider implements the local kind provider
-type Provider struct {
-	// metalLBPool caches the MetalLB address pool derived from the kind node
-	// network during Deploy, for InfraSettings to read. InfraSettings has no
-	// projectName or runtime access of its own, and deriving from the live
-	// environment there would make unit tests depend on whatever kind
-	// clusters happen to be running. Keying is unnecessary: every kind
-	// cluster on a host shares the one "kind" Docker network, so the pool is
-	// identical for all local clusters. Empty until Deploy runs, in which
-	// case InfraSettings falls back to defaultMetalLBAddressPool.
-	//
-	// No locking: Deploy (writer) and InfraSettings (reader) run sequentially
-	// on the same goroutine in the deploy flow, and the local provider is not
-	// used to deploy multiple clusters concurrently.
-	metalLBPool string
-}
+type Provider struct{}
 
 // NewProvider creates a new local provider
 func NewProvider() *Provider {
@@ -104,8 +86,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 }
 
 // Deploy creates the NIC-managed kind cluster (named after the project) if it
-// does not already exist, then derives the MetalLB address pool from the
-// cluster's network for InfraSettings to consume.
+// does not already exist. The gateway's NodePorts are published on host ports
+// at creation time (see gatewayPortMappings), so the platform is reachable at
+// 127.0.0.1 without any load-balancer or DNS setup.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.Deploy")
@@ -157,7 +140,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("gitops_path", config.DefaultLocalRepositoryPath(projectName)))
 
-		if err := createKindCluster(ctx, kp, projectName, kindCfg); err != nil {
+		if err := createKindCluster(ctx, kp, projectName, kindCfg, int32(localCfg.HTTPPort), int32(localCfg.HTTPSPort)); err != nil {
 			span.RecordError(err)
 			return err
 		}
@@ -167,21 +150,6 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("kube_context", kindContextName(projectName)))
-	}
-
-	// Derive the MetalLB pool from the cluster's network for InfraSettings.
-	// On failure we keep the static default and say so, rather
-	// than failing the deploy over a load-balancer address range.
-	if pool, err := kindNodeAddressPool(ctx, kp, projectName); err == nil {
-		p.metalLBPool = pool
-		span.SetAttributes(attribute.String("metallb_address_pool", pool))
-	} else {
-		span.RecordError(err)
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Could not derive MetalLB address pool from the kind network, using default %s", defaultMetalLBAddressPool)).
-			WithResource("provider").
-			WithAction("deploy").
-			WithMetadata("cluster_name", projectName).
-			WithMetadata("error", err.Error()))
 	}
 
 	return nil
@@ -304,8 +272,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:        defaultStorageClass,
-		NeedsMetalLB:        true,
-		MetalLBAddressPool:  defaultMetalLBAddressPool,
+		GatewayHostPorts:    true,
 		SupportsLocalGitOps: true,
 		LonghornEnabled:     false,
 	}
@@ -317,21 +284,6 @@ func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSetting
 
 	if localCfg.HTTPSPort != 0 {
 		settings.HTTPSPort = localCfg.HTTPSPort
-	}
-
-	explicitPool := localCfg.MetalLB != nil && localCfg.MetalLB.AddressPool != ""
-	if explicitPool {
-		settings.MetalLBAddressPool = localCfg.MetalLB.AddressPool
-	}
-
-	// Explicit pool takes precedence. When no explicit pool was configured, use
-	// the pool derived from the live cluster network during Deploy, so MetalLB IPs
-	// are routable on whatever subnet Docker picked. If Deploy produced none
-	// (dry-run, tests), defaultMetalLBAddressPool is kept.
-	// This relies on Deploy having populated p.metalLBPool on this same Provider
-	// instance before InfraSettings is called.
-	if !explicitPool && p.metalLBPool != "" {
-		settings.MetalLBAddressPool = p.metalLBPool
 	}
 
 	return settings

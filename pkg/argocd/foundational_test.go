@@ -218,16 +218,6 @@ func TestFoundationalConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("MetalLBConfig defaults", func(t *testing.T) {
-		cfg := MetalLBConfig{}
-		if cfg.Enabled {
-			t.Error("MetalLBConfig.Enabled should default to false")
-		}
-		if cfg.AddressPool != "" {
-			t.Error("MetalLBConfig.AddressPool should default to empty")
-		}
-	})
-
 	t.Run("FoundationalConfig with values", func(t *testing.T) {
 		cfg := FoundationalConfig{
 			Keycloak: KeycloakConfig{
@@ -235,10 +225,6 @@ func TestFoundationalConfig(t *testing.T) {
 				AdminPassword:      "admin123",
 				Hostname:           "keycloak.example.com",
 				RealmAdminPassword: "realm-admin123",
-			},
-			MetalLB: MetalLBConfig{
-				Enabled:     true,
-				AddressPool: "192.168.1.100-192.168.1.110",
 			},
 		}
 
@@ -253,12 +239,6 @@ func TestFoundationalConfig(t *testing.T) {
 		}
 		if cfg.Keycloak.RealmAdminPassword != "realm-admin123" {
 			t.Errorf("Keycloak.RealmAdminPassword = %q, want %q", cfg.Keycloak.RealmAdminPassword, "realm-admin123")
-		}
-		if !cfg.MetalLB.Enabled {
-			t.Error("MetalLB.Enabled should be true")
-		}
-		if cfg.MetalLB.AddressPool != "192.168.1.100-192.168.1.110" {
-			t.Errorf("MetalLB.AddressPool = %q, want %q", cfg.MetalLB.AddressPool, "192.168.1.100-192.168.1.110")
 		}
 	})
 }

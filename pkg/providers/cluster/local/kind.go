@@ -2,9 +2,7 @@ package local
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"net"
 	"os"
 	"slices"
 	"time"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
+	clusterapi "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 const (
@@ -56,8 +55,38 @@ func kindClusterExists(ctx context.Context, kp *cluster.Provider, name string) (
 	return slices.Contains(clusters, name), nil
 }
 
-// createKindCluster creates a kind cluster with the configured node image and mounts
-func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig) error {
+// gatewayPortMappings publishes the gateway's fixed NodePorts on host ports,
+// so the platform is reachable at 127.0.0.1 without a routable load-balancer
+// IP (which Docker Desktop on macOS/Windows cannot provide). The listen
+// address is loopback on purpose: a local development cluster should not be
+// exposed to the LAN.
+func gatewayPortMappings(httpPort, httpsPort int32) []v1alpha4.PortMapping {
+	if httpPort == 0 {
+		httpPort = 80
+	}
+	if httpsPort == 0 {
+		httpsPort = 443
+	}
+	return []v1alpha4.PortMapping{
+		{
+			ContainerPort: clusterapi.GatewayHTTPNodePort,
+			HostPort:      httpPort,
+			ListenAddress: "127.0.0.1",
+			Protocol:      v1alpha4.PortMappingProtocolTCP,
+		},
+		{
+			ContainerPort: clusterapi.GatewayHTTPSNodePort,
+			HostPort:      httpsPort,
+			ListenAddress: "127.0.0.1",
+			Protocol:      v1alpha4.PortMappingProtocolTCP,
+		},
+	}
+}
+
+// createKindCluster creates a kind cluster with the configured node image and mounts.
+// httpPort and httpsPort are the host ports publishing the gateway's listeners
+// (0 means the defaults, 80 and 443).
+func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig, httpPort, httpsPort int32) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.createKindCluster")
 	defer span.End()
@@ -104,8 +133,9 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		Name: name,
 		Nodes: []v1alpha4.Node{
 			{
-				Role:        v1alpha4.ControlPlaneRole,
-				ExtraMounts: mounts,
+				Role:              v1alpha4.ControlPlaneRole,
+				ExtraMounts:       mounts,
+				ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
 			},
 		},
 	}
@@ -125,72 +155,4 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		return fmt.Errorf("create kind cluster %s: %w", name, err)
 	}
 	return nil
-}
-
-// kindNodeAddressPool derives a MetalLB address pool from a cluster node's
-// IPv4 address, so LoadBalancer IPs are routable on whatever subnet the kind
-// Docker network actually has rather than a hardcoded default. It reads the
-// address through kind's node abstraction (nodes.Node.IP), so it works for
-// docker and podman alike without NIC shelling out to a container runtime.
-func kindNodeAddressPool(ctx context.Context, kp *cluster.Provider, name string) (string, error) {
-	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.kindNodeAddressPool")
-	defer span.End()
-	span.SetAttributes(attribute.String("cluster_name", name))
-
-	nodeList, err := kp.ListNodes(name)
-	if err != nil {
-		span.RecordError(err)
-		return "", fmt.Errorf("list nodes for kind cluster %s: %w", name, err)
-	}
-	if len(nodeList) == 0 {
-		err := fmt.Errorf("kind cluster %s has no nodes", name)
-		span.RecordError(err)
-		return "", err
-	}
-	// Any node works because all kind clusters share the "kind" Docker network,
-	// so every node sits on the same subnet.
-	ipv4, _, err := nodeList[0].IP()
-	if err != nil {
-		span.RecordError(err)
-		return "", fmt.Errorf("get node IP for kind cluster %s: %w", name, err)
-	}
-	if ipv4 == "" {
-		err := fmt.Errorf("kind cluster %s node has no IPv4 address", name)
-		span.RecordError(err)
-		return "", err
-	}
-	// kind creates its Docker network from Docker's default address pools,
-	// which are /16. ParseCIDR (in deriveAddressPool) masks the host bits, so
-	// "<nodeIP>/16" yields the network the pool should live in.
-	return deriveAddressPool(ipv4 + "/16")
-}
-
-// deriveAddressPool maps an IPv4 subnet to an 11-address MetalLB pool in the
-// .100-.110 range of the subnet's last /24 block, e.g. 172.18.0.0/16 ->
-// 172.18.255.100-172.18.255.110 and 192.168.1.0/24 -> 192.168.1.100-192.168.1.110.
-func deriveAddressPool(subnet string) (string, error) {
-	_, ipnet, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return "", fmt.Errorf("parse subnet %q: %w", subnet, err)
-	}
-	ip4 := ipnet.IP.To4()
-	if ip4 == nil {
-		return "", fmt.Errorf("subnet %q is not IPv4", subnet)
-	}
-	ones, _ := ipnet.Mask.Size()
-	if ones > 24 {
-		return "", fmt.Errorf("subnet %q is smaller than /24", subnet)
-	}
-
-	base := binary.BigEndian.Uint32(ip4)
-	size := uint32(1) << (32 - ones)
-	lastBlock := base + size - 256
-
-	toIP := func(v uint32) net.IP {
-		ip := make(net.IP, 4)
-		binary.BigEndian.PutUint32(ip, v)
-		return ip
-	}
-	return fmt.Sprintf("%s-%s", toIP(lastBlock+100), toIP(lastBlock+110)), nil
 }
