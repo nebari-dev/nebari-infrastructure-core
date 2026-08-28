@@ -45,6 +45,29 @@ func awsLoadBalancerControllerHelmValues(cfg *Config, clusterName, vpcID string)
 		// Reuse the existing webhook TLS secret across upgrades instead of
 		// regenerating it.
 		"keepTLSSecret": true,
+
+		// LBC detects Gateway API CRDs at startup and can disable these gates when
+		// the CRDs are absent, but it does not reliably keep them disabled across
+		// restarts. Once Envoy Gateway installs the CRDs, a later LBC restart can
+		// therefore enable LBC's Gateway API controllers again. Envoy Gateway is
+		// Nebari's Gateway API implementation, so keep those controllers disabled
+		// while leaving LBC's Service, Ingress, and TargetGroupBinding controllers
+		// enabled (#383).
+		//
+		// Do not set GatewayListenerSet: upstream reads it only when ALBGatewayAPI
+		// or NLBGatewayAPI is enabled, and older chart versions reject the flag as
+		// unknown (before chart 3.2.2). The two gates below have the same floor at
+		// chart 1.13.0, where they were introduced; both defaulted to false until
+		// 3.2.1 flipped them to true, which is what made #383 reachable.
+		//
+		// Sole upstream read site, behind the ALB/NLB guard:
+		// https://github.com/kubernetes-sigs/aws-load-balancer-controller/blob/v3.4.3/main.go#L266-L273
+		"controllerConfig": map[string]any{
+			"featureGates": map[string]any{
+				"ALBGatewayAPI": false,
+				"NLBGatewayAPI": false,
+			},
+		},
 	}
 }
 

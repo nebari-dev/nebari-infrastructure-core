@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"gopkg.in/yaml.v3"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -21,6 +21,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
@@ -82,8 +83,32 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		}
 	}()
 
+	// Reject unfilled CHANGEME placeholders before provisioning anything, so a
+	// deploy against an unedited starter config fails fast instead of creating
+	// real infrastructure from nonsense values.
+	if err := rejectPlaceholders(cfg); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	// Validate configuration with registered providers
 	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	// Offline DNS provider validation (zone consistency), so a missing
+	// domain/zone_name or a domain outside the zone fails before any
+	// infrastructure is provisioned.
+	if err := validateDNSProvider(ctx, cfg, reg); err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	// Offline repository provider validation, so a malformed repository config
+	// (e.g. missing url or ambiguous auth) fails here instead of after the
+	// cluster has been provisioned. Runs in dry-run too, unlike Provision.
+	if err := validateRepositoryProvider(ctx, cfg, reg); err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
@@ -122,6 +147,33 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Get provider infrastructure settings up front. InfraSettings is a pure
+	// getter, so it is safe to compute before Deploy and lets us fail fast on
+	// misconfiguration before provisioning anything.
+	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
+
+	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
+	// (e.g. Azure, or AWS with longhorn disabled). Without Longhorn installed the
+	// longhorn.io CRDs are absent and the backups ArgoCD app would never sync.
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Backups configuration is invalid for this provider").
+			WithMetadata("provider", cfg.Cluster.ProviderName()).
+			WithMetadata("error", err.Error()))
+		return nil, fmt.Errorf("validate backups configuration: %w", err)
+	}
+
+	// Reject the local repository provider on a cluster that cannot host it
+	// before provisioning any infrastructure. The source-kind check after
+	// repository provisioning below remains the backstop for providers whose
+	// LocalSource cannot be predicted from the config alone.
+	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
+			WithMetadata("error", err.Error()))
+		return nil, err
+	}
+
 	// Resolve the top-level trust bundle once, here at the orchestration layer.
 	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
@@ -138,7 +190,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{DryRun: opts.DryRun, Timeout: opts.Timeout, TrustBundle: caBundle}); err != nil {
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
+		DryRun:       opts.DryRun,
+		Timeout:      opts.Timeout,
+		TrustBundle:  caBundle,
+		BackupBucket: backupBucketSpec(cfg),
+	}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").
 			WithMetadata("provider", clusterProvider.Name()).
@@ -149,22 +206,27 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
 
-	// Get provider infrastructure settings for GitOps and foundational services
-	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
-
-	// Resolve the effective GitOps configuration. This may auto-create a
-	// local directory for providers that support it, or fall back to the
-	// caller's cfg.GitRepository. We never mutate cfg — the resolved value
-	// is threaded explicitly into every downstream call that needs it.
-	gitConfig, err := c.getOrCreateGitConfig(ctx, cfg, infraSettings.SupportsLocalGitOps)
-	if err != nil {
-		span.RecordError(err)
-		status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps configuration failed").
-			WithMetadata("error", err.Error()))
-		return nil, fmt.Errorf("resolve gitops configuration: %w", err)
-	}
-	if gitConfig != nil && !opts.DryRun {
-		if err := c.bootstrapGitOps(ctx, cfg, gitConfig, opts.RegenApps, infraSettings, trustPEM); err != nil {
+	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
+	// provisioning has side effects (e.g. creating a directory). The resolved
+	// source is reused by the ArgoCD install below.
+	var repoSource repository.Source
+	if !opts.DryRun {
+		repoSource, err = c.resolveRepositorySource(ctx, cfg, reg)
+		if err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps repository resolution failed").
+				WithMetadata("error", err.Error()))
+			return nil, fmt.Errorf("resolve repository source: %w", err)
+		}
+		// A local repository requires a local cluster that can host it (e.g. a kind cluster).
+		if _, isLocal := repoSource.(repository.LocalSource); isLocal && !infraSettings.SupportsLocalGitOps {
+			err := fmt.Errorf("a local repository is not supported by cluster provider %q; use a remote repository provider", cfg.Cluster.ProviderName())
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
+				WithMetadata("error", err.Error()))
+			return nil, err
+		}
+		if err := c.bootstrapGitOps(ctx, cfg, repoSource, opts.RegenApps, infraSettings, trustPEM); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "GitOps bootstrap failed").
 				WithMetadata("error", err.Error()))
@@ -194,7 +256,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		// Build ArgoCD config with Keycloak OIDC SSO
 		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
 
-		if err := argocd.Install(ctx, cfg, clusterProvider, gitConfig, trustPEM, argoCDConfig); err != nil {
+		if err := argocd.Install(ctx, cfg, clusterProvider, repoSource, trustPEM, argoCDConfig); err != nil {
 			// Log error but don't fail deployment
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
 				WithMetadata("error", err.Error()))
@@ -230,15 +292,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 			foundationalCfg := argocd.FoundationalConfig{
 				Keycloak: argocd.KeycloakConfig{
-					Enabled:               true,
-					AdminUsername:         "admin",
-					AdminPassword:         secrets.KeycloakAdmin,
-					DBPassword:            secrets.KeycloakDB,
-					PostgresAdminPassword: secrets.PostgresAdmin,
-					PostgresUserPassword:  secrets.PostgresUser,
-					RealmAdminUsername:    "admin",
-					RealmAdminPassword:    secrets.RealmAdmin,
-					Hostname:              "", // Will be auto-generated from domain
+					Enabled:            true,
+					AdminUsername:      "admin",
+					AdminPassword:      secrets.KeycloakAdmin,
+					RealmAdminUsername: "admin",
+					RealmAdminPassword: secrets.RealmAdmin,
+					Hostname:           "", // Will be auto-generated from domain
 				},
 				ArgoCD: argocd.ArgoCDSSOConfig{
 					ClientSecret: argoCDClientSecret,
@@ -254,9 +313,11 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 					Enabled:     infraSettings.NeedsMetalLB,
 					AddressPool: infraSettings.MetalLBAddressPool,
 				},
+				Backups:       cfg.Backups.LonghornConfig(),
+				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
 
-			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, gitConfig, foundationalCfg); err != nil {
+			if err := argocd.InstallFoundationalServices(ctx, cfg, clusterProvider, repoSource, foundationalCfg); err != nil {
 				// Log warning but don't fail deployment
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install foundational services").
 					WithMetadata("error", err.Error()))
@@ -277,48 +338,36 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	return result, nil
 }
 
-// defaultGitConfig returns a default local git configuration for development workflows.
-// This is a pure function with no side effects — directory creation happens separately.
-func defaultGitConfig(projectName string) *git.Config {
-	return &git.Config{
-		URL:    fmt.Sprintf("file://%s", git.DefaultLocalPath(projectName)),
-		Branch: git.DefaultBranch,
-		Path:   "",
-		Auth:   git.AuthConfig{},
+// resolveRepositorySource provisions the GitOps repository via the configured repo
+// provider. The repository block is mandatory (enforced by config validation), so
+// cfg.Repository is non-nil here. Provision may have side effects (e.g. creating a
+// local directory), so callers run it only outside dry-run.
+func (c *Client) resolveRepositorySource(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) (repository.Source, error) {
+	provider, err := reg.RepositoryProviders.Get(ctx, cfg.Repository.ProviderName())
+	if err != nil {
+		return nil, fmt.Errorf("get repository provider %q: %w", cfg.Repository.ProviderName(), err)
 	}
+	src, err := provider.Provision(ctx, cfg.ProjectName, cfg.Repository)
+	if err != nil {
+		return nil, fmt.Errorf("provision repository %q: %w", cfg.Repository.ProviderName(), err)
+	}
+	return src, nil
 }
 
-// getOrCreateGitConfig returns the git configuration, creating a default local one if none is configured.
-// For providers that support local gitops without explicit git_repository config, this auto-creates
-// ~/.nic/gitops/{project_name}. For other providers, explicit git_repository config is required.
-// The supportsLocalGitOps parameter comes from cluster.InfraSettings().SupportsLocalGitOps.
-func (c *Client) getOrCreateGitConfig(ctx context.Context, cfg *config.NebariConfig, supportsLocalGitOps bool) (*git.Config, error) {
-	if cfg.GitRepository != nil {
-		return cfg.GitRepository, nil
+// gitAuth maps a resolved repository.Auth onto the git client's auth. A nil auth
+// (e.g. a local repository) yields the zero Auth (anonymous); an unrecognized
+// kind is an error rather than a silent anonymous fallback.
+func gitAuth(a repository.Auth) (git.Auth, error) {
+	switch a := a.(type) {
+	case nil:
+		return git.Auth{}, nil
+	case repository.TokenAuth:
+		return git.NewAuthToken(a.Token), nil
+	case repository.SSHKeyAuth:
+		return git.NewSSHKeyAuth(a.Key, a.InsecureSkipHostKeyVerification), nil
+	default:
+		return git.Auth{}, fmt.Errorf("unsupported repository auth type %T", a)
 	}
-
-	// Only auto-create local gitops for providers that support it (e.g., local, kind, k3s)
-	// Cloud providers without explicit git_repository config skip GitOps bootstrapping
-	if !supportsLocalGitOps {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured and provider does not support local gitops, skipping GitOps bootstrap").
-			WithMetadata("provider", cfg.Cluster.ProviderName()))
-		return nil, nil
-	}
-
-	gitCfg := defaultGitConfig(cfg.ProjectName)
-	localPath, err := gitCfg.GetLocalPath()
-	if err != nil {
-		return nil, fmt.Errorf("invalid local path in auto-generated git config: %w", err)
-	}
-
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "No git_repository configured, using auto-generated local directory").
-		WithMetadata("path", localPath))
-
-	if err := git.EnsureLocalGitOpsDir(ctx, localPath); err != nil {
-		return nil, err
-	}
-
-	return gitCfg, nil
 }
 
 // lookupEndpointAndProvisionDNS gets the load balancer endpoint from the cluster
@@ -398,41 +447,28 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 	return lbEndpoint
 }
 
-// bootstrapGitOps initializes the GitOps repository with ArgoCD application manifests.
-// This is the orchestrator function that handles all I/O operations.
-// gitConfig must be non-nil and represents the effective GitOps configuration
-// (either cfg.GitRepository or an auto-generated local config).
-func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, regenApps bool, settings cluster.InfraSettings, trustBundlePEM string) error {
+// bootstrapGitOps initializes the GitOps repository with ArgoCD application
+// manifests. It acquires the working copy according to the source kind — open a
+// local directory, or authenticate and clone a remote — writes the manifests,
+// commits, and (for a remote) pushes. trustBundlePEM is the top-level trust
+// bundle already resolved by the orchestration layer (empty when unset).
+func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, src repository.Source, regenApps bool, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.bootstrapGitOps")
 	defer span.End()
 
+	if src == nil {
+		err := fmt.Errorf("repository source is nil")
+		span.RecordError(err)
+		return err
+	}
+
 	span.SetAttributes(
-		attribute.String("git.url", gitConfig.URL),
+		attribute.String("repository.url", src.RepoURL()),
 		attribute.Bool("regen_apps", regenApps),
 	)
 
-	isLocal := gitConfig.IsLocalPath()
-	var localPath string
-	if isLocal {
-		var err error
-		localPath, err = gitConfig.GetLocalPath()
-		if err != nil {
-			return fmt.Errorf("invalid local git path: %w", err)
-		}
-		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing local GitOps directory").
-			WithMetadata("path", localPath))
-	} else {
-		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing GitOps repository").
-			WithMetadata("url", gitConfig.URL))
-	}
-
-	// Create git client
-	gitClient, err := git.NewClient(gitConfig)
-	if err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to create git client: %w", err)
-	}
+	gitClient := git.NewClient(src.GetBranch(), src.RepoPath())
 	defer func() {
 		if err := gitClient.Cleanup(); err != nil {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to clean up git client temp directory").
@@ -440,16 +476,38 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		}
 	}()
 
-	// Validate authentication before proceeding (skipped for local paths)
-	if err := gitClient.ValidateAuth(ctx); err != nil {
+	// Acquire the working copy. Local sources are opened in place and remote
+	// sources are authenticated and cloned, then pushed after commit.
+	remote := false
+	switch s := src.(type) {
+	case repository.LocalSource:
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing local GitOps directory").
+			WithMetadata("path", s.Dir))
+		if err := gitClient.Init(ctx, s.Dir); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to initialize local git repository: %w", err)
+		}
+	case repository.RemoteSource:
+		status.Send(ctx, status.NewUpdate(status.LevelProgress, "Initializing GitOps repository").
+			WithMetadata("url", s.URL))
+		auth, err := gitAuth(s.PushAuth)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if err := gitClient.ValidateAuth(ctx, s.URL, auth); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("git authentication failed: %w", err)
+		}
+		if err := gitClient.Clone(ctx, s.URL, auth); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to clone git repository: %w", err)
+		}
+		remote = true
+	default:
+		err := fmt.Errorf("unsupported repository source type %T", src)
 		span.RecordError(err)
-		return fmt.Errorf("git authentication failed: %w", err)
-	}
-
-	// Clone/pull the repository
-	if err := gitClient.Init(ctx); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to initialize git repository: %w", err)
+		return err
 	}
 
 	// Check if already bootstrapped
@@ -458,7 +516,6 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		span.RecordError(err)
 		return fmt.Errorf("failed to check bootstrap status: %w", err)
 	}
-
 	if bootstrapped && !regenApps {
 		status.Info(ctx, "GitOps repository already bootstrapped, skipping manifest generation")
 		span.SetAttributes(attribute.Bool("skipped", true))
@@ -471,14 +528,14 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		status.Progress(ctx, "Bootstrapping GitOps repository with ArgoCD application manifests")
 	}
 
-	if err := c.writeConfigToRepo(ctx, cfg, gitConfig, gitClient.WorkDir(), trustBundlePEM); err != nil {
+	if err := c.writeConfigToRepo(ctx, cfg, gitClient.WorkDir(), trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
 	// Write all ArgoCD application manifests and raw K8s manifests to git
 	status.Progress(ctx, "Writing ArgoCD application manifests to git repository")
-	if err := argocd.WriteAllToGit(ctx, gitClient, cfg, gitConfig, settings, trustBundlePEM); err != nil {
+	if err := argocd.WriteAllToGit(ctx, gitClient.WorkDir(), cfg, src, settings, trustBundlePEM); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to write application manifests: %w", err)
 	}
@@ -489,37 +546,37 @@ func (c *Client) bootstrapGitOps(ctx context.Context, cfg *config.NebariConfig, 
 		return fmt.Errorf("failed to write bootstrap marker: %w", err)
 	}
 
-	// Commit (and push for remote repos)
 	commitMsg := "Bootstrap foundational ArgoCD applications"
 	if regenApps {
 		commitMsg = "Regenerate foundational ArgoCD applications"
 	}
-	if err := gitClient.CommitAndPush(ctx, commitMsg); err != nil {
+	if err := gitClient.Commit(ctx, commitMsg); err != nil {
 		span.RecordError(err)
-		if isLocal {
-			return fmt.Errorf("failed to commit: %w", err)
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+	if remote {
+		if err := gitClient.Push(ctx); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to push: %w", err)
 		}
-		return fmt.Errorf("failed to commit and push: %w", err)
 	}
 
-	if isLocal {
-		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Local GitOps directory bootstrapped successfully").
-			WithMetadata("path", localPath))
-	} else {
-		status.Send(ctx, status.NewUpdate(status.LevelSuccess, "GitOps repository bootstrapped successfully").
-			WithMetadata("url", gitConfig.URL))
-	}
+	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "GitOps repository bootstrapped successfully").
+		WithMetadata("url", src.RepoURL()))
 	return nil
 }
 
-// writeConfigToRepo serialises cfg (with sensitive fields scrubbed and the
-// effective gitConfig substituted in) and writes the result into the git
-// working directory. Sourcing from the parsed config keeps this feature
-// available to library consumers who don't construct cfg from a file.
-func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, gitConfig *git.Config, workDir string, trustBundlePEM string) error {
-	configBytes, err := yaml.Marshal(scrubbedConfig(cfg, gitConfig, trustBundlePEM))
+// writeConfigToRepo serializes cfg and writes it into the git working
+// directory. The config holds only env-var names for credentials, never the
+// secrets themselves (and the resolved Source is never serialized), so it is
+// safe to commit as-is — except the trust bundle, which committedConfig
+// rewrites to its resolved inline form (trustBundlePEM). Sourcing from the
+// parsed config keeps this available to library consumers who don't construct
+// cfg from a file.
+func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig, workDir string, trustBundlePEM string) error {
+	configBytes, err := yaml.Marshal(committedConfig(cfg, trustBundlePEM))
 	if err != nil {
-		return fmt.Errorf("marshal scrubbed config to YAML: %w", err)
+		return fmt.Errorf("marshal config to YAML: %w", err)
 	}
 
 	configDest := filepath.Join(workDir, "nic-config.yaml")
@@ -529,34 +586,19 @@ func (c *Client) writeConfigToRepo(ctx context.Context, cfg *config.NebariConfig
 	if err := os.WriteFile(configDest, configBytes, git.GitOpsFileMode); err != nil {
 		return fmt.Errorf("write config to repository: %w", err)
 	}
-	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository (auth fields scrubbed)").
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Wrote NIC config to repository").
 		WithMetadata("path", configDest))
 	return nil
 }
 
-// scrubbedConfig returns a copy of cfg with sensitive fields zeroed (or
-// nilled out where the schema supports omitempty). The gitConfig argument
-// supplies the effective GitOps configuration to persist (may differ from
-// cfg.GitRepository when the local default was auto-generated); when nil,
-// the resulting GitRepository field is also nil. Operating on the typed
-// struct means renaming a sensitive field on the source type fails to
-// compile here, instead of silently leaking once a deny-list of string
-// keys drifts out of sync.
-//
-// trustBundlePEM is the already-resolved trust bundle (empty when unset). A
-// path:-based trust_bundle references a file on the operator's machine, which
-// is meaningless (and leaks a local path) in the committed record, so any
-// configured bundle is rewritten to its resolved inline form; this also keeps
-// the committed config self-contained and reflecting the deployed value.
-func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundlePEM string) *config.NebariConfig {
+// committedConfig returns the config as it should be recorded in the GitOps
+// repo. A path:-based trust_bundle references a file on the operator's
+// machine, which is meaningless (and leaks a local path) in the committed
+// record, so any configured bundle is rewritten to its resolved inline form
+// (trustBundlePEM, already resolved by the caller; empty when unset). This
+// keeps the committed config self-contained and reflecting the deployed value.
+func committedConfig(cfg *config.NebariConfig, trustBundlePEM string) *config.NebariConfig {
 	out := *cfg
-	out.GitRepository = nil
-	if gitConfig != nil {
-		gitRepo := *gitConfig
-		gitRepo.Auth = git.AuthConfig{} // value type with no omitempty: zero the env-var names
-		gitRepo.ArgoCDAuth = nil        // *AuthConfig with omitempty: nil → omitted
-		out.GitRepository = &gitRepo
-	}
 	out.TrustBundle = nil
 	if cfg.TrustBundle != nil && trustBundlePEM != "" {
 		out.TrustBundle = &config.TrustBundleConfig{Inline: trustBundlePEM}
@@ -564,10 +606,81 @@ func scrubbedConfig(cfg *config.NebariConfig, gitConfig *git.Config, trustBundle
 	return &out
 }
 
+// backupRoleARNResolver is an optional capability: providers that provision a
+// keyless Longhorn backup role (EKS Pod Identity) implement it to report that
+// role's ARN, which NIC writes into the credential Secret as AWS_IAM_ROLE_ARN.
+// Only the AWS provider implements it; the type assertion in Deploy yields ok
+// == false for others, and no role ARN is set.
+type backupRoleARNResolver interface {
+	BackupPodIdentityRoleARN(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) (string, error)
+}
+
+// resolveBackupRoleARN returns the Pod Identity role ARN for a keyless S3 backup
+// target, or "" when backups are disabled, not keyless, or the provider doesn't
+// support it. A resolution error is surfaced as a warning and returns "" — the
+// credential Secret is then built without AWS_IAM_ROLE_ARN, which Longhorn
+// rejects, so the user sees a clear backup-target error rather than a silent
+// half-configured state.
+func resolveBackupRoleARN(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) string {
+	lh := cfg.Backups.LonghornConfig()
+	if lh == nil || !lh.S3.PodIdentityAuth(cfg.Cluster.ProviderName()) {
+		return ""
+	}
+	resolver, ok := clusterProvider.(backupRoleARNResolver)
+	if !ok {
+		return ""
+	}
+	arn, err := resolver.BackupPodIdentityRoleARN(ctx, cfg.ProjectName, cfg.Cluster)
+	if err != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not resolve Longhorn backup IAM role; keyless backups will not authenticate").
+			WithMetadata("error", err.Error()))
+		return ""
+	}
+	if arn == "" {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Longhorn backup Pod Identity role not found; keyless backups will not authenticate"))
+	}
+	return arn
+}
+
+// backupBucketSpec derives the provider bucket-provisioning request from config.
+// Returns nil unless the module has work to do: creating a cloud-native
+// bucket/container (create_bucket/create_container set and no external endpoint)
+// or provisioning a keyless Pod Identity association for an AWS S3 target.
+func backupBucketSpec(cfg *config.NebariConfig) *cluster.BackupBucketSpec {
+	if !cfg.Backups.LonghornEnabled() {
+		return nil
+	}
+	provider := cfg.Cluster.ProviderName()
+	lh := cfg.Backups.LonghornConfig()
+	if s3 := lh.S3; s3 != nil {
+		create := s3.CreateBucket && s3.Endpoint == ""
+		podIdentity := s3.PodIdentityAuth(provider)
+		if !create && !podIdentity {
+			// External/pre-existing bucket with static keys: nothing for the module.
+			return nil
+		}
+		return &cluster.BackupBucketSpec{
+			Name:         s3.Bucket,
+			Create:       create,
+			PodIdentity:  podIdentity,
+			ForceDestroy: !s3.RetainOnDestroyEnabled(),
+		}
+	}
+	if az := lh.Azure; az != nil && az.CreateContainer && az.Endpoint == "" {
+		return &cluster.BackupBucketSpec{
+			Name:           az.Container,
+			StorageAccount: az.StorageAccount,
+			Create:         true,
+			ForceDestroy:   !az.RetainOnDestroyEnabled(),
+		}
+	}
+	return nil
+}
+
 // generateSecurePassword generates a cryptographically secure random password.
 // It accepts an io.Reader to allow for deterministic testing with known bytes.
 // Callers must propagate the error rather than substituting a weaker fallback:
-// these strings end up as Keycloak admin / Postgres / Redis credentials on the
+// these strings end up as Keycloak admin / Redis credentials on the
 // installed cluster.
 func generateSecurePassword(r io.Reader) (string, error) {
 	b := make([]byte, 32)
@@ -579,12 +692,10 @@ func generateSecurePassword(r io.Reader) (string, error) {
 }
 
 // foundationalSecrets bundles the random secrets required to install the
-// foundational services (Keycloak, Postgres, Redis).
+// foundational services (Keycloak, Redis). Postgres credentials are not
+// generated here: CNPG creates them in-cluster.
 type foundationalSecrets struct {
 	KeycloakAdmin string
-	KeycloakDB    string
-	PostgresAdmin string
-	PostgresUser  string
 	RealmAdmin    string
 	Redis         string
 }
@@ -595,9 +706,6 @@ func generateFoundationalSecrets(r io.Reader) (foundationalSecrets, error) {
 	var s foundationalSecrets
 	for _, dst := range []*string{
 		&s.KeycloakAdmin,
-		&s.KeycloakDB,
-		&s.PostgresAdmin,
-		&s.PostgresUser,
 		&s.RealmAdmin,
 		&s.Redis,
 	} {

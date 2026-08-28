@@ -2,6 +2,7 @@ package hetzner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
-const providerName = "hetzner"
+const ProviderName = "hetzner"
 
 // Provider implements the Hetzner Cloud provider using hetzner-k3s.
 type Provider struct{}
@@ -25,7 +26,7 @@ func NewProvider() *Provider {
 	return &Provider{}
 }
 
-func (p *Provider) Name() string { return providerName }
+func (p *Provider) Name() string { return ProviderName }
 
 // parseConfig extracts and validates the Hetzner config from ClusterConfig.
 func (p *Provider) parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (*Config, error) {
@@ -46,7 +47,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -89,7 +90,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -124,12 +125,12 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
-	// Download hetzner-k3s binary
+	// Resolve the hetzner-k3s binary: an explicit override or a `hetzner-k3s`
+	// on PATH when present, otherwise NIC's pinned download.
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Ensuring hetzner-k3s binary is available").
 		WithResource("provider").WithAction("deploy"))
 
-	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
+	binaryPath, err := resolveHetznerK3sBinary(ctx, cacheDir)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
@@ -242,13 +243,17 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	return nil
 }
 
+// Destroy tears down the Hetzner k3s cluster. When running it with opts.Force,
+// failures like Longhorn uninstall errors or volume cleanup errors are logged
+// and returned joined at the end, so a teardown that leaked resources still
+// exits non-zero.
 func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DestroyOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Destroy")
 	defer span.End()
 
 	span.SetAttributes(
-		attribute.String("provider", providerName),
+		attribute.String("provider", ProviderName),
 		attribute.String("project_name", projectName),
 	)
 
@@ -285,12 +290,15 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	downloader := &hetznerK3sDownloader{version: DefaultHetznerK3sVersion, cacheDir: cacheDir}
-	binaryPath, err := ensureBinary(ctx, cacheDir, DefaultHetznerK3sVersion, downloader)
+	binaryPath, err := resolveHetznerK3sBinary(ctx, cacheDir)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to get hetzner-k3s binary: %w", err)
 	}
+
+	// Errors the destroy continues past accumulate here and are returned
+	// joined at the end.
+	var destroyErrs []error
 
 	// Uninstall Longhorn before tearing down the cluster (ADR-0002 §"Destroy
 	// Flow"). Best-effort: if it fails, --force lets teardown continue and
@@ -304,10 +312,11 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 				WithResource("longhorn").WithAction("uninstalling"))
 		default:
 			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
+				span.RecordError(err)
 				if !opts.Force {
-					span.RecordError(err)
 					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
 				}
+				destroyErrs = append(destroyErrs, fmt.Errorf("uninstall Longhorn: %w", err))
 				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
 					WithResource("longhorn").WithAction("uninstalling"))
 			}
@@ -319,7 +328,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	if err := runHetznerK3s(ctx, binaryPath, "delete", clusterYAMLPath); err != nil {
 		span.RecordError(err)
-		return err
+		return errors.Join(append(destroyErrs, err)...)
 	}
 
 	// Clean up CSI volumes that aren't marked persist=true
@@ -329,6 +338,7 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	deleted, err := cleanupVolumes(ctx)
 	if err != nil {
 		span.RecordError(err)
+		destroyErrs = append(destroyErrs, fmt.Errorf("clean up volumes: %w", err))
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up some volumes: %v", err)).
 			WithResource("provider").WithAction("destroy"))
 	} else if deleted > 0 {
@@ -343,11 +353,16 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	deletedLBs, err := cleanupLoadBalancers(ctx)
 	if err != nil {
 		span.RecordError(err)
+		destroyErrs = append(destroyErrs, fmt.Errorf("clean up load balancers: %w", err))
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to clean up some load balancers: %v", err)).
 			WithResource("provider").WithAction("destroy"))
 	} else if deletedLBs > 0 {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted %d orphaned load balancer(s)", deletedLBs)).
 			WithResource("provider").WithAction("destroy"))
+	}
+
+	if len(destroyErrs) > 0 {
+		return errors.Join(destroyErrs...)
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Hetzner k3s cluster destroyed successfully").

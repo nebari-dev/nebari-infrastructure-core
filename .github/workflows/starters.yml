@@ -1,0 +1,256 @@
+name: Starters
+
+on:
+  pull_request:
+    paths:
+      - "starters/**"
+      - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
+      - ".github/workflows/starters.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "starters/**"
+      - "cmd/starters/**"
+      # The generated pixi.toml derives its opentofu constraint from
+      # pkg/tofu.MinVersion/MaxVersionExclusive, so a bump there changes what
+      # gets published and has to re-run this workflow.
+      - "pkg/tofu/**"
+      - "examples/local-config.yaml"
+      - "examples/aws-config.yaml"
+      - ".github/workflows/starters.yml"
+    # Publishing is tag-driven: a starter tagged v<x.y.z> must keep meaning the
+    # same bytes forever, and a main push resolves to the PREVIOUS tag, so
+    # publishing from main would silently rewrite an already-released bundle.
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Starters publish under the existing nebari project, in a starters/ subdir,
+  # mirroring how the charts live at quay.io/nebari/charts. The provider alone
+  # names the repo: quay.io/nebari/starters/aws, not .../starters/starter-aws,
+  # which stutters in the reference a user actually types.
+  QUAY_NAMESPACE: nebari
+  STARTER_REPO_PREFIX: starters
+
+jobs:
+  validate-starters:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Generate starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/starters -out dist/starters
+
+      - name: Rendered starters are complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A substitution token that failed to expand would otherwise ship to
+          # the registry, and a malformed pixi.toml would not surface until the
+          # publish job runs pixi lock.
+          if grep -rn '__[A-Z_]*__' dist/starters/; then
+            echo "::error::unsubstituted template tokens in the rendered starters"
+            exit 1
+          fi
+          for provider in local aws; do
+            python3 -c 'import tomllib,sys; tomllib.load(open(sys.argv[1],"rb"))' \
+              "dist/starters/${provider}/pixi.toml"
+          done
+          echo "OK: no leftover tokens, every pixi.toml parses"
+
+      - name: Unedited starters are rejected, filled ones validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            config="dist/starters/${provider}/config.yaml"
+
+            echo "== ${provider}: the unedited starter must be rejected =="
+            if err="$(nic validate -f "$config" 2>&1)"; then
+              echo "::error::nic validate accepted the unedited ${provider} starter"
+              echo "$err"
+              exit 1
+            fi
+            # nic logs errors as JSON, so the quotes in the message arrive
+            # backslash-escaped; drop the escapes before matching on them.
+            plain="$(printf '%s' "$err" | tr -d '\\')"
+
+            echo "$plain" | grep -q CHANGEME || {
+              echo "::error::${provider} validation error did not mention CHANGEME"
+              echo "$err"
+              exit 1; }
+
+            # Rejection alone is not enough, and neither is grepping the
+            # message for CHANGEME: go-yaml quotes the offending source line in
+            # a parse error, so sed surgery that breaks the YAML produces an
+            # error that mentions CHANGEME too. "placeholder value" only comes
+            # from the placeholder gate, which runs after a successful
+            # unmarshal, so matching it proves the config still parses.
+            echo "$plain" | grep -q 'placeholder value' || {
+              echo "::error::${provider} was rejected, but not by the placeholder gate - the config probably no longer parses"
+              echo "$err"
+              exit 1; }
+
+            # The expected fields are written out here on purpose. nic derives
+            # these paths from the parsed config, so asserting them is
+            # independent of the generator's own field list - a prefix that
+            # matched the wrong line lands on a different path and fails here.
+            case "$provider" in
+              local) want='field "project_name"' ;;
+              aws)   want='fields "certificate.acme.email", "domain", "project_name", "repository.existing.path", "repository.existing.url"' ;;
+            esac
+            echo "$plain" | grep -qF "$want" || {
+              echo "::error::${provider} placeholdered the wrong fields; wanted ${want}"
+              echo "$err"
+              exit 1; }
+            echo "OK: ${provider} is rejected unedited, parses, and placeholders exactly the expected fields"
+          done
+
+  publish-starters:
+    name: Publish starters to quay.io
+    needs: validate-starters
+    # Tag builds only, and deliberately NOT workflow_dispatch. A dispatch can
+    # target any ref: from a branch it would publish starters/*:vmain (and pin a
+    # version from the PREVIOUS tag, since cmd/starters reads git describe),
+    # and from an existing tag it would overwrite a released bundle - the exact
+    # rewrite the trigger comment above says must never happen. Deployment-branch
+    # rules live in repo settings and cannot be reviewed from this file, so the
+    # guard belongs here. A manual re-publish is a re-run of the tag's own run.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Approval + deployment-branch gate, matching every other credentialed job
+    # in this repo (release.yml, the deployment-tests cloud jobs).
+    environment: quay-publish
+    concurrency:
+      # Publishing mutates a shared registry; never cancel a run mid-push or a
+      # tag can end up with one starter published and the other not.
+      group: publish-starters
+      cancel-in-progress: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Install pixi and nebi
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installer pinned to the v0.77.0 tag commit; PIXI_VERSION pins the
+          # binary it fetches. Same shape as the k3d pin in deployment-tests.
+          curl -fsSL https://raw.githubusercontent.com/prefix-dev/pixi/e3c26fbf7d8294d4ddbe7c913b4f8e60bcbafe5a/install/install.sh \
+            | PIXI_VERSION=v0.77.0 bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          # Asset-layer bundling (config.yaml and the README travelling with the
+          # workspace) needs nebi >= 0.10; older versions silently ship only
+          # pixi.toml and pixi.lock. Pinned so a credentialed job never resolves
+          # a floating dependency at run time.
+          # Floor plus ceiling rather than ==, so patch releases are allowed.
+          # Channel pinned explicitly: this job holds the Quay push token, and
+          # an unpinned channel decides which build of nebi runs beside it.
+          pixi global install -c conda-forge "nebi>=0.13,<0.14"
+
+      - name: Generate starters
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/starters -out dist/starters
+
+      - name: Configure quay registry
+        shell: bash
+        env:
+          # Username is a variable, token is a secret; both scoped to the
+          # quay-publish environment.
+          QUAY_USERNAME: ${{ vars.QUAY_OCI_STARTERS_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_OCI_STARTERS_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_OCI_STARTERS_USERNAME is not set for this environment}"
+          : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set for this environment}"
+          printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
+            --name quay \
+            --url quay.io \
+            --namespace "$QUAY_NAMESPACE" \
+            --username "$QUAY_USERNAME" \
+            --password-stdin
+
+      - name: Lock and publish each starter
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for provider in local aws; do
+            pushd "dist/starters/${provider}" > /dev/null
+            # Resolve the toolchain now so the published bundle carries a lock.
+            pixi lock
+            nebi init
+            nebi publish --local \
+              --registry quay \
+              --repo "${STARTER_REPO_PREFIX}/${provider}" \
+              --tag "v${version}"
+            popd > /dev/null
+          done
+
+      - name: Imported starters still carry their placeholders
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for provider in local aws; do
+            dest="/tmp/imported-${provider}"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:v${version}" -o "$dest"
+            test -f "$dest/config.yaml"
+            test -f "$dest/README.md"
+            grep -q CHANGEME "$dest/config.yaml"
+            # The published bundle must be rejected unedited, same as the
+            # freshly generated one.
+            if nic validate -f "$dest/config.yaml"; then
+              echo "::error::published ${provider} starter validates unedited"
+              exit 1
+            fi
+            echo "OK: ${provider} round-tripped and is still not deployable as-is"
+          done

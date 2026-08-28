@@ -50,6 +50,14 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
 1. **Create the `release` environment** (Settings -> Environments) with required
    reviewers. This activates the approval gate on the release job.
 
+2. **Register the prefix.dev trusted publisher** for the conda channel, under
+   the channel's settings: this repository, workflow file `publish-conda.yml`,
+   and the `release` environment. Publishing uses OIDC, so there is no token to
+   store, but there is also nothing in the repository that fails when the
+   registration is missing or wrong. It surfaces only as a failed upload at the
+   end of `Publish conda packages`. See
+   [packaging.md](packaging.md#the-conda-channel).
+
 `ADD_TO_PROJECT_PAT` is already a fine-grained token with least-privilege scope
 (organization Projects: read and write; repository Issues, Pull requests, and
 Metadata: read-only), verified 2026-07-14, so it needs no change. The only

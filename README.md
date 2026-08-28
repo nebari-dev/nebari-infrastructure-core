@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/cli-reference.md">CLI Reference</a> &middot; <a
+  <a href="#quick-start">Quick Start</a> &middot; <a href="docs/reference/cli/nic.md">CLI Reference</a> &middot; <a
   href="#architecture">Architecture</a> &middot; <a href="#roadmap">Roadmap</a> &middot; <a
   href="docs/design-doc/README.md">Documentation</a>
 </p>
@@ -149,7 +149,7 @@ Every NIC deployment includes a landing page where users discover and access all
 - Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
 
-NIC automatically downloads and manages its own OpenTofu binary — no manual installation required.
+NIC automatically downloads and manages its own OpenTofu binary — no manual installation required. If you already have a compatible OpenTofu installed (e.g. via a package manager), NIC uses it instead: an explicit path via `NIC_TOFU_PATH`, or `tofu` found on `PATH`. See [Packaging and External Binaries](docs/operations/packaging.md).
 
 ### Install
 
@@ -177,7 +177,7 @@ cp .env.example .env  # Edit with your cloud provider credentials
 ./nic deploy
 ```
 
-See the [CLI Reference](docs/cli-reference.md) for all commands and options.
+See the [CLI Reference](docs/reference/cli/nic.md) for all commands and options.
 
 ### `nic deploy`
 
@@ -309,9 +309,9 @@ The cluster is named after `project_name` (kube context `kind-<project_name>`) a
 
 **GitOps repository:**
 
-- Omit `git_repository` and NIC auto-creates and mounts a local repo at `~/.nic/gitops/<project_name>` — zero configuration.
-- For a remote repo, set `git_repository.url` to an SSH/HTTPS URL and supply credentials via the `GIT_SSH_PRIVATE_KEY` environment variable (or a token).
-- For a custom local `file://` path, you must also declare a matching `cluster.local.kind.extra_mounts` entry so the kind node can read it — see `examples/local-config.yaml`.
+- Declare `repository: { local: {} }` and NIC auto-creates and mounts a local repository at `~/.nic/gitops/<project_name>` — zero configuration.
+- For a remote repository, use the `existing` provider: set `repository.existing.url` to an SSH/HTTPS URL and point `repository.existing.auth` at an environment variable holding an SSH key or token.
+- For a custom local path (`repository.local.path`), you must also declare a matching `cluster.local.kind.extra_mounts` entry so the kind node can read it — see `examples/local-config.yaml`.
 
 ### Using a pre-existing Cluster (k3d / k3s / minikube / cloud)
 
@@ -387,37 +387,20 @@ contributions to help shape the future of the project!
 
 | Document                                             | Description                                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [CLI Reference](docs/cli-reference.md)               | All commands, flags, and configuration options                                                                                                                                                                                                                                                                                                             |
+| [CLI Reference](docs/reference/cli/nic.md)           | All commands and flags                                                                                                                                                                                                                                                                                                                                     |
+| [Configuration Reference](docs/configuration/README.md) | All `nebari-config.yaml` options, by provider                                                                                                                                                                                                                                                                                                           |
 | [Design Doc](docs/design-doc/README.md)              | The original design document that laid the foundation for NIC's architecture and implementation. It includes detailed explanations of the core components, design decisions, and implementation details. The document is organized into sections covering architecture, design decisions, configuration reference, Nebari Operator, and testing strategy.) |
 | [Architectural Decision Records](docs/adr/README.md) | Architectural decision records recording design decisions as we build                                                                                                                                                                                                                                                                                      |
 
 ## Contributing
 
-Contributions are welcome! To get started:
-
-```bash
-# Clone the repo
-git clone https://github.com/nebari-dev/nebari-infrastructure-core.git
-cd nebari-infrastructure-core
-
-# Install dependencies and build
-make build
-
-# Run tests
-go test ./... -v
-
-# Run all checks (fmt, vet, lint, test)
-make check
-
-# Install pre-commit hooks
-pre-commit install
-```
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full process: getting set up, the development loop, and how a change travels from your clone to `main`.
 
 See our [issue tracker](https://github.com/nebari-dev/nebari-infrastructure-core/issues) for open issues.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 ## OpenTofu lockfile updates
 

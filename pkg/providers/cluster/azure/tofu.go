@@ -1,6 +1,10 @@
 package azure
 
-import "embed"
+import (
+	"embed"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+)
 
 // tofuTemplates contains the OpenTofu shim that calls the external AKS module.
 // The embedded files are extracted to the working directory at deploy time
@@ -37,6 +41,9 @@ type TFVars struct {
 	SKUTier                   string                 `json:"sku_tier"`
 	IdentityType              string                 `json:"identity_type"`
 	NodeGroups                map[string]TFNodeGroup `json:"node_groups"`
+	BackupContainerCreate     bool                   `json:"backup_container_create"`
+	BackupStorageAccount      string                 `json:"backup_storage_account,omitempty"`
+	BackupContainerName       string                 `json:"backup_container_name,omitempty"`
 }
 
 // TFNodeGroup is the JSON shape the Terraform module expects for each node
@@ -53,11 +60,11 @@ type TFNodeGroup struct {
 	Zones        []string          `json:"zones,omitempty"`
 }
 
-// providerName is the NIC provider name returned by Provider.Name() and used
+// ProviderName is the NIC provider name returned by Provider.Name() and used
 // as the value for the "provider" OTel span attribute. Distinct from the
 // AKS "azure" network-plugin literal in TFVars (which is the upstream
 // `azurerm_kubernetes_cluster.network_profile.network_plugin` value).
-const providerName = "azure"
+const ProviderName = "azure"
 
 // modeSystem and modeUser are the AKS node-pool mode values. Each pool's
 // mode determines whether it can host critical system workloads or only
@@ -96,7 +103,7 @@ const managedByValue = "nic"
 //  1. Default each node group's Mode to "User" if empty.
 //  2. Resolve create_resource_group / create_vnet flags from BYO presence.
 //  3. Inject NIC-required tags for tag-based discovery.
-func (c *Config) toTFVars(projectName string) TFVars {
+func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) TFVars {
 	vars := TFVars{
 		ProjectName:           projectName,
 		Location:              c.Region,
@@ -135,6 +142,12 @@ func (c *Config) toTFVars(projectName string) TFVars {
 		if c.Network.ExistingNodeSubnetID != "" {
 			vars.ExistingNodeSubnetID = &c.Network.ExistingNodeSubnetID
 		}
+	}
+
+	if backup != nil {
+		vars.BackupContainerCreate = backup.Create
+		vars.BackupStorageAccount = backup.StorageAccount
+		vars.BackupContainerName = backup.Name
 	}
 
 	return vars

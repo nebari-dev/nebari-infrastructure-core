@@ -150,6 +150,7 @@ create the secret in `envoy-gateway-system`, so no `ReferenceGrant` is needed.
 - `files` or `env` with only one of the pair set (both are required)
 - `existing_secret` without a `name`
 - combining `acme` with `type: existing`
+- `type: letsencrypt` without `acme.email`
 
 ## Verifying the served certificate
 

@@ -10,21 +10,23 @@ This file follows the [AGENTS.md](https://agents.md) convention and is read by C
 
 NIC is organized around pluggable **providers**. A provider is a small Go interface with one implementation per backend; each provider is free to use whatever tool fits the backend best (OpenTofu, a vendor CLI, a Kubernetes-native installer, a REST API). The CLI never branches on provider names - it depends only on provider interfaces.
 
-The codebase currently has two provider categories in tree:
+The codebase currently has three provider categories in tree:
 
 - **Cluster providers** (`pkg/providers/cluster/`) - bring up the Kubernetes cluster
 - **DNS providers** (`pkg/providers/dns/`) - manage DNS records pointing at the cluster's load balancer
+- **Repository providers** (`pkg/providers/repository/`) - provision or resolve the GitOps repository that ArgoCD syncs foundational software from
 
-More categories (certificate issuers, git hosting, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
+More categories (certificate issuers, software installers) are planned. See **[ADR-0004: Out-of-Tree Provider Plugin Architecture](docs/adr/0004-out-of-tree-provider-plugins.md)** for the direction this is heading.
+
 
 ### Cluster Providers
 
 | Provider | Backing tool | Status |
 | --- | --- | --- |
 | `aws` | OpenTofu, using the [`terraform-aws-eks-cluster`](https://github.com/nebari-dev/terraform-aws-eks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/aws/templates/` and driven via `terraform-exec` | Primary, in active use |
-| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; NIC downloads and caches a pinned release with checksum verification | Active development |
+| `hetzner` | [`hetzner-k3s`](https://github.com/vitobotta/hetzner-k3s) binary; resolved via `NIC_HETZNER_K3S_PATH` / `PATH` / pinned download (checksum-verified) | Active development |
 | `existing` | Bring-your-own kubeconfig context. Validates an existing context; performs no provisioning | Working |
-| `local` | Validates an existing kubeconfig context for a Kind cluster. **The Kind cluster itself is brought up by `make localkind-up`**, not by `nic deploy` (the provider's `Deploy` is currently a stub) | Working for the Makefile-driven flow |
+| `local` | Kind. `nic deploy` creates the Kind cluster (reusing it if one already exists) and bootstraps it; `nic destroy` deletes it | Working |
 | `azure` | OpenTofu, using the [`terraform-azurerm-aks-cluster`](https://github.com/nebari-dev/terraform-azurerm-aks-cluster) module with `.tf` templates embedded under `pkg/providers/cluster/azure/templates/` | Implemented end-to-end |
 | `gcp` | Stub implementation only | Not implemented |
 
@@ -70,21 +72,23 @@ go test ./pkg/providers/cluster/aws -v # single package
 make fmt                      # gofmt -s -w
 make vet                      # go vet
 make lint                     # golangci-lint run
-make pre-commit               # run pre-commit checks
+make pre-commit               # install the pre-commit hooks
+make pre-commit-run           # run the hooks across all files
 ```
 
 ### Local Kind Cluster
 
 ```bash
-make localkind-up             # Build nic + create Kind cluster + deploy Nebari
-make localkind-down           # Tear down the Kind cluster
+make build                                     # build the nic binary
+./nic deploy -f examples/local-config.yaml     # create the Kind cluster + deploy Nebari
+./nic destroy -f examples/local-config.yaml    # tear the Kind cluster down
 ```
 
 See `docs/local-kind-development.md` for the full workflow.
 
 ### Running NIC
 
-NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `cmd/nic/config_discovery.go`.
+NIC resolves its config file in this order: `--file/-f` flag → `NIC_CONFIG_PATH` env var → `./config.yaml` (auto-discovery). See `internal/cli/config_discovery.go`.
 
 ```bash
 ./nic version
@@ -102,41 +106,52 @@ OTEL_EXPORTER=otlp OTEL_ENDPOINT=localhost:4317 ./nic deploy -f config.yaml
 ### Component Structure
 
 ```
-cmd/nic/                # CLI entry point - thin cobra commands over pkg/nic
-  ├── main.go           # CLI setup, telemetry init, .env loading via godotenv
-  ├── deploy.go         # Deploy command
-  ├── destroy.go        # Destroy command
-  ├── validate.go       # Validate command
-  ├── kubeconfig.go     # Kubeconfig command
-  ├── version.go        # Version command
-  └── config_discovery.go # Resolve config file path
+cmd/nic/                # CLI entry point - thin wrapper: .env loading, telemetry, signal handling
+  └── main.go           # Calls internal/cli.Execute(ctx)
+
+cmd/docgen/              # Standalone tool: generates docs/reference/cli/ (from internal/cli.NewRootCmd())
+                          # and docs/configuration/ (from provider config structs)
+
+internal/
+  └── cli/              # Cobra command tree; imported by cmd/nic (to run) and cmd/docgen (to introspect for docs)
+      ├── root.go        # NewRootCmd() constructor, Execute(ctx), RunError
+      ├── deploy.go      # Deploy command
+      ├── destroy.go     # Destroy command
+      ├── validate.go    # Validate command
+      ├── kubeconfig.go  # Kubeconfig command
+      ├── outputs.go     # Outputs command (platform entry points + bootstrap credentials)
+      ├── version.go     # Version command
+      └── config_discovery.go # Resolve config file path
 
 pkg/
-  ├── nic/              # Orchestration + programmatic entrypoint; cmd/nic is a thin wrapper over this
+  ├── nic/              # Orchestration + programmatic entrypoint; internal/cli is a thin wrapper over this
   │   ├── client.go     # Client construction + default provider registry
   │   ├── deploy.go     # Deploy orchestration (provider -> argocd -> dns -> endpoint)
   │   ├── destroy.go    # Destroy orchestration
   │   ├── validate.go   # Validate orchestration
   │   ├── kubeconfig.go # Kubeconfig retrieval
+  │   ├── outputs.go    # Platform outputs resolution (secrets + gateway address)
   │   └── status.go     # status.Update -> slog translation (StartSlogHandler)
-  ├── provider/         # Cluster provider interface + implementations
-  │   ├── provider.go   # Provider interface, InfraSettings, DeployOptions
-  │   ├── aws/          # OpenTofu-backed; templates/ holds embedded .tf files
-  │   ├── azure/        # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
-  │   ├── hetzner/      # hetzner-k3s-backed; downloads + caches the binary
-  │   ├── existing/     # Bring-your-own kubeconfig
-  │   ├── local/        # Kubeconfig validator for Kind clusters
-  │   └── gcp/          # Stub
-  ├── dnsprovider/      # DNS provider interface + implementations
-  │   ├── provider.go   # DNSProvider interface
-  │   └── cloudflare/   # Cloudflare API implementation
-  ├── registry/         # Unified registry holding both cluster and DNS providers
+  ├── providers/        # Provider interfaces + implementations, one directory per category
+  │   ├── cluster/      # Provider interface, InfraSettings, DeployOptions (provider.go)
+  │   │   ├── aws/      # OpenTofu-backed; templates/ holds embedded .tf files
+  │   │   ├── azure/    # OpenTofu-backed (terraform-azurerm-aks-cluster); embedded templates/
+  │   │   ├── hetzner/  # hetzner-k3s-backed; downloads + caches the binary
+  │   │   ├── existing/ # Bring-your-own kubeconfig
+  │   │   ├── local/    # Kind-backed local clusters
+  │   │   └── gcp/      # Stub
+  │   ├── dns/          # DNSProvider interface (provider.go)
+  │   │   └── cloudflare/ # Cloudflare API implementation
+  │   └── repository/   # Repository provider interface + sealed Source/Auth contract (provider.go)
+  │       ├── existing/ # Pre-existing remote repository (https or ssh)
+  │       └── local/    # Directory on disk for local/dev clusters
+  ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
   │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
   ├── tofu/             # terraform-exec wrapper (used by the AWS and Azure cluster providers)
   ├── argocd/           # ArgoCD bootstrap and foundational-apps templating
   ├── config/           # YAML config parsing/validation
-  ├── git/              # Git config types and client used by ArgoCD GitOps repo
+  ├── git/              # Git client used to operate on the GitOps repository
   ├── helm/             # Helm helpers
   ├── kubeconfig/       # Kubeconfig file helpers
   ├── endpoint/         # Post-deploy LB endpoint discovery + DNS hints
@@ -180,12 +195,13 @@ DNS providers are stateless - domain and config are passed to each call. `cloudf
 
 ### The Provider Registry
 
-`pkg/registry/registry.go` holds both provider categories behind one thread-safe struct:
+`pkg/registry/registry.go` holds all provider categories behind one thread-safe struct:
 
 ```go
 type Registry struct {
-    ClusterProviders *ProviderList[provider.Provider]
-    DNSProviders     *ProviderList[dnsprovider.DNSProvider]
+    ClusterProviders    *ProviderList[cluster.Provider]
+    DNSProviders        *ProviderList[dns.Provider]
+    RepositoryProviders *ProviderList[repository.Provider]
 }
 ```
 
@@ -229,7 +245,7 @@ type NebariConfig struct {
     Domain        string             `yaml:"domain,omitempty"`
     Cluster       *ClusterConfig     `yaml:"cluster,omitempty"`
     DNS           *DNSConfig         `yaml:"dns,omitempty"`
-    GitRepository *git.Config        `yaml:"git_repository,omitempty"`
+    Repository    *RepositoryConfig  `yaml:"repository,omitempty"`
     Certificate   *CertificateConfig `yaml:"certificate,omitempty"`
 }
 ```
@@ -303,6 +319,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Exemptions:**
 - `pkg/status` is the in-process status channel. Per-line writers and helpers there are intentionally not span-instrumented; spans at that granularity would dwarf the operations they describe.
+- Inside `pkg/config`, the ctx-less validation helpers (e.g. `CheckPlaceholders` and its YAML-node walk, the `Validate` family, the trust-bundle readers) take no `context.Context`; wrapping them in spans would add a tracing dependency to leaf validation for no observability gain, and the few that touch disk do so on a local file already named in the surrounding span. The instrumented parse entrypoints (`ParseConfig`, `UnmarshalProviderConfig`) already carry the config-loading spans.
 - Inside `pkg/tofu`, the byte/line-level helpers (`streamThroughStatus`, `jsonLineMapper`, `mapStatusLevel`, the `status.Writer` methods) are similarly exempt. Operation-granularity wrapper methods on `TerraformExecutor` (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) should still be span-instrumented; this is tracked as outstanding work.
 - New code in any other `pkg/` package must be instrumented as described above.
 
@@ -314,7 +331,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 **Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
 
-**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler` and remains the only layer that emits logs. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
+**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler`, and the application layer (`cmd/nic` and the `internal/cli` handlers) is the only place that emits logs, never `pkg/`. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
 
 ## Key Development Patterns
 
@@ -327,6 +344,8 @@ func SomeFunction(ctx context.Context, ...) error {
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
 6. Add an `examples/<name>-config.yaml`.
 7. Cover the provider with table-driven unit tests; integration tests gated on credentials.
+8. Wire the provider into the deployment tests: a `.github/fixtures/deploy/<name>-config.yaml` (validated by `TestExampleConfigsValidate`), a job in `.github/workflows/deployment-tests.yml` (plus its `workflow_dispatch` provider option, `if:` condition, a `concurrency: group: deploy-test-<name>` block so overlapping runs cannot wipe the gitops branch under each other, and a Deploy-step `timeout-minutes` set below the job timeout so teardown always has budget), and an `environment:` with credentials if the provider needs real cloud access. The `<name>` branch in the `nic-ci-gitops` scratch repo is created automatically by `reset-gitops-branch` on first run.
+9. Update the deployment-tests section in `docs/design-doc/operations/12-testing-strategy.md` (the §12.1 scope/runner bullets and the CI-prerequisites list).
 
 ### Adding a New DNS Provider
 
@@ -334,6 +353,15 @@ func SomeFunction(ctx context.Context, ...) error {
 2. Implement the `DNSProvider` interface (`Name`, `ProvisionRecords`, `DestroyRecords`).
 3. Register with the `registry.Registry`.
 4. Add to `examples/` (e.g., update `aws-config-with-dns.yaml`).
+
+### Adding a New Repository Provider
+
+1. Create `pkg/providers/repository/<name>/`.
+2. Implement the `Provider` interface (`Name`, `Validate`, `Provision`). `Provision` returns a `Source`: `RemoteSource` for a repository reached over the network, `LocalSource` for a directory on disk (only usable with cluster providers whose `InfraSettings` set `SupportsLocalGitOps`).
+3. Keep `Validate` offline and side-effect free: it runs from `nic validate` and dry-run deploys, before any infrastructure exists. Resolve credentials from environment variables only inside `Provision`. The config carries env-var names, never secret values.
+4. Register with the `registry.Registry` in `pkg/nic/registry.go`, exporting a `ProviderName` constant as the registry key.
+5. Update `examples/` configs with the new `repository:` provider block.
+6. Cover the provider with table-driven unit tests (see `pkg/providers/repository/existing/` for the pattern).
 
 ### Adding a New Configuration Field
 
@@ -344,6 +372,8 @@ func SomeFunction(ctx context.Context, ...) error {
 5. Update example configs in `examples/`.
 6. Add tests.
 
+**Placeholder sentinel.** NIC reserves the literal, case-sensitive token `CHANGEME` as an "unfilled value" marker. `config.CheckPlaceholders` walks the parsed YAML node tree (not the Go struct) and rejects any scalar value *or mapping key* whose text *contains* `CHANGEME` (including nested provider blocks, lists, `|`/`>` block scalars, and map keys such as `node_groups: { CHANGEME: … }`), reporting every offending field in one pass. YAML comments are never scanned, though a `#` line inside a block scalar is content and is. The check runs at `validate` and `deploy` only — it is deliberately not part of `NebariConfig.Validate`, so `destroy`/`kubeconfig` are not gated on it. Starter and example configs that must be edited before deploy should use this exact token; example configs meant to validate as-is must avoid it (use descriptive-but-valid values like `nebari.example.com`). See `docs/operations/config-placeholders.md`.
+
 ### Error Handling Convention
 
 ```go
@@ -353,6 +383,16 @@ if err != nil {
     return fmt.Errorf("descriptive context: %w", err)
 }
 ```
+
+### Destroy Error Contract
+
+`--force` controls whether a failed step stops the teardown. When adding a step to a provider's `Destroy`, pick one of three behaviors deliberately:
+
+1. A step failure **before or during teardown** aborts the destroy unless `Force` is set. With `Force`, it is warned, appended to the accumulated error slice, and returned via `errors.Join` at the end of `Destroy`.
+2. A failure in a **post-teardown sweep** (the cluster is already gone, there is nothing left to abort) always accumulates and joins, whether force is set or not.
+3. Warn-and-continue without accumulating is reserved for steps that must never fail teardown and cannot leak billable resources (DNS cleanup, GPU-operator uninstall, retained-backup handling, the Azure orphan report). Each such step carries a comment explaining why.
+
+Either way, a failure that can leave resources behind must surface in the exit code: `pkg/nic.Destroy` re-wraps the provider error with `%w` and emits `LevelWarning` instead of `LevelSuccess`, so a partial teardown never looks clean (#534).
 
 ## Testing Strategy
 
@@ -373,7 +413,7 @@ if err != nil {
 
 **Critical:** Code must respect package boundaries.
 
-- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`provider.Provider`, `dnsprovider.DNSProvider`), never on specific implementations.
+- **CLI commands (`cmd/nic/`)** depend only on provider interfaces (`cluster.Provider`, `dns.Provider`, `repository.Provider`), never on specific implementations.
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
@@ -414,9 +454,11 @@ References:
   - **ADR-0003** - Software pack codegen
   - **ADR-0004** - Out-of-tree provider plugin architecture (Proposed)
 - **`docs/design-doc/`** - Living design docs (architecture / implementation / operations / appendix)
-- **`docs/cli-reference.md`** - CLI command reference
+- **`docs/reference/cli/`** - Generated CLI command reference (from `internal/cli`'s cobra tree; regenerate with `make docs`)
+- **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make docs`)
 - **`docs/local-kind-development.md`** - Local Kind workflow
 - **`docs/plans/`** - In-flight implementation plans
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - The human-facing contribution process
 
 ## Dependencies
 
@@ -429,10 +471,24 @@ Core libraries (see `go.mod`):
 - `k8s.io/client-go` - Kubernetes client
 
 Runtime dependencies (per cluster provider):
-- **AWS:** OpenTofu binary in `PATH` (NIC will also download into a cache if needed)
-- **Hetzner:** none - NIC downloads and caches a pinned `hetzner-k3s` release
-- **Local:** Kind (and Docker) in `PATH`, driven through `make localkind-up`
+- **AWS / Azure:** OpenTofu, resolved in order: `NIC_TOFU_PATH` override, compatible `tofu` on `PATH`, automatic download into the user cache. See `docs/operations/packaging.md` for the full contract
+- **Hetzner:** `hetzner-k3s`, resolved in order: `NIC_HETZNER_K3S_PATH` override, `hetzner-k3s` on `PATH`, automatic download (SHA256-verified) into the user cache. Not on conda-forge/prefix.dev, so network-restricted deploys can pre-provide it - though `nic deploy` still fetches k3s release tags via `hetzner-k3s releases`, so fully air-gapped Hetzner deploys are not yet supported. See `docs/operations/packaging.md`
+- **Local:** a container runtime (Docker or Podman). NIC embeds the kind Go library, so the `kind` CLI is not required. Run `nic deploy -f examples/local-config.yaml` and the local provider creates the Kind cluster
 - **Existing:** an existing kubeconfig with a working context
+
+## Pull Request Lifecycle
+
+Merging to `main` requires **one approving review from a `CODEOWNERS` owner**. Admin enforcement is on, so `gh pr merge --admin` does not bypass it, and GitHub never lets an author approve their own pull request. Approvals are **dismissed on every push**, so re-request review after pushing a fixup. `main` requires linear history: rebase, do not merge.
+
+Open pull requests expire. After **30 days** with no activity a pull request is labeled `status: inactive 💤` and warned; after **37 days** total it closes automatically. Any comment, push, or review resets the clock. Nothing is exempt by default, including drafts.
+
+To keep a pull request open indefinitely, add the **`status: keep open 📌`** label. Use it for long-running design work, or when the hold-up is on the maintainers' side.
+
+Staleness is derived from GitHub's `updated_at`, which is bumped by comments, pushes, reviews, and **label changes**. Adding or removing a label on an already-inactive pull request therefore resets the 30-day counter and clears `status: inactive 💤`, so labelling is not a read-only triage action. The bot excludes its own stale label from this, so applying it does not reset the countdown it starts.
+
+Closes are reversible: branches are preserved and the pull request can be reopened.
+
+The full human-facing process is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Pre-Commit Checklist
 
@@ -443,7 +499,7 @@ Run before every commit:
 3. **Formatting:** `make fmt`
 4. **Vet:** `make vet`
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
-6. **Logging convention:** `slog` usage only in `cmd/nic`, not in `pkg/`
-7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/` or `pkg/providers/dns/`
+6. **Logging convention:** `slog` usage only in the application layer (`cmd/nic` / `internal/cli`), not in `pkg/`
+7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.

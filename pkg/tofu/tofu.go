@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/opentofu/tofudl"
 	"github.com/spf13/afero"
 
@@ -118,6 +119,21 @@ func (te *TerraformExecutor) Destroy(ctx context.Context, opts ...tfexec.Destroy
 // interact with the status writers.
 func (te *TerraformExecutor) Output(ctx context.Context, opts ...tfexec.OutputOption) (map[string]tfexec.OutputMeta, error) {
 	return te.Terraform.Output(signalSafeContext(ctx), opts...)
+}
+
+// Show wraps tfexec.Terraform.Show with a signal-safe context. Show parses the
+// current state into its own buffer, so it does not interact with the status
+// writers. The non-variadic signature lets it satisfy a narrow state-editing
+// interface cleanly.
+func (te *TerraformExecutor) Show(ctx context.Context) (*tfjson.State, error) {
+	return te.Terraform.Show(signalSafeContext(ctx))
+}
+
+// StateRm wraps tfexec.Terraform.StateRm with a signal-safe context. The
+// non-variadic signature lets it satisfy a narrow state-editing interface
+// cleanly.
+func (te *TerraformExecutor) StateRm(ctx context.Context, address string) error {
+	return te.Terraform.StateRm(signalSafeContext(ctx), address)
 }
 
 // backendOverrideJSON overrides the configured backend with a local backend.
@@ -227,7 +243,7 @@ func downloadExecutable(ctx context.Context, appFs afero.Fs, dir string, downloa
 	}
 
 	execPath := filepath.Join(dir, "tofu")
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		execPath += ".exe"
 	}
 	if err := afero.WriteFile(appFs, execPath, binary, 0755); err != nil {
@@ -281,16 +297,20 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 }
 
 // Setup prepares the OpenTofu environment by extracting provider-specific templates,
-// downloading the binary, configuring provider plugin caching, and writing tfvars.
+// resolving the tofu binary, configuring provider plugin caching, and writing tfvars.
+// The binary is resolved in order: NIC_TOFU_PATH, a compatible `tofu` on PATH, then
+// download of the pinned Version (see ResolveExternal).
 // The returned executor's Init/Plan/Apply/Destroy methods stream tofu output
 // as status updates on the status channel attached to ctx; the caller is
 // responsible for starting a status handler (status.StartHandler) before
 // invoking those methods.
 // The caller is responsible for calling Init() and Apply() with appropriate options and
 // deferring Cleanup() to remove the temporary working directory.
-// Downloaded archives are cached in ~/.cache/nic/tofu/ to avoid re-downloading on subsequent runs.
-// The extracted binary is written to the temporary working directory to avoid conflicts
-// when multiple deployments run concurrently or use different OpenTofu versions.
+// Downloaded archives are cached in os.UserCacheDir()/nic/tofu (e.g. ~/.cache/nic/tofu on
+// Linux, ~/Library/Caches/nic/tofu on macOS) to avoid re-downloading on subsequent runs.
+// A downloaded binary is written to the temporary working directory to avoid conflicts
+// when multiple deployments run concurrently or use different OpenTofu versions; an
+// external binary (NIC_TOFU_PATH or PATH) is used in place and never copied or deleted.
 func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecutor, err error) {
 	appFs := afero.NewOsFs()
 
@@ -329,10 +349,24 @@ func Setup(ctx context.Context, templates fs.FS, tfvars any) (te *TerraformExecu
 		}
 	}()
 
-	downloader := &tofuDownloader{cacheDir: cacheDir, version: Version}
-	execPath, err := downloadExecutable(ctx, appFs, workingDir, downloader)
+	resolution, err := ResolveExternal(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get executable: %w", err)
+		return nil, err
+	}
+	for _, note := range resolution.Notes {
+		status.Warning(ctx, note)
+	}
+
+	var execPath string
+	if resolution.Binary != nil {
+		resolution.Binary.announce(ctx)
+		execPath = resolution.Binary.Path
+	} else {
+		downloader := &tofuDownloader{cacheDir: cacheDir, version: Version}
+		execPath, err = downloadExecutable(ctx, appFs, workingDir, downloader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get executable (set %s to use a pre-installed OpenTofu instead): %w", EnvTofuPath, err)
+		}
 	}
 
 	if err = os.Setenv("TF_PLUGIN_CACHE_DIR", pluginCacheDir); err != nil {

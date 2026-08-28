@@ -1,6 +1,8 @@
 module "aks_cluster" {
+  # 0.2.0 is the first release carrying the longhorn_backup_* variables and the
+  # longhorn_backup_container output (nebari-dev/terraform-azurerm-aks-cluster#4).
   source  = "nebari-dev/aks-cluster/azurerm"
-  version = "0.1.1"
+  version = "0.2.0"
 
   project_name                 = var.project_name
   location                     = var.location
@@ -25,4 +27,8 @@ module "aks_cluster" {
   sku_tier                     = var.sku_tier
   identity_type                = var.identity_type
   node_groups                  = var.node_groups
+
+  longhorn_backup_container_create = var.backup_container_create
+  longhorn_backup_storage_account  = var.backup_storage_account
+  longhorn_backup_container_name   = var.backup_container_name
 }

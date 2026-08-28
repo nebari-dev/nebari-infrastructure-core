@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/dns"
 )
 
 // mockClient implements CloudflareClient for testing.
@@ -56,6 +58,130 @@ func TestProviderName(t *testing.T) {
 	provider := NewProvider()
 	if provider.Name() != "cloudflare" {
 		t.Fatalf("Name() = %q, want %q", provider.Name(), "cloudflare")
+	}
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name        string
+		domain      string
+		dnsConfig   map[string]any
+		opts        dns.ValidateOptions
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "domain within zone",
+			domain:    "nebari.example.com",
+			dnsConfig: map[string]any{"zone_name": "example.com"},
+			wantErr:   false,
+		},
+		{
+			name:      "domain equals zone apex",
+			domain:    "example.com",
+			dnsConfig: map[string]any{"zone_name": "example.com"},
+			wantErr:   false,
+		},
+		{
+			name:        "missing domain",
+			domain:      "",
+			dnsConfig:   map[string]any{"zone_name": "example.com"},
+			wantErr:     true,
+			errContains: "domain is required",
+		},
+		{
+			name:        "nil config",
+			domain:      "nebari.example.com",
+			dnsConfig:   nil,
+			wantErr:     true,
+			errContains: "dns configuration is missing",
+		},
+		{
+			name:        "missing zone_name",
+			domain:      "nebari.example.com",
+			dnsConfig:   map[string]any{},
+			wantErr:     true,
+			errContains: "requires zone_name",
+		},
+		{
+			name:        "empty zone_name",
+			domain:      "nebari.example.com",
+			dnsConfig:   map[string]any{"zone_name": ""},
+			wantErr:     true,
+			errContains: "requires zone_name",
+		},
+		{
+			name:        "non-string zone_name",
+			domain:      "nebari.example.com",
+			dnsConfig:   map[string]any{"zone_name": 12345},
+			wantErr:     true,
+			errContains: "zone_name must be a string",
+		},
+		{
+			name:        "domain outside zone",
+			domain:      "nebari.other.com",
+			dnsConfig:   map[string]any{"zone_name": "example.com"},
+			wantErr:     true,
+			errContains: "is not within DNS zone_name",
+		},
+		{
+			name:        "domain suffix collision rejected",
+			domain:      "notexample.com",
+			dnsConfig:   map[string]any{"zone_name": "example.com"},
+			wantErr:     true,
+			errContains: "is not within DNS zone_name",
+		},
+		{
+			name:      "CheckCreds is a no-op stub (no credentials in env)",
+			domain:    "nebari.example.com",
+			dnsConfig: map[string]any{"zone_name": "example.com"},
+			opts:      dns.ValidateOptions{CheckCreds: true},
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// No mock client: Validate's offline checks must never reach the
+			// Cloudflare API (and the CheckCreds branch is a stub, see #137).
+			provider := NewProvider()
+			err := provider.Validate(context.Background(), tt.domain, tt.dnsConfig, tt.opts)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Validate() expected error containing %q, got nil", tt.errContains)
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDomainInZone(t *testing.T) {
+	tests := []struct {
+		domain string
+		zone   string
+		want   bool
+	}{
+		{"example.com", "example.com", true},
+		{"nebari.example.com", "example.com", true},
+		{"a.b.example.com", "example.com", true},
+		{"notexample.com", "example.com", false},
+		{"nebari.other.com", "example.com", false},
+		{"example.com", "nebari.example.com", false},
+	}
+
+	for _, tt := range tests {
+		if got := domainInZone(tt.domain, tt.zone); got != tt.want {
+			t.Errorf("domainInZone(%q, %q) = %v, want %v", tt.domain, tt.zone, got, tt.want)
+		}
 	}
 }
 
@@ -196,7 +322,7 @@ func TestProvisionRecords(t *testing.T) {
 			envToken:       "test-token",
 			mock:           &mockClient{},
 			wantErr:        true,
-			wantErrContain: "not within zone",
+			wantErrContain: "not within DNS zone_name",
 		},
 		{
 			name:       "error when zone resolution fails",
