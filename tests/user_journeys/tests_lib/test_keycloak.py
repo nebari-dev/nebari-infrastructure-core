@@ -59,6 +59,31 @@ def test_create_user_posts_username_and_marks_enabled():
     assert user_id == "user-123"
 
 
+def test_create_user_sets_a_non_empty_first_and_last_name():
+    """Keycloak's declarative user profile requires firstName/lastName;
+    without them VERIFY_PROFILE fires as a required action on first login
+    and interrupts the OIDC round trip with an interactive form."""
+    session = MagicMock()
+    session.post.return_value.headers = {"Location": "https://kc/users/u1"}
+    kc = _kc(session)
+    kc.create_user("journey-abc", "pw123")
+    body = session.post.call_args.kwargs["json"]
+    assert body["firstName"]
+    assert body["lastName"]
+
+
+def test_create_user_clears_required_actions():
+    """A scratch user must never be forced through an interactive
+    account-completion flow, so requiredActions is sent explicitly empty
+    rather than left to the realm's defaults."""
+    session = MagicMock()
+    session.post.return_value.headers = {"Location": "https://kc/users/u1"}
+    kc = _kc(session)
+    kc.create_user("journey-abc", "pw123")
+    body = session.post.call_args.kwargs["json"]
+    assert body["requiredActions"] == []
+
+
 def test_create_user_sets_a_non_temporary_password():
     session = MagicMock()
     session.post.return_value.headers = {"Location": "https://kc/users/u1"}

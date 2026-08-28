@@ -2,6 +2,7 @@ import re
 from unittest.mock import MagicMock
 
 import pytest
+from kubernetes.client.rest import ApiException
 
 from nebari_journeys import constants
 from nebari_journeys.k8s import (
@@ -202,3 +203,39 @@ def test_wait_pod_ready_tolerates_a_transient_image_pull_error():
     ns = _ns_with_pod(_pod("Pending", waiting_reason="ErrImagePull"))
     with pytest.raises(TimeoutError):
         ns.wait_pod_ready("writer", timeout=0)
+
+
+def test_wait_pod_ready_tolerates_a_404_immediately_after_creation(monkeypatch):
+    """On EKS the API server can briefly not serve a just-created object
+    back to a subsequent read. That 404 means "not visible yet", not
+    "failed", so it must be treated as not-ready and polled through."""
+    monkeypatch.setattr("nebari_journeys.waits.time.sleep", lambda _: None)
+    cluster = MagicMock()
+    cluster.core.read_namespaced_pod.side_effect = [
+        ApiException(status=404),
+        _pod("Running", ready=True),
+    ]
+    ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
+    assert ns.wait_pod_ready("writer", timeout=30) is None
+
+
+def test_wait_pod_ready_still_raises_on_a_non_404_api_exception():
+    cluster = MagicMock()
+    cluster.core.read_namespaced_pod.side_effect = ApiException(status=500)
+    ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
+    with pytest.raises(ApiException):
+        ns.wait_pod_ready("writer", timeout=30)
+
+
+def test_wait_pod_ready_still_fails_fast_on_a_terminal_phase_after_a_404(monkeypatch):
+    """The 404 tolerance must not swallow a genuine terminal failure that
+    shows up once the object becomes visible."""
+    monkeypatch.setattr("nebari_journeys.waits.time.sleep", lambda _: None)
+    cluster = MagicMock()
+    cluster.core.read_namespaced_pod.side_effect = [
+        ApiException(status=404),
+        _pod("Failed"),
+    ]
+    ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
+    with pytest.raises(RuntimeError, match="Failed"):
+        ns.wait_pod_ready("writer", timeout=30)

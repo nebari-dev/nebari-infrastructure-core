@@ -118,6 +118,21 @@ class Keycloak:
                 "enabled": True,
                 "emailVerified": True,
                 "email": f"{username}@journeys.invalid",
+                # firstName/lastName are required by Keycloak's declarative
+                # user profile; without them the VERIFY_PROFILE required
+                # action fires on first login and the user is dropped onto
+                # an interactive account-completion form instead of
+                # completing the OIDC redirect. Derived from the username
+                # so the user stays identifiable in the realm.
+                "firstName": "Journey",
+                "lastName": username,
+                # A scratch user exists only to prove the OIDC round trip
+                # works. Any required action (UPDATE_PASSWORD,
+                # CONFIGURE_TOTP, VERIFY_PROFILE, ...) turns that into an
+                # interactive dead end that looks like an OIDC failure, so
+                # this is set explicitly rather than relying on the realm
+                # not having any default required actions configured.
+                "requiredActions": [],
                 "credentials": [
                     {"type": "password", "value": password, "temporary": False}
                 ],

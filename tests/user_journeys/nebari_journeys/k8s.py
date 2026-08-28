@@ -203,10 +203,25 @@ class ScratchNamespace:
         nothing about why. Raising immediately with the phase and the
         container's waiting reason turns that into a one-line diagnosis in a
         CI log.
+
+        A 404 here means the opposite of what it means in delete_pod: right
+        after create_namespaced_pod returns, the API server can briefly not
+        yet serve the object back to a subsequent read (observed on EKS).
+        That is "not visible yet", not "gone", so it is treated as NOT
+        READY and polling continues. Every other ApiException still
+        propagates, and a terminal phase or waiting reason still raises
+        immediately even if a 404 was seen on an earlier poll.
         """
 
         def ready() -> bool:
-            pod = self.cluster.core.read_namespaced_pod(name=name, namespace=self.name)
+            try:
+                pod = self.cluster.core.read_namespaced_pod(
+                    name=name, namespace=self.name
+                )
+            except ApiException as exc:
+                if exc.status == 404:
+                    return False
+                raise
             phase = pod.status.phase
 
             if phase in TERMINAL_POD_PHASES:
@@ -235,6 +250,11 @@ class ScratchNamespace:
         self.cluster.core.delete_namespaced_pod(name=name, namespace=self.name)
 
         def gone() -> bool:
+            # Here a 404 means the opposite of what it means in
+            # wait_pod_ready: this poll starts only after a successful
+            # delete, so a 404 means the object is actually gone, not that
+            # it is not visible yet. Both interpretations are correct for
+            # their own call site; do not "harmonise" them.
             try:
                 self.cluster.core.read_namespaced_pod(name=name, namespace=self.name)
             except ApiException as exc:
