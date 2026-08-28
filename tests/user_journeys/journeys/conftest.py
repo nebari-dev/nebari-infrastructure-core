@@ -106,6 +106,14 @@ SELF_SIGNED_WARNING = (
     "real fix: cert-manager issuing a proper CA for the gateway)"
 )
 
+SELF_SIGNED_TRUSTED_CA_WARNING = (
+    "self signed cert detected: ArgoCD cannot trust the gateway certificate for "
+    "server-side OIDC discovery, so ArgoCD SSO is UNVERIFIED and known broken on "
+    "this cluster (#490, root cause #447; #607 blocks in-cluster resolution of the "
+    "issuer URL on the same shape). A cluster with a real issuing CA runs this "
+    "journey normally."
+)
+
 
 @pytest.fixture(scope="session")
 def self_signed_anchor(trust_anchor_pem) -> bool:
@@ -150,6 +158,28 @@ def skip_tls_marked_tests_on_self_signed(request, self_signed_anchor):
     """
     if self_signed_anchor and request.node.get_closest_marker("tls"):
         pytest.skip(SELF_SIGNED_WARNING)
+
+
+@pytest.fixture(autouse=True)
+def skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor):
+    """Skip `requires_trusted_ca`-marked journeys when the anchor is a
+    self-signed leaf.
+
+    This is a different failure shape from `tls`-marked journeys: those
+    fail because the TEST RUNNER cannot validate the chain. Here, the
+    runner's own trust is irrelevant -- it is a THIRD PARTY (ArgoCD's
+    server, performing OIDC discovery against the external Keycloak URL)
+    that cannot trust the gateway's self-signed leaf. No SPKI pin fixes
+    that: the pin only relaxes Chromium's trust in this process, and
+    ArgoCD's server is a separate process with no such pin. See issues
+    #490 (ArgoCD's OIDC discovery fails TLS verification), #447 (root
+    cause: cert-manager's selfsigned-issuer produces a CA:FALSE leaf,
+    not a proper CA), and #607 (a second, separate blocker on the same
+    cluster shape: the external hostname does not resolve in-cluster at
+    all).
+    """
+    if self_signed_anchor and request.node.get_closest_marker("requires_trusted_ca"):
+        pytest.skip(SELF_SIGNED_TRUSTED_CA_WARNING)
 
 
 @pytest.fixture(scope="session", autouse=True)

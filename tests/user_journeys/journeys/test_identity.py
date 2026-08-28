@@ -97,11 +97,24 @@ def test_argocd_client_redirects_to_this_platforms_domain(keycloak, platform_dom
 
 
 @pytest.mark.ui
+@pytest.mark.requires_trusted_ca
 def test_a_new_user_can_sign_in_to_argocd_through_keycloak(
     page, platform_domain, scratch_user
 ):
     """The whole chain in one story: gateway, TLS, HTTPRoute, Keycloak,
     OIDC client configuration, and ArgoCD.
+
+    Marked `requires_trusted_ca` and skipped (not failed) on a cluster whose
+    gateway anchor is a self-signed leaf: ArgoCD's server performs OIDC
+    discovery against the external Keycloak URL and cannot trust that
+    certificate, so this journey cannot pass for a reason that has nothing
+    to do with the realm, the client, or ArgoCD's configuration (issue #490,
+    root cause #447; issue #607 is a second, separate blocker on the same
+    cluster shape). See `journeys/conftest.py`'s
+    `skip_trusted_ca_marked_tests_on_self_signed` fixture. This is narrower
+    than the `tls` marker: the other identity journeys talk to Keycloak
+    directly from the test runner over a trust anchor the suite derives, so
+    they are unaffected and keep running.
 
     Navigates to ARGOCD_OIDC_LOGIN_PATH rather than the bare host. Argo CD's
     own /login page does not auto-redirect to the identity provider: it

@@ -40,7 +40,7 @@ pixi run fmt                    # ruff format .
 | File | Journey |
 |---|---|
 | `test_smoke.py` | Every foundational ArgoCD app is Synced and Healthy. Runs first, so other failures are interpretable. |
-| `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). |
+| `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
 | `test_tls.py` | The gateway's certificate validates against the plain system trust store, with no cluster-derived anchor. Marked `@pytest.mark.tls`; skips (does not fail) on a self-signed cluster, since a `CA:FALSE` leaf can never pass this by design (issue #447). |
 
@@ -65,9 +65,12 @@ pixi run fmt                    # ruff format .
    journeys additionally get an SPKI pin automatically (see "Chromium and
    self-signed clusters" below) -- do not add your own certificate bypass.
 6. **Mark browser journeys `@pytest.mark.ui`**, journeys over 60 seconds
-   `@pytest.mark.slow`, and a journey whose SUBJECT is certificate validity
+   `@pytest.mark.slow`, a journey whose SUBJECT is certificate validity
    or chain trust itself `@pytest.mark.tls` (see "Chromium and self-signed
-   clusters" below) -- not a journey that merely happens to travel over TLS.
+   clusters" below) -- not a journey that merely happens to travel over TLS
+   -- and a journey that depends on a THIRD PARTY, not the test runner,
+   trusting the gateway certificate `@pytest.mark.requires_trusted_ca` (see
+   "ArgoCD SSO on self-signed clusters" below).
 7. **Prefer `scratch_user` over admin credentials**, so failure artifacts carry
    as little as possible.
 8. **Write the assertion message for someone reading a CI log** with no access
@@ -201,6 +204,48 @@ the API journeys` step in `.github/workflows/ci.yml` reads for the
 by `journeys/conftest.py`'s browser fixtures. Running the suite locally
 against a self-signed cluster needs no manual trust-store setup either: point
 `KUBECONFIG` at the cluster and run the journeys.
+
+### ArgoCD SSO on self-signed clusters: known broken, not merely untested
+
+The SPKI pin above fixes trust for the TEST RUNNER's own browser. It does
+nothing for a THIRD PARTY that also has to trust the gateway certificate,
+which is exactly the situation `test_a_new_user_can_sign_in_to_argocd_through_keycloak`
+is in: ArgoCD's server performs OIDC discovery against the external Keycloak
+URL (`https://keycloak.<domain>/realms/nebari`), as a separate server-side
+HTTP call ArgoCD makes itself, not something Chromium's launch flags touch.
+On a self-signed cluster ArgoCD does not trust that certificate and discovery
+fails with:
+
+```
+failed to query provider "https://keycloak.<domain>/realms/nebari":
+tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+This is issue [#490](https://github.com/nebari-dev/nebari-infrastructure-core/issues/490),
+whose root cause is [#447](https://github.com/nebari-dev/nebari-infrastructure-core/issues/447):
+cert-manager's default `selfsigned-issuer` issues a self-signed LEAF
+(`CA:FALSE`), so there is no CA for ArgoCD to trust in the first place. A
+second, separate blocker exists on the same cluster shape, issue
+[#607](https://github.com/nebari-dev/nebari-infrastructure-core/issues/607):
+the external hostname does not even resolve from inside the cluster, so
+discovery can fail earlier still, with SERVFAIL. **ArgoCD SSO is UNVERIFIED
+on a self-signed cluster, and is known broken, not merely untested.**
+
+The journey is marked `@pytest.mark.requires_trusted_ca` and is **skipped**,
+not failed, when the derived gateway anchor is a self-signed leaf (the
+`skip_trusted_ca_marked_tests_on_self_signed` fixture in
+`journeys/conftest.py`, keyed off the same
+`nebari_journeys.trust.is_self_signed_leaf` check the `tls` marker uses).
+This is a different shape from the `tls` skip: `tls`-marked journeys are
+skipped because the TEST RUNNER cannot validate the chain; this journey is
+skipped because ArgoCD's server cannot, which no SPKI pin in this process
+can fix. The other identity journeys (realm configuration, groups scope,
+OIDC clients, redirect URIs) talk to Keycloak directly from the test runner
+over the trust anchor the suite derives, so they are unaffected and keep
+running on a self-signed cluster. On a cluster with a real issuing CA, the
+sign-in journey runs normally and still fails if SSO is actually broken
+there -- the skip is scoped to a cluster shape that cannot physically work,
+not to the symptom.
 
 ## Security posture
 
