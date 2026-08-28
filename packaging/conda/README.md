@@ -28,8 +28,9 @@ entry, or a bundle that does not verify, fails the build.
 | `recipe.yaml.tmpl` | The recipe, with `__PLACEHOLDER__` slots. Not a standalone recipe |
 | `build-packages.sh` | Renders and builds it once per conda subdir |
 
-`.github/workflows/publish-conda.yml` runs the script after a successful
-`Release` run, for stable releases only, and uploads the results.
+The `publish-prefix-dev` job in `.github/workflows/release.yml` runs the script on
+every stable release, uploads the results, and is followed by `publish-starters`,
+which cannot lock until that upload has happened.
 
 ## Building locally
 
@@ -67,8 +68,9 @@ would otherwise fail in a way whose error message points nowhere near the cause.
 configuration rather than the recipe body: adding a requirements block or editing
 `build.script` leaves the name byte-identical. Since uploads skip filenames the
 channel already has, republishing a corrected recipe for an already-published
-version would be skipped silently. Pass `BUILD_NUMBER=1`, or the workflow's
-`build_number` input, when republishing.
+version would be skipped silently. `BUILD_NUMBER=1` covers a local rebuild; in
+CI there is no republish path at all, so a corrected recipe ships with a new
+patch release.
 
 **Windows differs twice.** The archives are `.zip` rather than `.tar.gz`, and
 conda expects binaries under `Library/bin` rather than `bin`. Both are handled
