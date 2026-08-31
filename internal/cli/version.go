@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/tofu"
 )
@@ -29,11 +30,26 @@ var (
 	date    = "unknown"
 )
 
+// buildInfo is the single reader of the ldflags-injected build vars, shared by
+// `nic version`'s output and the fingerprint `nic deploy` writes into the
+// cluster. Routing both through one function is what keeps the printed version
+// and the recorded version from drifting apart.
+func buildInfo() fingerprint.Build {
+	return fingerprint.Build{Version: version, Commit: commit, Date: date}
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
-	Long:  `Display the version information for Nebari Infrastructure Core (NIC).`,
-	RunE:  runVersion,
+	Long: `Display the version information for Nebari Infrastructure Core (NIC).
+
+This reports the identity of the binary in your hand. To ask which NIC build
+produced a cluster that is already running, read the ConfigMap nic deploy
+writes into it:
+
+  kubectl get cm nic-deployment-info -n nebari-system \
+    -o jsonpath='{.data.nic-version}@{.data.nic-commit}'`,
+	RunE: runVersion,
 }
 
 // tofuVersionLine describes which OpenTofu binary NIC would use: an external

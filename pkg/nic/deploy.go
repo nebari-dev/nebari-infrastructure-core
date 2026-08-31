@@ -13,18 +13,24 @@ import (
 	"github.com/goccy/go-yaml"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/fingerprint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/registry"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
+
+// clusterReadyTimeout bounds the wait for a freshly provisioned cluster's API
+// server to start serving. Matches the budget argocd.Install has always used.
+const clusterReadyTimeout = 5 * time.Minute
 
 // DeployOptions configures a Deploy call.
 type DeployOptions struct {
@@ -38,6 +44,16 @@ type DeployOptions struct {
 	// RegenApps forces regeneration of ArgoCD application manifests even
 	// when the GitOps repository is already bootstrapped.
 	RegenApps bool
+
+	// Build is the identity of the NIC binary running this deploy, recorded
+	// into the cluster as a fingerprint. Only Deploy reads it, which is why it
+	// lives here rather than on Client: the CLI knows the -ldflags values and
+	// the other commands have no use for them.
+	//
+	// The zero value skips the fingerprint write entirely rather than recording
+	// placeholder values, so a programmatic embedder that never sets it does not
+	// plant misleading provenance on a cluster.
+	Build fingerprint.Build
 }
 
 // DeployResult contains useful information from the deploy process that
@@ -206,6 +222,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
 
+	// Stamp the NIC build onto the cluster before ArgoCD and the foundational
+	// apps go in. Ordering is deliberate: the metadata is most valuable when a
+	// later stage fails, so a deploy that dies during bootstrap still leaves
+	// behind the record of which build died. Skipped in dry-run, which has no
+	// cluster to write to.
+	if !opts.DryRun {
+		c.recordFingerprint(ctx, cfg, clusterProvider, opts.Build)
+	}
+
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved
 	// source is reused by the ArgoCD install below.
@@ -338,6 +363,88 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	return result, nil
 }
 
+// recordFingerprint writes the NIC build identity into the cluster as a
+// ConfigMap, so anyone holding kubectl can answer "which NIC produced this
+// cluster?" without access to the binary, the config, or the tofu state.
+//
+// Failures warn and continue. This is provenance metadata, not infrastructure:
+// a cluster that came up correctly must not be reported as a failed deploy
+// because a ConfigMap write was rejected. The warning names the gap so the
+// operator knows the record is missing rather than stale.
+//
+// That is the fail-open half of ADR-0010's deploy-semantics ladder, which is
+// correct for the standard posture. If security_level lands as ADR-0010
+// describes, hardened mode wants this fail-closed; the choice is hardcoded here
+// only because there is no level to read yet.
+//
+// A zero DeployOptions.Build carries no identity and is skipped entirely - see
+// that field for why that beats writing placeholder provenance.
+func (c *Client) recordFingerprint(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, build fingerprint.Build) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "nic.recordFingerprint")
+	defer span.End()
+
+	if build == (fingerprint.Build{}) {
+		span.SetAttributes(attribute.Bool("fingerprint.skipped", true))
+		return
+	}
+
+	k8sClient, err := c.k8sClientFor(ctx, cfg, clusterProvider)
+	if err != nil {
+		warnFingerprint(ctx, span, err)
+		return
+	}
+
+	// A provider returning from Deploy does not mean its API server is serving
+	// yet - on EKS/AKS the endpoint and its DNS can take minutes. argocd.Install
+	// has always opened with this same wait for that reason; the fingerprint
+	// write now sits in front of it, so it has to wait too. Without this, the
+	// expected case on a managed cloud is a warning and no record, which loses
+	// provenance on exactly the slow deploys that need it.
+	if err := argocd.WaitForClusterReady(ctx, k8sClient, clusterReadyTimeout); err != nil {
+		warnFingerprint(ctx, span, fmt.Errorf("wait for cluster: %w", err))
+		return
+	}
+
+	info := fingerprint.Info{
+		Build:           build,
+		ClusterProvider: clusterProvider.Name(),
+		ProjectName:     cfg.ProjectName,
+		LastDeploy:      time.Now(),
+	}
+	if err := fingerprint.Apply(ctx, k8sClient, info); err != nil {
+		warnFingerprint(ctx, span, err)
+	}
+}
+
+// k8sClientFor builds a Kubernetes client for the deployed cluster. Collapses
+// the kubeconfig -> REST config -> clientset sequence that Deploy needs in more
+// than one place, so the error wrapping stays identical across callers.
+func (c *Client) k8sClientFor(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider) (*kubernetes.Clientset, error) {
+	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	if err != nil {
+		return nil, fmt.Errorf("get kubeconfig: %w", err)
+	}
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse kubeconfig: %w", err)
+	}
+	k8sClient, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create kubernetes client: %w", err)
+	}
+	return k8sClient, nil
+}
+
+// warnFingerprint records the failure on the span and warns the user, naming the
+// ConfigMap so the message is actionable rather than a bare error.
+func warnFingerprint(ctx context.Context, span trace.Span, err error) {
+	span.RecordError(err)
+	status.Send(ctx, status.NewUpdate(status.LevelWarning,
+		fmt.Sprintf("Could not record NIC deployment metadata in %s/%s; the cluster is deployed but its NIC version is not queryable from inside it", fingerprint.Namespace, fingerprint.Name)).
+		WithMetadata("error", err.Error()))
+}
+
 // resolveRepositorySource provisions the GitOps repository via the configured repo
 // provider. The repository block is mandatory (enforced by config validation), so
 // cfg.Repository is non-nil here. Provision may have side effects (e.g. creating a
@@ -374,23 +481,9 @@ func gitAuth(a repository.Auth) (git.Auth, error) {
 // and provisions DNS records if a DNS provider is configured. Returns the LB
 // endpoint for use in manual DNS guidance (may be nil if lookup failed).
 func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.NebariConfig, clusterProvider cluster.Provider, reg *registry.Registry) *endpoint.LoadBalancerEndpoint {
-	kubeconfigBytes, err := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster)
+	k8sClient, err := c.k8sClientFor(ctx, cfg, clusterProvider)
 	if err != nil {
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not get kubeconfig for endpoint lookup").
-			WithMetadata("error", err.Error()))
-		return nil
-	}
-
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
-	if err != nil {
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not parse kubeconfig for endpoint lookup").
-			WithMetadata("error", err.Error()))
-		return nil
-	}
-
-	k8sClient, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not create k8s client for endpoint lookup").
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not reach cluster for endpoint lookup").
 			WithMetadata("error", err.Error()))
 		return nil
 	}

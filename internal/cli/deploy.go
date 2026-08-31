@@ -30,7 +30,11 @@ resources to establish a fully functional Nebari cluster.
 Configs that still contain the reserved CHANGEME placeholder are rejected before
 any provider API call, so an unedited starter cannot provision infrastructure.
 
-Use --dry-run to preview changes without applying them.`,
+Use --dry-run to preview changes without applying them.
+
+Once the cluster is up, the NIC build that deployed it is recorded in the
+nebari-system/nic-deployment-info ConfigMap, so the version is queryable from
+inside the cluster.`,
 		RunE: runDeploy,
 	}
 )
@@ -88,6 +92,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		DryRun:    deployDryRun,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
+		Build:     buildInfo(),
 	})
 	if err != nil {
 		span.RecordError(err)
