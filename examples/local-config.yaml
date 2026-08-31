@@ -19,6 +19,14 @@ cluster:
     #     - host_path: /home/user/my-gitops-repo
     #       container_path: /home/user/my-gitops-repo
     #       read_only: true
+
+    # Host ports publishing the gateway's listeners on 127.0.0.1 (defaults: 80
+    # and 443). Override if the defaults are already in use on your machine, when
+    # running several local clusters, or on rootless container runtimes that
+    # cannot bind ports below 1024. Takes effect on cluster creation only.
+    # http_port: 8080
+    # https_port: 8443
+
     node_selectors:
       general:
         kubernetes.io/os: linux
@@ -26,13 +34,6 @@ cluster:
         kubernetes.io/os: linux
       worker:
         kubernetes.io/os: linux
-
-  # Host ports publishing the gateway's listeners on 127.0.0.1 (defaults: 80
-  # and 443). Override if the defaults are already in use on your machine, when
-  # running several local clusters, or on rootless container runtimes that
-  # cannot bind ports below 1024. Takes effect on cluster creation only.
-  # http_port: 8080
-  # https_port: 8443
 
 # GitOps repository configuration (required)
 # Configures the repository that ArgoCD will use to manage cluster resources.
