@@ -109,8 +109,8 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name                  string
-		settings              cluster.InfraSettings
+		name                   string
+		settings               cluster.InfraSettings
 		wantStorageClass       string
 		wantLBAnnotationCount  int
 		wantKeycloakBasePath   string
