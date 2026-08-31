@@ -68,7 +68,7 @@ func kindClusterExists(ctx context.Context, kp *cluster.Provider, name string) (
 
 // hostPort narrows a config port to int32 for kind's PortMapping. Zero (the
 // unset value) becomes def, and out-of-range values also fall back to def as
-// a safety net: Validate has already rejected them by the time Deploy runs.
+// a safety net.
 func hostPort(port int, def int32) int32 {
 	if port <= 0 || port > 65535 {
 		return def
