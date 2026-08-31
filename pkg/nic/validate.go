@@ -67,6 +67,10 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostPorts); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
 
 	return nil
 }
@@ -133,6 +137,18 @@ func validateRepositoryProvider(ctx context.Context, cfg *config.NebariConfig, r
 	}
 	if err := repoProvider.Validate(ctx, cfg.ProjectName, cfg.Repository); err != nil {
 		return fmt.Errorf("invalid repository: %w", err)
+	}
+	return nil
+}
+
+// ensureDNSSupported rejects a dns block on a cluster whose gateway is
+// published on loopback host ports (local kind clusters). Public DNS records
+// cannot usefully point at 127.0.0.1, and deploy would skip provisioning them
+// anyway, so the block is dead configuration at best and at worst suppresses
+// the /etc/hosts guidance the user actually needs.
+func ensureDNSSupported(cfg *config.NebariConfig, gatewayHostPorts bool) error {
+	if cfg.DNS != nil && gatewayHostPorts {
+		return fmt.Errorf("a dns provider is not supported by cluster provider %q: the gateway is published on host ports of 127.0.0.1, which DNS records cannot usefully point to. Remove the dns block and use the /etc/hosts instructions printed by deploy", cfg.Cluster.ProviderName())
 	}
 	return nil
 }

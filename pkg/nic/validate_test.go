@@ -290,6 +290,50 @@ func TestEnsureLocalRepositorySupported(t *testing.T) {
 	}
 }
 
+func TestEnsureDNSSupported(t *testing.T) {
+	tests := []struct {
+		name             string
+		dnsProviders     map[string]any
+		gatewayHostPorts bool
+		wantErr          bool
+	}{
+		{
+			name:             "dns block on a host-port gateway rejected",
+			dnsProviders:     map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+			gatewayHostPorts: true,
+			wantErr:          true,
+		},
+		{
+			name:             "dns block on a load-balancer gateway",
+			dnsProviders:     map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+			gatewayHostPorts: false,
+			wantErr:          false,
+		},
+		{
+			name:             "no dns block is a no-op",
+			dnsProviders:     nil,
+			gatewayHostPorts: true,
+			wantErr:          false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testRepoConfig(nil)
+			if tt.dnsProviders != nil {
+				cfg.DNS = &config.DNSConfig{Providers: tt.dnsProviders}
+			}
+			err := ensureDNSSupported(cfg, tt.gatewayHostPorts)
+			if tt.wantErr && err == nil {
+				t.Fatal("ensureDNSSupported() expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ensureDNSSupported() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestStructuralValidatePermitsZoneInconsistency pins the destroy/kubeconfig
 // behavior: those commands validate via cfg.Validate(validateOptions(...))
 // only and never call validateDNSProvider, so a config whose domain is

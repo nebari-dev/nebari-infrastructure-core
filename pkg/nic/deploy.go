@@ -174,6 +174,16 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, err
 	}
 
+	// Reject a dns block on a host-port gateway before provisioning any
+	// infrastructure, mirroring the validate path for library callers that
+	// skip Validate.
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostPorts); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible dns and cluster providers").
+			WithMetadata("error", err.Error()))
+		return nil, err
+	}
+
 	// Resolve the top-level trust bundle once, here at the orchestration layer.
 	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
@@ -327,14 +337,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	// Look up the LB endpoint and provision DNS records if configured. With a
 	// host-port gateway (local kind clusters) there is no load balancer: the
-	// platform is published on 127.0.0.1, so report that directly and skip DNS
-	// provisioning (public DNS records pointing at loopback are never useful).
+	// platform is published on 127.0.0.1, so report that directly. There are
+	// no DNS records to provision on this path: ensureDNSSupported rejected
+	// any dns block up front.
 	if cfg.Domain != "" && !opts.DryRun {
 		if infraSettings.GatewayHostPorts {
 			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: "127.0.0.1", Port: infraSettings.HTTPSPort}
-			if cfg.DNS != nil {
-				status.Warning(ctx, "Skipping DNS provisioning: the local gateway is published on 127.0.0.1")
-			}
 		} else {
 			result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
 		}
