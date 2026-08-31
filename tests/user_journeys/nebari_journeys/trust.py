@@ -298,6 +298,45 @@ def classify_anchor(
     return PRIVATELY_ISSUED
 
 
+def anchor_hostnames(pem: str) -> list[str]:
+    """DNS names the anchor certificate claims, in certificate order."""
+    cert = load_chain(pem)[0]
+    try:
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return []
+    return list(san.get_values_for_type(x509.DNSName))
+
+
+def verifiable_hostname(pem: str | None, domain: str) -> str:
+    """A hostname on which the GATEWAY's own certificate will be served.
+
+    Not simply the platform domain, and the difference is not academic. A
+    Nebari cluster has more than one certificate on the same gateway
+    address: alongside `nebari-gateway-tls` there is a landing-page
+    certificate, and BOTH claim the bare apex. Which one Envoy serves for
+    a given connection is chosen by SNI, so connecting on the apex can
+    return the landing page's certificate while the anchor was derived
+    from the gateway's. On an ACME cluster both are publicly trusted and
+    the mismatch is invisible; on a self-signed cluster they are two
+    unrelated self-signed leaves and verification fails with
+    "self-signed certificate" -- which looks like a broken platform and
+    is really the wrong certificate having been asked for.
+
+    So prefer a name the derived certificate claims that is NOT the bare
+    apex, since the apex is the contested one. Falls back to the platform
+    domain when the anchor has no other name, or when there is no anchor
+    at all.
+    """
+    if pem is None:
+        return domain
+    names = [n for n in anchor_hostnames(pem) if not n.startswith("*")]
+    specific = [n for n in names if n != domain]
+    if specific:
+        return specific[0]
+    return names[0] if names else domain
+
+
 def spki_sha256_b64(pem: str) -> str:
     """Base64-encoded SHA-256 hash of a certificate's SubjectPublicKeyInfo.
 

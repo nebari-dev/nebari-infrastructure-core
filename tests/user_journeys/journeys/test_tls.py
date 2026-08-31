@@ -24,7 +24,12 @@ from nebari_journeys import trust
 
 
 def test_gateway_serves_a_valid_certificate_for_this_domain(
-    platform_domain, gateway_address, trust_anchor, dns_mapping, gateway_reachable
+    platform_domain,
+    gateway_address,
+    trust_anchor,
+    trust_anchor_pem,
+    dns_mapping,
+    gateway_reachable,
 ):
     """Runs on EVERY cluster shape, including self-signed and staging.
 
@@ -41,12 +46,15 @@ def test_gateway_serves_a_valid_certificate_for_this_domain(
     The only thing it cannot prove is that a stranger would trust it,
     which is what the journey below is for.
     """
-    version = trust.negotiated_tls(
-        platform_domain, gateway_address, ca_file=trust_anchor
-    )
+    # Connect on a name the GATEWAY certificate claims, not on the bare
+    # apex: the landing page has its own certificate that also claims the
+    # apex, and Envoy picks between them by SNI. See
+    # trust.verifiable_hostname.
+    hostname = trust.verifiable_hostname(trust_anchor_pem, platform_domain)
+    version = trust.negotiated_tls(hostname, gateway_address, ca_file=trust_anchor)
     assert version in trust.ACCEPTABLE_TLS_VERSIONS, (
-        f"gateway for {platform_domain!r} negotiated {version!r}, which is not "
-        f"one of {sorted(trust.ACCEPTABLE_TLS_VERSIONS)}; the connection is not "
+        f"gateway for {hostname!r} negotiated {version!r}, which is not one of "
+        f"{sorted(trust.ACCEPTABLE_TLS_VERSIONS)}; the connection is not "
         "protected by a currently acceptable TLS version"
     )
 

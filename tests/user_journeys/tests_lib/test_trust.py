@@ -660,3 +660,59 @@ def test_a_leaf_issued_directly_by_a_trusted_root_still_verifies():
         )
         == trust.PUBLICLY_TRUSTED
     )
+
+
+# --- which hostname the validity journey connects on -----------------------
+#
+# A Nebari gateway serves more than one certificate on the same address:
+# nebari-gateway-tls and the landing page's certificate BOTH claim the bare
+# apex, and Envoy chooses by SNI. Connecting on the apex can therefore
+# return the landing page's certificate while the anchor came from the
+# gateway's. On ACME both are publicly trusted and the mismatch is
+# invisible; on a self-signed cluster they are unrelated leaves and the
+# handshake fails with "self-signed certificate", which reads as a broken
+# platform. Caught by CI on kind, and by the local and existing deployment
+# tests, after passing on a production-ACME cluster.
+
+
+def test_anchor_hostnames_lists_the_certificates_dns_names():
+    leaf, _ = make_cert(
+        "nebari.test", dns=["nebari.test", "keycloak.nebari.test", "argocd.nebari.test"]
+    )
+    assert trust.anchor_hostnames(chain_pem(leaf)) == [
+        "nebari.test",
+        "keycloak.nebari.test",
+        "argocd.nebari.test",
+    ]
+
+
+def test_verifiable_hostname_avoids_the_contested_apex():
+    """The apex is the one name another certificate also claims."""
+    leaf, _ = make_cert("nebari.test", dns=["nebari.test", "keycloak.nebari.test"])
+    assert (
+        trust.verifiable_hostname(chain_pem(leaf), "nebari.test")
+        == "keycloak.nebari.test"
+    )
+
+
+def test_verifiable_hostname_falls_back_to_the_apex_when_it_is_the_only_name():
+    leaf, _ = make_cert("nebari.test", dns=["nebari.test"])
+    assert trust.verifiable_hostname(chain_pem(leaf), "nebari.test") == "nebari.test"
+
+
+def test_verifiable_hostname_skips_wildcards():
+    """A wildcard is a fine SAN but a poor server_hostname."""
+    leaf, _ = make_cert("nebari.test", dns=["*.nebari.test", "keycloak.nebari.test"])
+    assert (
+        trust.verifiable_hostname(chain_pem(leaf), "nebari.test")
+        == "keycloak.nebari.test"
+    )
+
+
+def test_verifiable_hostname_uses_the_domain_when_there_is_no_anchor():
+    assert trust.verifiable_hostname(None, "nebari.test") == "nebari.test"
+
+
+def test_verifiable_hostname_uses_the_domain_when_the_certificate_has_no_sans():
+    leaf, _ = make_cert("nebari.test")
+    assert trust.verifiable_hostname(chain_pem(leaf), "nebari.test") == "nebari.test"
