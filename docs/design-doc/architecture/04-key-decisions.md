@@ -110,8 +110,7 @@ See [State Management](05-state-management.md).
    and client-go, not through GitOps)
    ↓
 2. App-of-apps root.yaml, then individual apps by sync wave:
-   ├── wave 1: envoy-gateway, metallb, metallb-config
-   │           (metallb pair only when InfraSettings.NeedsMetalLB)
+   ├── wave 1: envoy-gateway
    ├── wave 2: cert-manager, gateway-config
    ├── wave 3: cluster-issuers, certificates, httproutes, trust-manager,
    │           cloudnative-pg, securitypolicies, longhorn-backup

@@ -103,7 +103,7 @@ The pattern, if you choose tofu for a new provider:
 1. Create `pkg/providers/cluster/<name>/` with `config.go`, `provider.go`, and `tofu.go`.
 2. Add a `templates/` directory inside the package with `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`, and (optionally) `backend.tf`. Embed it via `go:embed`.
 3. Implement the `cluster.Provider` interface. `Deploy` should build a tfvars map, call `pkg/tofu.Setup`, and invoke `Init`/`Plan`/`Apply` (or `Plan` only when `DeployOptions.DryRun` is true).
-4. Implement `InfraSettings(cfg)` to return provider-shaped capabilities (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, etc.). Do not add `switch` statements on provider name elsewhere in the codebase.
+4. Implement `InfraSettings(cfg)` to return provider-shaped capabilities (`StorageClass`, `GatewayHostPorts`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, etc.). Do not add `switch` statements on provider name elsewhere in the codebase.
 5. Register the provider in `pkg/nic/registry.go`'s `defaultRegistry` via `r.ClusterProviders.Register(ctx, "<name>", <name>.NewProvider())`.
 6. Add an example config under `examples/` and validate against `pkg/config`.
 

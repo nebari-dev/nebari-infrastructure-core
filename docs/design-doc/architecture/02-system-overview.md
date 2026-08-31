@@ -61,7 +61,7 @@
 │    Manifests live under pkg/argocd/templates/apps/ and are  │
 │    rendered into the GitOps repo. ArgoCD then syncs them    │
 │    via a root app-of-apps:                                  │
-│    ├── w1: envoy-gateway, metallb + metallb-config          │
+│    ├── w1: envoy-gateway                                    │
 │    ├── w2: cert-manager, gateway-config                     │
 │    ├── w3: cluster-issuers, certificates, httproutes,       │
 │    │       trust-manager, cloudnative-pg, securitypolicies, │
@@ -104,7 +104,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`pkg/providers/cluster/` (Cluster providers)**
 
-- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`).
+- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `GatewayHostPorts`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`, `LonghornEnabled`).
 - One sub-package per cluster provider. `aws/`, `azure/`, `hetzner/`, `local/`, and `existing/` are implemented; `gcp/` is a registered stub (its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil` rather than provisioning anything, and `GetKubeconfig` returns "not yet implemented").
 - AWS-specific Terraform templates live under `pkg/providers/cluster/aws/templates/` and are embedded into the binary via `go:embed`.
 
@@ -132,7 +132,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 **`pkg/argocd/` (ArgoCD orchestration)**
 
 - Installs ArgoCD via the embedded Helm Go SDK (`pkg/helm`), not via a Terraform `helm_release`.
-- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Every YAML under `apps/` ships (they are enumerated at render time via `fs.ReadDir`): cert-manager, cluster-issuers, certificates, trust-manager, trust-bundle, envoy-gateway, gateway-config, httproutes, securitypolicies, keycloak, postgresql, cloudnative-pg, metallb, metallb-config, longhorn-backup, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
+- Renders the foundational app-of-apps from templates under `pkg/argocd/templates/apps/` and `pkg/argocd/templates/manifests/`. Every YAML under `apps/` ships (they are enumerated at render time via `fs.ReadDir`): cert-manager, cluster-issuers, certificates, trust-manager, trust-bundle, envoy-gateway, gateway-config, httproutes, securitypolicies, keycloak, postgresql, cloudnative-pg, longhorn-backup, opentelemetry-collector, nebari-landingpage, nebari-operator, and the root app.
 - The nebari-operator app references the upstream repository (`github.com/nebari-dev/nebari-operator`) via Kustomize; the operator's source code does not live in this repo.
 
 **`pkg/dns`/`pkg/endpoint`/`pkg/git`/`pkg/helm`/`pkg/kubeconfig`/`pkg/status`/`pkg/telemetry`**
@@ -153,7 +153,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 | ArgoCD for foundational software | GitOps best practices, declarative dependency management via sync waves, self-healing. |
 | Embedded Helm SDK for the ArgoCD install itself | Bootstraps the GitOps controller without requiring an out-of-band Helm CLI. After ArgoCD is up, everything else is GitOps. |
 | Out-of-tree Nebari Operator | The operator is its own product with its own release cadence. NIC just deploys it. |
-| `InfraSettings` for provider-shaped capabilities | CLI code never switches on provider name. Providers expose capabilities (e.g., `NeedsMetalLB`, `StorageClass`, `SupportsLocalGitOps`) and the rest of the system consumes them. |
+| `InfraSettings` for provider-shaped capabilities | CLI code never switches on provider name. Providers expose capabilities (e.g., `GatewayHostPorts`, `StorageClass`, `SupportsLocalGitOps`) and the rest of the system consumes them. |
 | OpenTelemetry in library code, `slog` in CLI | Library code is reusable across CLI commands and (eventually) plugins. CLI is the only layer that emits human-facing logs. |
 
 ### 2.4 The Status Channel: pkg → cmd Seam

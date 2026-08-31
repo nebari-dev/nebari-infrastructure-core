@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-06-03)
+Proposed (2026-06-03) · Amended (2026-08-31): MetalLB, cited throughout as the conditional-app status quo expected to migrate to this interface, was removed instead ([#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640): the local provider publishes the gateway on kind host ports, so no `LoadBalancer` implementation is needed). References to MetalLB below are historical and the decision itself stands.
 
 Refines the "GitOps for software" principle in [ADR-0001](0001-git-provider-for-gitops-bootstrap.md), `AGENTS.md` §Core Architecture Principles #5, and the design doc §4.5 for the specific case of *conditional, provider/cluster-dependent* foundational software. The implementation of the shared interface described here is tracked in #349; this ADR records the decision and the target design.
 
