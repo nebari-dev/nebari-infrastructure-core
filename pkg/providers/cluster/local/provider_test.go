@@ -154,6 +154,27 @@ func TestValidateKindMode(t *testing.T) {
 				"local": map[string]any{"http_port": 8080, "https_port": 8443},
 			},
 		},
+		{
+			name: "both ports invalid reports http_port first",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": -1, "https_port": 99999999},
+			},
+			wantErr: "http_port must be between 1 and 65535",
+		},
+		{
+			name: "equal ports are rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 8443, "https_port": 8443},
+			},
+			wantErr: "http_port and https_port must differ",
+		},
+		{
+			name: "http_port colliding with the default https_port is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 443},
+			},
+			wantErr: "http_port and https_port must differ",
+		},
 	}
 
 	for _, tt := range tests {
