@@ -20,10 +20,11 @@ NIC has four testing levels today, plus one (health) that is planned but not yet
 
 ### Deployment tests (real infrastructure)
 
-- **Scope**: End-to-end `nic deploy` / `nic destroy` for every implemented provider: local (Kind), existing cluster (k3d on the runner), AWS, Azure, and Hetzner.
+- **Scope**: End-to-end `nic deploy` / `nic destroy` for every implemented provider: local (Kind), existing cluster (k3d on the runner), AWS, Azure, and Hetzner. Each provider job then runs the **user journey suite** against the cluster it just created (see below), so a provider is verified on what the deployed platform can *do*, not only on whether deployment succeeded.
 - **Runner**: `.github/workflows/deployment-tests.yml`, which builds `nic`, then runs the [`nebari-dev/deploy-nebari-action`](https://github.com/nebari-dev/deploy-nebari-action) (pinned by commit SHA) with the per-provider configs in `.github/fixtures/deploy/`. The action deploys, waits for the platform to converge, and destroys in a post step that runs even on failure or cancellation.
 - **Where they run**: On demand via `workflow_dispatch` (pick one provider or `all`) and on every published release.
-- **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget.
+- **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget. The journey step is time-boxed the same way and for the same reason.
+- **Staging certificates and the journeys**: because every cloud fixture uses the Let's Encrypt *staging* endpoint, the gateway chain is real but not publicly trusted. `nebari_journeys.trust.classify_anchor` recognises that as its own state, so certificate *validity* (expiry, hostname, chain completeness, TLS version) is still asserted on these clusters and only the *public trust* assertion is skipped. See `tests/user_journeys/README.md`, "Three kinds of trust anchor".
 
 ### User journey tests (end-to-end behaviour)
 
@@ -31,7 +32,7 @@ NIC has four testing levels today, plus one (health) that is planned but not yet
 - **Runner**: `make test-journeys` (pixi-managed Python/pytest suite; drives a browser via Playwright for the UI journeys). `make test-journeys-lib` runs the library's own unit tests, which need no cluster.
 - **Input**: a kubeconfig, and nothing else. Domain, gateway address, credentials and which optional components exist are all discovered from the cluster, so the suite runs against a cluster this checkout never deployed.
 - **Skips, not failures**: an absent or unsupportable component skips with a reason naming what was missing and what stays unverified. TLS is never disabled to make a journey pass.
-- **Where they run**: the `Deploy & user journeys` job in `.github/workflows/ci.yml`, after the platform is deployed to Kind. The library's unit tests run in their own `Journey library tests` job on every push and PR, with no cluster involved. Playwright traces, videos and screenshots upload as artifacts on failure, with deliberately short retention.
+- **Where they run**: the `Deploy & user journeys` job in `.github/workflows/ci.yml` after the platform is deployed to Kind, and every provider job in `.github/workflows/deployment-tests.yml`. Both go through the shared `.github/actions/run-user-journeys` composite action, so CI and the deployment tests cannot drift apart. The library's unit tests run in their own `Journey library tests` job on every push and PR, with no cluster involved. Playwright traces, videos and screenshots upload as artifacts on failure, with deliberately short retention.
 
 ### Health tests (planned)
 
@@ -79,7 +80,7 @@ Highlights:
 - All GitHub Actions are SHA-pinned, enforced by `check-action-pins.sh`.
 - A `govulncheck` gate fails the build on known vulnerabilities.
 - The LocalStack integration tests are still not wired into CI; the Kind-based `Deploy & user journeys` job is the end-to-end smoke test, and since the journey suite runs there it now checks platform behaviour and not only deployment success.
-- The journey suite is not yet wired into `deployment-tests.yml`, so the cloud providers' deployments are still verified only as deployments.
+- `deployment-tests.yml` runs on `release: published` as well as on demand, so a journey failure there fails the release workflow. That is deliberate -- a platform a user cannot log in to should not ship quietly -- but it is the reason the journey step is bounded and the suite skips rather than fails on absent or unsupportable components.
 
 Other workflows in `.github/workflows/`:
 

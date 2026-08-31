@@ -135,48 +135,26 @@ jobs:
         with:
           nic-binary: nic
 
-      - name: Set up pixi
-        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
-        with:
-          manifest-path: tests/user_journeys/pixi.toml
-
       # There is deliberately no step installing the gateway's certificate
-      # into the runner's system trust store. An earlier version had one,
-      # on the stated grounds that OpenSSL -- and therefore the
-      # requests-based journeys -- would read it. That is not true inside a
-      # pixi environment, which resolves its own CA material:
+      # into the runner's system trust store. An earlier version had one, on
+      # the stated grounds that OpenSSL -- and therefore the requests-based
+      # journeys -- would read it. That is not true inside a pixi
+      # environment, which resolves its own CA material:
       #
       #   requests default CA bundle: .pixi/envs/default/.../certifi/cacert.pem
       #   openssl default verify paths: .pixi/envs/default/ssl/cert.pem
       #
-      # So `update-ca-certificates` on the runner was invisible to the
-      # suite. Nothing needs it either: the API journeys pass the anchor
-      # explicitly via `verify=` from the `trust_anchor` fixture, Chromium
-      # is pinned to the anchor's SPKI hash at launch (see
-      # nebari_journeys.trust.chromium_args), and `verify=True` is only
-      # ever reached on a cluster whose chain is publicly trusted anyway.
+      # So `update-ca-certificates` on the runner was invisible to the suite.
+      # Nothing needs it either: the API journeys pass the anchor explicitly
+      # via `verify=` from the `trust_anchor` fixture, Chromium is pinned to
+      # the anchor's SPKI hash when and only when the chain is not publicly
+      # trusted (see nebari_journeys.trust.classify_anchor), and `verify=True`
+      # is only ever reached on a publicly trusted cluster anyway.
       - name: Run user journey tests
-        run: make test-journeys
-
-      - name: Upload journey failure artifacts
-        # The `test` pixi task (see pixi.toml) passes --tracing=retain-on-failure,
-        # --screenshot=only-on-failure and --video=retain-on-failure, so a
-        # trace, screenshot and video land in test-results/ only for a
-        # failing browser journey. Retention is deliberately short: a
-        # Playwright trace from a failed login journey can contain the
-        # throwaway user's password, and Playwright has no trace redaction
-        # API, so short retention plus throwaway credentials (scratch_user,
-        # not admin credentials) are the actual control here, not a
-        # convenience setting. Do not raise retention-days without also
-        # solving redaction.
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
         with:
-          name: journey-artifacts
-          path: |
-            tests/user_journeys/test-results/
-          retention-days: 3
-          if-no-files-found: ignore
+          artifact-name: journey-artifacts
 
       - name: Verify docs are up-to-date
         run: |
