@@ -1023,6 +1023,73 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	})
 }
 
+func TestWriteAllToGit_GatewayHostPorts(t *testing.T) {
+	ctx := context.Background()
+
+	renderEnvoyProxy := func(t *testing.T, settings cluster.InfraSettings) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		proxyPath := filepath.Join(tmpDir, "manifests", "networking", "envoyproxy.yaml")
+		content, err := os.ReadFile(proxyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read envoyproxy.yaml: %v", err)
+		}
+		return string(content)
+	}
+
+	t.Run("pins the Envoy service to the provider's NodePorts when GatewayHostPorts is true", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:     "standard",
+			GatewayHostPorts: true,
+		})
+
+		for _, want := range []string{
+			"envoyService:",
+			"type: NodePort",
+			"type: StrategicMerge",
+			"- port: 80",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPNodePort),
+			"- port: 443",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPSNodePort),
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("envoyproxy.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("targets the overridden HTTPS listener port so the patch merges into an existing port", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:     "standard",
+			GatewayHostPorts: true,
+			HTTPSPort:        8443,
+		})
+
+		if want := fmt.Sprintf("- port: 8443\n                  nodePort: %d", cluster.GatewayHTTPSNodePort); !strings.Contains(out, want) {
+			t.Errorf("envoyproxy.yaml should pin the HTTPS NodePort to listener port 8443, got:\n%s", out)
+		}
+		if strings.Contains(out, "- port: 443") {
+			t.Errorf("envoyproxy.yaml should not reference port 443 when https_port is 8443, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits the service pinning when GatewayHostPorts is false", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass: "gp2",
+		})
+
+		for _, unwanted := range []string{"envoyService:", "NodePort"} {
+			if strings.Contains(out, unwanted) {
+				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
+			}
+		}
+	})
+}
+
 func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	ctx := context.Background()
 
