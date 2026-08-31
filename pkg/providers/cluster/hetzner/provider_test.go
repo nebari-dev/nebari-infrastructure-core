@@ -68,8 +68,8 @@ func TestProvider_InfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantSC)
 			}
-			if settings.GatewayHostPorts {
-				t.Error("GatewayHostPorts = true, want false")
+			if settings.GatewayHostAddress != "" {
+				t.Errorf("GatewayHostAddress = %q, want empty", settings.GatewayHostAddress)
 			}
 			if settings.KeycloakBasePath != tt.wantKBP {
 				t.Errorf("KeycloakBasePath = %q, want %q", settings.KeycloakBasePath, tt.wantKBP)

@@ -111,11 +111,11 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
 		name                  string
 		settings              cluster.InfraSettings
-		wantStorageClass      string
-		wantLBAnnotationCount int
-		wantKeycloakBasePath  string
-		wantGatewayHostPorts  bool
-		wantHTTPSPort         int
+		wantStorageClass       string
+		wantLBAnnotationCount  int
+		wantKeycloakBasePath   string
+		wantGatewayHostAddress string
+		wantHTTPSPort          int
 	}{
 		{
 			name:             "aws defaults",
@@ -136,12 +136,12 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		{
 			name: "local with host-port gateway",
 			settings: cluster.InfraSettings{
-				StorageClass:     "standard",
-				GatewayHostPorts: true,
+				StorageClass:       "standard",
+				GatewayHostAddress: "127.0.0.1",
 			},
-			wantStorageClass:     "standard",
-			wantGatewayHostPorts: true,
-			wantHTTPSPort:        443,
+			wantStorageClass:       "standard",
+			wantGatewayHostAddress: "127.0.0.1",
+			wantHTTPSPort:          443,
 		},
 		{
 			name: "custom HTTPS port",
@@ -166,8 +166,8 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
 				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.GatewayHostPorts != tt.wantGatewayHostPorts {
-				t.Errorf("GatewayHostPorts = %v, want %v", data.GatewayHostPorts, tt.wantGatewayHostPorts)
+			if data.GatewayHostAddress != tt.wantGatewayHostAddress {
+				t.Errorf("GatewayHostAddress = %q, want %q", data.GatewayHostAddress, tt.wantGatewayHostAddress)
 			}
 			if data.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
@@ -1023,7 +1023,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	})
 }
 
-func TestWriteAllToGit_GatewayHostPorts(t *testing.T) {
+func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 	ctx := context.Background()
 
 	renderEnvoyProxy := func(t *testing.T, settings cluster.InfraSettings) string {
@@ -1041,10 +1041,10 @@ func TestWriteAllToGit_GatewayHostPorts(t *testing.T) {
 		return string(content)
 	}
 
-	t.Run("pins the Envoy service to the provider's NodePorts when GatewayHostPorts is true", func(t *testing.T) {
+	t.Run("pins the Envoy service to the provider's NodePorts when GatewayHostAddress is set", func(t *testing.T) {
 		out := renderEnvoyProxy(t, cluster.InfraSettings{
-			StorageClass:     "standard",
-			GatewayHostPorts: true,
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
 		})
 
 		for _, want := range []string{
@@ -1064,9 +1064,9 @@ func TestWriteAllToGit_GatewayHostPorts(t *testing.T) {
 
 	t.Run("targets the overridden HTTPS listener port so the patch merges into an existing port", func(t *testing.T) {
 		out := renderEnvoyProxy(t, cluster.InfraSettings{
-			StorageClass:     "standard",
-			GatewayHostPorts: true,
-			HTTPSPort:        8443,
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
+			HTTPSPort:          8443,
 		})
 
 		if want := fmt.Sprintf("- port: 8443\n                  nodePort: %d", cluster.GatewayHTTPSNodePort); !strings.Contains(out, want) {
@@ -1077,7 +1077,7 @@ func TestWriteAllToGit_GatewayHostPorts(t *testing.T) {
 		}
 	})
 
-	t.Run("omits the service pinning when GatewayHostPorts is false", func(t *testing.T) {
+	t.Run("omits the service pinning when GatewayHostAddress is empty", func(t *testing.T) {
 		out := renderEnvoyProxy(t, cluster.InfraSettings{
 			StorageClass: "gp2",
 		})

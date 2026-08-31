@@ -68,10 +68,11 @@ type TemplateData struct {
 	// envoy-gateway-system, requiring a namespace on certificateRefs and a ReferenceGrant.
 	GatewayTLSCrossNamespace bool
 
-	// GatewayHostPorts pins the gateway's Envoy service to fixed NodePorts in
-	// the rendered EnvoyProxy resource, so the cluster provider can publish
-	// them on host ports (local kind clusters only).
-	GatewayHostPorts bool
+	// GatewayHostAddress, when non-empty, pins the gateway's Envoy service to
+	// fixed NodePorts in the rendered EnvoyProxy resource, so the cluster
+	// provider can publish them on host ports of this address (local kind
+	// clusters only).
+	GatewayHostAddress string
 	// GatewayHTTPNodePort and GatewayHTTPSNodePort are the pinned NodePorts,
 	// threaded from the cluster package constants so the provider's host port
 	// mappings and the rendered service cannot drift.
@@ -146,7 +147,7 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		Domain:                  cfg.Domain,
 		StorageClass:            settings.StorageClass,
 		HTTPSPort:               httpsPort,
-		GatewayHostPorts:        settings.GatewayHostPorts,
+		GatewayHostAddress:      settings.GatewayHostAddress,
 		GatewayHTTPNodePort:     cluster.GatewayHTTPNodePort,
 		GatewayHTTPSNodePort:    cluster.GatewayHTTPSNodePort,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,

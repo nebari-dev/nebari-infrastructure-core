@@ -292,28 +292,34 @@ func TestEnsureLocalRepositorySupported(t *testing.T) {
 
 func TestEnsureDNSSupported(t *testing.T) {
 	tests := []struct {
-		name             string
-		dnsProviders     map[string]any
-		gatewayHostPorts bool
-		wantErr          bool
+		name               string
+		dnsProviders       map[string]any
+		gatewayHostAddress string
+		wantErr            bool
 	}{
 		{
-			name:             "dns block on a host-port gateway rejected",
-			dnsProviders:     map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
-			gatewayHostPorts: true,
-			wantErr:          true,
+			name:               "dns block on a loopback host-port gateway rejected",
+			dnsProviders:       map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+			gatewayHostAddress: "127.0.0.1",
+			wantErr:            true,
 		},
 		{
-			name:             "dns block on a load-balancer gateway",
-			dnsProviders:     map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
-			gatewayHostPorts: false,
-			wantErr:          false,
+			name:               "dns block on a load-balancer gateway",
+			dnsProviders:       map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+			gatewayHostAddress: "",
+			wantErr:            false,
 		},
 		{
-			name:             "no dns block is a no-op",
-			dnsProviders:     nil,
-			gatewayHostPorts: true,
-			wantErr:          false,
+			name:               "dns block on a routable host-port gateway",
+			dnsProviders:       map[string]any{"cloudflare": map[string]any{"zone_name": "example.com"}},
+			gatewayHostAddress: "192.0.2.10",
+			wantErr:            false,
+		},
+		{
+			name:               "no dns block is a no-op",
+			dnsProviders:       nil,
+			gatewayHostAddress: "127.0.0.1",
+			wantErr:            false,
 		},
 	}
 
@@ -323,7 +329,7 @@ func TestEnsureDNSSupported(t *testing.T) {
 			if tt.dnsProviders != nil {
 				cfg.DNS = &config.DNSConfig{Providers: tt.dnsProviders}
 			}
-			err := ensureDNSSupported(cfg, tt.gatewayHostPorts)
+			err := ensureDNSSupported(cfg, tt.gatewayHostAddress)
 			if tt.wantErr && err == nil {
 				t.Fatal("ensureDNSSupported() expected error, got nil")
 			}

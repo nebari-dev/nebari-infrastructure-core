@@ -280,7 +280,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:        defaultStorageClass,
-		GatewayHostPorts:    true,
+		GatewayHostAddress:  gatewayHostAddress,
 		SupportsLocalGitOps: true,
 		LonghornEnabled:     false,
 	}

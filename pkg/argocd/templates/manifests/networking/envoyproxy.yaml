@@ -23,12 +23,12 @@ spec:
               memory: 128Mi
             limits:
               memory: 512Mi
-{{- if .GatewayHostPorts }}
+{{- if .GatewayHostAddress }}
       # Local kind clusters have no LoadBalancer implementation. The Envoy
       # service is pinned to fixed NodePorts instead, which the cluster
-      # provider publishes on host ports at cluster creation, making the
-      # gateway reachable at 127.0.0.1. The patch merges by port number into
-      # the service Envoy Gateway generates from the Gateway listeners.
+      # provider publishes on host ports of its gateway host address at
+      # cluster creation. The patch merges by port number into the service
+      # Envoy Gateway generates from the Gateway listeners.
       envoyService:
         type: NodePort
         patch:

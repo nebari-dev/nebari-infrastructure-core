@@ -223,7 +223,7 @@ func TestResolveOutputsHostPortGateway(t *testing.T) {
 	data := argocd.NewTemplateData(
 		&config.NebariConfig{Domain: "nebari.local"},
 		nil,
-		cluster.InfraSettings{GatewayHostPorts: true},
+		cluster.InfraSettings{GatewayHostAddress: "127.0.0.1"},
 	)
 
 	got, err := resolveOutputs(ctx, client, data, OutputsOptions{})

@@ -62,8 +62,8 @@ func TestInfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantSC)
 			}
-			if !settings.GatewayHostPorts {
-				t.Error("GatewayHostPorts = false, want true")
+			if settings.GatewayHostAddress != "127.0.0.1" {
+				t.Errorf("GatewayHostAddress = %q, want 127.0.0.1", settings.GatewayHostAddress)
 			}
 			if settings.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", settings.HTTPSPort, tt.wantHTTPSPort)

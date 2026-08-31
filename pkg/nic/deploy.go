@@ -174,10 +174,10 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, err
 	}
 
-	// Reject a dns block on a host-port gateway before provisioning any
-	// infrastructure, mirroring the validate path for library callers that
-	// skip Validate.
-	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostPorts); err != nil {
+	// Reject a dns block on a loopback host-port gateway before provisioning
+	// any infrastructure, mirroring the validate path for library callers
+	// that skip Validate.
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostAddress); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible dns and cluster providers").
 			WithMetadata("error", err.Error()))
@@ -337,12 +337,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	// Look up the LB endpoint and provision DNS records if configured. With a
 	// host-port gateway (local kind clusters) there is no load balancer: the
-	// platform is published on 127.0.0.1, so report that directly. There are
-	// no DNS records to provision on this path: ensureDNSSupported rejected
-	// any dns block up front.
+	// platform is published on the provider's host address, so report that
+	// directly. There are no DNS records to provision on this path:
+	// ensureDNSSupported rejected any dns block up front.
 	if cfg.Domain != "" && !opts.DryRun {
-		if infraSettings.GatewayHostPorts {
-			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: "127.0.0.1", Port: infraSettings.HTTPSPort}
+		if addr := infraSettings.GatewayHostAddress; addr != "" {
+			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: addr, Port: infraSettings.HTTPSPort}
 		} else {
 			result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
 		}

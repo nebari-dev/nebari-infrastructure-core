@@ -8,7 +8,7 @@ NIC's configuration philosophy:
 2. **Discriminator pattern for providers**: `cluster.<provider>:` and `dns.<provider>:` use the provider name as the map key, with provider-specific config underneath. The `config` package never imports a provider package; per-provider decoding happens inside each provider.
 3. **No secrets in config**: Credentials live in environment variables (typically loaded from `.env`). Config files are safe to check into a GitOps repo.
 4. **Validate at parse time**: `NebariConfig.Validate(opts)` checks required fields and provider-name validity before any infrastructure call.
-5. **Provider capabilities flow through `InfraSettings`**: Code outside `cmd/nic` and a provider's own package never branches on provider name; capabilities like `GatewayHostPorts` or `StorageClass` are read from `provider.InfraSettings(cfg)`.
+5. **Provider capabilities flow through `InfraSettings`**: Code outside `cmd/nic` and a provider's own package never branches on provider name; capabilities like `GatewayHostAddress` or `StorageClass` are read from `provider.InfraSettings(cfg)`.
 
 ## 7.2 Top-Level Schema
 
