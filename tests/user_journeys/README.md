@@ -51,7 +51,7 @@ pixi run fmt                    # ruff format .
 | `test_smoke.py` | Every foundational ArgoCD app is Synced and Healthy. Runs first, so other failures are interpretable. |
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
-| `test_tls.py` | The gateway's certificate validates against the plain system trust store, with no cluster-derived anchor. Marked `@pytest.mark.tls`; skips (does not fail) on a self-signed cluster, since a `CA:FALSE` leaf can never pass this by design (issue #447). |
+| `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a self-signed leaf (#447) or a privately issued chain such as Let's Encrypt staging. See "Three kinds of trust anchor" below for why this is split. |
 
 ## Adding a journey
 
@@ -190,6 +190,62 @@ prefers `ca.crt` and falls back to `tls.crt` for a self-signed leaf (NOT
 publicly trusted ACME certificate) and simply falls back to the system trust
 store.
 
+### Three kinds of trust anchor
+
+`trust.classify_anchor` sorts a cluster into exactly one of three states.
+The suite used to ask a single yes/no question -- "is this a self-signed
+leaf?" -- and treat "no" as "publicly trusted", which was wrong in both
+directions and produced two real bugs:
+
+- **Let's Encrypt staging** is a genuine chain from a root no trust store
+  carries. It is not self-signed, so it was treated as publicly trusted,
+  and the TLS journey ran `verify=True` and *failed* -- reporting a
+  deliberate CI choice as a platform defect. Every cloud fixture in
+  `.github/fixtures/deploy/` uses the staging endpoint so CI never
+  consumes production ACME rate limits, so this was the shape CI itself
+  deploys.
+- **Production ACME** is publicly trusted, but `trust_anchor_pem` falls
+  back to `tls.crt` and so returns a PEM on *every* cert-manager cluster.
+  `chromium_args` keyed off "did we get a PEM", so Chromium ran with
+  `--ignore-certificate-errors-spki-list` even against a chain it could
+  have validated normally. The browser journeys therefore never exercised
+  real certificate validation on the one cluster shape where they could.
+  Confirmed against a live production-ACME cluster before the fix.
+
+| Classification | Cluster shape | `verify=` | Chromium | `tls`-marked journey |
+|---|---|---|---|---|
+| `publicly-trusted` | production ACME | `True` (system store) | no flags, real validation | runs |
+| `privately-issued` | LE **staging**, private CA | the cluster's own chain | SPKI pin | skips |
+| `self-signed-leaf` | kind / `selfsigned-issuer` | the leaf itself | SPKI pin | skips |
+
+Classification is entirely **offline**: cert-manager writes the full chain
+into `tls.crt`, so the chain is verified against certifi's bundle without
+ever contacting the gateway. That is deliberate -- probing over TLS would
+answer the same question but would make every journey depend on gateway
+reachability, which the non-autouse `dns_mapping` / `gateway_reachable`
+split exists to prevent.
+
+**A skip never hides a certificate defect.** Only the *public trust*
+assertion is skipped. Validity -- expiry, hostname, chain completeness,
+and that TLS is negotiated at all -- is checked on every cluster shape by
+the unmarked journey in `test_tls.py`, verifying fully against the
+cluster's own chain. A staging certificate is still a real certificate;
+the only thing staging cannot demonstrate is that a stranger would trust
+it.
+
+Two deliberate edge cases, both tested:
+
+- An **expired or wrong-hostname** certificate from a *public* root stays
+  `publicly-trusted` even though verification fails, so the public-trust
+  journey runs and fails loudly. Classifying it as privately issued would
+  skip it and hide a real defect.
+- A secret holding **only the leaf**, with no intermediates, cannot be
+  chained offline (certifi carries roots, not intermediates) and is
+  reported as `privately-issued` even if a browser would trust it. This
+  only arises for an operator-supplied `certificate.existing_secret`;
+  cert-manager always writes the full chain. The cost is bounded to
+  losing the public-trust assertion.
+
 ### Chromium and self-signed clusters: SPKI pinning, honestly
 
 cert-manager's default `selfsigned-issuer` issues a self-signed **leaf**
@@ -218,7 +274,8 @@ kubeconfig:
 
 **This is weaker than full chain validation and is not sold as equivalent to
 it.** It is applied only when a trust anchor was actually derived from the
-cluster (a self-signed cluster); an ACME cluster gets no extra Chromium flags
+cluster (self-signed, or privately issued such as staging); a PUBLICLY
+TRUSTED cluster gets no extra Chromium flags
 at all, so it is driven exactly as a real user's browser would be. The real
 fix is issue #447: once cert-manager issues a proper CA for the gateway,
 Chromium validates the chain like any other browser, and the SPKI pin

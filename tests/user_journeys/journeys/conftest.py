@@ -99,8 +99,28 @@ def trust_anchor_pem(cluster) -> str | None:
 
 
 @pytest.fixture(scope="session")
-def trust_anchor(trust_anchor_pem, tmp_path_factory) -> str | None:
-    """Path to a CA file, or None when the system trust store suffices."""
+def anchor_trust(trust_anchor_pem, platform_domain) -> str:
+    """How the gateway chain stands relative to public trust.
+
+    Three outcomes, not two -- see `trust.classify_anchor`. The suite
+    previously asked only "is this a self-signed leaf?" and treated "no"
+    as "publicly trusted", which mis-handled Let's Encrypt STAGING in one
+    direction and production ACME in the other.
+    """
+    return trust.classify_anchor(trust_anchor_pem, platform_domain)
+
+
+@pytest.fixture(scope="session")
+def trust_anchor(trust_anchor_pem, anchor_trust, tmp_path_factory) -> str | None:
+    """Path to a CA file, or None when the system trust store suffices.
+
+    None for a publicly trusted chain, so `requests` runs with plain
+    `verify=True` exactly as a real client would, rather than being handed
+    the cluster's own certificate to trust. The file is only written when
+    the chain genuinely needs it.
+    """
+    if anchor_trust == trust.PUBLICLY_TRUSTED:
+        return None
     return trust.write_trust_anchor(trust_anchor_pem, tmp_path_factory.mktemp("trust"))
 
 
@@ -108,6 +128,25 @@ SELF_SIGNED_WARNING = (
     "self signed cert detected, skipping tls tests "
     "(see nebari_journeys.trust.is_self_signed_leaf and issue #447 for the "
     "real fix: cert-manager issuing a proper CA for the gateway)"
+)
+
+PRIVATELY_ISSUED_WARNING = (
+    "the gateway certificate is a real chain from a CA the public trust store "
+    "does not carry -- Let's Encrypt STAGING is exactly this shape, and every "
+    "cloud fixture in .github/fixtures/deploy/ uses the staging endpoint on "
+    "purpose so CI never consumes production ACME rate limits. A journey whose "
+    "SUBJECT is public trust cannot pass here, and its failure would report a "
+    "deliberate CI choice as a platform defect, so it is skipped. Point the "
+    "suite at a cluster issued by a publicly trusted CA to run it."
+)
+
+PRIVATELY_ISSUED_TRUSTED_CA_WARNING = (
+    "the gateway certificate chains to a CA nothing outside this cluster "
+    "trusts (Let's Encrypt STAGING, or a private CA), so a THIRD PARTY -- "
+    "ArgoCD's server performing OIDC discovery against the external Keycloak "
+    "URL -- cannot validate it. The SPKI pin only relaxes Chromium in this "
+    "process and does nothing for a separate server, so this journey is "
+    "skipped rather than failed."
 )
 
 SELF_SIGNED_TRUSTED_CA_WARNING = (
@@ -120,7 +159,7 @@ SELF_SIGNED_TRUSTED_CA_WARNING = (
 
 
 @pytest.fixture(scope="session")
-def self_signed_anchor(trust_anchor_pem) -> bool:
+def self_signed_anchor(anchor_trust) -> bool:
     """True when the derived anchor is a self-signed leaf, not a real CA.
 
     This is the shape cert-manager's default `selfsigned-issuer` produces
@@ -132,13 +171,11 @@ def self_signed_anchor(trust_anchor_pem) -> bool:
     `tls`) are skipped, since those cannot pass against a leaf that was
     never meant to be an anchor.
     """
-    if trust_anchor_pem is None:
-        return False
-    return trust.is_self_signed_leaf(trust_anchor_pem)
+    return anchor_trust == trust.SELF_SIGNED_LEAF
 
 
 @pytest.fixture(scope="session", autouse=True)
-def warn_once_if_self_signed(self_signed_anchor):
+def warn_once_if_not_publicly_trusted(anchor_trust):
     """Surface the relaxation once per session, even if no `tls`-marked
     journey exists yet to be skipped by it, so an operator running
     locally can see that certificate validation has been narrowed for
@@ -147,12 +184,14 @@ def warn_once_if_self_signed(self_signed_anchor):
     pytest's warnings summary without needing -s, and does not fail
     the run.
     """
-    if self_signed_anchor:
+    if anchor_trust == trust.SELF_SIGNED_LEAF:
         warnings.warn(SELF_SIGNED_WARNING, UserWarning, stacklevel=2)
+    elif anchor_trust == trust.PRIVATELY_ISSUED:
+        warnings.warn(PRIVATELY_ISSUED_WARNING, UserWarning, stacklevel=2)
 
 
 @pytest.fixture(autouse=True)
-def skip_tls_marked_tests_on_self_signed(request, self_signed_anchor):
+def skip_tls_marked_tests_without_public_trust(request, anchor_trust):
     """Skip `tls`-marked journeys when the anchor is a self-signed leaf.
 
     Scoped narrowly to tests whose SUBJECT is certificate validity or
@@ -160,12 +199,18 @@ def skip_tls_marked_tests_on_self_signed(request, self_signed_anchor):
     that merely travels over TLS) keeps running, pinned by the SPKI flag
     in chromium_args.
     """
-    if self_signed_anchor and request.node.get_closest_marker("tls"):
-        pytest.skip(SELF_SIGNED_WARNING)
+    if anchor_trust == trust.PUBLICLY_TRUSTED:
+        return
+    if request.node.get_closest_marker("tls"):
+        pytest.skip(
+            SELF_SIGNED_WARNING
+            if anchor_trust == trust.SELF_SIGNED_LEAF
+            else PRIVATELY_ISSUED_WARNING
+        )
 
 
 @pytest.fixture(autouse=True)
-def skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor):
+def skip_trusted_ca_marked_tests_without_public_trust(request, anchor_trust):
     """Skip `requires_trusted_ca`-marked journeys when the anchor is a
     self-signed leaf.
 
@@ -182,8 +227,14 @@ def skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor):
     cluster shape: the external hostname does not resolve in-cluster at
     all).
     """
-    if self_signed_anchor and request.node.get_closest_marker("requires_trusted_ca"):
-        pytest.skip(SELF_SIGNED_TRUSTED_CA_WARNING)
+    if anchor_trust == trust.PUBLICLY_TRUSTED:
+        return
+    if request.node.get_closest_marker("requires_trusted_ca"):
+        pytest.skip(
+            SELF_SIGNED_TRUSTED_CA_WARNING
+            if anchor_trust == trust.SELF_SIGNED_LEAF
+            else PRIVATELY_ISSUED_TRUSTED_CA_WARNING
+        )
 
 
 @pytest.fixture(scope="session")
@@ -310,6 +361,7 @@ def browser_type_launch_args(
     gateway_address,
     dns_mapping,
     trust_anchor_pem,
+    anchor_trust,
 ):
     """Map the platform domain for Chromium, and when a trust anchor was
     derived from the cluster (a self-signed leaf, not a proper CA -- see
@@ -321,7 +373,11 @@ def browser_type_launch_args(
     args = list(browser_type_launch_args.get("args", []))
     args.extend(
         trust.chromium_args(
-            platform_domain, gateway_address, dns_mapping, trust_anchor_pem
+            platform_domain,
+            gateway_address,
+            dns_mapping,
+            trust_anchor_pem,
+            anchor_trust,
         )
     )
     return {**browser_type_launch_args, "args": args}

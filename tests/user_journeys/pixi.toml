@@ -12,6 +12,9 @@ requests = "*"
 pytest-playwright = "*"
 playwright-python = "*"
 cryptography = "*"
+# Explicit rather than inherited from requests: trust.classify_anchor reads
+# certifi.where() directly to verify the gateway chain offline.
+certifi = "*"
 
 [pypi-dependencies]
 nebari_journeys = { path = ".", editable = true }

@@ -30,9 +30,12 @@ than full chain validation:
   mismatch. The pin authenticates "this is the key I read from the
   cluster", not "this certificate is a valid one for this hostname".
 
-This is strictly worse than driving a real CA-issued (or ACME) chain
-through unmodified Chromium, which is why an ACME cluster gets no
-extra flags at all (see `chromium_args`). The real fix is issue #447:
+This is strictly worse than driving a real CA-issued chain through
+unmodified Chromium, which is why a PUBLICLY TRUSTED chain gets no extra
+flags at all (see `chromium_args` and `classify_anchor`). Note the
+condition is public trust, not "is this ACME": Let's Encrypt STAGING is
+ACME and is NOT publicly trusted, and every cloud fixture in
+.github/fixtures/deploy/ uses staging. The real fix is issue #447:
 once cert-manager issues a proper CA for the gateway, Chromium can
 validate the chain like any other browser, and this SPKI pin -- along
 with `spki_sha256_b64` and the flag it feeds -- should be removed.
@@ -41,17 +44,30 @@ with `spki_sha256_b64` and the flag it feeds -- should be removed.
 import base64
 import hashlib
 import socket
+import ssl
+import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+import certifi
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
 from kubernetes.client.rest import ApiException
 
 CA_KEY = "ca.crt"
 LEAF_KEY = "tls.crt"
 
 NOT_FOUND_STATUS = 404
+
+# How the gateway's certificate relates to the trust the rest of the world
+# has. Three outcomes, not two: the suite used to ask only "is this a
+# self-signed leaf?", which silently lumped a real-but-untrusted chain in
+# with a publicly trusted one and got both of them wrong. See
+# `classify_anchor`.
+PUBLICLY_TRUSTED = "publicly-trusted"
+PRIVATELY_ISSUED = "privately-issued"
+SELF_SIGNED_LEAF = "self-signed-leaf"
 
 
 def trust_anchor_pem(cluster) -> str | None:
@@ -127,6 +143,161 @@ def is_self_signed_leaf(pem: str) -> bool:
     return not basic_constraints.ca
 
 
+def load_chain(pem: str) -> list[x509.Certificate]:
+    """Every certificate in a PEM bundle, leaf first.
+
+    cert-manager writes the FULL chain into `tls.crt` (on this cluster:
+    leaf, then two intermediates), not just the end-entity certificate,
+    which is what makes the offline verification in `classify_anchor`
+    possible without ever contacting the gateway.
+    """
+    return list(x509.load_pem_x509_certificates(pem.encode()))
+
+
+PEM_CERT_START = "-----BEGIN CERTIFICATE-----"
+
+
+def load_trust_store(store_pems: str) -> list[x509.Certificate]:
+    """Parse a CA bundle, skipping any certificate that will not load.
+
+    Deliberately block-by-block rather than one
+    `load_pem_x509_certificates` call over the whole bundle, which is
+    all-or-nothing. certifi ships at least one root with a non-positive
+    serial number -- disallowed by RFC 5280 -- and `cryptography`
+    currently warns that "loading this certificate will cause an exception
+    in a future release". A single hard failure there would take the
+    entire trust store with it, and `classify_anchor` would then report
+    every publicly trusted cluster as privately issued, silently skipping
+    the public-trust journey everywhere. Dropping one malformed root out
+    of certifi's ~150 is the far smaller loss: a root that will not parse
+    could not have served as a trust anchor anyway.
+
+    Raises when NOTHING loads: an empty trust store is a broken
+    environment, not a fact about the cluster, and must not be reported as
+    one.
+    """
+    certs = []
+    for block in store_pems.split(PEM_CERT_START)[1:]:
+        pem = PEM_CERT_START + block
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                certs.append(x509.load_pem_x509_certificate(pem.encode()))
+        # Broad, and silent: one unparseable root must not discard the
+        # store (BLE001), and this module is library code, which reports
+        # through return values rather than logging (S112). The empty-store
+        # check below is what surfaces a store that is actually broken.
+        except Exception:  # noqa: BLE001, S112
+            continue
+    if not certs:
+        raise RuntimeError(
+            "no usable certificates in the trust store; this is an "
+            "environment fault, not a property of the cluster under test"
+        )
+    return certs
+
+
+def _store_subjects(store_pems: str) -> set[bytes]:
+    return {cert.subject.public_bytes() for cert in load_trust_store(store_pems)}
+
+
+def classify_anchor(
+    pem: str | None, domain: str, *, store_pems: str | None = None
+) -> str:
+    """How the gateway's certificate stands relative to public trust.
+
+    Answers the question the suite actually needs and previously could
+    not: not "did we read a certificate off the cluster" (we always do --
+    `trust_anchor_pem` falls back to `tls.crt`, so it returns a PEM on
+    every cert-manager cluster) but "would an ordinary client, and an
+    ordinary third-party server, trust this chain?"
+
+    Three outcomes:
+
+    - PUBLICLY_TRUSTED: the chain validates against the public trust
+      store, which is the case for production ACME. Nothing needs
+      relaxing anywhere: `verify=True` works, Chromium needs no flags,
+      and a third party such as ArgoCD's server can complete OIDC
+      discovery against the gateway.
+    - PRIVATELY_ISSUED: a genuine chain from a CA nothing trusts. Let's
+      Encrypt STAGING is exactly this, and every cloud fixture in
+      `.github/fixtures/deploy/` uses staging, so this is the shape CI
+      hits. Journeys whose subject is public trust must SKIP here: the
+      failure is a deliberate CI choice, not a platform defect.
+    - SELF_SIGNED_LEAF: cert-manager's default `selfsigned-issuer` output,
+      a `CA:FALSE` certificate that is its own issuer (see the module
+      docstring).
+
+    Verification is entirely OFFLINE, against certifi's bundle, using the
+    chain the cluster secret already contains. That is deliberate: probing
+    the gateway over TLS would answer the same question but would make
+    every journey depend on gateway reachability, which is precisely what
+    the non-autouse `dns_mapping`/`gateway_reachable` split exists to
+    avoid.
+
+    An expired or wrong-hostname certificate from a PUBLIC root is
+    reported as PUBLICLY_TRUSTED, not PRIVATELY_ISSUED, even though
+    verification fails. This is deliberate and it fails CLOSED: those are
+    real platform defects, and classifying them as privately issued would
+    make the public-trust journey skip and hide them. The root's
+    trustworthiness is re-checked by issuer DN so the distinction
+    survives.
+
+    KNOWN LIMITATION. A secret holding only the leaf, with no
+    intermediates, cannot be verified offline: certifi carries roots, not
+    intermediates, so there is nothing to chain through and the issuer-DN
+    fallback cannot match either. Such a certificate is reported as
+    PRIVATELY_ISSUED even if a browser (which receives the chain from the
+    server, not from this secret) would trust it, so the public-trust
+    journey skips with a loud reason. cert-manager always writes the full
+    chain into `tls.crt`, so this only arises for an operator-supplied
+    `certificate.existing_secret`.
+
+    What that costs is bounded, and only because the TLS journeys are
+    split: `test_gateway_serves_a_valid_certificate_for_this_domain` runs
+    on every cluster shape regardless of this classification and still
+    checks expiry, hostname and chain completeness. So a mis-classification
+    here loses the "a stranger would trust this" assertion and nothing
+    else -- it can never hide a certificate defect.
+
+    `store_pems` overrides the trust store, for tests.
+    """
+    if pem is None:
+        # No secret at all: the system store is the only thing in play, so
+        # the chain either works for everyone or fails for everyone.
+        return PUBLICLY_TRUSTED
+
+    chain = load_chain(pem)
+    if not chain:
+        return PUBLICLY_TRUSTED
+    if len(chain) == 1 and is_self_signed_leaf(pem):
+        return SELF_SIGNED_LEAF
+
+    if store_pems is None:
+        store_pems = Path(certifi.where()).read_text()
+
+    leaf, intermediates = chain[0], chain[1:]
+    verifier = (
+        PolicyBuilder()
+        .store(Store(load_trust_store(store_pems)))
+        .build_server_verifier(x509.DNSName(domain))
+    )
+    try:
+        verifier.verify(leaf, intermediates)
+        return PUBLICLY_TRUSTED
+    except VerificationError:
+        pass
+
+    # Verification failed. Distinguish "nobody trusts this root" from
+    # "trusted root, but the certificate is expired or for the wrong
+    # name": only the former justifies skipping the TLS journeys.
+    subjects = _store_subjects(store_pems)
+    top_issuer = chain[-1].issuer.public_bytes()
+    if top_issuer in subjects or chain[-1].subject.public_bytes() in subjects:
+        return PUBLICLY_TRUSTED
+    return PRIVATELY_ISSUED
+
+
 def spki_sha256_b64(pem: str) -> str:
     """Base64-encoded SHA-256 hash of a certificate's SubjectPublicKeyInfo.
 
@@ -173,6 +344,43 @@ def gateway_reachable(address: str, port: int = 443, timeout: float = 5) -> bool
             return True
     except OSError:
         return False
+
+
+# TLS versions that count as actually encrypting the connection. Anything
+# below 1.2 is deprecated (RFC 8996) and Python's default context will not
+# negotiate it, so seeing one of these is the positive signal.
+ACCEPTABLE_TLS_VERSIONS = frozenset({"TLSv1.2", "TLSv1.3"})
+
+
+def negotiated_tls(
+    domain: str,
+    address: str,
+    port: int = 443,
+    ca_file: str | None = None,
+    timeout: float = 10,
+) -> str:
+    """Complete a real TLS handshake and return the negotiated protocol.
+
+    Verification is FULL and is never relaxed: the certificate must chain
+    to `ca_file` (or to the public store when None), must be within its
+    validity window, and must carry a SAN matching `domain` -- Python's
+    default context checks the hostname.
+
+    The point of taking `ca_file` is that "is this certificate valid" and
+    "is this certificate publicly trusted" are different questions, and
+    only the second one depends on who signed it. Pointed at the chain the
+    cluster itself serves, this still catches an expired certificate, a
+    certificate issued for the wrong name, a broken or incomplete chain,
+    and a gateway not serving TLS at all -- on a Let's Encrypt STAGING or
+    self-signed cluster, where asking about public trust could only ever
+    return "no" and tell you nothing about the platform.
+    """
+    context = ssl.create_default_context(cafile=ca_file)
+    with (
+        socket.create_connection((address, port), timeout=timeout) as sock,
+        context.wrap_socket(sock, server_hostname=domain) as tls,
+    ):
+        return tls.version()
 
 
 def needs_dns_mapping(domain: str, gateway_address: str) -> bool:
@@ -234,6 +442,7 @@ def chromium_args(
     address: str,
     mapping_needed: bool,
     trust_anchor_pem: str | None = None,
+    anchor_trust: str = PUBLICLY_TRUSTED,
 ) -> list[str]:
     """Chromium flags mapping the domain and, where needed, pinning trust.
 
@@ -264,7 +473,19 @@ def chromium_args(
         args.append(
             f"--host-resolver-rules=MAP *.{domain} {address},MAP {domain} {address}"
         )
-    if trust_anchor_pem:
+    # The pin is emitted ONLY for a chain the world does not trust.
+    #
+    # This used to key off `trust_anchor_pem` being non-None, which is a
+    # different question and one that is almost always true:
+    # `trust_anchor_pem()` falls back to `tls.crt`, so it returns a PEM on
+    # every cert-manager cluster including production ACME. The result was
+    # that Chromium ran with `--ignore-certificate-errors-spki-list` even
+    # against a publicly trusted chain, so the browser journeys never
+    # exercised real certificate validation on the one cluster shape where
+    # they could have -- while this module's docstring claimed the exact
+    # opposite. Verified against a live production-ACME cluster before the
+    # fix: the flag was present.
+    if anchor_trust != PUBLICLY_TRUSTED and trust_anchor_pem:
         args.append(
             f"--ignore-certificate-errors-spki-list={spki_sha256_b64(trust_anchor_pem)}"
         )

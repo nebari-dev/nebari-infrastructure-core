@@ -12,7 +12,7 @@ import pytest
 
 import journeys.conftest as _journeys_conftest
 from journeys.conftest import gateway_reachable as gateway_reachable_fixture
-from tests_lib.test_trust import SELF_SIGNED_CA_PEM, SELF_SIGNED_LEAF_PEM
+from nebari_journeys import trust
 
 # Fixture functions refuse to be called directly (pytest raises on it), so
 # the underlying function is exercised through __wrapped__: it is a plain
@@ -31,10 +31,15 @@ from tests_lib.test_trust import SELF_SIGNED_CA_PEM, SELF_SIGNED_LEAF_PEM
 # fixture-marked objects as globals at all.
 gateway_reachable = gateway_reachable_fixture.__wrapped__
 self_signed_anchor = _journeys_conftest.self_signed_anchor.__wrapped__
-skip_trusted_ca_marked_tests_on_self_signed = (
-    _journeys_conftest.skip_trusted_ca_marked_tests_on_self_signed.__wrapped__
+skip_trusted_ca = (
+    _journeys_conftest.skip_trusted_ca_marked_tests_without_public_trust.__wrapped__
 )
+skip_tls = _journeys_conftest.skip_tls_marked_tests_without_public_trust.__wrapped__
 SELF_SIGNED_TRUSTED_CA_WARNING = _journeys_conftest.SELF_SIGNED_TRUSTED_CA_WARNING
+PRIVATELY_ISSUED_TRUSTED_CA_WARNING = (
+    _journeys_conftest.PRIVATELY_ISSUED_TRUSTED_CA_WARNING
+)
+PRIVATELY_ISSUED_WARNING = _journeys_conftest.PRIVATELY_ISSUED_WARNING
 
 
 def test_gateway_reachable_returns_true_when_the_gateway_is_up():
@@ -56,30 +61,24 @@ def test_gateway_reachable_fails_with_a_diagnosis_naming_domain_and_address():
     assert "612" in message
 
 
-def _request_marked_requires_trusted_ca(marked: bool):
+def _request_marked(marker: str | None):
     """A fake pytest `request` whose closest marker lookup behaves like a
-    real one for the one marker this fixture cares about."""
+    real one for the markers these fixtures care about."""
     request = MagicMock()
     request.node.get_closest_marker.side_effect = lambda name: (
-        MagicMock() if marked and name == "requires_trusted_ca" else None
+        MagicMock() if marker and name == marker else None
     )
     return request
 
 
-def test_self_signed_anchor_is_true_for_a_self_signed_leaf():
-    """The cert-manager selfsigned-issuer shape: CA:FALSE, subject == issuer."""
-    assert self_signed_anchor(SELF_SIGNED_LEAF_PEM) is True
+def _request_marked_requires_trusted_ca(marked: bool):
+    return _request_marked("requires_trusted_ca" if marked else None)
 
 
-def test_self_signed_anchor_is_false_for_a_ca_issued_certificate():
-    """A real issuing CA (even a self-signed root, CA:TRUE) is not this shape."""
-    assert self_signed_anchor(SELF_SIGNED_CA_PEM) is False
-
-
-def test_self_signed_anchor_is_false_when_no_anchor_was_derived():
-    """`trust_anchor_pem` returning None means a publicly trusted (ACME)
-    chain: nothing to flag as self-signed."""
-    assert self_signed_anchor(None) is False
+def test_self_signed_anchor_is_true_only_for_the_self_signed_classification():
+    assert self_signed_anchor(trust.SELF_SIGNED_LEAF) is True
+    assert self_signed_anchor(trust.PRIVATELY_ISSUED) is False
+    assert self_signed_anchor(trust.PUBLICLY_TRUSTED) is False
 
 
 def test_requires_trusted_ca_marked_journey_skips_on_a_self_signed_leaf():
@@ -89,7 +88,7 @@ def test_requires_trusted_ca_marked_journey_skips_on_a_self_signed_leaf():
     cannot trust that certificate for server-side OIDC discovery."""
     request = _request_marked_requires_trusted_ca(marked=True)
     with pytest.raises(pytest.skip.Exception) as excinfo:
-        skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor=True)
+        skip_trusted_ca(request, trust.SELF_SIGNED_LEAF)
     assert str(excinfo.value) == SELF_SIGNED_TRUSTED_CA_WARNING
 
 
@@ -112,7 +111,7 @@ def test_requires_trusted_ca_marked_journey_does_not_skip_on_a_ca_issued_anchor(
     self-signed-leaf shape, not to the symptom."""
     request = _request_marked_requires_trusted_ca(marked=True)
     # No exception raised means no skip.
-    skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor=False)
+    skip_trusted_ca(request, trust.PUBLICLY_TRUSTED)
 
 
 def test_requires_trusted_ca_marked_journey_does_not_skip_with_no_anchor_at_all():
@@ -120,7 +119,7 @@ def test_requires_trusted_ca_marked_journey_does_not_skip_with_no_anchor_at_all(
     (`trust_anchor_pem` returns None, so `self_signed_anchor` is False);
     this journey must still run there too."""
     request = _request_marked_requires_trusted_ca(marked=True)
-    skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor=False)
+    skip_trusted_ca(request, trust.PUBLICLY_TRUSTED)
 
 
 def test_unmarked_journey_never_skips_even_on_a_self_signed_leaf():
@@ -128,4 +127,47 @@ def test_unmarked_journey_never_skips_even_on_a_self_signed_leaf():
     without `requires_trusted_ca` must keep running on a self-signed
     cluster, whatever `self_signed_anchor` says."""
     request = _request_marked_requires_trusted_ca(marked=False)
-    skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor=True)
+    skip_trusted_ca(request, trust.SELF_SIGNED_LEAF)
+
+
+# --- Let's Encrypt staging, the shape CI actually deploys -----------------
+
+
+def test_tls_marked_journey_skips_on_a_privately_issued_chain():
+    """Every cloud fixture in .github/fixtures/deploy/ uses the Let's
+    Encrypt STAGING endpoint, whose root is in no trust store. test_tls
+    asserts `verify=True` succeeds, so before this it FAILED there --
+    reporting a deliberate CI choice as a platform defect, and blocking the
+    journeys from being wired into deployment-tests.yml at all."""
+    request = _request_marked("tls")
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        skip_tls(request, trust.PRIVATELY_ISSUED)
+    assert str(excinfo.value) == PRIVATELY_ISSUED_WARNING
+
+
+def test_tls_marked_journey_still_runs_on_a_publicly_trusted_chain():
+    """The skip must stay scoped: on production ACME this journey has to
+    run and be able to fail."""
+    skip_tls(_request_marked("tls"), trust.PUBLICLY_TRUSTED)
+
+
+def test_requires_trusted_ca_journey_skips_on_a_privately_issued_chain():
+    """ArgoCD's server cannot validate a staging chain either, and no SPKI
+    pin helps a separate process."""
+    request = _request_marked("requires_trusted_ca")
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        skip_trusted_ca(request, trust.PRIVATELY_ISSUED)
+    assert str(excinfo.value) == PRIVATELY_ISSUED_TRUSTED_CA_WARNING
+
+
+def test_the_staging_skip_reason_names_staging_and_the_fixtures():
+    """A skip nobody can act on is a skip nobody reads."""
+    assert "STAGING" in PRIVATELY_ISSUED_WARNING
+    assert ".github/fixtures/deploy/" in PRIVATELY_ISSUED_WARNING
+    assert "rate limits" in PRIVATELY_ISSUED_WARNING
+
+
+def test_an_unmarked_journey_never_skips_on_a_privately_issued_chain():
+    """Scope check: staging must not disable the rest of the suite."""
+    skip_tls(_request_marked(None), trust.PRIVATELY_ISSUED)
+    skip_trusted_ca(_request_marked(None), trust.PRIVATELY_ISSUED)

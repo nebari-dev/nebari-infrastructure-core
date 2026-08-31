@@ -1,4 +1,6 @@
+import pathlib
 import socket
+import ssl as ssl_module
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -192,8 +194,14 @@ def test_chromium_args_add_no_spki_flag_when_no_anchor_was_derived():
     assert args == []
 
 
-def test_chromium_args_pin_the_spki_hash_when_an_anchor_was_derived():
-    args = chromium_args("nebari.local", "10.0.0.5", True, SELF_SIGNED_LEAF_PEM)
+def test_chromium_args_pin_the_spki_hash_for_an_untrusted_chain():
+    args = chromium_args(
+        "nebari.local",
+        "10.0.0.5",
+        True,
+        SELF_SIGNED_LEAF_PEM,
+        anchor_trust=trust.SELF_SIGNED_LEAF,
+    )
     spki_flags = [
         a for a in args if a.startswith("--ignore-certificate-errors-spki-list=")
     ]
@@ -351,4 +359,304 @@ def test_an_exempt_host_outside_the_domain_changes_nothing():
             exempt_hosts=("api.other",),
         )
         == "10.0.0.5"
+    )
+
+
+# --- anchor classification -------------------------------------------------
+#
+# The suite used to ask one question -- "is this a self-signed leaf?" -- and
+# treat "no" as "publicly trusted". That is wrong in both directions:
+#
+#   * Let's Encrypt STAGING produces a real chain from an untrusted root.
+#     It classified as not-self-signed, so test_tls ran with verify=True
+#     and FAILED, even though staging is a deliberate CI choice, not a
+#     platform defect. Every cloud fixture in .github/fixtures/deploy/
+#     uses staging, so this is the shape CI actually hits.
+#   * Production ACME also classified as not-self-signed, but because
+#     trust_anchor_pem falls back to tls.crt it still returned a PEM, so
+#     chromium_args emitted an SPKI pin -- meaning the browser journeys
+#     never exercised real certificate validation on the one cluster shape
+#     where they could have.
+
+from tests_lib.certgen import make_cert
+from tests_lib.certgen import pem as chain_pem
+
+
+@pytest.fixture(scope="module")
+def public_chain():
+    """A leaf + intermediate chaining to a root we will put in the store."""
+    root, rk = make_cert("Test Public Root", ca=True)
+    inter, ik = make_cert("Test Public Intermediate", root, rk, ca=True)
+    leaf, _ = make_cert("nebari.test", inter, ik, dns=["nebari.test"])
+    return chain_pem(leaf, inter), chain_pem(root)
+
+
+@pytest.fixture(scope="module")
+def private_chain():
+    """The Let's Encrypt staging shape: a real chain from a root nobody
+    trusts."""
+    root, rk = make_cert("(STAGING) Pretend Root", ca=True)
+    inter, ik = make_cert("(STAGING) Pretend Intermediate", root, rk, ca=True)
+    leaf, _ = make_cert("nebari.test", inter, ik, dns=["nebari.test"])
+    return chain_pem(leaf, inter)
+
+
+def test_a_chain_to_a_trusted_root_is_publicly_trusted(public_chain):
+    chain, root = public_chain
+    assert (
+        trust.classify_anchor(chain, "nebari.test", store_pems=root)
+        == trust.PUBLICLY_TRUSTED
+    )
+
+
+def test_a_staging_style_chain_is_privately_issued(private_chain, public_chain):
+    """The case CI hits on every cloud provider."""
+    _, unrelated_root = public_chain
+    assert (
+        trust.classify_anchor(private_chain, "nebari.test", store_pems=unrelated_root)
+        == trust.PRIVATELY_ISSUED
+    )
+
+
+def test_a_self_signed_leaf_is_still_recognised_as_such(public_chain):
+    """cert-manager's selfsigned-issuer output, the kind/local shape."""
+    leaf, _ = make_cert("nebari.test", dns=["nebari.test"])
+    _, root = public_chain
+    assert (
+        trust.classify_anchor(chain_pem(leaf), "nebari.test", store_pems=root)
+        == trust.SELF_SIGNED_LEAF
+    )
+
+
+def test_no_anchor_at_all_is_publicly_trusted():
+    """No gateway secret: the system store is the only thing in play."""
+    assert trust.classify_anchor(None, "nebari.test") == trust.PUBLICLY_TRUSTED
+
+
+def test_an_expired_certificate_from_a_trusted_root_stays_publicly_trusted(
+    public_chain,
+):
+    """Fails CLOSED. An expired cert is a real platform defect; classifying
+    it as privately issued would make test_tls SKIP and hide it."""
+    root, rk = make_cert("Test Public Root", ca=True)
+    inter, ik = make_cert("Test Public Intermediate", root, rk, ca=True)
+    expired, _ = make_cert("nebari.test", inter, ik, dns=["nebari.test"], days=-1)
+    assert (
+        trust.classify_anchor(
+            chain_pem(expired, inter), "nebari.test", store_pems=chain_pem(root)
+        )
+        == trust.PUBLICLY_TRUSTED
+    )
+
+
+def test_a_wrong_hostname_certificate_from_a_trusted_root_stays_publicly_trusted():
+    """Same reasoning as expiry: a real defect must not be skipped away."""
+    root, rk = make_cert("Test Public Root", ca=True)
+    inter, ik = make_cert("Test Public Intermediate", root, rk, ca=True)
+    leaf, _ = make_cert("other.test", inter, ik, dns=["other.test"])
+    assert (
+        trust.classify_anchor(
+            chain_pem(leaf, inter), "nebari.test", store_pems=chain_pem(root)
+        )
+        == trust.PUBLICLY_TRUSTED
+    )
+
+
+def test_chromium_args_pin_a_privately_issued_chain_too():
+    """Staging is not self-signed, but Chromium cannot validate it either."""
+    args = chromium_args(
+        "nebari.local",
+        "10.0.0.5",
+        False,
+        SELF_SIGNED_LEAF_PEM,
+        anchor_trust=trust.PRIVATELY_ISSUED,
+    )
+    assert any(a.startswith("--ignore-certificate-errors-spki-list=") for a in args)
+
+
+def test_chromium_args_never_pin_a_publicly_trusted_chain():
+    """The whole point: on production ACME the browser journeys must run
+    with exactly the flags a real user's browser would see. Previously the
+    pin was emitted here, because a PEM is always derived."""
+    args = chromium_args(
+        "nebari.example",
+        "10.0.0.5",
+        False,
+        SELF_SIGNED_LEAF_PEM,
+        anchor_trust=trust.PUBLICLY_TRUSTED,
+    )
+    assert args == []
+
+
+# --- validity is verifiable without public trust ---------------------------
+#
+# A staging certificate is a real certificate: real expiry, real SANs, real
+# chain, real encryption. Only public trust is unavailable. Skipping the
+# whole TLS journey there discarded everything else.
+
+
+def _serve_tls(chain_pem_text, key, host="127.0.0.1"):
+    """A throwaway TLS server presenting a real chain, for handshake tests."""
+    import socket as s
+    import ssl
+    import tempfile
+    import threading
+
+    from cryptography.hazmat.primitives import serialization
+
+    d = tempfile.mkdtemp()
+    cert_path = pathlib.Path(d) / "chain.pem"
+    key_path = pathlib.Path(d) / "key.pem"
+    cert_path.write_text(chain_pem_text)
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(cert_path), str(key_path))
+    sock = s.socket()
+    sock.bind((host, 0))
+    sock.listen(1)
+    port = sock.getsockname()[1]
+
+    def serve():
+        try:
+            conn, _ = sock.accept()
+            with ctx.wrap_socket(conn, server_side=True):
+                pass
+        except OSError:
+            pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port, sock
+
+
+def test_a_privately_issued_certificate_still_proves_validity_and_encryption():
+    """The Let's Encrypt staging shape. Against the chain the cluster
+    itself serves, the handshake still verifies expiry, hostname and chain
+    completeness, and reports a real TLS version."""
+    root, rk = make_cert("(STAGING) Pretend Root", ca=True)
+    inter, ik = make_cert("(STAGING) Pretend Intermediate", root, rk, ca=True)
+    leaf, lk = make_cert("localhost", inter, ik, dns=["localhost"])
+
+    import tempfile
+
+    anchor = pathlib.Path(tempfile.mkdtemp()) / "anchor.pem"
+    anchor.write_text(chain_pem(leaf, inter))
+    port, sock = _serve_tls(chain_pem(leaf, inter), lk)
+    try:
+        version = trust.negotiated_tls(
+            "localhost", "127.0.0.1", port=port, ca_file=str(anchor)
+        )
+    finally:
+        sock.close()
+    assert version in trust.ACCEPTABLE_TLS_VERSIONS
+
+
+def test_an_expired_certificate_fails_the_handshake_even_privately_issued():
+    """The signal that skipping used to throw away: staging or not, an
+    expired certificate must fail."""
+    import tempfile
+
+    root, rk = make_cert("(STAGING) Pretend Root", ca=True)
+    inter, ik = make_cert("(STAGING) Pretend Intermediate", root, rk, ca=True)
+    expired, ek = make_cert("localhost", inter, ik, dns=["localhost"], days=-1)
+
+    anchor = pathlib.Path(tempfile.mkdtemp()) / "anchor.pem"
+    anchor.write_text(chain_pem(expired, inter))
+    port, sock = _serve_tls(chain_pem(expired, inter), ek)
+    try:
+        with pytest.raises(ssl_module.SSLError):
+            trust.negotiated_tls(
+                "localhost", "127.0.0.1", port=port, ca_file=str(anchor)
+            )
+    finally:
+        sock.close()
+
+
+def test_a_certificate_for_the_wrong_hostname_fails_even_privately_issued():
+    """The other signal skipping threw away."""
+    import tempfile
+
+    root, rk = make_cert("(STAGING) Pretend Root", ca=True)
+    inter, ik = make_cert("(STAGING) Pretend Intermediate", root, rk, ca=True)
+    wrong, wk = make_cert("elsewhere.test", inter, ik, dns=["elsewhere.test"])
+
+    anchor = pathlib.Path(tempfile.mkdtemp()) / "anchor.pem"
+    anchor.write_text(chain_pem(wrong, inter))
+    port, sock = _serve_tls(chain_pem(wrong, inter), wk)
+    try:
+        with pytest.raises(ssl_module.SSLCertVerificationError):
+            trust.negotiated_tls(
+                "localhost", "127.0.0.1", port=port, ca_file=str(anchor)
+            )
+    finally:
+        sock.close()
+
+
+def test_the_trust_store_survives_one_unparseable_certificate():
+    """certifi ships a root with a non-positive serial number, which
+    `cryptography` warns will become a hard error. All-or-nothing parsing
+    would then discard the whole store, and every publicly trusted cluster
+    would be misclassified as privately issued -- silently skipping the
+    public-trust journey everywhere."""
+    root, _ = make_cert("Good Root", ca=True)
+    bundle = (
+        chain_pem(root) + "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n"
+        "-----END CERTIFICATE-----\n"
+    )
+    loaded = trust.load_trust_store(bundle)
+    assert [c.subject.rfc4514_string() for c in loaded] == ["CN=Good Root"]
+
+
+def test_an_entirely_unusable_trust_store_raises_rather_than_misreporting():
+    """An empty store is an environment fault. Reporting it as a cluster
+    property would skip the public-trust journey and look like a pass."""
+    with pytest.raises(RuntimeError, match="environment fault"):
+        trust.load_trust_store("no certificates here")
+
+
+def test_classification_still_works_against_the_real_certifi_bundle():
+    """Guards the deprecation warning becoming a hard error: this walks
+    the actual shipped bundle, not a synthetic one."""
+    import certifi
+
+    store = pathlib.Path(certifi.where()).read_text()
+    assert len(trust.load_trust_store(store)) > 100
+
+
+def test_a_leaf_without_its_intermediates_is_reported_as_privately_issued():
+    """Known limitation, pinned so it is a decision rather than a surprise.
+
+    certifi carries roots, not intermediates, so a secret holding only the
+    leaf cannot be chained offline even when a browser would trust it.
+    The cost is bounded to losing the public-trust assertion: the always-
+    running validity journey still checks expiry, hostname and chain
+    completeness on this cluster shape.
+    """
+    root, rk = make_cert("Test Public Root", ca=True)
+    inter, ik = make_cert("Test Public Intermediate", root, rk, ca=True)
+    leaf, _ = make_cert("nebari.test", inter, ik, dns=["nebari.test"])
+    # Only the leaf, and a store holding the real root: still unverifiable.
+    assert (
+        trust.classify_anchor(
+            chain_pem(leaf), "nebari.test", store_pems=chain_pem(root)
+        )
+        == trust.PRIVATELY_ISSUED
+    )
+
+
+def test_a_leaf_issued_directly_by_a_trusted_root_still_verifies():
+    """The chain-completeness limitation is specific to a MISSING
+    intermediate, not to a short chain."""
+    root, rk = make_cert("Test Public Root", ca=True)
+    leaf, _ = make_cert("nebari.test", root, rk, dns=["nebari.test"])
+    assert (
+        trust.classify_anchor(
+            chain_pem(leaf), "nebari.test", store_pems=chain_pem(root)
+        )
+        == trust.PUBLICLY_TRUSTED
     )
