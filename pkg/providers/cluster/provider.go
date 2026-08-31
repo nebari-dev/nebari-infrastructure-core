@@ -8,7 +8,7 @@ import (
 )
 
 // Fixed NodePorts for the gateway's Envoy service when InfraSettings.
-// GatewayHostPorts is set. The provider maps host ports to these values at
+// GatewayHostAddress is set. The provider maps host ports to these values at
 // cluster creation, and the ArgoCD templates pin the Envoy service to them,
 // so both sides agree without runtime coordination.
 const (
@@ -80,13 +80,15 @@ type InfraSettings struct {
 	// Examples: "gp2" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
 	StorageClass string
 
-	// GatewayHostPorts indicates the gateway is published on host ports of the
-	// cluster node instead of a LoadBalancer service. The gateway's Envoy
-	// service is pinned to the fixed NodePorts below, the provider maps them to
-	// host ports at cluster creation (kind extraPortMappings), and the platform
-	// is reached at 127.0.0.1, so no DNS or routable load-balancer IP is needed.
-	// Only the local provider sets this.
-	GatewayHostPorts bool
+	// GatewayHostAddress is the address the platform is reached at when the
+	// gateway is published on host ports of the cluster node instead of a
+	// LoadBalancer service. Non-empty means host-port publishing: the
+	// gateway's Envoy service is pinned to the fixed NodePorts above and the
+	// provider maps them to host ports on this address at cluster creation
+	// (kind extraPortMappings). Empty means the gateway gets a LoadBalancer
+	// service. Only the local provider sets this, to 127.0.0.1: a development
+	// cluster should not be exposed to the LAN, and loopback needs no DNS.
+	GatewayHostAddress string
 
 	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
 	// Used by providers whose cloud controller manager requires annotations

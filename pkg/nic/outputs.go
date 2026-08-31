@@ -308,10 +308,11 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 
 	// The gateway address is read last, so the deadline may already have
 	// passed by the time its turn comes.
-	if data.GatewayHostPorts {
+	if data.GatewayHostAddress != "" {
 		// Host-port gateways (local kind clusters) have no load balancer to
-		// inspect: the gateway is published on loopback host ports.
-		outputs.GatewayAddress = "127.0.0.1"
+		// inspect: the gateway is published on host ports of the provider's
+		// address.
+		outputs.GatewayAddress = data.GatewayHostAddress
 	} else if err := ctx.Err(); err != nil {
 		missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
 	} else if ep, err := endpoint.Check(ctx, client); err != nil {

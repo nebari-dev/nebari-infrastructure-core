@@ -36,7 +36,7 @@ Do not use inline `helm.values` or `helm.valuesObject` on any source, and do not
 You must also:
 
 - Add a row for `<name>` to the `helmValueFilesApps` table in `pkg/argocd/writer_test.go`, with a signature string that appears in the rendered `base.yaml` (a distinctive substring is enough; it just proves the right template rendered). `TestHelmApps_SeamInvariants` enforces that every Helm app template and every `templates/values/<name>` directory is enrolled here.
-- If the app is gated (like `metallb` and `trust-manager`), add `values/<name>/base.yaml` as a **file** path to the corresponding gate predicate in `writer.go` (`isMetalLBPath`, `isTrustBundlePath`, or a new one). Prefer the file form over the `values/<name>` directory so the gate visibly removes only the file NIC owns. This is a clarity preference, not a safety requirement: `removeStaleTemplate` refuses recursive deletion under `values/` outright, so the broader directory-matching form is safe too. See the comment above `removeStaleTemplate` in `writer.go`, and do not weaken that guard.
+- If the app is gated (like `trust-manager`), add `values/<name>/base.yaml` as a **file** path to the corresponding gate predicate in `writer.go` (`isTrustBundlePath`, `isBackupPath`, `isLonghornOnlyPath`, or a new one). Prefer the file form over the `values/<name>` directory so the gate visibly removes only the file NIC owns. This is a clarity preference, not a safety requirement: `removeStaleTemplate` refuses recursive deletion under `values/` outright, so the broader directory-matching form is safe too. See the comment above `removeStaleTemplate` in `writer.go`, and do not weaken that guard.
 
 ## Usage
 

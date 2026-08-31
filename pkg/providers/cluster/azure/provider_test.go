@@ -117,8 +117,8 @@ func TestProviderInfraSettings(t *testing.T) {
 	if settings.StorageClass != "managed-csi" {
 		t.Errorf("StorageClass = %q, want managed-csi", settings.StorageClass)
 	}
-	if settings.GatewayHostPorts {
-		t.Error("GatewayHostPorts = true, want false")
+	if settings.GatewayHostAddress != "" {
+		t.Errorf("GatewayHostAddress = %q, want empty", settings.GatewayHostAddress)
 	}
 }
 

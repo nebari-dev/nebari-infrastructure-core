@@ -54,6 +54,38 @@ func TestPrintDNSGuidance(t *testing.T) {
 			},
 		},
 		{
+			name:   "with loopback endpoint shows hosts file guidance",
+			domain: "nebari.local",
+			endpoint: &endpoint.LoadBalancerEndpoint{
+				IP: "127.0.0.1",
+			},
+			wantContains: []string{
+				"HOSTS FILE CONFIGURATION REQUIRED",
+				"127.0.0.1 nebari.local keycloak.nebari.local argocd.nebari.local",
+				"open https://nebari.local in your browser",
+			},
+			wantAbsent: []string{
+				"DNS CONFIGURATION REQUIRED",
+				"nebari.local:443",
+			},
+		},
+		{
+			name:   "with loopback endpoint and custom port the URL carries the port",
+			domain: "nebari.local",
+			endpoint: &endpoint.LoadBalancerEndpoint{
+				IP:   "127.0.0.1",
+				Port: 8443,
+			},
+			wantContains: []string{
+				"127.0.0.1 nebari.local keycloak.nebari.local argocd.nebari.local",
+				"open https://nebari.local:8443 in your browser",
+			},
+			wantAbsent: []string{
+				// The /etc/hosts line maps names to addresses; no port on it.
+				"nebari.local:8443 keycloak",
+			},
+		},
+		{
 			name:     "with nil endpoint shows fallback instructions",
 			domain:   "example.com",
 			endpoint: nil,

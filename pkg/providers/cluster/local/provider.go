@@ -77,12 +77,28 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 	}
 
-	for name, port := range map[string]int{"http_port": localCfg.HTTPPort, "https_port": localCfg.HTTPSPort} {
-		if port < 0 || port > 65535 {
-			err := fmt.Errorf("%s must be between 1 and 65535, got %d", name, port)
+	for _, p := range []struct {
+		name string
+		port int
+	}{
+		{"http_port", localCfg.HTTPPort},
+		{"https_port", localCfg.HTTPSPort},
+	} {
+		if p.port < 0 || p.port > 65535 {
+			err := fmt.Errorf("%s must be between 1 and 65535 or omitted, got %d", p.name, p.port)
 			span.RecordError(err)
 			return err
 		}
+	}
+
+	// Compare the ports kind will actually map (hostPort applies the 80/443
+	// defaults), so a collision with a defaulted port is also caught. kind
+	// rejects duplicate port mappings too, but only after provisioning has
+	// started.
+	if hostPort(localCfg.HTTPPort, defaultHTTPPort) == hostPort(localCfg.HTTPSPort, defaultHTTPSPort) {
+		err := fmt.Errorf("http_port and https_port must differ, both are %d", hostPort(localCfg.HTTPPort, defaultHTTPPort))
+		span.RecordError(err)
+		return err
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Successfully validated local provider configuration").
@@ -280,7 +296,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:        defaultStorageClass,
-		GatewayHostPorts:    true,
+		GatewayHostAddress:  gatewayHostAddress,
 		SupportsLocalGitOps: true,
 		LonghornEnabled:     false,
 	}

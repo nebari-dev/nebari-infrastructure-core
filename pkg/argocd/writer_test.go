@@ -109,13 +109,13 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name                  string
-		settings              cluster.InfraSettings
-		wantStorageClass      string
-		wantLBAnnotationCount int
-		wantKeycloakBasePath  string
-		wantGatewayHostPorts  bool
-		wantHTTPSPort         int
+		name                   string
+		settings               cluster.InfraSettings
+		wantStorageClass       string
+		wantLBAnnotationCount  int
+		wantKeycloakBasePath   string
+		wantGatewayHostAddress string
+		wantHTTPSPort          int
 	}{
 		{
 			name:             "aws defaults",
@@ -136,12 +136,12 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 		{
 			name: "local with host-port gateway",
 			settings: cluster.InfraSettings{
-				StorageClass:     "standard",
-				GatewayHostPorts: true,
+				StorageClass:       "standard",
+				GatewayHostAddress: "127.0.0.1",
 			},
-			wantStorageClass:     "standard",
-			wantGatewayHostPorts: true,
-			wantHTTPSPort:        443,
+			wantStorageClass:       "standard",
+			wantGatewayHostAddress: "127.0.0.1",
+			wantHTTPSPort:          443,
 		},
 		{
 			name: "custom HTTPS port",
@@ -166,8 +166,8 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
 				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.GatewayHostPorts != tt.wantGatewayHostPorts {
-				t.Errorf("GatewayHostPorts = %v, want %v", data.GatewayHostPorts, tt.wantGatewayHostPorts)
+			if data.GatewayHostAddress != tt.wantGatewayHostAddress {
+				t.Errorf("GatewayHostAddress = %q, want %q", data.GatewayHostAddress, tt.wantGatewayHostAddress)
 			}
 			if data.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
@@ -1019,6 +1019,73 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
 		if _, err := os.Stat(appPath); !os.IsNotExist(err) {
 			t.Errorf("apps/securitypolicies.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
+		}
+	})
+}
+
+func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
+	ctx := context.Background()
+
+	renderEnvoyProxy := func(t *testing.T, settings cluster.InfraSettings) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		proxyPath := filepath.Join(tmpDir, "manifests", "networking", "envoyproxy.yaml")
+		content, err := os.ReadFile(proxyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read envoyproxy.yaml: %v", err)
+		}
+		return string(content)
+	}
+
+	t.Run("pins the Envoy service to the provider's NodePorts when GatewayHostAddress is set", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
+		})
+
+		for _, want := range []string{
+			"envoyService:",
+			"type: NodePort",
+			"type: StrategicMerge",
+			"- port: 80",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPNodePort),
+			"- port: 443",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPSNodePort),
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("envoyproxy.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("targets the overridden HTTPS listener port so the patch merges into an existing port", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
+			HTTPSPort:          8443,
+		})
+
+		if want := fmt.Sprintf("- port: 8443\n                  nodePort: %d", cluster.GatewayHTTPSNodePort); !strings.Contains(out, want) {
+			t.Errorf("envoyproxy.yaml should pin the HTTPS NodePort to listener port 8443, got:\n%s", out)
+		}
+		if strings.Contains(out, "- port: 443") {
+			t.Errorf("envoyproxy.yaml should not reference port 443 when https_port is 8443, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits the service pinning when GatewayHostAddress is empty", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass: "gp2",
+		})
+
+		for _, unwanted := range []string{"envoyService:", "NodePort"} {
+			if strings.Contains(out, unwanted) {
+				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
+			}
 		}
 	})
 }

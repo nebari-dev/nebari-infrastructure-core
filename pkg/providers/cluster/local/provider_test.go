@@ -62,8 +62,8 @@ func TestInfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantSC)
 			}
-			if !settings.GatewayHostPorts {
-				t.Error("GatewayHostPorts = false, want true")
+			if settings.GatewayHostAddress != "127.0.0.1" {
+				t.Errorf("GatewayHostAddress = %q, want 127.0.0.1", settings.GatewayHostAddress)
 			}
 			if settings.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", settings.HTTPSPort, tt.wantHTTPSPort)
@@ -153,6 +153,27 @@ func TestValidateKindMode(t *testing.T) {
 			providerConfig: map[string]any{
 				"local": map[string]any{"http_port": 8080, "https_port": 8443},
 			},
+		},
+		{
+			name: "both ports invalid reports http_port first",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": -1, "https_port": 99999999},
+			},
+			wantErr: "http_port must be between 1 and 65535",
+		},
+		{
+			name: "equal ports are rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 8443, "https_port": 8443},
+			},
+			wantErr: "http_port and https_port must differ",
+		},
+		{
+			name: "http_port colliding with the default https_port is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 443},
+			},
+			wantErr: "http_port and https_port must differ",
 		},
 	}
 

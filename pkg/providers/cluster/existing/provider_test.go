@@ -229,8 +229,8 @@ func TestInfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantStorageClass {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantStorageClass)
 			}
-			if settings.GatewayHostPorts {
-				t.Error("GatewayHostPorts = true, want false")
+			if settings.GatewayHostAddress != "" {
+				t.Errorf("GatewayHostAddress = %q, want empty", settings.GatewayHostAddress)
 			}
 			if len(settings.LoadBalancerAnnotations) != tt.wantLBAnnotationLen {
 				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(settings.LoadBalancerAnnotations), tt.wantLBAnnotationLen)
