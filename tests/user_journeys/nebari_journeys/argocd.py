@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from nebari_journeys import constants
+from nebari_journeys.waits import poll_until_settled
 
 SYNCED = "Synced"
 HEALTHY = "Healthy"
@@ -37,9 +38,7 @@ class Application:
             sync_status=status.get("sync", {}).get("status", UNKNOWN),
             health_status=status.get("health", {}).get("status", UNKNOWN),
             operation_phase=operation_state.get("phase"),
-            condition_types=tuple(
-                c.get("type") for c in conditions if c.get("type")
-            ),
+            condition_types=tuple(c.get("type") for c in conditions if c.get("type")),
         )
 
     def is_synced(self) -> bool:
@@ -94,3 +93,46 @@ def foundational_applications(cluster) -> list[Application]:
         for obj in cluster.applications()
         if is_foundational(obj)
     ]
+
+
+# How long to let foundational health converge before reporting it.
+#
+# The suite's whole premise is "any deployed cluster", and a cluster that
+# finished deploying minutes ago legitimately sits at Progressing: ArgoCD
+# is still rolling out, pods are still pulling images. Reading health once
+# turned that into a failure that says the platform is broken when the
+# honest answer is "not yet". CI happens to be safe because the deploy
+# action waits, but a human pointing the suite at a fresh cluster is not.
+#
+# Generous, because the cost of waiting is a slow pass and the cost of not
+# waiting is a false red.
+HEALTH_CONVERGENCE_TIMEOUT = 300.0
+HEALTH_CONVERGENCE_INTERVAL = 10.0
+
+
+def all_healthy(apps: list[Application]) -> bool:
+    """True when every application reports Healthy. False for an empty list:
+    no applications at all is a distinct failure the caller reports, and
+    calling it settled would let the wait return instantly on a cluster
+    where ArgoCD has not bootstrapped."""
+    return bool(apps) and all(app.is_healthy() for app in apps)
+
+
+def settled_foundational_applications(
+    cluster,
+    *,
+    timeout: float = HEALTH_CONVERGENCE_TIMEOUT,
+    interval: float = HEALTH_CONVERGENCE_INTERVAL,
+) -> list[Application]:
+    """Foundational applications, once health has converged or time is up.
+
+    Returns the LAST snapshot either way (see `waits.poll_until_settled`),
+    so the caller reports the real state of a cluster that never converged
+    rather than a bare timeout.
+    """
+    return poll_until_settled(
+        lambda: foundational_applications(cluster),
+        all_healthy,
+        timeout=timeout,
+        interval=interval,
+    )

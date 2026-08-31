@@ -2,7 +2,7 @@
 
 ## 12.1 Testing Levels
 
-NIC has three testing levels today, plus one (health) that is planned but not yet implemented:
+NIC has four testing levels today, plus one (health) that is planned but not yet implemented:
 
 ### Unit tests
 
@@ -24,6 +24,14 @@ NIC has three testing levels today, plus one (health) that is planned but not ye
 - **Runner**: `.github/workflows/deployment-tests.yml`, which builds `nic`, then runs the [`nebari-dev/deploy-nebari-action`](https://github.com/nebari-dev/deploy-nebari-action) (pinned by commit SHA) with the per-provider configs in `.github/fixtures/deploy/`. The action deploys, waits for the platform to converge, and destroys in a post step that runs even on failure or cancellation.
 - **Where they run**: On demand via `workflow_dispatch` (pick one provider or `all`) and on every published release.
 - **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget.
+
+### User journey tests (end-to-end behaviour)
+
+- **Scope**: What a user can actually do on a deployed platform, rather than whether the deployment succeeded: sign in through Keycloak, get durable and replicated storage, be admitted to (or refused from) a UI, reach the gateway over a valid TLS chain. Written as stories under `tests/user_journeys/journeys/`, on top of an assertion-free action library in `tests/user_journeys/nebari_journeys/`. Design and rationale: [ADR-0017](../../adr/0017-user-journey-tests-for-foundational-software.md).
+- **Runner**: `make test-journeys` (pixi-managed Python/pytest suite; drives a browser via Playwright for the UI journeys). `make test-journeys-lib` runs the library's own unit tests, which need no cluster.
+- **Input**: a kubeconfig, and nothing else. Domain, gateway address, credentials and which optional components exist are all discovered from the cluster, so the suite runs against a cluster this checkout never deployed.
+- **Skips, not failures**: an absent or unsupportable component skips with a reason naming what was missing and what stays unverified. TLS is never disabled to make a journey pass.
+- **Where they run**: the `Deploy & user journeys` job in `.github/workflows/ci.yml`, after the platform is deployed to Kind. The library's unit tests run in their own `Journey library tests` job on every push and PR, with no cluster involved. Playwright traces, videos and screenshots upload as artifacts on failure, with deliberately short retention.
 
 ### Health tests (planned)
 
@@ -58,8 +66,9 @@ GCS mocking is not in scope while the GCP provider remains a stub. Azure is impl
 |------|--------------|
 | `Lint` | `golangci-lint` (latest) |
 | `Test` | `go mod download` + `verify`, unit tests with `-race` and coverage, informational Codecov upload (`continue-on-error: true`) |
+| `Journey library tests` | `make test-journeys-lib` plus `ruff check` over `tests/user_journeys` - unit tests of the journey action library, no cluster needed |
 | `Build` | `make build`, uploads the `nic` binary as a 1-day artifact |
-| `Deploy` | downloads the `Build` artifact and runs the deploy action with its built-in default config: a local Kind cluster with an auto-created GitOps repo, deployed, waited on, and destroyed on the runner |
+| `Deploy & user journeys` | downloads the `Build` artifact and runs the deploy action with its built-in default config: a local Kind cluster with an auto-created GitOps repo, deployed, waited on, and destroyed on the runner; then runs `make test-journeys` against it |
 | `Workflow pins & release config` | `check-action-pins.sh` (every action SHA-pinned) + goreleaser config validation |
 | `Vulnerabilities` | `govulncheck` gate |
 
@@ -69,7 +78,8 @@ Highlights:
 - Unit tests run with `-race` and coverage.
 - All GitHub Actions are SHA-pinned, enforced by `check-action-pins.sh`.
 - A `govulncheck` gate fails the build on known vulnerabilities.
-- The LocalStack integration tests are still not wired into CI; the Kind-based `Deploy` job is the end-to-end smoke test.
+- The LocalStack integration tests are still not wired into CI; the Kind-based `Deploy & user journeys` job is the end-to-end smoke test, and since the journey suite runs there it now checks platform behaviour and not only deployment success.
+- The journey suite is not yet wired into `deployment-tests.yml`, so the cloud providers' deployments are still verified only as deployments.
 
 Other workflows in `.github/workflows/`:
 

@@ -2,7 +2,11 @@ import time
 
 import pytest
 
-from nebari_journeys.waits import wait_for_condition, wait_for_value
+from nebari_journeys.waits import (
+    poll_until_settled,
+    wait_for_condition,
+    wait_for_value,
+)
 
 
 def test_returns_immediately_when_already_true():
@@ -66,3 +70,47 @@ def test_wait_for_value_returns_falsy_values_that_are_not_none(falsy):
         lambda: falsy, timeout=0.05, interval=0.01, description="falsy value"
     )
     assert got == falsy
+
+
+# --- poll_until_settled ----------------------------------------------------
+
+
+def test_poll_until_settled_returns_immediately_when_already_settled():
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return "healthy"
+
+    assert (
+        poll_until_settled(fetch, lambda v: v == "healthy", timeout=5, interval=0)
+        == "healthy"
+    )
+    assert len(calls) == 1
+
+
+def test_poll_until_settled_polls_until_the_value_converges():
+    values = iter(["degraded", "degraded", "healthy"])
+    assert (
+        poll_until_settled(
+            lambda: next(values), lambda v: v == "healthy", timeout=5, interval=0
+        )
+        == "healthy"
+    )
+
+
+def test_poll_until_settled_returns_the_last_value_on_timeout_without_raising():
+    """The caller's own assertion carries the diagnosis, so a timeout must
+    hand back the real unconverged state rather than a bare TimeoutError."""
+    assert (
+        poll_until_settled(
+            lambda: "degraded", lambda v: v == "healthy", timeout=0, interval=0
+        )
+        == "degraded"
+    )
+
+
+def test_poll_until_settled_enforces_the_timeout_rather_than_counting_attempts():
+    started = time.monotonic()
+    poll_until_settled(lambda: "degraded", lambda v: False, timeout=0.05, interval=0.01)
+    assert time.monotonic() - started >= 0.05

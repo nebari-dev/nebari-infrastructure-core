@@ -6,7 +6,10 @@ if only a journey fails, that feature is broken.
 
 import warnings
 
-from nebari_journeys.argocd import foundational_applications
+from nebari_journeys.argocd import (
+    HEALTH_CONVERGENCE_TIMEOUT,
+    settled_foundational_applications,
+)
 
 
 def test_operator_sees_every_foundational_app_healthy(cluster):
@@ -17,6 +20,20 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
     count. An operator's own Application in the argocd namespace is not
     Nebari's foundational software and must not fail this journey.
 
+    Health is polled, not read once. The suite is meant to run against any
+    deployed cluster, and a cluster that finished deploying minutes ago
+    legitimately sits at Progressing while ArgoCD rolls out and pods pull
+    images. CI is incidentally safe because the deploy action waits first;
+    a human pointing the suite at a fresh cluster is not, and a single read
+    would tell them the platform is broken when the honest answer is "not
+    yet". See HEALTH_CONVERGENCE_TIMEOUT.
+
+    The cost of that: a cluster where ArgoCD exists but no foundational
+    application ever appears waits out the full timeout before saying so,
+    because a cluster mid-bootstrap looks identical for the first minute.
+    A cluster with no ArgoCD at all still fails immediately -- listing the
+    Application CRD raises rather than returning an empty list.
+
     Plain `OutOfSync` does NOT fail this journey: ArgoCD reports it for
     trivial, insignificant drift while the app is genuinely Healthy and
     working (see ADR-0017). Drift is still made visible via a warning rather
@@ -26,7 +43,7 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
     compare or sync -- means GitOps itself is broken, which is a real
     platform failure and does fail this journey.
     """
-    apps = foundational_applications(cluster)
+    apps = settled_foundational_applications(cluster)
     assert apps, (
         "no ArgoCD application in the argocd namespace carries "
         "app.kubernetes.io/part-of=nebari-foundational; either ArgoCD has not "
@@ -55,7 +72,8 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
     failures = []
     if unhealthy:
         failures.append(
-            "foundational applications are not Healthy:\n" + "\n".join(unhealthy)
+            f"foundational applications are not Healthy after "
+            f"{HEALTH_CONVERGENCE_TIMEOUT:g}s:\n" + "\n".join(unhealthy)
         )
     if sync_errors:
         failures.append(

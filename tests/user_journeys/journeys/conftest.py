@@ -12,7 +12,6 @@ import pytest
 from nebari_journeys import trust
 from nebari_journeys.cluster import Cluster
 from nebari_journeys.k8s import (
-    SCRATCH_NAMESPACE_PREFIX,
     ScratchNamespace,
     scratch_namespace_name,
     sweep_stale_namespaces,
@@ -30,6 +29,11 @@ def sweep_leftovers(cluster):
     result = sweep_stale_namespaces(cluster)
     if result.deleted:
         print(f"swept stale journey namespaces: {', '.join(result.deleted)}")
+    if result.failed:
+        print(
+            "!!! ANOMALY: stale journey namespaces could NOT be deleted and are "
+            f"still on the cluster: {', '.join(result.failed)}"
+        )
     if result.skipped:
         # A labeled namespace whose name does not match the scratch prefix
         # is an anomaly, not a routine outcome: it was left undeleted on
@@ -182,13 +186,34 @@ def skip_trusted_ca_marked_tests_on_self_signed(request, self_signed_anchor):
         pytest.skip(SELF_SIGNED_TRUSTED_CA_WARNING)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def dns_mapping(platform_domain, gateway_address):
-    """Map the platform domain to the gateway only when DNS does not already."""
+@pytest.fixture(scope="session")
+def dns_mapping(cluster, platform_domain, gateway_address):
+    """Map the platform domain to the gateway only when DNS does not already.
+
+    Deliberately NOT autouse, for the same reason `gateway_reachable` is
+    not. Requesting it pulls in `gateway_address`, which polls the gateway
+    Service until a load-balancer address appears; as an autouse fixture
+    that made every journey -- including `test_smoke.py` and the storage
+    journeys, which speak only to the Kubernetes API -- error out on a
+    cluster whose gateway Service never gets an EXTERNAL-IP at all. Only
+    the fixtures that actually need to reach a name under the platform
+    domain depend on this: `keycloak`, `browser_type_launch_args`, and
+    `test_tls.py`, which asks for it by name.
+
+    The mapping rebinds `socket.getaddrinfo` process-wide, so the
+    kubeconfig's API host is exempted: without that, a cluster whose API
+    server lives under the platform domain would have every subsequent
+    Kubernetes API call routed to the gateway. See
+    `trust.install_dns_mapping` and `Cluster.api_host`.
+    """
     if not trust.needs_dns_mapping(platform_domain, gateway_address):
         yield False
         return
-    undo = trust.install_dns_mapping(platform_domain, gateway_address)
+    undo = trust.install_dns_mapping(
+        platform_domain,
+        gateway_address,
+        exempt_hosts=[cluster.api_host()],
+    )
     try:
         yield True
     finally:
@@ -210,23 +235,58 @@ def scratch_namespace(cluster, request):
 
 @pytest.fixture(scope="session")
 def keycloak(cluster, platform_domain, trust_anchor, dns_mapping, gateway_reachable):
-    from nebari_journeys.keycloak import Keycloak
+    """The admin client, with leftover scratch users swept first.
 
-    return Keycloak.for_cluster(cluster, platform_domain, trust_anchor)
+    The sweep lives here rather than in an autouse fixture on purpose: it
+    needs Keycloak, and Keycloak needs a reachable gateway. As an autouse
+    fixture it would force gateway reachability on `test_smoke.py` and the
+    storage journeys, which is exactly what `gateway_reachable`'s comment
+    exists to prevent. Any journey that touches the realm triggers the
+    sweep; journeys that do not are unaffected.
+    """
+    from nebari_journeys.keycloak import Keycloak, sweep_scratch_users
+
+    client = Keycloak.for_cluster(cluster, platform_domain, trust_anchor)
+
+    result = sweep_scratch_users(client)  # never raises; see its docstring
+    if result.deleted:
+        print(f"swept leftover scratch realm users: {', '.join(result.deleted)}")
+    if result.failed:
+        # An undeleted scratch user is an ENABLED account in a live realm,
+        # and the admits journey puts one in longhorn-admins, so this can
+        # be a privileged leftover. Nobody gets to miss it.
+        print(
+            "!!! ANOMALY: leftover scratch realm users could NOT be deleted "
+            "and are still enabled in the realm: " + ", ".join(result.failed)
+        )
+    if result.skipped:
+        print(
+            "!!! ANOMALY: users matched the scratch search but not the "
+            f"scratch prefix, and were NOT deleted: {', '.join(result.skipped)}"
+        )
+    return client
 
 
 @pytest.fixture
 def scratch_user(keycloak):
-    """A throwaway realm user, deleted afterwards even when the test fails."""
+    """A throwaway realm user, deleted afterwards even when the test fails.
+
+    Built from SCRATCH_USER_PREFIX, the same constant `sweep_scratch_users`
+    re-checks before deleting anything, so a user created here is always a
+    user the next run's sweep will look at.
+
+    A failed delete is still swallowed rather than failing the journey --
+    the journey's own result is the more useful signal -- but it is
+    reported as an anomaly, not a print in passing, because what is left
+    behind is an ENABLED account in a live realm. `test_longhorn_ui_admits_
+    a_user_in_the_admins_group` adds this user to longhorn-admins before
+    logging in, so the leak can be a privileged one.
+    """
     import requests
 
-    from nebari_journeys.keycloak import generated_password
+    from nebari_journeys.keycloak import generated_password, scratch_username
 
-    # Built from the same SCRATCH_NAMESPACE_PREFIX that scratch_namespace_name()
-    # uses, rather than a hardcoded literal, so the two cannot drift apart.
-    username = "journey-" + scratch_namespace_name().removeprefix(
-        SCRATCH_NAMESPACE_PREFIX
-    )
+    username = scratch_username()
     password = generated_password()
     user_id = keycloak.create_user(username, password)
     try:
@@ -235,7 +295,12 @@ def scratch_user(keycloak):
         try:
             keycloak.delete_user(user_id)
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
-            print(f"failed to delete scratch user {username}: {exc}")
+            print(
+                f"!!! ANOMALY: scratch realm user {username} (id {user_id}) could "
+                f"NOT be deleted and is still ENABLED in the realm: {exc}. The "
+                "next run's sweep will clear it; delete it now if this realm is "
+                "not disposable."
+            )
 
 
 @pytest.fixture(scope="session")

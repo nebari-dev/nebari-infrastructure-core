@@ -26,10 +26,15 @@ def _replication_cluster(schedulable_nodes, expected_replicas, state, robustness
     pvc = MagicMock()
     pvc.spec.volume_name = "pvc-replicated"
     cluster.core.read_namespaced_persistent_volume_claim.return_value = pvc
-    cluster.longhorn_volume.return_value = {
+    volume = {
         "spec": {"numberOfReplicas": expected_replicas},
         "status": {"state": state, "robustness": robustness},
     }
+    cluster.longhorn_volume.return_value = volume
+    # The journey must read the SETTLED volume: robustness is `degraded`
+    # while Longhorn rebuilds replicas after an attach, so a single read
+    # calls a healthy cluster degraded.
+    cluster.settled_longhorn_volume.return_value = volume
     return cluster
 
 
@@ -83,3 +88,33 @@ def test_fails_when_nodes_satisfy_replicas_but_the_volume_is_degraded():
     )
     with pytest.raises(AssertionError, match="degraded"):
         replication_check(cluster, _namespace())
+
+
+def test_robustness_is_read_from_the_settled_volume_not_a_single_sample():
+    """Pins the fix for the read-immediately-after-attach flake: robustness
+    must come from the settled read, or it is sampled while Longhorn is
+    still rebuilding replicas."""
+    cluster = _replication_cluster(
+        schedulable_nodes=3,
+        expected_replicas=2,
+        state="attached",
+        robustness="healthy",
+    )
+    replication_check(cluster, _namespace())
+    cluster.settled_longhorn_volume.assert_called_once_with("pvc-replicated")
+
+
+def test_the_skip_decision_does_not_wait_for_robustness_to_settle():
+    """On a single-node cluster robustness can never become healthy, so
+    polling before deciding to skip would spend the whole settle timeout to
+    reach a foregone conclusion -- and single-node is the common case for
+    this skip."""
+    cluster = _replication_cluster(
+        schedulable_nodes=1,
+        expected_replicas=2,
+        state="attached",
+        robustness="degraded",
+    )
+    with pytest.raises(pytest.skip.Exception):
+        replication_check(cluster, _namespace())
+    cluster.settled_longhorn_volume.assert_not_called()

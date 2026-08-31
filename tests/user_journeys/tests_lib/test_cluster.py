@@ -487,3 +487,45 @@ def test_domain_propagates_a_permissions_error_on_httproutes():
     cluster = _cluster(custom=custom)
     with pytest.raises(ApiException):
         cluster.domain()
+
+
+# --- the Kubernetes API host ----------------------------------------------
+#
+# Needed so the session-wide DNS mapping can carve the API server out; see
+# nebari_journeys.trust.install_dns_mapping.
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("https://k8s.nebari.test:6443", "k8s.nebari.test"),
+        ("https://127.0.0.1:39707", "127.0.0.1"),
+        (
+            "https://ABC.gr7.us-west-2.eks.amazonaws.com",
+            "abc.gr7.us-west-2.eks.amazonaws.com",
+        ),
+        ("http://localhost:8080", "localhost"),
+        # A bare host with no scheme is not a URL urlparse can read a
+        # hostname out of, so it must not be mistaken for a path.
+        ("k8s.nebari.test:6443", "k8s.nebari.test"),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_api_host_is_the_hostname_of_the_configured_api_server(host, expected):
+    configuration = MagicMock(host=host)
+    with patch(
+        "nebari_journeys.cluster.client.Configuration.get_default_copy",
+        return_value=configuration,
+    ):
+        assert Cluster(core=MagicMock(), custom=MagicMock()).api_host() == expected
+
+
+def test_api_host_is_none_when_no_configuration_is_loaded():
+    """Never raises: the caller uses this only to build a carve-out list, and
+    failing to find an API host must not break a run."""
+    with patch(
+        "nebari_journeys.cluster.client.Configuration.get_default_copy",
+        side_effect=ValueError("no default configuration"),
+    ):
+        assert Cluster(core=MagicMock(), custom=MagicMock()).api_host() is None

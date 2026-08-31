@@ -3,6 +3,11 @@
 Everything a journey creates is namespaced and carries the journey
 label, so the blast radius is bounded and leftovers are identifiable.
 No action here asserts; assertions belong in the test files.
+
+`SweepResult` is imported from `nebari_journeys.sweep` rather than defined
+here, because `keycloak` reports its own sweep of leftover scratch users
+in the same shape and must not import the Kubernetes client to do it. It
+stays importable from this module, which is where callers expect it.
 """
 
 import uuid
@@ -12,6 +17,7 @@ from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
 
 from nebari_journeys import constants
+from nebari_journeys.sweep import SweepResult
 from nebari_journeys.waits import wait_for_condition
 
 JOURNEY_LABELS = {constants.JOURNEY_LABEL_KEY: constants.JOURNEY_LABEL_VALUE}
@@ -87,14 +93,6 @@ def scratch_namespace_name() -> str:
     return f"{SCRATCH_NAMESPACE_PREFIX}{uuid.uuid4().hex[:8]}"
 
 
-@dataclass
-class SweepResult:
-    """What the sweep did. No logging in library code; the caller reports."""
-
-    deleted: list[str]
-    skipped: list[str]
-
-
 def sweep_stale_namespaces(cluster) -> SweepResult:
     """Delete journey namespaces left behind by crashed runs.
 
@@ -107,15 +105,25 @@ def sweep_stale_namespaces(cluster) -> SweepResult:
     stale = cluster.core.list_namespace(label_selector=selector)
     names = [ns.metadata.name for ns in stale.items]
 
-    deleted = []
-    skipped = []
+    result = SweepResult()
     for name in names:
-        if name.startswith(SCRATCH_NAMESPACE_PREFIX):
+        if not name.startswith(SCRATCH_NAMESPACE_PREFIX):
+            result.skipped.append(name)
+            continue
+        try:
             cluster.core.delete_namespace(name=name)
-            deleted.append(name)
+        except ApiException as exc:
+            # 404 means something else already removed it, which is the
+            # outcome the sweep wanted; anything else left it in place and
+            # the caller has to be told. Either way the sweep continues:
+            # one undeletable namespace must not strand the rest.
+            if exc.status == 404:
+                result.deleted.append(name)
+            else:
+                result.failed.append(name)
         else:
-            skipped.append(name)
-    return SweepResult(deleted=deleted, skipped=skipped)
+            result.deleted.append(name)
+    return result
 
 
 @dataclass

@@ -3,8 +3,10 @@ from unittest.mock import MagicMock
 from nebari_journeys import constants
 from nebari_journeys.argocd import (
     Application,
+    all_healthy,
     foundational_applications,
     is_foundational,
+    settled_foundational_applications,
 )
 
 FOUNDATIONAL_LABELS = {constants.PART_OF_LABEL: constants.FOUNDATIONAL_PART_OF}
@@ -143,9 +145,7 @@ def test_comparison_error_condition_is_a_sync_error():
 
 
 def test_sync_error_condition_is_a_sync_error():
-    app = Application.from_object(
-        _app("keycloak", conditions=[{"type": "SyncError"}])
-    )
+    app = Application.from_object(_app("keycloak", conditions=[{"type": "SyncError"}]))
     assert app.has_sync_error() is True
 
 
@@ -154,3 +154,52 @@ def test_unrelated_condition_type_is_not_a_sync_error():
         _app("keycloak", conditions=[{"type": "SomeOtherCondition"}])
     )
     assert app.has_sync_error() is False
+
+
+# --- health convergence ----------------------------------------------------
+
+
+def test_all_healthy_is_false_for_an_empty_list():
+    """No applications at all is its own failure, reported by the caller. If
+    an empty list counted as settled the convergence wait would return
+    instantly on a cluster where ArgoCD never bootstrapped."""
+    assert all_healthy([]) is False
+
+
+def test_all_healthy_requires_every_application():
+    apps = [
+        Application.from_object(_app("a", health="Healthy")),
+        Application.from_object(_app("b", health="Progressing")),
+    ]
+    assert all_healthy(apps) is False
+    assert all_healthy(apps[:1]) is True
+
+
+def test_settled_applications_returns_as_soon_as_everything_is_healthy():
+    cluster = MagicMock()
+    cluster.applications.return_value = [_app("a", health="Healthy")]
+    apps = settled_foundational_applications(cluster, timeout=5, interval=0)
+    assert [a.name for a in apps] == ["a"]
+    assert cluster.applications.call_count == 1
+
+
+def test_settled_applications_waits_out_a_progressing_cluster():
+    """A cluster that finished deploying minutes ago legitimately sits at
+    Progressing; the suite is meant to run against any deployed cluster."""
+    cluster = MagicMock()
+    cluster.applications.side_effect = [
+        [_app("a", health="Progressing")],
+        [_app("a", health="Progressing")],
+        [_app("a", health="Healthy")],
+    ]
+    apps = settled_foundational_applications(cluster, timeout=5, interval=0)
+    assert apps[0].health_status == "Healthy"
+
+
+def test_settled_applications_returns_the_unhealthy_snapshot_on_timeout():
+    """The journey's own assertion names which app is unhealthy and how, so
+    the wait must hand back the real state rather than raise."""
+    cluster = MagicMock()
+    cluster.applications.return_value = [_app("a", health="Degraded")]
+    apps = settled_foundational_applications(cluster, timeout=0, interval=0)
+    assert apps[0].health_status == "Degraded"

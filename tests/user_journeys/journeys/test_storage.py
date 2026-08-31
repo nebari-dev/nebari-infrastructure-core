@@ -31,7 +31,9 @@ CANARY_TEXT = "nebari-journey-canary"
 POD_MOUNTS_LONGHORN_TIMEOUT = 300
 
 
-def _replication_unverified_message(schedulable_nodes: int, expected_replicas: int) -> str:
+def _replication_unverified_message(
+    schedulable_nodes: int, expected_replicas: int
+) -> str:
     """Names both numbers and states the risk, not just the mechanics.
 
     Split out so tests_lib can pin the exact wording without needing a
@@ -83,7 +85,8 @@ def test_a_users_volume_is_actually_replicated(cluster, scratch_namespace):
     """Bound is not the same as durable. A volume with one healthy replica
     survives a pod restart but not a node loss.
 
-    The volume is ATTACHED to a pod before its robustness is read. Longhorn
+    The volume is ATTACHED to a pod before its robustness is read, and
+    robustness is then POLLED until it settles rather than sampled once. Longhorn
     only computes robustness for an attached volume: a provisioned but
     detached volume sits at state `detached`, robustness `unknown`, because
     its replicas are not running and there is nothing to judge. The PVC binds
@@ -102,15 +105,25 @@ def test_a_users_volume_is_actually_replicated(cluster, scratch_namespace):
     pvc = cluster.core.read_namespaced_persistent_volume_claim(
         name="replicated", namespace=ns.name
     )
+    # Read once first, only to decide whether this cluster can replicate at
+    # all. The skip below is a physical fact about the topology, not
+    # something that converges, so waiting for robustness before deciding it
+    # would spend the whole settle timeout to reach a foregone skip -- on
+    # single-node clusters, which is the common case for the skip.
     volume = cluster.longhorn_volume(pvc.spec.volume_name)
-
     expected = volume["spec"]["numberOfReplicas"]
-    state = volume.get("status", {}).get("state")
-    healthy = volume.get("status", {}).get("robustness")
 
     schedulable_nodes = cluster.schedulable_longhorn_node_count()
     if schedulable_nodes < expected:
         pytest.skip(_replication_unverified_message(schedulable_nodes, expected))
+
+    # This cluster CAN satisfy the replica count, so robustness is now worth
+    # waiting on: a just-attached volume reports `degraded` while Longhorn
+    # rebuilds its replicas, and reading it the instant the pod goes Ready
+    # calls a healthy cluster degraded. See Cluster.settled_longhorn_volume.
+    volume = cluster.settled_longhorn_volume(pvc.spec.volume_name)
+    state = volume.get("status", {}).get("state")
+    healthy = volume.get("status", {}).get("robustness")
 
     assert expected >= 1, (
         f"Longhorn volume {pvc.spec.volume_name!r} is configured with "

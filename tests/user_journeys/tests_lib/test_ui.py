@@ -11,6 +11,7 @@ from nebari_journeys.ui import (
     is_access_denied,
     login_via_keycloak,
     page_host,
+    returned_to,
 )
 
 
@@ -29,10 +30,32 @@ def test_login_fills_username_and_password_then_submits():
     page.click.assert_called_once_with(KEYCLOAK_SUBMIT_SELECTOR)
 
 
-def test_login_waits_for_navigation_after_submitting():
+def test_login_waits_for_the_browser_to_return_to_the_application_host():
     page = MagicMock()
-    login_via_keycloak(page, "https://x", "u", "p")
-    page.wait_for_load_state.assert_called_once()
+    login_via_keycloak(page, "https://argocd.nebari.test/auth/login", "u", "p")
+
+    page.wait_for_url.assert_called_once()
+    predicate = page.wait_for_url.call_args.args[0]
+    assert predicate("https://argocd.nebari.test/applications")
+    assert not predicate("https://keycloak.nebari.test/realms/nebari")
+
+
+def test_login_never_waits_on_networkidle():
+    """Playwright marks networkidle DISCOURAGED, and Argo CD's application
+    view holds a watch stream open so the network may never go idle.
+    Regression guard: reintroducing it fails a successful login."""
+    page = MagicMock()
+    login_via_keycloak(page, "https://argocd.nebari.test/auth/login", "u", "p")
+    page.wait_for_load_state.assert_not_called()
+
+
+def test_login_returns_quietly_when_the_redirect_never_lands():
+    """The journeys assert on where the browser ended up and explain each
+    outcome; a raw Playwright timeout would replace those messages with a
+    worse one."""
+    page = MagicMock()
+    page.wait_for_url.side_effect = PlaywrightTimeoutError("no redirect")
+    login_via_keycloak(page, "https://argocd.nebari.test/auth/login", "u", "p")
 
 
 def test_login_does_not_register_a_locator_handler():
@@ -118,3 +141,43 @@ def test_argocd_oidc_login_path_is_not_the_bare_host():
 )
 def test_page_host_extracts_the_hostname(url, expected):
     assert page_host(url) == expected
+
+
+# --- the OIDC round trip's completion signal -------------------------------
+#
+# login_via_keycloak used to end on wait_for_load_state("networkidle"),
+# which Playwright's documentation marks DISCOURAGED and which cannot
+# settle on a page holding a watch stream open (Argo CD's application
+# view). The completion signal is "the browser is back on the application's
+# host", judged by the same predicate the journeys assert with.
+
+
+def test_returned_to_is_true_on_the_application_host():
+    assert returned_to("argocd.nebari.test")("https://argocd.nebari.test/applications")
+
+
+def test_returned_to_is_false_while_still_on_the_identity_provider():
+    assert not returned_to("argocd.nebari.test")(
+        "https://keycloak.nebari.test/realms/nebari/protocol/openid-connect/auth"
+    )
+
+
+def test_returned_to_ignores_path_and_query():
+    check = returned_to("longhorn.nebari.test")
+    assert check("https://longhorn.nebari.test/#/dashboard?tab=volume")
+
+
+def test_returned_to_is_case_insensitive_on_both_sides():
+    assert returned_to("ArgoCD.Nebari.Test")("https://argocd.NEBARI.test/applications")
+
+
+def test_returned_to_is_false_for_a_url_with_no_host():
+    assert not returned_to("argocd.nebari.test")("about:blank")
+
+
+def test_returned_to_does_not_match_a_suffix_lookalike_host():
+    """A substring or suffix match would accept
+    argocd.nebari.test.attacker.example as "back on the app"."""
+    check = returned_to("argocd.nebari.test")
+    assert not check("https://argocd.nebari.test.attacker.example/")
+    assert not check("https://not-argocd.nebari.test/")

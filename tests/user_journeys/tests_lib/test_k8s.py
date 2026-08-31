@@ -239,3 +239,37 @@ def test_wait_pod_ready_still_fails_fast_on_a_terminal_phase_after_a_404(monkeyp
     ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
     with pytest.raises(RuntimeError, match="Failed"):
         ns.wait_pod_ready("writer", timeout=30)
+
+
+def test_namespace_sweep_records_a_failed_delete_and_keeps_going():
+    """One undeletable namespace must not stop the sweep from clearing the
+    rest, and must not vanish from the report."""
+    cluster = MagicMock()
+    cluster.core.list_namespace.return_value = MagicMock(
+        items=[_fake_ns("nebari-journey-aaa"), _fake_ns("nebari-journey-bbb")]
+    )
+    cluster.core.delete_namespace.side_effect = [
+        ApiException(status=500, reason="boom"),
+        None,
+    ]
+
+    result = sweep_stale_namespaces(cluster)
+
+    assert result.deleted == ["nebari-journey-bbb"]
+    assert result.failed == ["nebari-journey-aaa"]
+
+
+def test_namespace_sweep_treats_an_already_gone_namespace_as_deleted():
+    """A 404 means someone else got there first, which is the outcome the
+    sweep wanted. Recording it as a failure would make a clean cluster look
+    dirty."""
+    cluster = MagicMock()
+    cluster.core.list_namespace.return_value = MagicMock(
+        items=[_fake_ns("nebari-journey-aaa")]
+    )
+    cluster.core.delete_namespace.side_effect = ApiException(status=404, reason="gone")
+
+    result = sweep_stale_namespaces(cluster)
+
+    assert result.deleted == ["nebari-journey-aaa"]
+    assert result.failed == []

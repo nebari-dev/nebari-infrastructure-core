@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes.client.rest import ApiException
 
+from nebari_journeys import trust
 from nebari_journeys.trust import (
     chromium_args,
     gateway_reachable,
@@ -268,3 +269,86 @@ def test_chromium_args_map_the_bare_apex_as_well_as_the_wildcard():
     assert len(args) == 1
     assert "MAP nebari.local 10.0.0.5" in args[0]
     assert "MAP *.nebari.local 10.0.0.5" in args[0]
+
+
+# --- the DNS mapping's carve-out ------------------------------------------
+#
+# install_dns_mapping rebinds socket.getaddrinfo for the whole session and
+# redirects every name under the platform domain to the gateway. urllib3
+# calls socket.getaddrinfo as a module attribute
+# (urllib3/util/connection.py), so the Kubernetes client goes through the
+# patch too. On a cluster whose API server lives under the platform domain
+# -- plausible on-prem -- that would silently route every subsequent
+# Kubernetes API call through Envoy.
+
+
+def _resolved_host(domain, address, host, exempt_hosts=()):
+    """The host install_dns_mapping actually hands to the real resolver."""
+    seen = []
+
+    def fake_getaddrinfo(h, port, *args, **kwargs):
+        seen.append(h)
+        return [(2, 1, 6, "", (h, port))]
+
+    with patch("socket.getaddrinfo", fake_getaddrinfo):
+        undo = trust.install_dns_mapping(domain, address, exempt_hosts=exempt_hosts)
+        try:
+            socket.getaddrinfo(host, 443)
+        finally:
+            undo()
+    return seen[-1]
+
+
+def test_subdomains_of_the_platform_domain_are_redirected_to_the_gateway():
+    assert (
+        _resolved_host("nebari.test", "10.0.0.5", "keycloak.nebari.test") == "10.0.0.5"
+    )
+
+
+def test_the_apex_is_redirected_to_the_gateway():
+    assert _resolved_host("nebari.test", "10.0.0.5", "nebari.test") == "10.0.0.5"
+
+
+def test_a_host_outside_the_platform_domain_is_left_alone():
+    assert _resolved_host("nebari.test", "10.0.0.5", "example.com") == "example.com"
+
+
+def test_the_kubernetes_api_host_is_exempt_even_under_the_platform_domain():
+    """Without this carve-out every Kubernetes API call after the mapping is
+    installed would be sent to the gateway, and the failures would look
+    like a broken cluster rather than a hijacked resolver."""
+    assert (
+        _resolved_host(
+            "nebari.test",
+            "10.0.0.5",
+            "k8s.nebari.test",
+            exempt_hosts=("k8s.nebari.test",),
+        )
+        == "k8s.nebari.test"
+    )
+
+
+def test_the_exemption_is_case_insensitive():
+    """DNS names are case insensitive, and a kubeconfig is free to spell the
+    API server host however it likes."""
+    assert (
+        _resolved_host(
+            "nebari.test",
+            "10.0.0.5",
+            "K8S.Nebari.Test",
+            exempt_hosts=("k8s.nebari.test",),
+        )
+        == "K8S.Nebari.Test"
+    )
+
+
+def test_an_exempt_host_outside_the_domain_changes_nothing():
+    assert (
+        _resolved_host(
+            "nebari.test",
+            "10.0.0.5",
+            "keycloak.nebari.test",
+            exempt_hosts=("api.other",),
+        )
+        == "10.0.0.5"
+    )

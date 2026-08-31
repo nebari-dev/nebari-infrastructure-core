@@ -8,6 +8,7 @@ checkout never deployed.
 
 import base64
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import pytest
 from kubernetes import client
@@ -15,7 +16,7 @@ from kubernetes import config as kubeconfig
 from kubernetes.client.rest import ApiException
 
 from nebari_journeys import constants
-from nebari_journeys.waits import wait_for_value
+from nebari_journeys.waits import poll_until_settled, wait_for_value
 
 ARGOCD_GROUP = "argoproj.io"
 ARGOCD_VERSION = "v1alpha1"
@@ -43,6 +44,19 @@ LONGHORN_STORAGE_CLASS = "longhorn"
 FALLBACK_STORAGE_CLASS = LONGHORN_STORAGE_CLASS
 
 NOT_FOUND_STATUS = 404
+
+# Longhorn's robustness values. `unknown` is what a detached volume
+# reports; `degraded` is also what a freshly attached volume reports while
+# it rebuilds its replicas, which is why robustness is polled rather than
+# read once.
+ROBUSTNESS_HEALTHY = "healthy"
+
+# How long to let a just-attached volume finish rebuilding its replicas.
+# Reading robustness immediately after the pod goes Ready catches Longhorn
+# mid-rebuild and reports `degraded` on a cluster that is about to be
+# perfectly healthy.
+ROBUSTNESS_SETTLE_TIMEOUT = 120.0
+ROBUSTNESS_SETTLE_INTERVAL = 5.0
 
 
 @dataclass
@@ -73,6 +87,36 @@ class Cluster:
             custom=client.CustomObjectsApi(),
             storage=client.StorageV1Api(),
         )
+
+    def api_host(self) -> str | None:
+        """Hostname of the Kubernetes API server, lowercased, or None.
+
+        Used by the DNS-mapping fixture to exempt the API server from the
+        session-wide resolver patch: on a cluster whose API server lives
+        under the platform domain, the patch would otherwise route every
+        Kubernetes API call to the Envoy gateway. See
+        `nebari_journeys.trust.install_dns_mapping`.
+
+        Never raises. A missing or unparseable host means "no carve-out to
+        make", which is the same as the common case of an API server that
+        sits outside the platform domain anyway; failing the run over it
+        would be worse than the problem.
+        """
+        try:
+            host = client.Configuration.get_default_copy().host
+        except Exception:  # noqa: BLE001 - see the docstring: this is a
+            # best-effort accessor used only to build a resolver carve-out.
+            # Whatever the Kubernetes client raises for an unloaded or
+            # malformed configuration, failing the run over it would be
+            # strictly worse than making no carve-out.
+            return None
+        if not host:
+            return None
+        # A kubeconfig host is normally a full URL, but tolerate a bare
+        # host:port: urlsplit would read that as a path with no hostname.
+        if "://" not in host:
+            host = f"https://{host}"
+        return urlsplit(host).hostname
 
     def secret_value(self, namespace: str, name: str, key: str) -> str:
         secret = self.core.read_namespaced_secret(name=name, namespace=namespace)
@@ -373,6 +417,34 @@ class Cluster:
             namespace=constants.LONGHORN_NAMESPACE,
             plural=VOLUME_PLURAL,
             name=pv_name,
+        )
+
+    def settled_longhorn_volume(
+        self,
+        pv_name: str,
+        *,
+        timeout: float = ROBUSTNESS_SETTLE_TIMEOUT,
+        interval: float = ROBUSTNESS_SETTLE_INTERVAL,
+    ) -> dict:
+        """The Longhorn Volume, once its robustness has settled or time is up.
+
+        A volume reports `degraded` for as long as it takes to rebuild its
+        replicas after being attached, so reading robustness the instant the
+        mounting pod goes Ready catches Longhorn mid-rebuild and calls a
+        healthy cluster degraded.
+
+        Returns the LAST snapshot either way (see
+        `waits.poll_until_settled`): a volume that genuinely never becomes
+        healthy is the real finding, and the caller's assertion says so far
+        better than a timeout would.
+        """
+        return poll_until_settled(
+            lambda: self.longhorn_volume(pv_name),
+            lambda volume: (
+                (volume.get("status") or {}).get("robustness") == ROBUSTNESS_HEALTHY
+            ),
+            timeout=timeout,
+            interval=interval,
         )
 
     def schedulable_longhorn_node_count(self) -> int:

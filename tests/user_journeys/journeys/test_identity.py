@@ -16,6 +16,7 @@ the ArgoCD half of every shared check still runs.
 import pytest
 
 from nebari_journeys import constants
+from nebari_journeys.keycloak import redirect_hosts
 from nebari_journeys.ui import (
     ARGOCD_OIDC_LOGIN_PATH,
     LONGHORN_UI_MARKER,
@@ -89,10 +90,20 @@ def test_oidc_clients_exist_for_the_platform_uis(cluster, keycloak):
 
 
 def test_argocd_client_redirects_to_this_platforms_domain(keycloak, platform_domain):
+    """Compares HOSTS, not substrings.
+
+    This asserted `platform_domain in " ".join(redirectUris)` first, which
+    is a weaker check than its name: it passes on
+    `https://argocd.nebari.test.somewhere-else.example/*`, and passes when
+    the domain shows up only in an unrelated client's URI. The thing worth
+    knowing is that a redirect URI points at THIS platform's ArgoCD host.
+    """
     client = keycloak.client(constants.ARGOCD_OIDC_CLIENT)
-    redirects = " ".join(client.get("redirectUris", []))
-    assert platform_domain in redirects, (
-        f"argocd client redirect URIs {redirects!r} do not mention {platform_domain}"
+    expected_host = f"{constants.ARGOCD_OIDC_CLIENT}.{platform_domain}".lower()
+    hosts = redirect_hosts(client)
+    assert expected_host in hosts, (
+        f"argocd client redirect URIs point at {sorted(hosts)}, none of which is "
+        f"{expected_host!r} (raw URIs: {client.get('redirectUris')!r})"
     )
 
 

@@ -31,6 +31,7 @@ credential, and why the password is generated fresh per run rather than
 reused.
 """
 
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -43,6 +44,10 @@ KEYCLOAK_SUBMIT_SELECTOR = "#kc-login"
 # Distinct from the click timeout it replaces: the failure this bounds is
 # "the OIDC redirect never happened", which deserves its own message.
 FORM_TIMEOUT_MS = 30_000
+
+# How long to wait, after submitting the form, for the OIDC round trip to
+# land the browser back on the application's host.
+REDIRECT_TIMEOUT_MS = 30_000
 
 # Path that forces Argo CD to start an OIDC login instead of rendering its
 # own local username/password form.
@@ -106,6 +111,20 @@ def page_host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
+def returned_to(host: str) -> "Callable[[str], bool]":
+    """Predicate: has the browser landed back on `host`?
+
+    The completion signal for an OIDC round trip. Extracted so it can be
+    unit tested, and so both the wait and the journeys' assertions judge
+    "did we get back" the same way.
+    """
+
+    def check(url: str) -> bool:
+        return page_host(url) == host.lower()
+
+    return check
+
+
 def login_via_keycloak(page, url: str, username: str, password: str) -> None:
     """Drive the Keycloak login form and wait for the redirect to settle.
 
@@ -140,4 +159,26 @@ def login_via_keycloak(page, url: str, username: str, password: str) -> None:
     page.fill(KEYCLOAK_USERNAME_SELECTOR, username)
     page.fill(KEYCLOAK_PASSWORD_SELECTOR, password)
     page.click(KEYCLOAK_SUBMIT_SELECTOR)
-    page.wait_for_load_state("networkidle")
+
+    # Wait for the browser to arrive back on the application's own host,
+    # NOT for the network to go quiet.
+    #
+    # `wait_for_load_state("networkidle")` was here first and is wrong for
+    # this page. Playwright's own documentation marks it DISCOURAGED --
+    # "Don't use this method for testing, rely on web assertions to assess
+    # readiness instead" -- because it waits for 500ms with no network
+    # connections at all, and Argo CD's application view holds a watch
+    # stream open for as long as it is displayed. On that page the network
+    # may never go idle, so the wait would burn its full timeout and fail a
+    # successful login. It happens to have worked on the clusters this was
+    # first run against, which is exactly the kind of luck not to build on.
+    #
+    # A timeout here is deliberately NOT raised. Every journey that calls
+    # this asserts on where the browser ended up and says precisely what
+    # each outcome means -- still on Keycloak, on some third host, on a
+    # login page. Those messages are far more useful than a Playwright
+    # timeout, so this hands control back and lets them speak.
+    try:
+        page.wait_for_url(returned_to(page_host(url)), timeout=REDIRECT_TIMEOUT_MS)
+    except PlaywrightTimeoutError:
+        return

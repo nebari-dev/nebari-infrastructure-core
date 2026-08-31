@@ -41,7 +41,7 @@ with `spki_sha256_b64` and the flag it feeds -- should be removed.
 import base64
 import hashlib
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from cryptography import x509
@@ -184,17 +184,41 @@ def needs_dns_mapping(domain: str, gateway_address: str) -> bool:
     return not any(info[4][0] == gateway_address for info in infos)
 
 
-def install_dns_mapping(domain: str, address: str) -> Callable[[], None]:
+def install_dns_mapping(
+    domain: str,
+    address: str,
+    exempt_hosts: Iterable[str] = (),
+) -> Callable[[], None]:
     """Map *.domain and domain itself to address for this process.
 
     Returns a callable that restores the original resolver.
+
+    `exempt_hosts` are names that fall under `domain` but must keep
+    resolving normally. This is not a nicety. The patch rebinds
+    `socket.getaddrinfo`, which urllib3 calls as a module attribute
+    (`socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)` in
+    urllib3/util/connection.py), so the Kubernetes client resolves through
+    it too. On a cluster whose API server lives under the platform domain
+    -- unusual on managed clouds, entirely plausible on-prem -- every
+    Kubernetes API call issued after this fixture installs would be sent
+    to the Envoy gateway instead of the API server, and the resulting
+    failures would look like a broken cluster rather than a hijacked
+    resolver. The caller passes the kubeconfig's API host (see
+    `Cluster.api_host`).
+
+    Comparison is case-insensitive on both sides: DNS names are, and a
+    kubeconfig is free to spell the API host however it likes.
     """
     original = socket.getaddrinfo
+    domain = domain.lower()
     suffix = f".{domain}"
+    exempt = {host.lower() for host in exempt_hosts if host}
 
     def patched(host, port, *args, **kwargs):
-        if isinstance(host, str) and (host == domain or host.endswith(suffix)):
-            return original(address, port, *args, **kwargs)
+        if isinstance(host, str):
+            name = host.lower()
+            if name not in exempt and (name == domain or name.endswith(suffix)):
+                return original(address, port, *args, **kwargs)
         return original(host, port, *args, **kwargs)
 
     socket.getaddrinfo = patched

@@ -9,9 +9,17 @@ merely that it deployed. Design and rationale: [ADR-0017](../../docs/adr/0017-us
 tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
   conftest.py            # only pytest_addoption for --keep-namespace
-  nebari_journeys/       # the action library: constants, waits, cluster, trust, k8s, argocd, keycloak, ui
-  tests_lib/              # unit tests OF the library, 140 tests, no cluster needed
+  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, argocd, keycloak, ui
+  tests_lib/              # unit tests OF the library, no cluster needed
   journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py
+```
+
+`journeys/` and `tests_lib/` each carry an `__init__.py`. Those are load
+bearing: both directories hold a `test_storage.py`, and under pytest's default
+`prepend` import mode a test module is named after its basename alone, so
+without them a bare `pytest` from this directory dies at collection with
+"import file mismatch". With them the modules are `journeys.test_storage` and
+`tests_lib.test_storage`.
 ```
 
 ## Running
@@ -31,6 +39,7 @@ pixi run test-api               # skip browser journeys, no Chromium download
 pixi run test -k storage        # one slice
 pixi run test --keep-namespace  # leave the scratch namespace for debugging
 pixi run install-browsers       # install Chromium for Playwright
+pytest                          # everything, including the library's tests
 pixi run lint                   # ruff check .
 pixi run fmt                    # ruff format .
 ```
@@ -95,15 +104,49 @@ nowhere else, so the contract test can see it. Three pinning patterns exist:
 `TestPythonConstantsEnrollment` fails when a constant is added without landing
 in one of them or being listed as suite-owned.
 
-## Namespace cleanup
+## Cleanup of leftovers
 
-A session-scoped, autouse fixture (`sweep_leftovers` in `journeys/conftest.py`)
-calls `sweep_stale_namespaces` at the start of every run to remove namespaces
-left behind by earlier crashed runs. It returns a `SweepResult(deleted,
-skipped)`: `deleted` lists what it actually removed, `skipped` lists any
-namespace that carries the journey label but does not match the
-`nebari-journey-` prefix, which it deliberately refuses to delete and reports
-as an anomaly for a human to investigate.
+Two sweeps, both reporting a `SweepResult(deleted, skipped, failed)`:
+`deleted` is what was removed, `skipped` is what carried the journey marker
+but failed the second guard and was deliberately left alone, and `failed` is
+what the sweep tried and could not remove. A sweep never aborts on one bad
+item, and everything but `deleted` is printed as an `!!! ANOMALY` line.
+
+**Namespaces.** A session-scoped, autouse fixture (`sweep_leftovers` in
+`journeys/conftest.py`) calls `sweep_stale_namespaces` at the start of every
+run. A namespace is deleted only if it carries the journey label *and* its
+name starts with `nebari-journey-`.
+
+**Scratch realm users.** The `keycloak` fixture calls `sweep_scratch_users`
+when it is first built. A run killed between `create_user` and its teardown
+would otherwise leave an *enabled* user in a live realm with a password only
+the dead process knew - and since
+`test_longhorn_ui_admits_a_user_in_the_admins_group` adds its user to
+`longhorn-admins` before logging in, that leftover can be a privileged one.
+As with namespaces there are two guards: Keycloak's username search is an
+*infix* match, so `journey-` also matches `prod-journey-admin`, and the
+prefix is re-checked client side before anything is deleted.
+
+The user sweep lives in the `keycloak` fixture rather than an autouse one on
+purpose. It needs Keycloak, and Keycloak needs a reachable gateway; as an
+autouse fixture it would force gateway reachability onto `test_smoke.py` and
+the storage journeys, which speak only to the Kubernetes API and must keep
+running when the gateway is unroutable.
+
+## Keycloak admin tokens
+
+Keycloak bootstraps the **master** realm with `accessTokenLifespan = 60`
+(hardcoded in Keycloak's `ApplianceBootstrap.java`, not the 300 seconds a new
+realm gets), and this suite authenticates against `/realms/master`. An admin
+token is therefore valid for one minute, which a run with three browser
+logins in it routinely outlives - and the very last admin call of a run is a
+`delete_user` in a fixture teardown.
+
+`Keycloak.token()` tracks expiry from the token response's `expires_in`,
+refetches with a safety margin, and every admin call goes through
+`Keycloak._send`, which refreshes once and retries on a `401`. Do not
+reintroduce a token cached for the session: the resulting 401s read like a
+platform authentication regression rather than a harness bug.
 
 ## Optional components
 

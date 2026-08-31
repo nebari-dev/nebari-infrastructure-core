@@ -49,3 +49,31 @@ def wait_for_value[T](
                 f"timed out after {timeout:g}s waiting for {description}"
             )
         time.sleep(interval)
+
+
+def poll_until_settled[T](
+    fetch: Callable[[], T],
+    is_settled: Callable[[T], bool],
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    interval: float = DEFAULT_INTERVAL,
+) -> T:
+    """Poll fetch() until is_settled(), returning the LAST value either way.
+
+    The other two waits raise on timeout, which is right when there is
+    nothing useful to say about a value that never arrived. This one is for
+    the opposite case: a value that is always present but takes time to
+    converge -- ArgoCD health right after a deploy, Longhorn robustness
+    right after an attach. The caller asserts on the result and already has
+    a precise message for the unconverged state, so a bare TimeoutError
+    here would replace a real diagnosis with a worse one.
+
+    Callers must therefore treat a non-settled return as a real result and
+    say something about it, not assume settlement.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        value = fetch()
+        if is_settled(value) or time.monotonic() >= deadline:
+            return value
+        time.sleep(interval)
