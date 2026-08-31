@@ -22,6 +22,11 @@ const (
 type LoadBalancerEndpoint struct {
 	Hostname string
 	IP       string
+	// Port is the HTTPS port the platform is served on. Zero means the
+	// standard 443. Non-standard values occur on host-port gateways (local
+	// kind clusters with cluster.local.https_port set). Load balancers found
+	// by inspecting the cluster always serve on 443 and leave this zero.
+	Port int
 }
 
 // Option configures the behavior of GetLoadBalancerEndpoint.

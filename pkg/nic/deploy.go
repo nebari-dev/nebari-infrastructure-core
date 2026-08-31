@@ -331,7 +331,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// provisioning (public DNS records pointing at loopback are never useful).
 	if cfg.Domain != "" && !opts.DryRun {
 		if infraSettings.GatewayHostPorts {
-			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: "127.0.0.1"}
+			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: "127.0.0.1", Port: infraSettings.HTTPSPort}
 			if cfg.DNS != nil {
 				status.Warning(ctx, "Skipping DNS provisioning: the local gateway is published on 127.0.0.1")
 			}

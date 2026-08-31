@@ -119,7 +119,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // pointing at loopback make no sense, and /etc/hosts is the whole setup.
 func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
 	if lb != nil && net.ParseIP(lb.IP).IsLoopback() {
-		printHostsFileGuidance(cfg, lb.IP)
+		printHostsFileGuidance(cfg, lb)
 		return
 	}
 
@@ -176,19 +176,26 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 }
 
 // printHostsFileGuidance prints /etc/hosts instructions for clusters whose
-// gateway is published on loopback host ports (local kind clusters).
-func printHostsFileGuidance(cfg *config.NebariConfig, ip string) {
+// gateway is published on loopback host ports (local kind clusters). The URL
+// carries the HTTPS port when it is non-standard; the /etc/hosts line never
+// does (hosts files map names to addresses, not ports).
+func printHostsFileGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
+	url := "https://" + cfg.Domain
+	if lb.Port != 0 && lb.Port != 443 {
+		url = fmt.Sprintf("https://%s:%d", cfg.Domain, lb.Port)
+	}
+
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  HOSTS FILE CONFIGURATION REQUIRED")
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
-	fmt.Printf("  The platform is published on host ports of %s.\n", ip)
+	fmt.Printf("  The platform is published on host ports of %s.\n", lb.IP)
 	fmt.Println("  Point the platform hostnames at it by adding this line to /etc/hosts:")
 	fmt.Println()
-	fmt.Printf("    %s %s keycloak.%s argocd.%s\n", ip, cfg.Domain, cfg.Domain, cfg.Domain)
+	fmt.Printf("    %s %s keycloak.%s argocd.%s\n", lb.IP, cfg.Domain, cfg.Domain, cfg.Domain)
 	fmt.Println()
-	fmt.Printf("  Then open https://%s in your browser.\n", cfg.Domain)
+	fmt.Printf("  Then open %s in your browser.\n", url)
 	fmt.Println()
 	fmt.Println("  /etc/hosts has no wildcard support: services exposed later on other")
 	fmt.Println("  subdomains need their hostname appended to the same line.")
