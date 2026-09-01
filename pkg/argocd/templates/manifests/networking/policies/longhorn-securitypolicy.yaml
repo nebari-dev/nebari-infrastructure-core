@@ -99,9 +99,9 @@ spec:
   jwt:
     # Straight JWT authentication for anything the oauth2 filter above
     # lets through with an existing Bearer (see passThroughAuthHeader).
-    # Tokenless requests are handled entirely by oauth2 (http-filter
-    # order 7) before jwt (order 8) is reached, so no `optional: true`
-    # relaxation is needed here.
+    # Tokenless requests are handled entirely by oauth2, which runs ahead
+    # of jwt in EG's http-filter order, so no `optional: true` relaxation
+    # is needed here.
     providers:
       - name: keycloak
         issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}"

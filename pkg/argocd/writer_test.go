@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -919,6 +920,24 @@ func TestSyncWaveOrdering(t *testing.T) {
 	}
 }
 
+// egOIDCIssuerPattern is the validation Envoy Gateway applies to
+// SecurityPolicy's spec.oidc.provider.issuer as of v1.9.1, copied verbatim from
+// the CRD (api/v1alpha1/oidc_types.go). EG enforces the same https-scheme rule a
+// second time in the translator (validateOIDCIssuerURL), so a value that fails
+// this is rejected at apply time AND would leave the policy Accepted: False with
+// no oauth2 filter on the route. Asserted directly rather than only comparing
+// against an expected literal, so that changing the template and the expected
+// constant together still fails.
+var egOIDCIssuerPattern = regexp.MustCompile(`^https://[^/?#@]+(/[^?#]*)?$`)
+
+func assertValidEGIssuer(t *testing.T, issuer string) {
+	t.Helper()
+	if !egOIDCIssuerPattern.MatchString(issuer) {
+		t.Errorf("oidc.provider.issuer %q does not satisfy the Envoy Gateway issuer constraint %s",
+			issuer, egOIDCIssuerPattern)
+	}
+}
+
 // longhornSecurityPolicyShape mirrors the subset of the rendered SecurityPolicy
 // we assert on. It exists so tests can verify the split-URL invariant on a
 // per-field basis instead of relying on strings.Contains over the whole file,
@@ -1042,8 +1061,9 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		// issuer is public purely to satisfy the CRD's https constraint; it is
 		// inert at runtime once discovery is suppressed.
 		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
-			t.Errorf("oidc.provider.issuer: got %q, want %q (public; the EG CRD constrains this field to an https scheme)", got, want)
+			t.Errorf("oidc.provider.issuer: got %q, want %q (public; EG constrains this field to an https scheme)", got, want)
 		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
 		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
 			t.Errorf("oidc.provider.tokenEndpoint: got %q, want %q (in-cluster)", got, want)
 		}
@@ -1086,10 +1106,9 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			t.Errorf("oidc.passThroughAuthHeader: got false, want true")
 		}
 
-		// JWT provider — issuer MUST be public (opposite of oidc.provider.issuer)
-		// because it has to match the `iss` claim Keycloak stamps into tokens,
-		// which is KC_HOSTNAME (always the public URL) regardless of which
-		// endpoint minted the token.
+		// JWT provider — issuer MUST be public, because it has to match the
+		// `iss` claim Keycloak stamps into tokens, which is KC_HOSTNAME
+		// (always the public URL) regardless of which endpoint minted the token.
 		if len(sp.Spec.JWT.Providers) != 1 {
 			t.Fatalf("jwt.providers: got %d, want 1", len(sp.Spec.JWT.Providers))
 		}
@@ -1176,6 +1195,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
 			t.Errorf("oidc.provider.issuer with basePath=/auth: got %q, want %q", got, want)
 		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
 		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
 			t.Errorf("oidc.provider.tokenEndpoint with basePath=/auth: got %q, want %q", got, want)
 		}
