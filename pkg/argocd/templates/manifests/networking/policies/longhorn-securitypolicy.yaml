@@ -28,8 +28,10 @@ spec:
     # Setting both authorizationEndpoint and tokenEndpoint suppresses
     # discovery entirely (envoyproxy/gateway internal/gatewayapi/
     # securitypolicy.go). With translation succeeding, the oauth2 filter
-    # runs at http-filter order 7 and redirects tokenless requests before
-    # jwt_authn (order 8) sees them, so the browser flow works as designed.
+    # runs ahead of jwt_authn in EG's http-filter order and redirects
+    # tokenless requests before jwt_authn sees them, so the browser flow
+    # works as designed. (Order numbers shift between EG releases; the
+    # oauth2-before-jwt_authn relationship is what matters.)
     #
     # Because we set both endpoints to skip discovery, EG also stops
     # discovering end_session; endSessionEndpoint must be set explicitly
@@ -49,13 +51,17 @@ spec:
     #
     # Endpoint routing:
     #
-    #   - issuer + tokenEndpoint: in-cluster URL. tokenEndpoint carries a
-    #     Basic Auth secret over plaintext HTTP on Envoy's in-cluster
-    #     network; NIC doesn't run TLS to Keycloak's admin port and the
-    #     operator makes the same choice. issuer itself is inert once
-    #     discovery is suppressed (EG's `ir.OIDCProvider` has no Issuer
-    #     field) but the CRD requires it; keeping it in-cluster mirrors
-    #     the operator.
+    #   - tokenEndpoint: in-cluster URL. It carries a Basic Auth secret
+    #     over plaintext HTTP on Envoy's in-cluster network; NIC doesn't
+    #     run TLS to Keycloak's admin port and the operator makes the
+    #     same choice.
+    #   - issuer: public URL, and it MUST use an https scheme. The field
+    #     is inert at runtime once discovery is suppressed (EG's
+    #     `ir.OIDCProvider` has no Issuer field), but it is required by
+    #     the CRD, which constrains it to
+    #     `^https://[^/?#@]+(/[^?#]*)?$` as of EG v1.9.1. An in-cluster
+    #     `http://` value here is rejected by the API server at apply
+    #     time, so it cannot mirror the operator's in-cluster issuer.
     #   - authorizationEndpoint + endSessionEndpoint: public URL.
     #     Browser redirects that must resolve on the user's machine.
     #
@@ -65,7 +71,7 @@ spec:
     # Design confirmation + reference implementation:
     # https://github.com/nebari-dev/nebari-operator/blob/main/internal/controller/reconcilers/auth/providers/keycloak.go#L73-L143
     provider:
-      issuer: "{{ .KeycloakServiceURL }}/realms/{{ .KeycloakRealm }}"
+      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}"
       tokenEndpoint: "{{ .KeycloakServiceURL }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/token"
       authorizationEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/auth"
       endSessionEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/logout"

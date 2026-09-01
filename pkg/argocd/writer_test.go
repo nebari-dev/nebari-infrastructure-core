@@ -1035,12 +1035,14 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			t.Errorf("spec.targetRefs[0]: got %+v, want kind=HTTPRoute name=longhorn", tr)
 		}
 
-		// OIDC provider — split-URL invariant. issuer + tokenEndpoint are
-		// in-cluster (back-channel); authorizationEndpoint + endSessionEndpoint
-		// are public (front-channel). Swapping any two silently reintroduces
-		// the private-domain OIDC-discovery bug this template exists to fix.
-		if got, want := sp.Spec.OIDC.Provider.Issuer, inClusterBase; got != want {
-			t.Errorf("oidc.provider.issuer: got %q, want %q (in-cluster)", got, want)
+		// OIDC provider — split-URL invariant. tokenEndpoint is in-cluster
+		// (back-channel); authorizationEndpoint + endSessionEndpoint are public
+		// (front-channel). Swapping any two silently reintroduces the
+		// private-domain OIDC-discovery bug this template exists to fix.
+		// issuer is public purely to satisfy the CRD's https constraint; it is
+		// inert at runtime once discovery is suppressed.
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
+			t.Errorf("oidc.provider.issuer: got %q, want %q (public; the EG CRD constrains this field to an https scheme)", got, want)
 		}
 		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
 			t.Errorf("oidc.provider.tokenEndpoint: got %q, want %q (in-cluster)", got, want)
@@ -1075,8 +1077,8 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		}
 		// passThroughAuthHeader lets a request that already carries an
 		// `Authorization: Bearer <token>` skip the oauth2 redirect and reach the
-		// jwt block below. Without it, EG's oauth2 filter (which runs first at
-		// http-filter order 7) treats the Bearer as an unknown session and
+		// jwt block below. Without it, EG's oauth2 filter (which runs ahead of
+		// jwt_authn) treats the Bearer as an unknown session and
 		// bounces the request back to Keycloak — breaking scripted API access.
 		// Browser flow is unaffected because browsers arrive with the oauth2
 		// session cookie, not a Bearer.
@@ -1171,7 +1173,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			publicBase    = "https://keycloak.test.example.com/auth/realms/nebari"
 		)
 
-		if got, want := sp.Spec.OIDC.Provider.Issuer, inClusterBase; got != want {
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
 			t.Errorf("oidc.provider.issuer with basePath=/auth: got %q, want %q", got, want)
 		}
 		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
