@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-08-27)
+Accepted
 
 Records the design for epic [#625](https://github.com/nebari-dev/nebari-infrastructure-core/issues/625), whose first slice is [#626](https://github.com/nebari-dev/nebari-infrastructure-core/issues/626). Fulfills the "integration tests" half of the [#429](https://github.com/nebari-dev/nebari-infrastructure-core/issues/429) placeholder, under the testing epic [#160](https://github.com/nebari-dev/nebari-infrastructure-core/issues/160).
 
