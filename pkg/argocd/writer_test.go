@@ -948,12 +948,13 @@ type longhornSecurityPolicyShape struct {
 			ClientSecret struct {
 				Name string `yaml:"name"`
 			} `yaml:"clientSecret"`
-			RedirectURL        string `yaml:"redirectURL"`
-			LogoutPath         string `yaml:"logoutPath"`
-			ForwardAccessToken bool   `yaml:"forwardAccessToken"`
+			RedirectURL           string `yaml:"redirectURL"`
+			LogoutPath            string `yaml:"logoutPath"`
+			ForwardAccessToken    bool   `yaml:"forwardAccessToken"`
+			RefreshToken          bool   `yaml:"refreshToken"`
+			PassThroughAuthHeader bool   `yaml:"passThroughAuthHeader"`
 		} `yaml:"oidc"`
 		JWT struct {
-			Optional  bool `yaml:"optional"`
 			Providers []struct {
 				Name       string `yaml:"name"`
 				Issuer     string `yaml:"issuer"`
@@ -1067,15 +1068,20 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if !sp.Spec.OIDC.ForwardAccessToken {
 			t.Errorf("oidc.forwardAccessToken: got false, want true")
 		}
-
-		// jwt.optional MUST be true. A browser arrives with no token, and Envoy
-		// Gateway runs JWT authentication before the OIDC filter, so without this
-		// every tokenless request is rejected with a bare "Jwt is missing" 401
-		// and a human can never reach the Keycloak login page. It relaxes
-		// authentication only: authorization.defaultAction below is still Deny
-		// and the allow rule still requires a JWT claim.
-		if !sp.Spec.JWT.Optional {
-			t.Error("jwt.optional: got false, want true (a tokenless browser must reach the OIDC redirect)")
+		// refreshToken keeps the session alive from the refresh token instead of
+		// bouncing the user back through Keycloak when the access token expires.
+		if !sp.Spec.OIDC.RefreshToken {
+			t.Errorf("oidc.refreshToken: got false, want true")
+		}
+		// passThroughAuthHeader lets a request that already carries an
+		// `Authorization: Bearer <token>` skip the oauth2 redirect and reach the
+		// jwt block below. Without it, EG's oauth2 filter (which runs first at
+		// http-filter order 7) treats the Bearer as an unknown session and
+		// bounces the request back to Keycloak — breaking scripted API access.
+		// Browser flow is unaffected because browsers arrive with the oauth2
+		// session cookie, not a Bearer.
+		if !sp.Spec.OIDC.PassThroughAuthHeader {
+			t.Errorf("oidc.passThroughAuthHeader: got false, want true")
 		}
 
 		// JWT provider — issuer MUST be public (opposite of oidc.provider.issuer)
@@ -1092,8 +1098,8 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if got, want := jp.Issuer, publicBase; got != want {
 			t.Errorf("jwt.providers[0].issuer: got %q, want %q (public — must match `iss` claim)", got, want)
 		}
-		if !strings.Contains(jp.RemoteJWKS.URI, "/realms/nebari/protocol/openid-connect/certs") {
-			t.Errorf("jwt.providers[0].remoteJWKS.uri: got %q, expected jwks path suffix", jp.RemoteJWKS.URI)
+		if got, want := jp.RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri: got %q, want %q (in-cluster)", got, want)
 		}
 
 		// Authorization: default-deny, allow only /longhorn-admins group.
@@ -1184,9 +1190,9 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if got, want := sp.Spec.JWT.Providers[0].Issuer, publicBase; got != want {
 			t.Errorf("jwt.providers[0].issuer with basePath=/auth: got %q, want %q", got, want)
 		}
-		if got := sp.Spec.JWT.Providers[0].RemoteJWKS.URI; !strings.HasPrefix(got, inClusterBase+"/protocol/openid-connect/certs") {
-			t.Errorf("jwt.providers[0].remoteJWKS.uri with basePath=/auth: got %q, want prefix %q",
-				got, inClusterBase+"/protocol/openid-connect/certs")
+		if got, want := sp.Spec.JWT.Providers[0].RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri with basePath=/auth: got %q, want %q",
+				got, want)
 		}
 	})
 
