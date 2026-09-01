@@ -157,6 +157,26 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
+
+		// Fail before anything is rendered when the configured ports differ
+		// from the ones the cluster was created with: the mappings cannot
+		// change on a live cluster, so continuing would move the gateway
+		// listeners and printed URLs to ports the host does not publish.
+		client, err := clusterClient(kp, projectName)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if err := verifyClusterPorts(ctx, client, projectName,
+			hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort)); err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Configured host ports do not match the existing kind cluster").
+				WithResource("provider").
+				WithAction("deploy").
+				WithMetadata("cluster_name", projectName).
+				WithMetadata("error", err.Error()))
+			return err
+		}
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").
@@ -174,6 +194,24 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("kube_context", kindContextName(projectName)))
+
+		// Record the ports the cluster was just created with, so the next
+		// deploy can verify them. A failed write costs only that check (a
+		// later deploy adopts and records the values it finds configured),
+		// so it does not fail a deploy that is otherwise healthy.
+		client, err := clusterClient(kp, projectName)
+		if err == nil {
+			err = recordClusterPorts(ctx, client,
+				hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort))
+		}
+		if err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not record the cluster's host ports, so the next deploy cannot verify them against the config").
+				WithResource("provider").
+				WithAction("deploy").
+				WithMetadata("cluster_name", projectName).
+				WithMetadata("error", err.Error()))
+		}
 	}
 
 	return nil

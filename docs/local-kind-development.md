@@ -84,7 +84,7 @@ To reach the platform, point the hostnames at loopback in `/etc/hosts` (the depl
 
 `/etc/hosts` has no wildcard support, so services exposed later on other subdomains need their hostname appended to the same line.
 
-One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster.
+One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster (`nic destroy`, then `nic deploy`). NIC records the ports a cluster was created with and `nic deploy` fails when the config no longer matches them, rather than deploying a gateway the host does not publish.
 
 ## Troubleshooting
 
