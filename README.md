@@ -153,31 +153,38 @@ NIC automatically downloads and manages its own OpenTofu binary — no manual in
 
 ### Install
 
-> [!NOTE]
-> **Draft / incomplete.** This section is a work in progress:
-> - The **pixi** path is pending #579 (nic is not on the prefix.dev channel yet).
-> - The **install-script** and **Homebrew** paths are added by #539; reconcile with that PR at merge.
-> - The docs-site mirror of this content is still TODO.
-
 Pick the path that matches how you'll use `nic`:
 
-**pixi (recommended once [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) lands).** Pins the exact `nic` build in your `pixi.lock`, so the toolchain travels with your config:
+**A Nebi starter workspace (recommended).** The toolchain and the config travel together: the workspace pins `nic` in its `pixi.lock`, ships a ready-to-edit `config.yaml`, and carries the `validate` and `deploy` tasks.
 
 ```bash
-# Project-scoped (pins in pixi.lock — recommended)
-pixi add --channel https://prefix.dev/github-releases nebari-infrastructure-core
-
-# Machine-wide CLI
-pixi global install --channel https://prefix.dev/github-releases nebari-infrastructure-core
+nebi import quay.io/nebari/starters/local:v0.14.0   # or starters/aws
+cd local && pixi install
 ```
 
-**Homebrew (macOS):**
+**pixi, into a project you already have.** Same pinning, without the starter's config and tasks:
 
 ```bash
-brew install nebari-dev/tap/nic
+pixi workspace channel add https://prefix.dev/nebari-dev/nebari
+pixi add nebari-infrastructure-core
 ```
 
-**Release archives.** Download `nebari-infrastructure-core_<version>_<os>_<arch>.tar.gz` from the [releases page](https://github.com/nebari-dev/nebari-infrastructure-core/releases). Verify it before use: check the cosign signature over `checksums.txt`, then verify the tarball against `checksums.txt`. Checksums fetched from the same origin as the tarball prove integrity, not authenticity — the signature is what proves authenticity. Full steps in [Verifying a NIC release](docs/operations/verifying-releases.md).
+**pixi, as a machine-wide CLI.** No lockfile, so nothing pins the version for a teammate:
+
+```bash
+pixi global install \
+  -c https://prefix.dev/nebari-dev/nebari \
+  -c conda-forge \
+  nebari-infrastructure-core
+```
+
+**Homebrew (macOS).** Installs a cask; the post-install hook strips the macOS quarantine attribute, since the binaries are not notarized:
+
+```bash
+brew install --cask nebari-dev/tap/nic
+```
+
+**Release archives.** Download `nebari-infrastructure-core_<version>_<os>_<arch>.tar.gz` from the [releases page](https://github.com/nebari-dev/nebari-infrastructure-core/releases). Verify it before use: check the cosign signature over `checksums.txt`, then verify the tarball against `checksums.txt`. Checksums fetched from the same origin as the tarball prove integrity, not authenticity - the signature is what proves authenticity. Full steps in [Verifying a NIC release](docs/operations/verifying-releases.md).
 
 #### From source (contributors)
 
