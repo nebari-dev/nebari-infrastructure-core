@@ -18,6 +18,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -309,10 +310,19 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 	// The gateway address is read last, so the deadline may already have
 	// passed by the time its turn comes.
 	if data.GatewayHostAddress != "" {
-		// Host-port gateways (local kind clusters) have no load balancer to
-		// inspect: the gateway is published on host ports of the provider's
-		// address.
-		outputs.GatewayAddress = data.GatewayHostAddress
+		// A host-port gateway (local kind clusters) has no load balancer
+		// status to read: the address comes from the provider. The Envoy
+		// service is still read as a drift check. The kind host ports point
+		// at the pinned NodePorts, so when the service is missing or carries
+		// other nodePorts, nothing answers at the host address and it is
+		// reported unresolved instead.
+		if err := ctx.Err(); err != nil {
+			missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
+		} else if err := endpoint.CheckNodePorts(ctx, client, []int32{cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort}); err != nil {
+			missing = append(missing, unresolved{field: "gateway_address", reason: err.Error()})
+		} else {
+			outputs.GatewayAddress = data.GatewayHostAddress
+		}
 	} else if err := ctx.Err(); err != nil {
 		missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
 	} else if ep, err := endpoint.Check(ctx, client); err != nil {

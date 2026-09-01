@@ -3,10 +3,12 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -154,13 +156,74 @@ func Check(ctx context.Context, client kubernetes.Interface, opts ...Option) (*L
 }
 
 // checkEndpoint performs a single attempt to find the load balancer endpoint.
-// If multiple services match the selector, the first one is used. In practice,
-// Envoy Gateway creates exactly one service per Gateway resource.
 func checkEndpoint(ctx context.Context, client kubernetes.Interface, cfg *options) (*LoadBalancerEndpoint, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "endpoint.checkEndpoint")
 	defer span.End()
 
+	svc, err := gatewayService(ctx, client, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	ingress := svc.Status.LoadBalancer.Ingress
+	if len(ingress) == 0 {
+		return nil, fmt.Errorf("load balancer not ready: no ingress entries")
+	}
+
+	return &LoadBalancerEndpoint{
+		Hostname: ingress[0].Hostname,
+		IP:       ingress[0].IP,
+	}, nil
+}
+
+// CheckNodePorts verifies the gateway's service carries every NodePort in
+// want, in one attempt with no polling. Host-port gateways (local kind
+// clusters) have no load balancer status to observe: the cluster-side fact
+// their host port mappings depend on is the service's pinned nodePort values.
+// A missing service or a different nodePort means the mapped host ports lead
+// nowhere (for example when the EnvoyProxy service patch no longer matches
+// the generated service and Kubernetes assigned random NodePorts), so the
+// caller must not report the host address as reachable.
+func CheckNodePorts(ctx context.Context, client kubernetes.Interface, want []int32, opts ...Option) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "endpoint.CheckNodePorts")
+	defer span.End()
+
+	cfg := defaultOptions()
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	span.SetAttributes(
+		attribute.String("namespace", cfg.namespace),
+		attribute.String("label_selector", cfg.labelSelector),
+	)
+
+	svc, err := gatewayService(ctx, client, cfg)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	got := make([]int32, 0, len(svc.Spec.Ports))
+	for _, p := range svc.Spec.Ports {
+		got = append(got, p.NodePort)
+	}
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			err := fmt.Errorf("gateway service %s/%s does not carry nodePort %d (has %v): the EnvoyProxy service patch has not applied", svc.Namespace, svc.Name, w, got)
+			span.RecordError(err)
+			return err
+		}
+	}
+	return nil
+}
+
+// gatewayService finds the gateway's service by label selector. If multiple
+// services match the selector, the first one is used. In practice, Envoy
+// Gateway creates exactly one service per Gateway resource.
+func gatewayService(ctx context.Context, client kubernetes.Interface, cfg *options) (*corev1.Service, error) {
 	services, err := client.CoreV1().Services(cfg.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: cfg.labelSelector,
 	})
@@ -172,14 +235,5 @@ func checkEndpoint(ctx context.Context, client kubernetes.Interface, cfg *option
 		return nil, fmt.Errorf("no services found in namespace %q matching %q", cfg.namespace, cfg.labelSelector)
 	}
 
-	svc := services.Items[0]
-	ingress := svc.Status.LoadBalancer.Ingress
-	if len(ingress) == 0 {
-		return nil, fmt.Errorf("load balancer not ready: no ingress entries")
-	}
-
-	return &LoadBalancerEndpoint{
-		Hostname: ingress[0].Hostname,
-		IP:       ingress[0].IP,
-	}, nil
+	return &services.Items[0], nil
 }

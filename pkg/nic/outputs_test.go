@@ -210,29 +210,79 @@ func TestResolveOutputs(t *testing.T) {
 	}
 }
 
-// TestResolveOutputsHostPortGateway pins that a host-port gateway (local kind
-// clusters) reports 127.0.0.1 without inspecting any LoadBalancer status: a
-// NodePort service never gets ingress entries, so the LB path would fail (and
-// --wait would poll to timeout) on a healthy local cluster.
-func TestResolveOutputsHostPortGateway(t *testing.T) {
-	// No gateway service object at all: the address must not come from the cluster.
-	client := fake.NewSimpleClientset(without(fullyDeployed(), 3)...)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// nodePortGatewayService is the Envoy service as a host-port gateway sees it:
+// type NodePort with pinned nodePorts and no load balancer ingress entries.
+func nodePortGatewayService(httpNodePort, httpsNodePort int32) *corev1.Service {
+	svc := gatewayService()
+	svc.Spec.Type = corev1.ServiceTypeNodePort
+	svc.Spec.Ports = []corev1.ServicePort{
+		{Port: 80, NodePort: httpNodePort},
+		{Port: 443, NodePort: httpsNodePort},
+	}
+	return svc
+}
 
-	data := argocd.NewTemplateData(
+// TestResolveOutputsHostPortGateway pins that a host-port gateway (local kind
+// clusters) reports the provider's host address, never a LoadBalancer status
+// (a NodePort service has no ingress entries), and only after confirming the
+// Envoy service carries the pinned NodePorts the kind host ports point at.
+func TestResolveOutputsHostPortGateway(t *testing.T) {
+	hostPortData := argocd.NewTemplateData(
 		&config.NebariConfig{Domain: "nebari.local"},
 		nil,
 		cluster.InfraSettings{GatewayHostAddress: "127.0.0.1"},
 	)
 
-	got, err := resolveOutputs(ctx, client, data, OutputsOptions{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.GatewayAddress != "127.0.0.1" {
-		t.Errorf("gateway address = %q, want 127.0.0.1", got.GatewayAddress)
-	}
+	t.Run("reports the host address once the pinned NodePorts are confirmed", func(t *testing.T) {
+		objects := append(without(fullyDeployed(), 3),
+			nodePortGatewayService(cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort))
+		client := fake.NewSimpleClientset(objects...)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		got, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.GatewayAddress != "127.0.0.1" {
+			t.Errorf("gateway address = %q, want 127.0.0.1", got.GatewayAddress)
+		}
+	})
+
+	t.Run("reports the address unresolved when the service has other nodePorts", func(t *testing.T) {
+		// Random NodePorts are what a no-op EnvoyProxy service patch produces:
+		// Kubernetes assigns them when nothing pins the values.
+		objects := append(without(fullyDeployed(), 3), nodePortGatewayService(31234, 32456))
+		client := fake.NewSimpleClientset(objects...)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		for _, want := range []string{"gateway_address", "does not carry nodePort"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("reports the address unresolved when the service is absent", func(t *testing.T) {
+		client := fake.NewSimpleClientset(without(fullyDeployed(), 3)...)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		for _, want := range []string{"gateway_address", "no services found"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
+		}
+	})
 }
 
 func TestResolveOutputsWaitsForAsyncFields(t *testing.T) {
