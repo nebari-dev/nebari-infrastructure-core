@@ -23,6 +23,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0014](0014-helm-valuefiles-overlay-seam.md) | Helm valueFiles Overlay Seam for Foundational Apps | Accepted | 2026-07-22 |
 | [ADR-0015](0015-repository-provider-abstraction.md) | Repository Provider Abstraction for GitOps Bootstrap | Accepted | 2026-07-10 |
 | [ADR-0016](0016-opentofu-runtime-version-policy.md) | OpenTofu Runtime Version Policy (External Binaries and Compatibility Window) | Proposed | 2026-08-12 |
+| [ADR-0018](0018-local-gateway-host-ports.md) | Publish the Local Gateway on Host Ports Instead of MetalLB | Proposed | 2026-09-01 |
 
 ## ADR Statuses
 

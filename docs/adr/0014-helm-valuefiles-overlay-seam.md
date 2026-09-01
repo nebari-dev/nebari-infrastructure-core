@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted · Amended (2026-08-31): metallb was removed in [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640), so `isMetalLBPath` no longer exists. trust-manager (`isTrustBundlePath`) remains the worked example of a gated app. References to metallb below are historical.
+Accepted · Amended (2026-08-31): metallb was removed in [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640) (see [ADR-0018](0018-local-gateway-host-ports.md)), so `isMetalLBPath` no longer exists. trust-manager (`isTrustBundlePath`) remains the worked example of a gated app. References to metallb below are historical.
 
 ## Date
 
