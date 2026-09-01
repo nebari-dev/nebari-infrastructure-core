@@ -22,8 +22,14 @@ nebari_journeys = { path = ".", editable = true }
 [tasks]
 install-browsers = "playwright install chromium"
 test-lib = "pytest tests_lib -v"
-test-api = "pytest journeys -v -m 'not ui'"
-test = { cmd = "pytest journeys -v --tracing=retain-on-failure --screenshot=only-on-failure --video=retain-on-failure", depends-on = ["install-browsers"] }
+# -rs prints the REASON for every skip. Without it a CI log shows nine
+# skips and no way to tell whether the platform lacks Longhorn, the
+# cluster has no publicly trusted certificate, or a journey quietly
+# stopped testing anything -- which makes the suite's central promise,
+# that a skip always names what stayed unverified, undeliverable in the
+# one place people actually read the output.
+test-api = "pytest journeys -v -rs -m 'not ui'"
+test = { cmd = "pytest journeys -v -rs --tracing=retain-on-failure --screenshot=only-on-failure --video=retain-on-failure", depends-on = ["install-browsers"] }
 
 [feature.dev.dependencies]
 ruff = "*"
