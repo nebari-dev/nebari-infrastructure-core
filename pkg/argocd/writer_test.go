@@ -1145,8 +1145,7 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 			LonghornEnabled:  true,
 			KeycloakBasePath: "/auth",
 		}
-		mock := &mockGitClient{workDir: tmpDir}
-		if err := WriteAllToGit(ctx, mock, cfg, nil, settings, ""); err != nil {
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
