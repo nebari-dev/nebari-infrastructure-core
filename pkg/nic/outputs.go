@@ -311,14 +311,16 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 	// passed by the time its turn comes.
 	if data.GatewayHostAddress != "" {
 		// A host-port gateway (local kind clusters) has no load balancer
-		// status to read: the address comes from the provider. The Envoy
-		// service is still read as a drift check. The kind host ports point
-		// at the pinned NodePorts, so when the service is missing or carries
-		// other nodePorts, nothing answers at the host address and it is
-		// reported unresolved instead.
+		// status to read: the address comes from the provider, so it is
+		// substantiated before it is reported. The Envoy service must carry
+		// the pinned NodePorts the kind host ports point at, and the gateway
+		// must answer a real HTTPS request at the address. Either failing
+		// reports the field unresolved instead of an address nothing serves.
 		if err := ctx.Err(); err != nil {
 			missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
 		} else if err := endpoint.CheckNodePorts(ctx, client, []int32{cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort}); err != nil {
+			missing = append(missing, unresolved{field: "gateway_address", reason: err.Error()})
+		} else if err := endpoint.ProbeGateway(ctx, data.GatewayHostAddress, data.Domain, data.HTTPSPort); err != nil {
 			missing = append(missing, unresolved{field: "gateway_address", reason: err.Error()})
 		} else {
 			outputs.GatewayAddress = data.GatewayHostAddress

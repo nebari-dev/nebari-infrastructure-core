@@ -2,8 +2,12 @@ package endpoint
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -18,6 +22,13 @@ const (
 	DefaultLabelSelector = "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway"
 	DefaultTimeout       = 5 * time.Minute
 	DefaultPollInterval  = 5 * time.Second
+
+	// probeDialTimeout and probeTimeout bound ProbeGateway's single attempt.
+	// They are short on purpose: callers own retry policy (nic outputs --wait
+	// polls), so one attempt must fail fast rather than eat the caller's
+	// window on an address that does not answer.
+	probeDialTimeout = 5 * time.Second
+	probeTimeout     = 10 * time.Second
 )
 
 // LoadBalancerEndpoint holds the external endpoint assigned to the load balancer.
@@ -217,6 +228,60 @@ func CheckNodePorts(ctx context.Context, client kubernetes.Interface, want []int
 			return err
 		}
 	}
+	return nil
+}
+
+// ProbeGateway sends one HTTPS request for domain through the gateway at
+// address, with no polling. address may be an IP or a hostname: the TCP
+// connection is pinned to it while SNI and Host stay domain, because the
+// gateway routes by hostname. Any HTTP response, whatever its status code,
+// proves the path to the gateway. Redirects are not followed. TLS is
+// deliberately not verified, since reachability is the claim being checked
+// and certificate trust is the caller's concern (local clusters serve
+// self-signed certificates).
+func ProbeGateway(ctx context.Context, address, domain string, port int) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "endpoint.ProbeGateway")
+	defer span.End()
+
+	target := net.JoinHostPort(address, strconv.Itoa(port))
+	span.SetAttributes(
+		attribute.String("target", target),
+		attribute.String("domain", domain),
+	)
+
+	probeClient := &http.Client{
+		Timeout: probeTimeout,
+		Transport: &http.Transport{
+			// Dial the gateway address no matter what host the URL names.
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: probeDialTimeout}).DialContext(ctx, network, target)
+			},
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // reachability probe, not a trust decision; see the doc comment
+				ServerName:         domain,
+			},
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	url := fmt.Sprintf("https://%s/", net.JoinHostPort(domain, strconv.Itoa(port)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("build gateway probe request: %w", err)
+	}
+
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("the gateway did not answer an HTTPS request for %s at %s: %w", domain, target, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	span.SetAttributes(attribute.Int("status_code", resp.StatusCode))
 	return nil
 }
 

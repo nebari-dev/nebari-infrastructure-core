@@ -2,6 +2,10 @@ package nic
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -222,30 +226,79 @@ func nodePortGatewayService(httpNodePort, httpsNodePort int32) *corev1.Service {
 	return svc
 }
 
+// hostPortData builds TemplateData for a host-port gateway whose HTTPS
+// listener is published on the given loopback port, so the probe in
+// resolveOutputs dials a port the test controls instead of the real 443.
+func hostPortData(port int) argocd.TemplateData {
+	return argocd.NewTemplateData(
+		&config.NebariConfig{Domain: "nebari.local"},
+		nil,
+		cluster.InfraSettings{GatewayHostAddress: "127.0.0.1", HTTPSPort: port},
+	)
+}
+
+// startGatewayListener serves TLS on a loopback port and returns the port,
+// standing in for the published gateway the probe dials.
+func startGatewayListener(t *testing.T) int {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "https://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port from %q: %v", server.URL, err)
+	}
+	return port
+}
+
 // TestResolveOutputsHostPortGateway pins that a host-port gateway (local kind
 // clusters) reports the provider's host address, never a LoadBalancer status
 // (a NodePort service has no ingress entries), and only after confirming the
-// Envoy service carries the pinned NodePorts the kind host ports point at.
+// Envoy service carries the pinned NodePorts the kind host ports point at
+// and the gateway answers a real HTTPS request at the address.
 func TestResolveOutputsHostPortGateway(t *testing.T) {
-	hostPortData := argocd.NewTemplateData(
-		&config.NebariConfig{Domain: "nebari.local"},
-		nil,
-		cluster.InfraSettings{GatewayHostAddress: "127.0.0.1"},
-	)
-
-	t.Run("reports the host address once the pinned NodePorts are confirmed", func(t *testing.T) {
+	t.Run("reports the host address once the NodePorts and a live listener are confirmed", func(t *testing.T) {
+		port := startGatewayListener(t)
 		objects := append(without(fullyDeployed(), 3),
 			nodePortGatewayService(cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort))
 		client := fake.NewSimpleClientset(objects...)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		got, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		got, err := resolveOutputs(ctx, client, hostPortData(port), OutputsOptions{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got.GatewayAddress != "127.0.0.1" {
 			t.Errorf("gateway address = %q, want 127.0.0.1", got.GatewayAddress)
+		}
+	})
+
+	t.Run("reports the address unresolved when nothing answers at the host port", func(t *testing.T) {
+		// NodePorts pinned, but no listener: a kind cluster created before a
+		// port change, or a dead Envoy, looks exactly like this.
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("reserve port: %v", err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		_ = listener.Close()
+
+		objects := append(without(fullyDeployed(), 3),
+			nodePortGatewayService(cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort))
+		client := fake.NewSimpleClientset(objects...)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		_, err = resolveOutputs(ctx, client, hostPortData(port), OutputsOptions{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		for _, want := range []string{"gateway_address", "did not answer"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
 		}
 	})
 
@@ -257,7 +310,7 @@ func TestResolveOutputsHostPortGateway(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		_, err := resolveOutputs(ctx, client, hostPortData(443), OutputsOptions{})
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -273,7 +326,7 @@ func TestResolveOutputsHostPortGateway(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err := resolveOutputs(ctx, client, hostPortData, OutputsOptions{})
+		_, err := resolveOutputs(ctx, client, hostPortData(443), OutputsOptions{})
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
