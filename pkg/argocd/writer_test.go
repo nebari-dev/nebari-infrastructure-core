@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -921,6 +922,88 @@ func TestSyncWaveOrdering(t *testing.T) {
 	}
 }
 
+// egOIDCIssuerPattern is the validation Envoy Gateway applies to
+// SecurityPolicy's spec.oidc.provider.issuer as of v1.9.1, copied verbatim from
+// the CRD (api/v1alpha1/oidc_types.go). EG enforces the same https-scheme rule a
+// second time in the translator (validateOIDCIssuerURL), so a value that fails
+// this is rejected at apply time AND would leave the policy Accepted: False with
+// no oauth2 filter on the route. Asserted directly rather than only comparing
+// against an expected literal, so that changing the template and the expected
+// constant together still fails.
+var egOIDCIssuerPattern = regexp.MustCompile(`^https://[^/?#@]+(/[^?#]*)?$`)
+
+func assertValidEGIssuer(t *testing.T, issuer string) {
+	t.Helper()
+	if !egOIDCIssuerPattern.MatchString(issuer) {
+		t.Errorf("oidc.provider.issuer %q does not satisfy the Envoy Gateway issuer constraint %s",
+			issuer, egOIDCIssuerPattern)
+	}
+}
+
+// longhornSecurityPolicyShape mirrors the subset of the rendered SecurityPolicy
+// we assert on. It exists so tests can verify the split-URL invariant on a
+// per-field basis instead of relying on strings.Contains over the whole file,
+// which cannot distinguish `oidc.provider.issuer` from `jwt.providers[0].issuer`
+// when they render as different lines with the same key.
+type longhornSecurityPolicyShape struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Metadata   struct {
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
+	} `yaml:"metadata"`
+	Spec struct {
+		TargetRefs []struct {
+			Group string `yaml:"group"`
+			Kind  string `yaml:"kind"`
+			Name  string `yaml:"name"`
+		} `yaml:"targetRefs"`
+		OIDC struct {
+			Provider struct {
+				Issuer                string `yaml:"issuer"`
+				TokenEndpoint         string `yaml:"tokenEndpoint"`
+				AuthorizationEndpoint string `yaml:"authorizationEndpoint"`
+				EndSessionEndpoint    string `yaml:"endSessionEndpoint"`
+			} `yaml:"provider"`
+			ClientID     string `yaml:"clientID"`
+			ClientSecret struct {
+				Name string `yaml:"name"`
+			} `yaml:"clientSecret"`
+			RedirectURL           string `yaml:"redirectURL"`
+			LogoutPath            string `yaml:"logoutPath"`
+			ForwardAccessToken    bool   `yaml:"forwardAccessToken"`
+			RefreshToken          bool   `yaml:"refreshToken"`
+			PassThroughAuthHeader bool   `yaml:"passThroughAuthHeader"`
+		} `yaml:"oidc"`
+		JWT struct {
+			Providers []struct {
+				Name       string `yaml:"name"`
+				Issuer     string `yaml:"issuer"`
+				RemoteJWKS struct {
+					URI string `yaml:"uri"`
+				} `yaml:"remoteJWKS"`
+			} `yaml:"providers"`
+		} `yaml:"jwt"`
+		Authorization struct {
+			DefaultAction string `yaml:"defaultAction"`
+			Rules         []struct {
+				Name      string `yaml:"name"`
+				Action    string `yaml:"action"`
+				Principal struct {
+					JWT struct {
+						Provider string `yaml:"provider"`
+						Claims   []struct {
+							Name      string   `yaml:"name"`
+							ValueType string   `yaml:"valueType"`
+							Values    []string `yaml:"values"`
+						} `yaml:"claims"`
+					} `yaml:"jwt"`
+				} `yaml:"principal"`
+			} `yaml:"rules"`
+		} `yaml:"authorization"`
+	} `yaml:"spec"`
+}
+
 func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	ctx := context.Background()
 
@@ -940,39 +1023,200 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
 		}
-		out := string(content)
 
-		for _, want := range []string{
-			"kind: SecurityPolicy",
-			"apiVersion: gateway.envoyproxy.io/v1alpha1",
-			"name: longhorn-oidc",
-			"namespace: longhorn-system",
-			"kind: HTTPRoute",
-			"name: longhorn",
-			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
-			"clientID: longhorn",
-			"name: longhorn-oidc-client-secret",
-			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
-			`logoutPath: "/oauth2/logout"`,
-			"forwardAccessToken: true",
-			"jwt:",
-			"name: keycloak",
-			"/realms/nebari/protocol/openid-connect/certs",
-			"authorization:",
-			"defaultAction: Deny",
-			"name: allow-longhorn-admins",
-			"action: Allow",
-			"valueType: StringArray",
-			"- /longhorn-admins",
-		} {
-			if !strings.Contains(out, want) {
-				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
-			}
+		var sp longhornSecurityPolicyShape
+		if err := yaml.Unmarshal(content, &sp); err != nil {
+			t.Fatalf("failed to unmarshal SecurityPolicy: %v\ngot:\n%s", err, string(content))
+		}
+
+		const (
+			inClusterBase = "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari"
+			publicBase    = "https://keycloak.test.example.com/realms/nebari"
+		)
+
+		// Top-level shape.
+		if got, want := sp.APIVersion, "gateway.envoyproxy.io/v1alpha1"; got != want {
+			t.Errorf("apiVersion: got %q, want %q", got, want)
+		}
+		if got, want := sp.Kind, "SecurityPolicy"; got != want {
+			t.Errorf("kind: got %q, want %q", got, want)
+		}
+		if got, want := sp.Metadata.Name, "longhorn-oidc"; got != want {
+			t.Errorf("metadata.name: got %q, want %q", got, want)
+		}
+		if got, want := sp.Metadata.Namespace, "longhorn-system"; got != want {
+			t.Errorf("metadata.namespace: got %q, want %q", got, want)
+		}
+
+		// Target: the Longhorn HTTPRoute.
+		if len(sp.Spec.TargetRefs) != 1 {
+			t.Fatalf("spec.targetRefs: got %d, want 1", len(sp.Spec.TargetRefs))
+		}
+		if tr := sp.Spec.TargetRefs[0]; tr.Kind != "HTTPRoute" || tr.Name != "longhorn" {
+			t.Errorf("spec.targetRefs[0]: got %+v, want kind=HTTPRoute name=longhorn", tr)
+		}
+
+		// OIDC provider — split-URL invariant. tokenEndpoint is in-cluster
+		// (back-channel); authorizationEndpoint + endSessionEndpoint are public
+		// (front-channel). Swapping any two silently reintroduces the
+		// private-domain OIDC-discovery bug this template exists to fix.
+		// issuer is public purely to satisfy the CRD's https constraint; it is
+		// inert at runtime once discovery is suppressed.
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
+			t.Errorf("oidc.provider.issuer: got %q, want %q (public; EG constrains this field to an https scheme)", got, want)
+		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
+		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
+			t.Errorf("oidc.provider.tokenEndpoint: got %q, want %q (in-cluster)", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.AuthorizationEndpoint, publicBase+"/protocol/openid-connect/auth"; got != want {
+			t.Errorf("oidc.provider.authorizationEndpoint: got %q, want %q (public)", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.EndSessionEndpoint, publicBase+"/protocol/openid-connect/logout"; got != want {
+			t.Errorf("oidc.provider.endSessionEndpoint: got %q, want %q (public)", got, want)
+		}
+
+		// OIDC client fields.
+		if got, want := sp.Spec.OIDC.ClientID, "longhorn"; got != want {
+			t.Errorf("oidc.clientID: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.ClientSecret.Name, "longhorn-oidc-client-secret"; got != want {
+			t.Errorf("oidc.clientSecret.name: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.RedirectURL, "https://longhorn.test.example.com/oauth2/callback"; got != want {
+			t.Errorf("oidc.redirectURL: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.LogoutPath, "/oauth2/logout"; got != want {
+			t.Errorf("oidc.logoutPath: got %q, want %q", got, want)
+		}
+		if !sp.Spec.OIDC.ForwardAccessToken {
+			t.Errorf("oidc.forwardAccessToken: got false, want true")
+		}
+		// refreshToken keeps the session alive from the refresh token instead of
+		// bouncing the user back through Keycloak when the access token expires.
+		if !sp.Spec.OIDC.RefreshToken {
+			t.Errorf("oidc.refreshToken: got false, want true")
+		}
+		// passThroughAuthHeader lets a request that already carries an
+		// `Authorization: Bearer <token>` skip the oauth2 redirect and reach the
+		// jwt block below. Without it, EG's oauth2 filter (which runs ahead of
+		// jwt_authn) treats the Bearer as an unknown session and
+		// bounces the request back to Keycloak — breaking scripted API access.
+		// Browser flow is unaffected because browsers arrive with the oauth2
+		// session cookie, not a Bearer.
+		if !sp.Spec.OIDC.PassThroughAuthHeader {
+			t.Errorf("oidc.passThroughAuthHeader: got false, want true")
+		}
+
+		// JWT provider — issuer MUST be public, because it has to match the
+		// `iss` claim Keycloak stamps into tokens, which is KC_HOSTNAME
+		// (always the public URL) regardless of which endpoint minted the token.
+		if len(sp.Spec.JWT.Providers) != 1 {
+			t.Fatalf("jwt.providers: got %d, want 1", len(sp.Spec.JWT.Providers))
+		}
+		jp := sp.Spec.JWT.Providers[0]
+		if got, want := jp.Name, "keycloak"; got != want {
+			t.Errorf("jwt.providers[0].name: got %q, want %q", got, want)
+		}
+		if got, want := jp.Issuer, publicBase; got != want {
+			t.Errorf("jwt.providers[0].issuer: got %q, want %q (public — must match `iss` claim)", got, want)
+		}
+		if got, want := jp.RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri: got %q, want %q (in-cluster)", got, want)
+		}
+
+		// Authorization: default-deny, allow only /longhorn-admins group.
+		if got, want := sp.Spec.Authorization.DefaultAction, "Deny"; got != want {
+			t.Errorf("authorization.defaultAction: got %q, want %q", got, want)
+		}
+		if len(sp.Spec.Authorization.Rules) != 1 {
+			t.Fatalf("authorization.rules: got %d, want 1", len(sp.Spec.Authorization.Rules))
+		}
+		rule := sp.Spec.Authorization.Rules[0]
+		if rule.Name != "allow-longhorn-admins" || rule.Action != "Allow" {
+			t.Errorf("authorization.rules[0]: got name=%q action=%q, want allow-longhorn-admins/Allow",
+				rule.Name, rule.Action)
+		}
+		if rule.Principal.JWT.Provider != "keycloak" {
+			t.Errorf("authorization.rules[0].principal.jwt.provider: got %q, want %q",
+				rule.Principal.JWT.Provider, "keycloak")
+		}
+		if len(rule.Principal.JWT.Claims) != 1 {
+			t.Fatalf("authorization.rules[0].principal.jwt.claims: got %d, want 1",
+				len(rule.Principal.JWT.Claims))
+		}
+		claim := rule.Principal.JWT.Claims[0]
+		if claim.Name != "groups" || claim.ValueType != "StringArray" {
+			t.Errorf("authorization claim: got name=%q valueType=%q, want groups/StringArray",
+				claim.Name, claim.ValueType)
+		}
+		if len(claim.Values) != 1 || claim.Values[0] != "/longhorn-admins" {
+			t.Errorf("authorization claim.values: got %v, want [/longhorn-admins]", claim.Values)
 		}
 
 		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
 		if _, err := os.Stat(appPath); err != nil {
 			t.Errorf("apps/securitypolicies.yaml should be written when LonghornEnabled=true: %v", err)
+		}
+	})
+
+	t.Run("renders correctly with a KeycloakBasePath override", func(t *testing.T) {
+		// A non-empty KeycloakBasePath (e.g. "/auth" on Keycloak deployments
+		// that keep the pre-Quarkus path prefix) has to land in the right
+		// position on all four rendered URLs. Notably: `KeycloakServiceURL`
+		// already embeds the base path (see writer.go), while the public URLs
+		// interpolate `{{ .KeycloakBasePath }}` directly. Regressing either
+		// side would mis-render only under this configuration.
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:     "longhorn",
+			LonghornEnabled:  true,
+			KeycloakBasePath: "/auth",
+		}
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
+		}
+
+		var sp longhornSecurityPolicyShape
+		if err := yaml.Unmarshal(content, &sp); err != nil {
+			t.Fatalf("failed to unmarshal SecurityPolicy: %v\ngot:\n%s", err, string(content))
+		}
+
+		const (
+			inClusterBase = "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth/realms/nebari"
+			publicBase    = "https://keycloak.test.example.com/auth/realms/nebari"
+		)
+
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
+			t.Errorf("oidc.provider.issuer with basePath=/auth: got %q, want %q", got, want)
+		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
+		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
+			t.Errorf("oidc.provider.tokenEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.AuthorizationEndpoint, publicBase+"/protocol/openid-connect/auth"; got != want {
+			t.Errorf("oidc.provider.authorizationEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.EndSessionEndpoint, publicBase+"/protocol/openid-connect/logout"; got != want {
+			t.Errorf("oidc.provider.endSessionEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+
+		if len(sp.Spec.JWT.Providers) != 1 {
+			t.Fatalf("jwt.providers with basePath=/auth: got %d, want 1", len(sp.Spec.JWT.Providers))
+		}
+		if got, want := sp.Spec.JWT.Providers[0].Issuer, publicBase; got != want {
+			t.Errorf("jwt.providers[0].issuer with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.JWT.Providers[0].RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri with basePath=/auth: got %q, want %q",
+				got, want)
 		}
 	})
 

@@ -1,0 +1,43 @@
+[workspace]
+name = "nebari-user-journeys"
+description = "User journey (e2e) tests for Nebari foundational software"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.12"
+pytest = "*"
+python-kubernetes = "*"
+requests = "*"
+pytest-playwright = "*"
+playwright-python = "*"
+cryptography = "*"
+# Explicit rather than inherited from requests: trust.classify_anchor reads
+# certifi.where() directly to verify the gateway chain offline.
+certifi = "*"
+
+[pypi-dependencies]
+nebari_journeys = { path = ".", editable = true }
+
+[tasks]
+install-browsers = "playwright install chromium"
+test-lib = "pytest tests_lib -v"
+# -rs prints the REASON for every skip. Without it a CI log shows nine
+# skips and no way to tell whether the platform lacks Longhorn, the
+# cluster has no publicly trusted certificate, or a journey quietly
+# stopped testing anything -- which makes the suite's central promise,
+# that a skip always names what stayed unverified, undeliverable in the
+# one place people actually read the output.
+test-api = "pytest journeys -v -rs -m 'not ui'"
+test = { cmd = "pytest journeys -v -rs --tracing=retain-on-failure --screenshot=only-on-failure --video=retain-on-failure", depends-on = ["install-browsers"] }
+
+[feature.dev.dependencies]
+ruff = "*"
+
+[feature.dev.tasks]
+lint = "ruff check ."
+fmt = "ruff format ."
+
+[environments]
+default = { features = [] }
+dev = { features = ["dev"] }

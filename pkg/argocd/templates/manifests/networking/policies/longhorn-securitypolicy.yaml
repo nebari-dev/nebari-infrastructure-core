@@ -12,8 +12,69 @@ spec:
       kind: HTTPRoute
       name: longhorn
   oidc:
+    # Split-horizon OIDC for the Longhorn admin UI. On private-domain /
+    # air-gapped clusters, the Envoy Gateway control plane can't resolve
+    # Keycloak's public FQDN, so its default behaviour — fetching the OIDC
+    # discovery document from `issuer` — fails with a name-resolution
+    # error. A failing `buildOIDC` leaves the SecurityPolicy
+    # `Accepted: False` and no oauth2 filter is installed on the route.
+    # Only the jwt block below survives in the compiled xDS, so every
+    # tokenless browser request returns a bare "Jwt is missing" 401 from
+    # jwt_authn instead of the expected Keycloak redirect. The failure
+    # surfaces explicitly in the SP status:
+    #   OIDC: Get "https://keycloak.<domain>/.well-known/openid-configuration":
+    #   dial tcp: lookup keycloak.<domain>: no such host
+    #
+    # Setting both authorizationEndpoint and tokenEndpoint suppresses
+    # discovery entirely (envoyproxy/gateway internal/gatewayapi/
+    # securitypolicy.go). With translation succeeding, the oauth2 filter
+    # runs ahead of jwt_authn in EG's http-filter order and redirects
+    # tokenless requests before jwt_authn sees them, so the browser flow
+    # works as designed. (Order numbers shift between EG releases; the
+    # oauth2-before-jwt_authn relationship is what matters.)
+    #
+    # Because we set both endpoints to skip discovery, EG also stops
+    # discovering end_session; endSessionEndpoint must be set explicitly
+    # or logout silently can't reach Keycloak. Requires Envoy Gateway
+    # v1.5+ for endSessionEndpoint.
+    #
+    # This works regardless of whether Keycloak has
+    # KC_HOSTNAME_BACKCHANNEL_DYNAMIC set. It relies on two Keycloak
+    # invariants:
+    #
+    #   1. A static KC_HOSTNAME stamps the public URL as `iss` on every
+    #      token, no matter which listener minted it — so the jwt block
+    #      below can validate against the public issuer.
+    #   2. Keycloak serves back-channel endpoints (token exchange, jwks)
+    #      on any host address — so the token endpoint can be pinned
+    #      in-cluster safely.
+    #
+    # Endpoint routing:
+    #
+    #   - tokenEndpoint: in-cluster URL. It carries a Basic Auth secret
+    #     over plaintext HTTP on Envoy's in-cluster network; NIC doesn't
+    #     run TLS to Keycloak's admin port and the operator makes the
+    #     same choice.
+    #   - issuer: public URL, and it MUST use an https scheme. The field
+    #     is inert at runtime once discovery is suppressed (EG's
+    #     `ir.OIDCProvider` has no Issuer field), but it is required by
+    #     the CRD, which constrains it to
+    #     `^https://[^/?#@]+(/[^?#]*)?$` as of EG v1.9.1. An in-cluster
+    #     `http://` value here is rejected by the API server at apply
+    #     time, so it cannot mirror the operator's in-cluster issuer.
+    #   - authorizationEndpoint + endSessionEndpoint: public URL.
+    #     Browser redirects that must resolve on the user's machine.
+    #
+    # jwt.providers[].issuer below stays public because it must match the
+    # `iss` claim Keycloak stamps into tokens.
+    #
+    # Design confirmation + reference implementation:
+    # https://github.com/nebari-dev/nebari-operator/blob/main/internal/controller/reconcilers/auth/providers/keycloak.go#L73-L143
     provider:
-      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+      issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}"
+      tokenEndpoint: "{{ .KeycloakServiceURL }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/token"
+      authorizationEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/auth"
+      endSessionEndpoint: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/logout"
     clientID: longhorn
     clientSecret:
       name: {{ .LonghornOIDCSecretName }}
@@ -28,12 +89,24 @@ spec:
     # rather than bouncing the user back through Keycloak mid-session.
     refreshToken: true
     forwardAccessToken: true
+    # Let a request that already carries `Authorization: Bearer <token>` fall
+    # through to jwt_authn below instead of being redirected to Keycloak by
+    # the oauth2 filter. Matches EG's combined OIDC+JWT e2e example
+    # (test/e2e/testdata/oidc-securitypolicy.yaml). Browser sessions are
+    # unaffected — they arrive with the oauth2 session cookie, not a Bearer.
+    # Only matters for scripted API access with a pre-obtained token.
+    passThroughAuthHeader: true
   jwt:
+    # Straight JWT authentication for anything the oauth2 filter above
+    # lets through with an existing Bearer (see passThroughAuthHeader).
+    # Tokenless requests are handled entirely by oauth2, which runs ahead
+    # of jwt in EG's http-filter order, so no `optional: true` relaxation
+    # is needed here.
     providers:
       - name: keycloak
-        issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/nebari"
+        issuer: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}/realms/{{ .KeycloakRealm }}"
         remoteJWKS:
-          uri: "{{ .KeycloakServiceURL }}/realms/nebari/protocol/openid-connect/certs"
+          uri: "{{ .KeycloakServiceURL }}/realms/{{ .KeycloakRealm }}/protocol/openid-connect/certs"
           # JWKS staleness window: how long Envoy Gateway keeps serving a cached
           # key set after Keycloak rotates the realm signing keys.
           cacheDuration: 300s
