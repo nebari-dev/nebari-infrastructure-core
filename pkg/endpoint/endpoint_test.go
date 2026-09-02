@@ -239,6 +239,56 @@ func TestCheck(t *testing.T) {
 // of its own. Delegating to an already-instrumented helper is not enough - the
 // caller's own frame is what makes a trace attributable to the operation the
 // operator asked for.
+// nodePortGatewaySvc builds a NodePort service carrying the default
+// owning-gateway label, shaped like the Envoy service of a host-port gateway:
+// pinned nodePorts and no load balancer ingress.
+func nodePortGatewaySvc(nodePorts ...int32) *corev1.Service {
+	svc := gatewaySvc()
+	svc.Spec.Type = corev1.ServiceTypeNodePort
+	for i, nodePort := range nodePorts {
+		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+			Port:     int32(80 * (i + 1)),
+			NodePort: nodePort,
+		})
+	}
+	return svc
+}
+
+func TestCheckNodePorts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("passes when the service carries every wanted nodePort", func(t *testing.T) {
+		client := fake.NewSimpleClientset(nodePortGatewaySvc(30080, 30443))
+		if err := CheckNodePorts(ctx, client, []int32{30080, 30443}); err != nil {
+			t.Errorf("CheckNodePorts() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("fails naming the missing nodePort and the ports found", func(t *testing.T) {
+		client := fake.NewSimpleClientset(nodePortGatewaySvc(31234, 32456))
+		err := CheckNodePorts(ctx, client, []int32{30080, 30443})
+		if err == nil {
+			t.Fatal("CheckNodePorts() expected error, got nil")
+		}
+		for _, want := range []string{"30080", "31234", "does not carry"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("fails when no gateway service exists", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		err := CheckNodePorts(ctx, client, []int32{30080})
+		if err == nil {
+			t.Fatal("CheckNodePorts() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "no services found") {
+			t.Errorf("error %q should contain %q", err.Error(), "no services found")
+		}
+	})
+}
+
 // startProbeTarget serves TLS on a loopback port, answering every request
 // with status, and returns the port. Its certificate is httptest's
 // self-signed one, which also pins that ProbeGateway does not verify TLS.
