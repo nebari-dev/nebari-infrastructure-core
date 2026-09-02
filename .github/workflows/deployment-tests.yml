@@ -116,7 +116,7 @@ jobs:
     concurrency:
       group: deploy-test-aws
       cancel-in-progress: false
-    timeout-minutes: 130
+    timeout-minutes: 140
     permissions:
       contents: read
       id-token: write
@@ -146,8 +146,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-west-2
           # The default duration is 3600 seconds (one hour), so we bump it
-          # to 7200 seconds (two hours) to give it room to deploy and destroy.
-          role-duration-seconds: 7200
+          # to 9000 seconds (two hours and a half) to give it room to deploy and destroy.
+          role-duration-seconds: 9000
 
       - name: Deploy
         uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
@@ -188,7 +188,7 @@ jobs:
     concurrency:
       group: deploy-test-azure
       cancel-in-progress: false
-    timeout-minutes: 130
+    timeout-minutes: 140
     permissions:
       contents: read
       id-token: write
