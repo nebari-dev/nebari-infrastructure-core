@@ -145,10 +145,10 @@ quay.io` did not run or did not pass. Check its `quay-publish` approval first,
 then whether `pixi lock` resolved - a starter cannot lock until the package it
 pins is actually on the channel.
 
-**Nothing published for a release cut before this pipeline existed.** There is no
-backfill path: publishing happens only as part of a release run. v0.14.0 and
-earlier are not on the channel and will not be, so `pixi add` against this channel
-starts working with the first stable release cut after this landed.
+**Publishing happens only as part of a release run, so there is no automatic
+backfill.** v0.14.0 was seeded onto the channel by hand to prove the path end to
+end, and resolves today; releases from the first stable tag cut after this landed
+are published by the pipeline instead.
 
 This channel is a bridge. The intended home is prefix.dev's shared
 [`github-releases`](https://prefix.dev/channels/github-releases) channel, which is
