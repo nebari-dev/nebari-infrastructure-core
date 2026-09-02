@@ -61,9 +61,17 @@ TOKEN_EXPIRY_MARGIN_SECONDS = 10
 
 # Prefix for the throwaway realm users journeys create. Mirrors the role
 # SCRATCH_NAMESPACE_PREFIX plays for namespaces: it is both what the
-# generator builds from and the second guard the sweep checks, so the two
+# generator builds from and a guard the sweep re-checks, so the two
 # cannot drift apart.
 SCRATCH_USER_PREFIX = "journey-"
+
+# Email domain create_user stamps onto every scratch user, and the sweep's
+# second, INDEPENDENT guard. The prefix is a signal worn by the username
+# alone, and usernames are chosen by humans: a real operator can register
+# "journey-planner". RFC 2606 reserves .invalid, so no legitimate account
+# carries an address under this domain, which makes prefix-plus-domain the
+# user-sweep equivalent of the namespace sweep's label-plus-prefix pair.
+SCRATCH_EMAIL_DOMAIN = "journeys.invalid"
 
 # Cap on the user listing the sweep asks Keycloak for. Deliberately not
 # paginated: more than this many leftover scratch users means something is
@@ -120,14 +128,16 @@ def sweep_scratch_users(keycloak: "Keycloak") -> SweepResult:
     puts that user in `longhorn-admins` before logging in, so the leak can
     be a privileged one.
 
-    Two guards, as with the namespace sweep. Keycloak's username search is
-    an INFIX match, so asking it for `journey-` also returns
-    `prod-journey-admin`; the prefix is therefore re-checked here before
-    anything is deleted, and a non-matching user is reported as skipped
-    rather than silently dropped. A delete that fails does not abort the
-    sweep -- the remaining leftovers still need clearing -- but it is
-    recorded, because a user still sitting in the realm is exactly what
-    the caller has to be told about.
+    Two independent guards, as with the namespace sweep. Keycloak's
+    username search is an INFIX match, so asking it for `journey-` also
+    returns `prod-journey-admin`. The prefix is re-checked here before
+    anything is deleted. The prefix alone is still only the username's
+    word for it so the sweep also requires the SCRATCH_EMAIL_DOMAIN
+    address `create_user` stamps on every scratch user. A user missing
+    either signal is reported as skipped rather than silently dropped. A
+    delete that fails does not abort the sweep but it is recorded,
+    because a user still sitting in the realm is exactly what the caller
+    has to be told about.
 
     Never raises: a sweep that cannot list the realm reports itself as
     failed rather than aborting the run before a single journey has had a
@@ -145,7 +155,10 @@ def sweep_scratch_users(keycloak: "Keycloak") -> SweepResult:
         return result
     for user in listing:
         username = user.get("username", "")
-        if not username.startswith(SCRATCH_USER_PREFIX):
+        email = (user.get("email") or "").lower()
+        if not username.startswith(SCRATCH_USER_PREFIX) or not email.endswith(
+            f"@{SCRATCH_EMAIL_DOMAIN}"
+        ):
             result.skipped.append(username)
             continue
         try:
@@ -289,7 +302,7 @@ class Keycloak:
                 "username": username,
                 "enabled": True,
                 "emailVerified": True,
-                "email": f"{username}@journeys.invalid",
+                "email": f"{username}@{SCRATCH_EMAIL_DOMAIN}",
                 # firstName/lastName are required by Keycloak's declarative
                 # user profile; without them the VERIFY_PROFILE required
                 # action fires on first login and the user is dropped onto

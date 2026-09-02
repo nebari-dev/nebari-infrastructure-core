@@ -319,8 +319,13 @@ def test_a_401_on_a_mutating_call_is_also_retried():
 # so the leak can be a privileged one.
 
 
-def _user(username, uid=None):
-    return {"username": username, "id": uid or f"id-{username}"}
+def _user(username, uid=None, email=None):
+    """A realm user as the sweep's listing sees it. The default email is the
+    one create_user stamps; pass email explicitly to model a user the suite
+    did not create."""
+    if email is None:
+        email = f"{username}@{keycloak_module.SCRATCH_EMAIL_DOMAIN}"
+    return {"username": username, "id": uid or f"id-{username}", "email": email}
 
 
 def test_sweep_deletes_users_matching_the_scratch_prefix():
@@ -362,6 +367,45 @@ def test_sweep_never_deletes_a_user_outside_the_scratch_prefix():
     assert result.deleted == ["journey-aaaa"]
     assert sorted(result.skipped) == ["prod-journey-admin", "real-user"]
     assert session.delete.call_count == 1
+
+
+def test_sweep_never_deletes_a_prefix_matching_user_without_the_scratch_email():
+    """The prefix is only the username's word for it, and usernames are
+    chosen by humans: a real operator can register "journey-planner". The
+    sweep therefore also requires the second, independent signal
+    create_user stamps on every scratch user: an email under the
+    reserved SCRATCH_EMAIL_DOMAIN, mirroring the namespace sweep's
+    label-plus-prefix pair. A user missing the email entirely is skipped
+    too, since the suite never creates one that way."""
+    session = MagicMock()
+    session.post.return_value = _token_response("fresh")
+    listing = MagicMock(status_code=200)
+    listing.json.return_value = [
+        _user("journey-aaaa"),
+        _user("journey-planner", email="journey-planner@company.example"),
+        _user("journey-noemail", email=""),
+    ]
+    session.get.return_value = listing
+    session.delete.return_value = MagicMock(status_code=204)
+
+    kc = _kc(session)
+    result = sweep_scratch_users(kc)
+
+    assert result.deleted == ["journey-aaaa"]
+    assert sorted(result.skipped) == ["journey-noemail", "journey-planner"]
+    assert session.delete.call_count == 1
+
+
+def test_scratch_users_are_created_with_the_swept_email_domain():
+    """create_user and the sweep's email guard must build from one
+    constant, or a rename leaves users the sweep will never delete."""
+    session = MagicMock()
+    session.post.return_value.headers = {"Location": "https://kc/users/u1"}
+    kc = _kc(session)
+    kc.create_user("journey-abcd1234", "pw123")
+    body = session.post.call_args.kwargs["json"]
+    assert body["email"] == (f"journey-abcd1234@{keycloak_module.SCRATCH_EMAIL_DOMAIN}")
+    assert body["email"].endswith("@journeys.invalid")
 
 
 def test_sweep_records_a_failed_delete_and_keeps_going():

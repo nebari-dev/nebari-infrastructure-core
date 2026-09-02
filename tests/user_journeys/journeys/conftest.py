@@ -312,8 +312,9 @@ def keycloak(cluster, platform_domain, trust_anchor, dns_mapping, gateway_reacha
         )
     if result.skipped:
         print(
-            "!!! ANOMALY: users matched the scratch search but not the "
-            f"scratch prefix, and were NOT deleted: {', '.join(result.skipped)}"
+            "!!! ANOMALY: users matched the scratch search but not both "
+            "scratch guards (username prefix plus scratch email domain), "
+            f"and were NOT deleted: {', '.join(result.skipped)}"
         )
     return client
 
