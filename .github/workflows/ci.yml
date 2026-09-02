@@ -88,6 +88,25 @@ jobs:
       - name: Lint the journey suite
         run: cd tests/user_journeys && pixi run --environment dev lint
 
+  verify-docs:
+    name: Verify docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Verify docs are up-to-date
+        run: |
+          make docs
+          git add -N docs/reference/cli docs/configuration
+          git diff --exit-code -- docs/reference/cli docs/configuration
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -155,12 +174,6 @@ jobs:
         uses: ./.github/actions/run-user-journeys
         with:
           artifact-name: journey-artifacts
-
-      - name: Verify docs are up-to-date
-        run: |
-          make docs
-          git add -N docs/reference/cli docs/configuration
-          git diff --exit-code -- docs/reference/cli docs/configuration
 
   workflow-pins:
     name: Workflow pins & release config
