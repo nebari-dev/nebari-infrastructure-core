@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // The provisioning marker records inputs that kind consumes only at cluster
@@ -75,12 +77,13 @@ func recordClusterPorts(ctx context.Context, client kubernetes.Interface, httpPo
 // they differ. The mappings cannot change on a live cluster, so deploying
 // would move the gateway listeners and printed URLs to ports the host does
 // not publish. A cluster without a marker (or with a marker missing a key)
-// predates it, so the configured values are adopted and recorded to make the
-// next deploy verifiable.
+// adopts the configured values so the next deploy is verifiable, and warns:
+// the adopted values are unverified, and if they differ from the ports the
+// cluster was really created with, the check now defends the wrong ones.
 func verifyClusterPorts(ctx context.Context, client kubernetes.Interface, clusterName string, httpPort, httpsPort int32) error {
 	marker, err := client.CoreV1().ConfigMaps(markerNamespace).Get(ctx, markerName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return recordClusterPorts(ctx, client, httpPort, httpsPort)
+		return adoptClusterPorts(ctx, client, clusterName, httpPort, httpsPort)
 	}
 	if err != nil {
 		return fmt.Errorf("read the cluster provisioning marker: %w", err)
@@ -95,11 +98,25 @@ func verifyClusterPorts(ctx context.Context, client kubernetes.Interface, cluste
 	} {
 		recorded := marker.Data[port.key]
 		if recorded == "" {
-			return recordClusterPorts(ctx, client, httpPort, httpsPort)
+			return adoptClusterPorts(ctx, client, clusterName, httpPort, httpsPort)
 		}
 		if recorded != strconv.Itoa(int(port.configured)) {
 			return fmt.Errorf("kind cluster %s was created with %s %s but the config now says %d: kind port mappings are fixed at cluster creation, so restore the original value or recreate the cluster (nic destroy, then nic deploy)", clusterName, port.key, recorded, port.configured)
 		}
 	}
 	return nil
+}
+
+// adoptClusterPorts records the configured ports for a cluster whose marker
+// is missing or incomplete, and warns that they are unverified: kind cannot
+// report the real mappings, so the config is taken on faith. The marker is
+// normally written at creation, so this runs when it was deleted, when the
+// creation-time write failed, or on a cluster created before the marker
+// existed.
+func adoptClusterPorts(ctx context.Context, client kubernetes.Interface, clusterName string, httpPort, httpsPort int32) error {
+	status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s has no record of its host ports, recording http_port %d and https_port %d from the config unverified. If these differ from the ports the cluster was created with, recreate it (nic destroy, then nic deploy)", clusterName, httpPort, httpsPort)).
+		WithResource("provider").
+		WithAction("deploy").
+		WithMetadata("cluster_name", clusterName))
+	return recordClusterPorts(ctx, client, httpPort, httpsPort)
 }
