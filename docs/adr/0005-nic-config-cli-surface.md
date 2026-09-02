@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-09-01). Proposed (2026-06-03) - Amended (2026-07-15): config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434).
+Proposed (2026-06-03) · Amended (2026-07-15) — config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434) · Accepted (2026-09-01).
+
+The discussion this ADR was opened for did not happen as a discussion. It was settled by [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) shipping its outcomes instead: the starter workspaces ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)) and placeholder rejection ([#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561)) now cover the onboarding need that Options 1 and 2 were reaching for. This PR records that outcome; the acceptance is the review approval on it.
 
 ## Date
 
@@ -19,7 +21,7 @@ Several capabilities were explored during that design that we elected to defer f
 3. **Reflection-driven CLI flag generation** for `nic config init` from the Go `Config` types — required scalar fields become flags, godoc becomes `--help` text, composite blocks (DNS, certificate, gitops) are inferred from flag presence.
 4. **Examples regeneration**: `examples/<provider>.yaml` maintained via `nic config init` invocations in CI, drift-gated the same way `schemas/` is.
 
-This ADR is the venue for that discussion. It stays in Proposed status until the team converges.
+This ADR is the venue for that discussion.
 
 ## Decision Drivers
 
@@ -38,43 +40,75 @@ This ADR is the venue for that discussion. It stays in Proposed status until the
 
 ## Decision Outcome
 
-**Accepted: Option 3 (status quo CLI surface), with the onboarding need met outside the CLI.**
+Chosen option: **Option 3, status quo**, because the two capabilities Options 1
+and 2 were reaching for are both delivered outside the CLI, by mechanisms that turned out to
+be better than a subcommand.
 
-No `nic config init`, no `nic config schema`. The two capabilities those options were reaching for are both delivered, by mechanisms that turned out to be better than a subcommand:
+- **Config bootstrap** is a generated Nebi starter workspace
+  ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)).
+  `nebi import quay.io/nebari/starters/aws:<tag>` yields a ready-to-edit `config.yaml`, and
+  additionally pins the `nic` binary in `pixi.lock` and ships the `validate` and `deploy`
+  tasks. `nic config init` would have produced only the first of those three.
+- **Schema inspection** is served today by the generated config reference under
+  `docs/configuration/` (docgen, #434). A machine-readable JSON Schema consumed through an
+  editor `$schema` modeline is in flight
+  ([#562](https://github.com/nebari-dev/nebari-infrastructure-core/issues/562),
+  [#600](https://github.com/nebari-dev/nebari-infrastructure-core/issues/600)) and, per the
+  2026-07 update below, arrives as a docgen output format rather than as a
+  `nic config schema` subcommand.
 
-- **Config bootstrap** is a generated Nebi starter workspace (#560). `nebi import quay.io/nebari/starters/aws:v0.14.0` yields a ready-to-edit `config.yaml`, and additionally pins the `nic` binary in `pixi.lock` and ships the `validate` and `deploy` tasks. `nic config init` would have produced only the first of those three.
-- **Schema inspection** is the JSON Schema committed under `schemas/` and consumed by an editor through a `$schema` modeline (#562). This serves the need continuously, on every edit, rather than once at creation.
+The argument for the starter over a generator rests on two things the Options Detail below
+does not already cover:
 
-### Why the starter beats the generator
+- **It versions.** Starters are tagged OCI artifacts, so `nebi diff` shows what config
+  changed between two `nic` versions, and rollback is pulling the older tag. A generator
+  emits a file and forgets.
+- **It pins the toolchain with the config.** The workspace's `pixi.lock` fixes the exact
+  `nic` build, `nic` pins OpenTofu, and the embedded `.terraform.lock.hcl` pins the
+  providers, so one lockfile transitively pins the whole infrastructure toolchain.
 
-- **It versions.** Starters are tagged OCI artifacts, so `nebi diff` shows what config changed between two `nic` versions, and rollback is pulling the older tag. A generator has no such notion: it emits a file and forgets.
-- **It pins the toolchain with the config.** The workspace's `pixi.lock` fixes the exact `nic` build, `nic` pins OpenTofu, and the embedded `.terraform.lock.hcl` pins the providers. One lockfile transitively pins the whole infrastructure toolchain. This is the property the epic (#552) was built to get, and a scaffolding command cannot offer it.
-- **It avoids the reflection cost this ADR itself priced.** Option 1's Cons list maps, slices, pointers and tri-state `*bool`, plus semantically-required-but-structurally-invisible rules such as Hetzner's "exactly one node group must have `master: true`". None of that has to be written.
-- **The surface was never the bottleneck.** Stripped of comments, the examples are 51 effective lines for AWS, 39 for GCP, 16 for Hetzner and 15 for existing-cluster. Copy-and-edit at that size is not what makes onboarding hard; not knowing which keys are valid is, and the schema answers that.
+Options 1 and 4 are rejected on the Cons already recorded below, with one thing that has
+changed since they were written: `examples/` is now the source `cmd/starters` renders the
+starter workspaces from, and every file in it must validate as-is against the Go config
+types in CI (`pkg/nic.TestExampleConfigsValidate`), which also rejects unreplaced
+`CHANGEME` placeholders. The silent drift Option 4 existed to solve is caught by that test
+rather than by deleting the directory. Note its limit, per its own docstring: provider-level
+validation is not reached, so a green result does not prove an example would deploy.
 
-### What this does not decide
+### Consequences
 
-Nothing here forecloses a `nic config init` later. If starters prove insufficient, Option 1 remains available and its substrate is now `cmd/docgen` rather than a new generator (see the two updates below). The decision recorded here is that it is not needed, not that it is impossible.
+**Good:**
 
-### Examples stay hand-written
+- Onboarding gets a deployable starting point that pins its own toolchain, which neither
+  `examples/` nor a generator provided.
+- A Nebari upgrade becomes a reviewable config diff, and rollback becomes pulling a tag.
+- No reflection code to write or maintain: none of the maps, slices, pointers or tri-state
+  `*bool` handling Option 1's Cons priced.
 
-Option 4 (replace `examples/` with `schemas/`) is rejected for the reason already in its Cons: a 300-line fully-commented document is a worse starting point than a 20-line deployable one. `examples/` also gained a job it did not have when this ADR was written - it is the source `cmd/starters` renders the starter workspaces from, and every file in it is validated against the generated schemas in CI (`pkg/nic.TestExampleConfigsMatchGeneratedSchemas`). The drift that Option 4 existed to solve is now caught by that test rather than by deleting the directory.
+**Bad:**
+
+- No machine-readable schema until #562 and #600 land, so editor completion and offline
+  schema inspection are unavailable in the meantime.
+- Onboarding now depends on Nebi, pixi and an OCI registry (`quay.io/nebari`) being
+  reachable. That is a materially heavier dependency chain than a `nic` subcommand, and it
+  moves part of the onboarding path outside this repo.
+- `examples/` stays hand-maintained. CI catches drift only against the Go types, which does
+  not prove an example deploys.
 
 ### Distribution belongs in its own ADR
 
-This ADR's subject is the config surface, and #552 also settled how `nic` reaches
-users: a prefix.dev conda channel repackaging the release archives, the package
-name `nebari-infrastructure-core` (#556), and starter workspaces published as OCI
-artifacts to `quay.io/nebari` (#560).
+[#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) also settled how
+`nic` reaches users: a prefix.dev conda channel repackaging the release archives, the package
+name `nebari-infrastructure-core`
+([#556](https://github.com/nebari-dev/nebari-infrastructure-core/issues/556)), and starter
+workspaces published as OCI artifacts. Those are recorded here only where they bear on config
+bootstrap. The packaging concerns proper, including whether to move to the shared
+`github-releases` channel
+([#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620)), have different
+drivers and would be unfindable under a title about the config CLI surface.
 
-Those decisions are recorded here only where they bear on config bootstrap - the
-starter workspace as the mechanism, above. The packaging concerns proper (which
-channel, how release archives become conda packages, what the trusted-publisher
-and signing chain is, and whether to move to the shared `github-releases` channel
-per #620) are a different subject with a different set of drivers, and folding
-them into an ADR titled "nic config CLI surface" would leave them unfindable.
-
-**Decision: distribution gets ADR-0017, written separately.** Tracked in #652.
+**Decision: distribution gets its own ADR, written separately.** Tracked in
+[#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652).
 
 ## Options Detail
 
@@ -123,7 +157,7 @@ If retained, `cmd/schemagen` becomes a thin wrapper around `nic config schema` f
 - Adds Option 1's reflection complexity plus `nic config schema` itself.
 - `nic config schema` is mostly useful when `schemas/` isn't already published — diminishing return for users who have GitHub access.
 
-### Option 3: Status quo
+### Option 3: Status quo (Chosen)
 
 No `nic config` subcommands. `cmd/schemagen` ships from the schema-pipeline PRs. `examples/*.yaml` stays hand-written, drifts silently when fields change.
 
@@ -149,13 +183,27 @@ Drop `examples/` entirely. The committed `schemas/<provider>.yaml` (a fully-comm
 
 ## Open questions for discussion
 
-Resolved 2026-09-01 with the decision above. Recorded rather than deleted, since the reasoning is what a future reader needs.
+Resolved 2026-09-01 by the decision above. The questions are kept verbatim; each answer follows it.
 
-1. **Required-from-omitempty signal.** *Moot for flag generation, load-bearing elsewhere.* No flags are generated, so the question no longer gates this ADR. The signal did not go away, though: both docgen emitters rely on it, and the JSON Schema emitter made it stricter, because a schema marking a runtime-defaulted field as `required` rejects configs the binary accepts. Semantic requirements such as Hetzner's `master: true` rule stay in `Validate()`, which is where the question always pointed.
-2. **Optional-scalar flag coverage.** *Moot.* No flags.
-3. **Composite-block-via-presence.** *Moot.* No flags.
-4. **`nic config schema` value-add.** *Answered: none that justifies a subcommand.* Of the three motivations listed, editor/LSP integration is the real one, and it is served better by a published, version-pinned schema than by a runtime command - an editor cannot invoke a CLI per keystroke, and the modeline pins the schema to the same version as the binary. Air-gapped inspection is served by the `schemas/` directory travelling in the source tree and in the starter workspace.
-5. **Validation on init.** *Answered by the starter's task graph.* There is no `init` to validate at. The starter's `deploy` task depends on `validate` (#560), so validation runs before any deploy rather than at creation, and #561 makes `validate` reject unreplaced placeholder values - which is the specific failure mode "validate on init" was worried about, caught at the moment it matters instead of the moment the file is created.
+1. **Required-from-omitempty signal.** Is `yaml:"<name>"` without `omitempty` an accurate-enough signal for "must be set on init"? Some required-ness is semantic (e.g. Hetzner's "exactly one node group must have `master: true`") and can't be expressed structurally. Acceptable to push those into `Validate()` and not surface them as flags?
+
+   *Moot for flag generation, load-bearing elsewhere.* No flags are generated, so this no longer gates the ADR. The signal itself did not go away: docgen relies on it, and the JSON Schema emitter in flight makes it stricter, because a schema marking a runtime-defaulted field as `required` rejects configs the binary accepts. The semantic cases named here stay in `Validate()`, which is where the question always pointed. See also the 2026-07 update's data point below.
+
+2. **Optional-scalar flag coverage.** If we go Option 1 or 2, do flags cover only required scalars (clean rule, smaller `--help`) or some commonly-set optionals too (better ergonomics, larger flag matrix)?
+
+   *Moot.* No flags are generated.
+
+3. **Composite-block-via-presence.** Is `--dns cloudflare --dns-zone-name example.com` → `dns:` block included a clear-enough rule, or do users want explicit `--with-dns cloudflare` toggles?
+
+   *Moot.* No flags are generated.
+
+4. **`nic config schema` value-add.** With `schemas/` committed and fetchable, what's the user need for a runtime `nic config schema`? Air-gapped envs? Editor LSP integration? Just nice-to-have?
+
+   *Answered: no need that justifies a subcommand.* Of the three motivations listed, editor/LSP integration is the real one, and a published schema pinned to the same version as the binary serves it better than a runtime command an editor cannot invoke per keystroke. Air-gapped inspection is served by the generated reference travelling in the source tree.
+
+5. **Validation on init.** Run `client.Validate(...)` before emitting YAML, or trust the user to run `nic validate` after editing? The former catches errors earlier; the latter keeps init mechanical.
+
+   *Answered by the starter's task graph.* There is no `init` to validate at. The starter's `deploy` task depends on `validate`, so validation runs before any deploy rather than at creation, and #561 makes `validate` reject unreplaced placeholder values - the specific failure mode this question worried about, caught when it matters instead of when the file is created.
 
 ## Update (2026-07): config-reference pipeline resolved (#434)
 
@@ -205,4 +253,13 @@ limitation.
 
 ## Links
 
-- [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md) — related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
+- [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md)
+- [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) Epic: distribute NIC via pixi/prefix.dev and ship Nebari deployments as Nebi workspaces - the epic this decision serves
+- [#565](https://github.com/nebari-dev/nebari-infrastructure-core/issues/565) The issue asking for this decision to be recorded
+- [#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560) Publish per-provider Nebi starter workspaces - the config-bootstrap mechanism chosen here
+- [#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561) `nic validate` must reject placeholder config values - answers open question 5
+- [#562](https://github.com/nebari-dev/nebari-infrastructure-core/issues/562) Version-pinned `$schema` modeline in starter configs - answers open question 4, in flight
+- [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) Distribute nic via a prefix.dev channel - the distribution decision deferred to its own ADR
+- [#556](https://github.com/nebari-dev/nebari-infrastructure-core/issues/556) Conda package name for nic
+- [#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620) Move to the shared prefix.dev github-releases channel - open
+- [#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652) Write the distribution and packaging ADR — related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
