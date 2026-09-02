@@ -147,9 +147,20 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
-	// Get provider infrastructure settings up front. InfraSettings is a pure
-	// getter, so it is safe to compute before Deploy and lets us fail fast on
-	// misconfiguration before provisioning anything.
+	// Get provider infrastructure settings up front, before Deploy runs. This
+	// first call is for fail-fast validation only and must rely solely on
+	// statically-known fields (e.g. StorageClass, SupportsLocalGitOps) derived
+	// from clusterConfig alone: nothing here depends on the live cluster, so
+	// misconfiguration is caught before provisioning anything.
+	//
+	// InfraSettings is deliberately called a second time after Deploy below
+	// (see the comment there). Some providers (e.g. local/kind) can only
+	// derive certain settings, like the MetalLB address pool, from a running
+	// cluster, and Deploy is what makes that cluster exist. Do not remove
+	// either call: removing the early one loses fail-fast validation, and
+	// removing the later one silently reintroduces #612, where every local
+	// deploy used an unroutable fallback MetalLB pool because InfraSettings
+	// was never read again after Deploy populated the real value.
 	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
@@ -205,6 +216,15 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
+
+	// Re-read InfraSettings now that the cluster exists. This is the second of
+	// the two deliberate InfraSettings calls described above: it picks up
+	// values a provider can only compute from a live cluster (e.g. the local
+	// provider's kind-network-derived MetalLB pool), which are still zero/
+	// default in the pre-Deploy read. Every consumer of infraSettings from
+	// this point on (GitOps bootstrap, ArgoCD/foundational install, MetalLB
+	// config) uses this refreshed value.
+	infraSettings = clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved

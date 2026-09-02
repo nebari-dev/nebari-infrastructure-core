@@ -220,6 +220,69 @@ func TestInfraSettingsKindModeExplicitPool(t *testing.T) {
 	}
 }
 
+// TestInfraSettingsMetalLBPoolLifecycle pins the fix for #612: InfraSettings
+// must return the pool derived from the live kind network (cached in
+// p.metalLBPool by Deploy) once it is populated, fall back to
+// defaultMetalLBAddressPool when it is not (dry-run, or InfraSettings called
+// before Deploy), and always defer to an explicit config override regardless
+// of what Deploy derived.
+func TestInfraSettingsMetalLBPoolLifecycle(t *testing.T) {
+	const derivedPool = "172.18.255.100-172.18.255.110"
+	const explicitPool = "10.0.0.100-10.0.0.110"
+
+	tests := []struct {
+		name           string
+		metalLBPool    string // simulates Deploy having run (or not) and cached this
+		providerConfig map[string]any
+		wantPool       string
+	}{
+		{
+			name:        "before Deploy runs, falls back to the static default",
+			metalLBPool: "",
+			wantPool:    defaultMetalLBAddressPool,
+		},
+		{
+			name:        "after Deploy runs, returns the network-derived pool",
+			metalLBPool: derivedPool,
+			wantPool:    derivedPool,
+		},
+		{
+			name:        "explicit pool wins over the derived pool",
+			metalLBPool: derivedPool,
+			providerConfig: map[string]any{
+				"local": map[string]any{
+					"metallb": map[string]any{"address_pool": explicitPool},
+				},
+			},
+			wantPool: explicitPool,
+		},
+		{
+			name:        "explicit pool wins even when Deploy has not run",
+			metalLBPool: "",
+			providerConfig: map[string]any{
+				"local": map[string]any{
+					"metallb": map[string]any{"address_pool": explicitPool},
+				},
+			},
+			wantPool: explicitPool,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewProvider()
+			p.metalLBPool = tt.metalLBPool
+
+			cfg := &config.ClusterConfig{Providers: tt.providerConfig}
+
+			settings := p.InfraSettings(cfg)
+			if settings.MetalLBAddressPool != tt.wantPool {
+				t.Errorf("MetalLBAddressPool = %q, want %q", settings.MetalLBAddressPool, tt.wantPool)
+			}
+		})
+	}
+}
+
 func TestSummaryKindMode(t *testing.T) {
 	p := NewProvider()
 

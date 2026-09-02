@@ -1,0 +1,479 @@
+"""Cluster discovery.
+
+A kubeconfig is the only required input. Everything else - domain,
+gateway address, admin credentials, which optional components exist -
+is read from the cluster, so the suite runs against a cluster this
+checkout never deployed.
+"""
+
+import base64
+from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+import pytest
+from kubernetes import client
+from kubernetes import config as kubeconfig
+from kubernetes.client.rest import ApiException
+
+from nebari_journeys import constants
+from nebari_journeys.waits import poll_until_settled, wait_for_value
+
+ARGOCD_GROUP = "argoproj.io"
+ARGOCD_VERSION = "v1alpha1"
+ARGOCD_PLURAL = "applications"
+
+CERTMANAGER_GROUP = "cert-manager.io"
+CERTMANAGER_VERSION = "v1"
+CERTIFICATE_PLURAL = "certificates"
+
+GATEWAY_API_GROUP = "gateway.networking.k8s.io"
+GATEWAY_API_VERSION = "v1"
+GATEWAY_PLURAL = "gateways"
+HTTPROUTE_PLURAL = "httproutes"
+
+STORAGE_DEFAULT_ANNOTATION = "storageclass.kubernetes.io/is-default-class"
+LONGHORN_GROUP = "longhorn.io"
+LONGHORN_VERSION = "v1beta2"
+VOLUME_PLURAL = "volumes"
+LONGHORN_NODE_PLURAL = "nodes"
+
+# Longhorn's own default StorageClass name, created by the Longhorn chart
+# itself rather than by NIC, which is why it is not a mirrored constant and
+# is not pinned by the Go contract test.
+LONGHORN_STORAGE_CLASS = "longhorn"
+FALLBACK_STORAGE_CLASS = LONGHORN_STORAGE_CLASS
+
+NOT_FOUND_STATUS = 404
+
+# Longhorn's robustness values. `unknown` is what a detached volume
+# reports; `degraded` is also what a freshly attached volume reports while
+# it rebuilds its replicas, which is why robustness is polled rather than
+# read once.
+ROBUSTNESS_HEALTHY = "healthy"
+
+# How long to let a just-attached volume finish rebuilding its replicas.
+# Reading robustness immediately after the pod goes Ready catches Longhorn
+# mid-rebuild and reports `degraded` on a cluster that is about to be
+# perfectly healthy.
+ROBUSTNESS_SETTLE_TIMEOUT = 120.0
+ROBUSTNESS_SETTLE_INTERVAL = 5.0
+
+
+@dataclass
+class Cluster:
+    """Entry point for every cluster action a journey performs."""
+
+    core: client.CoreV1Api
+    custom: client.CustomObjectsApi
+    storage: client.StorageV1Api = None
+
+    @classmethod
+    def connect(cls) -> "Cluster":
+        try:
+            kubeconfig.load_kube_config()
+        except kubeconfig.ConfigException as kubeconfig_error:
+            # Running inside the cluster is legitimate, so fall back. But if
+            # that fails too, the kubeconfig problem is almost always the
+            # real cause, and reporting only the in-cluster failure hides it.
+            try:
+                kubeconfig.load_incluster_config()
+            except kubeconfig.ConfigException as incluster_error:
+                raise kubeconfig.ConfigException(
+                    f"could not load a kubeconfig ({kubeconfig_error}) and no "
+                    f"in-cluster config is available ({incluster_error})"
+                ) from kubeconfig_error
+        return cls(
+            core=client.CoreV1Api(),
+            custom=client.CustomObjectsApi(),
+            storage=client.StorageV1Api(),
+        )
+
+    def api_host(self) -> str | None:
+        """Hostname of the Kubernetes API server, lowercased, or None.
+
+        Used by the DNS-mapping fixture to exempt the API server from the
+        session-wide resolver patch: on a cluster whose API server lives
+        under the platform domain, the patch would otherwise route every
+        Kubernetes API call to the Envoy gateway. See
+        `nebari_journeys.trust.install_dns_mapping`.
+
+        Never raises. A missing or unparseable host means "no carve-out to
+        make", which is the same as the common case of an API server that
+        sits outside the platform domain anyway; failing the run over it
+        would be worse than the problem.
+        """
+        try:
+            host = client.Configuration.get_default_copy().host
+        except Exception:  # noqa: BLE001 - see the docstring: this is a
+            # best-effort accessor used only to build a resolver carve-out.
+            # Whatever the Kubernetes client raises for an unloaded or
+            # malformed configuration, failing the run over it would be
+            # strictly worse than making no carve-out.
+            return None
+        if not host:
+            return None
+        # A kubeconfig host is normally a full URL, but tolerate a bare
+        # host:port: urlsplit would read that as a path with no hostname.
+        if "://" not in host:
+            host = f"https://{host}"
+        return urlsplit(host).hostname
+
+    def secret_value(self, namespace: str, name: str, key: str) -> str:
+        secret = self.core.read_namespaced_secret(name=name, namespace=namespace)
+        data = secret.data or {}
+        if key not in data:
+            raise KeyError(
+                f"key {key!r} not in secret {namespace}/{name}; "
+                f"present keys: {sorted(data)}"
+            )
+        return base64.b64decode(data[key]).decode()
+
+    def keycloak_admin_password(self) -> str:
+        return self.secret_value(
+            constants.KEYCLOAK_NAMESPACE,
+            constants.KEYCLOAK_ADMIN_SECRET,
+            constants.KEYCLOAK_ADMIN_PASSWORD_KEY,
+        )
+
+    def realm_admin_password(self) -> str:
+        return self.secret_value(
+            constants.KEYCLOAK_NAMESPACE,
+            constants.REALM_ADMIN_SECRET,
+            constants.REALM_ADMIN_PASSWORD_KEY,
+        )
+
+    def gateway_address(self) -> str:
+        """IP if the load balancer has one, else its hostname."""
+
+        def fetch():
+            services = self.core.list_namespaced_service(
+                namespace=constants.GATEWAY_NAMESPACE,
+                label_selector=constants.GATEWAY_LABEL_SELECTOR,
+            )
+            for svc in services.items:
+                ingress = (svc.status.load_balancer.ingress or [None])[0]
+                if ingress is None:
+                    continue
+                if ingress.ip:
+                    return ingress.ip
+                if ingress.hostname:
+                    return ingress.hostname
+            return None
+
+        return wait_for_value(fetch, description="the gateway load balancer address")
+
+    def gateway(self) -> dict | None:
+        """The Nebari Gateway object, or None when it does not exist."""
+        try:
+            return self.custom.get_namespaced_custom_object(
+                group=GATEWAY_API_GROUP,
+                version=GATEWAY_API_VERSION,
+                namespace=constants.GATEWAY_NAMESPACE,
+                plural=GATEWAY_PLURAL,
+                name=constants.GATEWAY_NAME,
+            )
+        except ApiException as error:
+            if error.status == NOT_FOUND_STATUS:
+                return None
+            raise
+
+    def gateway_tls_secret_ref(self) -> tuple[str, str]:
+        """(name, namespace) of the TLS secret the gateway actually serves.
+
+        Both are operator-configurable (pkg/config/config.go,
+        CertificateConfig.GatewaySecretRef): `certificate.secret_name`
+        renames it, and `certificate.existing_secret` can put it in another
+        namespace entirely. Assuming the default name would silently degrade
+        the trust anchor to the system store on a supported cluster shape, so
+        the reference is read from the Gateway's own
+        `listeners[].tls.certificateRefs` instead. The default is only used
+        when the Gateway cannot be read at all, so a cluster without the
+        Gateway API still behaves as before.
+        """
+        gateway = self.gateway()
+        if gateway is None:
+            return constants.GATEWAY_TLS_SECRET, constants.GATEWAY_NAMESPACE
+
+        listeners = gateway.get("spec", {}).get("listeners") or []
+        for listener in listeners:
+            refs = (listener.get("tls") or {}).get("certificateRefs") or []
+            for ref in refs:
+                name = ref.get("name")
+                if not name:
+                    continue
+                # A certificateRef without an explicit namespace resolves in
+                # the Gateway's own namespace, per the Gateway API spec.
+                return name, ref.get("namespace") or constants.GATEWAY_NAMESPACE
+
+        return constants.GATEWAY_TLS_SECRET, constants.GATEWAY_NAMESPACE
+
+    def gateway_route_hostnames(self) -> list[str]:
+        """Every hostname served by an HTTPRoute attached to the gateway.
+
+        An empty list when the HTTPRoute CRD is not installed at all, so the
+        caller can fall back and then report what it looked for, rather than
+        surfacing a raw 404 from the API server.
+        """
+        try:
+            routes = self.custom.list_cluster_custom_object(
+                group=GATEWAY_API_GROUP,
+                version=GATEWAY_API_VERSION,
+                plural=HTTPROUTE_PLURAL,
+            ).get("items", [])
+        except ApiException as error:
+            if error.status != NOT_FOUND_STATUS:
+                raise
+            return []
+
+        hostnames: list[str] = []
+        for route in routes:
+            spec = route.get("spec") or {}
+            parents = spec.get("parentRefs") or []
+            if not any(
+                parent.get("name") == constants.GATEWAY_NAME for parent in parents
+            ):
+                continue
+            hostnames.extend(spec.get("hostnames") or [])
+        return hostnames
+
+    def domain(self) -> str:
+        """The platform domain, discovered from what the gateway serves.
+
+        HTTPRoutes are the primary source because they exist on every
+        supported certificate shape. The gateway Certificate does not: with
+        `certificate.type: existing` NIC never renders
+        gateway-certificate.yaml (pkg/argocd/writer.go,
+        skipCertificateTemplate), so a Certificate that does not exist is not
+        fatal, and its absence never blocks derivation.
+
+        The domain is the longest common suffix, by DNS label, of every
+        hostname served by an HTTPRoute attached to the gateway. Nebari's own
+        routes are `<service>.<domain>` (argocd, keycloak, longhorn) *and*
+        the landing page route, which serves the bare apex `<domain>` with no
+        service label at all. Stripping a fixed number of labels from every
+        hostname therefore does not work: the apex has one fewer label than
+        the rest. The longest-common-suffix rule handles both shapes
+        uniformly and, as a side effect, also absorbs a transient cert-manager
+        ACME challenge route for the apex, since that is just another
+        apex hostname sharing the same suffix.
+
+        Comparison is done label-by-label from the right, never
+        character-wise: `evil-openteams.dev` must not be treated as sharing
+        the `openteams.dev` suffix just because the characters overlap.
+        """
+        hostnames = [
+            hostname
+            for hostname in self.gateway_route_hostnames()
+            if hostname and not hostname.startswith("*")
+        ]
+
+        if not hostnames:
+            return self._domain_from_certificate(hostnames)
+
+        label_lists = [hostname.split(".") for hostname in hostnames]
+        common: list[str] = []
+        for labels_from_the_right in zip(*(reversed(labels) for labels in label_lists)):
+            if len(set(labels_from_the_right)) != 1:
+                break
+            common.append(labels_from_the_right[0])
+        common.reverse()
+
+        if len(common) < 2:
+            raise ValueError(
+                "HTTPRoutes attached to Gateway "
+                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} do not "
+                "share a common platform domain of at least two DNS labels "
+                f"(hostnames seen: {sorted(hostnames)}); cannot determine which "
+                "domain this cluster is"
+            )
+
+        derived = ".".join(common)
+        return self._domain_from_certificate(hostnames, derived)
+
+    def _domain_from_certificate(
+        self, hostnames: list[str], derived: str | None = None
+    ) -> str:
+        """Fall back to, or cross-check against, the gateway Certificate.
+
+        `hostnames` is only used for error messages, so a caller with no
+        route hostnames at all can still say what it looked at. `derived` is
+        the domain already computed from HTTPRoutes, or None when there were
+        none to compute it from.
+
+        A missing Certificate is not fatal: with `certificate.type: existing`
+        NIC never renders gateway-certificate.yaml (pkg/argocd/writer.go,
+        skipCertificateTemplate), so on that shape `derived` (when present) is
+        used as-is. When both a derived domain and a Certificate commonName
+        are available and they disagree, that is a genuine inconsistency and
+        this raises naming both rather than silently preferring one.
+        """
+        try:
+            cert = self.custom.get_namespaced_custom_object(
+                group=CERTMANAGER_GROUP,
+                version=CERTMANAGER_VERSION,
+                namespace=constants.GATEWAY_NAMESPACE,
+                plural=CERTIFICATE_PLURAL,
+                name=constants.GATEWAY_CERTIFICATE_NAME,
+            )
+        except ApiException as error:
+            if error.status != NOT_FOUND_STATUS:
+                raise
+            if derived is not None:
+                return derived
+            raise ValueError(
+                "could not determine the platform domain: no HTTPRoute attached to "
+                f"Gateway {constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} "
+                f"carries any hostname (hostnames seen: {sorted(hostnames)}), and "
+                f"Certificate {constants.GATEWAY_NAMESPACE}/"
+                f"{constants.GATEWAY_CERTIFICATE_NAME} does not exist "
+                "(expected on a cluster deployed with certificate.type: existing). "
+                "Is this a Nebari cluster, and does the kubeconfig have read access "
+                "to HTTPRoutes?"
+            ) from error
+
+        common_name = cert.get("spec", {}).get("commonName")
+        if not common_name:
+            if derived is not None:
+                return derived
+            raise ValueError(
+                f"{constants.GATEWAY_CERTIFICATE_NAME} has no spec.commonName; "
+                "cannot determine the platform domain "
+                f"(hostnames seen: {sorted(hostnames)})"
+            )
+
+        if derived is not None and common_name != derived:
+            raise ValueError(
+                "platform domain is ambiguous: HTTPRoutes attached to Gateway "
+                f"{constants.GATEWAY_NAMESPACE}/{constants.GATEWAY_NAME} derive "
+                f"{derived!r}, but Certificate {constants.GATEWAY_NAMESPACE}/"
+                f"{constants.GATEWAY_CERTIFICATE_NAME} spec.commonName is "
+                f"{common_name!r}; these disagree and cannot both be right"
+            )
+
+        return derived if derived is not None else common_name
+
+    def applications(self) -> list[dict]:
+        result = self.custom.list_namespaced_custom_object(
+            group=ARGOCD_GROUP,
+            version=ARGOCD_VERSION,
+            namespace=constants.ARGOCD_NAMESPACE,
+            plural=ARGOCD_PLURAL,
+        )
+        return result.get("items", [])
+
+    def has_app(self, name: str) -> bool:
+        return any(a["metadata"]["name"] == name for a in self.applications())
+
+    def require_app(self, name: str) -> None:
+        """Skip the calling test when an optional component is not installed."""
+        if not self.has_app(name):
+            pytest.skip(f"ArgoCD application {name!r} is not deployed on this cluster")
+
+    def storage_class_names(self) -> list[str]:
+        return [sc.metadata.name for sc in self.storage.list_storage_class().items]
+
+    def has_longhorn(self) -> bool:
+        """Whether Longhorn is installed on this cluster.
+
+        Keyed off the `longhorn` StorageClass rather than an ArgoCD
+        Application, because Longhorn core is NOT one: there is no
+        apps/longhorn.yaml in pkg/argocd/templates/apps, only
+        apps/longhorn-backup.yaml, so require_app() cannot answer this
+        question. The StorageClass is preferred over the longhorn-system
+        namespace because the namespace can outlive an uninstall (a
+        terminating or leftover-but-empty namespace would report Longhorn
+        present), and because the StorageClass is the thing the storage
+        journeys actually consume.
+        """
+        return LONGHORN_STORAGE_CLASS in self.storage_class_names()
+
+    def require_longhorn(self) -> None:
+        """Skip the calling test when Longhorn is not installed.
+
+        Longhorn is optional: a Nebari cluster on EKS or GKE may run entirely
+        on the cloud provider's storage, with no Longhorn StorageClass, no
+        Longhorn UI, no `longhorn` OIDC client and no `longhorn-admins` group.
+        None of that is a failure.
+        """
+        if not self.has_longhorn():
+            pytest.skip(
+                f"Longhorn is not installed on this cluster: no {LONGHORN_STORAGE_CLASS!r} "
+                "StorageClass exists"
+            )
+
+    def default_storage_class(self) -> str:
+        """The class marked default, else Longhorn's."""
+        for sc in self.storage.list_storage_class().items:
+            annotations = sc.metadata.annotations or {}
+            if annotations.get(STORAGE_DEFAULT_ANNOTATION) == "true":
+                return sc.metadata.name
+        return FALLBACK_STORAGE_CLASS
+
+    def longhorn_volume(self, pv_name: str) -> dict:
+        """The Longhorn Volume backing a PersistentVolume."""
+        return self.custom.get_namespaced_custom_object(
+            group=LONGHORN_GROUP,
+            version=LONGHORN_VERSION,
+            namespace=constants.LONGHORN_NAMESPACE,
+            plural=VOLUME_PLURAL,
+            name=pv_name,
+        )
+
+    def settled_longhorn_volume(
+        self,
+        pv_name: str,
+        *,
+        timeout: float = ROBUSTNESS_SETTLE_TIMEOUT,
+        interval: float = ROBUSTNESS_SETTLE_INTERVAL,
+    ) -> dict:
+        """The Longhorn Volume, once its robustness has settled or time is up.
+
+        A volume reports `degraded` for as long as it takes to rebuild its
+        replicas after being attached, so reading robustness the instant the
+        mounting pod goes Ready catches Longhorn mid-rebuild and calls a
+        healthy cluster degraded.
+
+        Returns the LAST snapshot either way (see
+        `waits.poll_until_settled`): a volume that genuinely never becomes
+        healthy is the real finding, and the caller's assertion says so far
+        better than a timeout would.
+        """
+        return poll_until_settled(
+            lambda: self.longhorn_volume(pv_name),
+            lambda volume: (
+                (volume.get("status") or {}).get("robustness") == ROBUSTNESS_HEALTHY
+            ),
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def schedulable_longhorn_node_count(self) -> int:
+        """How many Longhorn nodes can currently take a replica.
+
+        A `nodes.longhorn.io` object counts only when it is both Ready
+        (status.conditions has a Ready condition with status "True") and
+        schedulable (spec.allowScheduling is true). Neither alone is
+        enough: a node can be marked schedulable while NotReady (about to
+        be evicted), or Ready while an operator has disabled scheduling on
+        it for maintenance. This is a plain count, not an assertion -
+        callers decide what a shortfall means for the volume they are
+        looking at.
+        """
+        nodes = self.custom.list_namespaced_custom_object(
+            group=LONGHORN_GROUP,
+            version=LONGHORN_VERSION,
+            namespace=constants.LONGHORN_NAMESPACE,
+            plural=LONGHORN_NODE_PLURAL,
+        ).get("items", [])
+
+        count = 0
+        for node in nodes:
+            if not (node.get("spec") or {}).get("allowScheduling"):
+                continue
+            conditions = (node.get("status") or {}).get("conditions") or []
+            if any(
+                c.get("type") == "Ready" and c.get("status") == "True"
+                for c in conditions
+            ):
+                count += 1
+        return count

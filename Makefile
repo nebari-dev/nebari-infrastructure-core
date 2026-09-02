@@ -93,6 +93,15 @@ test-all: ## Run all tests (unit + integration)
 	$(MAKE) test-integration
 	@echo "All tests passed successfully"
 
+test-journeys: ## Run user journey tests against the cluster in $KUBECONFIG
+	@echo "Running user journey tests..."
+	@which pixi > /dev/null || (echo "Error: pixi is not installed (https://pixi.sh)" && exit 1)
+	cd tests/user_journeys && pixi run test
+	@echo "User journey tests passed successfully"
+
+test-journeys-lib: ## Run tests of the journey library itself (no cluster needed)
+	cd tests/user_journeys && pixi run test-lib
+
 LOCAL_CONFIG?=./examples/local-config.yaml
 REGEN_APPS?=
 

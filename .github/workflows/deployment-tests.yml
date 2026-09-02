@@ -60,7 +60,7 @@ jobs:
     concurrency:
       group: deploy-test-local
       cancel-in-progress: false
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -89,6 +89,20 @@ jobs:
           config: .github/fixtures/deploy/local-config.yaml
           nic-binary: nic
 
+      # Deployment success is not platform correctness: a cluster can finish
+      # deploying with every ArgoCD application Healthy while a user cannot
+      # log in, cannot get durable storage, or is admitted to a UI that
+      # should refuse them. The deploy action exports KUBECONFIG, so this
+      # runs against the cluster just created and is torn down with it.
+      - name: Run user journey tests
+        # Bounded below the job timeout for the same reason the Deploy step
+        # is: the destroy post step must always have budget left, or a
+        # failed run leaks real cloud infrastructure.
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts-local
+
   aws:
     name: AWS
     needs: build
@@ -102,7 +116,7 @@ jobs:
     concurrency:
       group: deploy-test-aws
       cancel-in-progress: false
-    timeout-minutes: 120
+    timeout-minutes: 140
     permissions:
       contents: read
       id-token: write
@@ -132,8 +146,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-west-2
           # The default duration is 3600 seconds (one hour), so we bump it
-          # to 7200 seconds (two hours) to give it room to deploy and destroy.
-          role-duration-seconds: 7200
+          # to 9000 seconds (two hours and a half) to give it room to deploy and destroy.
+          role-duration-seconds: 9000
 
       - name: Deploy
         uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
@@ -146,6 +160,20 @@ jobs:
           config: .github/fixtures/deploy/aws-config.yaml
           nic-binary: nic
           wait-timeout: '1800'
+
+      # Deployment success is not platform correctness: a cluster can finish
+      # deploying with every ArgoCD application Healthy while a user cannot
+      # log in, cannot get durable storage, or is admitted to a UI that
+      # should refuse them. The deploy action exports KUBECONFIG, so this
+      # runs against the cluster just created and is torn down with it.
+      - name: Run user journey tests
+        # Bounded below the job timeout for the same reason the Deploy step
+        # is: the destroy post step must always have budget left, or a
+        # failed run leaks real cloud infrastructure.
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts-aws
 
   azure:
     name: Azure
@@ -160,7 +188,7 @@ jobs:
     concurrency:
       group: deploy-test-azure
       cancel-in-progress: false
-    timeout-minutes: 120
+    timeout-minutes: 140
     permissions:
       contents: read
       id-token: write
@@ -207,6 +235,20 @@ jobs:
           nic-binary: nic
           wait-timeout: '1800'
 
+      # Deployment success is not platform correctness: a cluster can finish
+      # deploying with every ArgoCD application Healthy while a user cannot
+      # log in, cannot get durable storage, or is admitted to a UI that
+      # should refuse them. The deploy action exports KUBECONFIG, so this
+      # runs against the cluster just created and is torn down with it.
+      - name: Run user journey tests
+        # Bounded below the job timeout for the same reason the Deploy step
+        # is: the destroy post step must always have budget left, or a
+        # failed run leaks real cloud infrastructure.
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts-azure
+
   hetzner:
     name: Hetzner
     needs: build
@@ -220,7 +262,7 @@ jobs:
     concurrency:
       group: deploy-test-hetzner
       cancel-in-progress: false
-    timeout-minutes: 60
+    timeout-minutes: 80
 
     steps:
       - name: Checkout code
@@ -279,6 +321,20 @@ jobs:
           nic-binary: nic
           wait-timeout: '1800'
 
+      # Deployment success is not platform correctness: a cluster can finish
+      # deploying with every ArgoCD application Healthy while a user cannot
+      # log in, cannot get durable storage, or is admitted to a UI that
+      # should refuse them. The deploy action exports KUBECONFIG, so this
+      # runs against the cluster just created and is torn down with it.
+      - name: Run user journey tests
+        # Bounded below the job timeout for the same reason the Deploy step
+        # is: the destroy post step must always have budget left, or a
+        # failed run leaks real cloud infrastructure.
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts-hetzner
+
   existing:
     name: Existing
     needs: build
@@ -290,7 +346,7 @@ jobs:
     concurrency:
       group: deploy-test-existing
       cancel-in-progress: false
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -334,3 +390,17 @@ jobs:
         with:
           config: .github/fixtures/deploy/existing-config.yaml
           nic-binary: nic
+
+      # Deployment success is not platform correctness: a cluster can finish
+      # deploying with every ArgoCD application Healthy while a user cannot
+      # log in, cannot get durable storage, or is admitted to a UI that
+      # should refuse them. The deploy action exports KUBECONFIG, so this
+      # runs against the cluster just created and is torn down with it.
+      - name: Run user journey tests
+        # Bounded below the job timeout for the same reason the Deploy step
+        # is: the destroy post step must always have budget left, or a
+        # failed run leaks real cloud infrastructure.
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts-existing

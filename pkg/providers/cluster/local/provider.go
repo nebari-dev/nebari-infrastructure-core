@@ -32,8 +32,15 @@ type Provider struct {
 	// environment there would make unit tests depend on whatever kind
 	// clusters happen to be running. Keying is unnecessary: every kind
 	// cluster on a host shares the one "kind" Docker network, so the pool is
-	// identical for all local clusters. Empty until Deploy runs, in which
-	// case InfraSettings falls back to defaultMetalLBAddressPool.
+	// identical for all local clusters.
+	//
+	// Empty until Deploy runs. The orchestration layer (pkg/nic Deploy) calls
+	// InfraSettings twice by design: once before Deploy for fail-fast
+	// validation (see the comment there), and again after Deploy specifically
+	// so this field is populated by the time InfraSettings reads it. Only the
+	// pre-Deploy call ever observes metalLBPool empty and falls back to
+	// defaultMetalLBAddressPool; if a caller reads InfraSettings without ever
+	// calling Deploy first (dry-run, tests), it also gets the fallback.
 	//
 	// No locking: Deploy (writer) and InfraSettings (reader) run sequentially
 	// on the same goroutine in the deploy flow, and the local provider is not
