@@ -191,25 +191,6 @@ downstream". Both halves of that sentence need correcting, and one does not:
   (ADR-0004) are unaffected either way, since the capability is discovered by
   type assertion rather than required by the `Provider` interface.
 
-**Still deferred: one extraction path.** The two emitters read the same structs
-by different means - `go/ast` for markdown, reflection for JSON Schema - which
-is the two-sources-of-truth risk the previous update invoked when it ruled out a
-second binary. Folding them into one binary bounds that risk but does not remove
-it, and the cost is already demonstrated: constraints moved into `jsonschema`
-tags were silently dropped from the markdown reference until the emitter was
-taught to read the tag. Rendering the markdown config reference *from* the
-schema would collapse the two to one extraction path. That is the intended
-direction, not a decided one; it is deliberately not part of the PR that shipped
-`schemas/`, because both emitters had just changed shape.
-
-**Consequence for open question #1 (required-from-omitempty).** The imperfect
-signal noted above is now load-bearing in a second output, and a wrong inference
-there is worse than in markdown: a schema that marks a runtime-defaulted field
-as `required` rejects configs the binary accepts. Two repository provider fields
-did exactly that. The mitigation is unchanged - add `omitempty` to
-genuinely-optional tags - but it is now enforced rather than advised, by
-validating every file under `examples/` against the generated schemas.
-
 ## Links
 
 - [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md) — related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
