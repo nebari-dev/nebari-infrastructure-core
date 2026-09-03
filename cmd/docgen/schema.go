@@ -274,11 +274,14 @@ type category struct {
 
 // categoryTable describes every category in ConfigTypes. It is a literal list
 // because each entry carries naming that cannot be derived from the type, but
-// it must stay exhaustive: a category missing here emits no schema, and an
-// absent file produces no diff for the drift gate to fail on, which is how the
-// repository category shipped undocumented. TestCategoryTableCoversConfigTypes
-// compares this list against ConfigTypes' fields so an addition there cannot be
-// silently forgotten here.
+// it must stay exhaustive: a category missing here emits no schema, and CI
+// cannot see the gap. The drift gate compares the regenerated tree against the
+// committed one, so it catches a schema that stops being emitted - but only for
+// a category that was emitted once, leaving a tracked file to go missing. A
+// category that was never in this table has no committed file to diff against,
+// which is how the repository category shipped undocumented.
+// TestCategoryTableCoversConfigTypes compares this list against ConfigTypes'
+// fields so an addition there cannot be silently forgotten here.
 func categoryTable(types *nic.ConfigTypes) []category {
 	return []category{
 		{"cluster", "cluster provider", "config.ClusterConfig", types.Cluster},

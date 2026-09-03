@@ -29,10 +29,13 @@ type ConfigTypes struct {
 // category defines.
 //
 // Every category in registry.Registry must be walked here. A category that is
-// missed generates no schema and no documentation, and produces no diff for the
-// drift gate to fail on, so it goes unnoticed - which is how the repository
-// category shipped undocumented. A provider that does not implement that
-// capability is simply omitted (its config type is unknown), never a hard error.
+// missed generates no schema and no documentation, and CI cannot see the gap:
+// the drift gate diffs the regenerated tree against the committed one, so it
+// catches output that disappears, but a category that was never walked has no
+// committed file to go missing - which is how the repository category shipped
+// undocumented. TestConfigTypesCoversEveryRegistryCategory counts the
+// categories instead. A provider that does not implement that capability is
+// simply omitted (its config type is unknown), never a hard error.
 //
 // Intended for build-time tooling (cmd/docgen) and, later, config
 // scaffolding (nic init), so neither needs to import concrete provider packages

@@ -299,8 +299,9 @@ func TestCheckSchemaNameCollisions(t *testing.T) {
 
 // The category table carries naming that cannot be derived from the types, so
 // it is a literal list - but a category present in ConfigTypes and missing here
-// emits no schema at all, and an absent file leaves the drift gate nothing to
-// fail on.
+// emits no schema at all, and the drift gate can only compare against files
+// that were committed once. A category that never reached this table has no
+// committed schema to go missing, so nothing else would notice.
 func TestCategoryTableCoversConfigTypes(t *testing.T) {
 	fields := reflect.TypeOf(nic.ConfigTypes{}).NumField()
 	if got := len(categoryTable(&nic.ConfigTypes{})); got != fields {

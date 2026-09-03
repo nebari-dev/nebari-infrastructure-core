@@ -48,10 +48,11 @@ func TestRegisteredProvidersImplementConfigTyped(t *testing.T) {
 // TestConfigTypesCoversEveryRegistryCategory fails when a provider category is
 // added to registry.Registry but not walked by RegisteredConfigTypes. That
 // omission is invisible at runtime - the new category simply produces no schema
-// and no docs, and an absent page yields no diff for the drift gate to catch,
-// which is exactly how pkg/providers/repository/ shipped undocumented. Counting
-// fields keeps the check honest without naming the categories, so it also
-// covers the next one.
+// and no docs - and the drift gate cannot see it either: the gate diffs
+// regenerated output against what is committed, and a category that was never
+// walked has no committed page or schema to go missing. That is exactly how
+// pkg/providers/repository/ shipped undocumented. Counting fields keeps the
+// check honest without naming the categories, so it also covers the next one.
 func TestConfigTypesCoversEveryRegistryCategory(t *testing.T) {
 	// Count only the provider-list fields. Counting every field would make a
 	// future non-provider field on Registry (a mutex, a clock) fail this test
