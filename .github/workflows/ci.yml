@@ -123,6 +123,25 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Assert version injection
+        run: |
+          set -o pipefail
+          # Drive the values through the ENVIRONMENT, not the command line: this
+          # is the path `?=` exists for. A command-line `make build VERSION=...`
+          # overrides a plain `=` too, so it would pass even if `?=` regressed to
+          # `=`; only the environment path actually exercises this PR's change.
+          VERSION=ci-test-v9.9.9 COMMIT=abcdef1 DATE=2020-01-01T00:00:00Z make build
+          out=$(./nic version)
+          for want in "Version: ci-test-v9.9.9" "Commit: abcdef1" "Built: 2020-01-01T00:00:00Z"; do
+            if ! grep -qF "$want" <<<"$out"; then
+              echo "ldflags version injection failed: missing '$want'" >&2
+              echo "$out" >&2
+              exit 1
+            fi
+          done
+          # Restore the normally-versioned binary for the upload step.
+          make build
+
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
