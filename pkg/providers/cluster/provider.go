@@ -7,6 +7,18 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 )
 
+// Fixed NodePorts for the gateway's Envoy service when InfraSettings.
+// GatewayHostAddress is set. The provider maps host ports to these values at
+// cluster creation, and the ArgoCD templates pin the Envoy service to them,
+// so both sides agree without runtime coordination.
+const (
+	// GatewayHTTPNodePort backs the gateway's HTTP listener (host port 80).
+	GatewayHTTPNodePort = 30080
+	// GatewayHTTPSNodePort backs the gateway's HTTPS listener (host port
+	// https_port, default 443).
+	GatewayHTTPSNodePort = 30443
+)
+
 // BackupBucketSpec describes an object-storage bucket/container the provider's
 // Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec
 // in DeployOptions means "do not provision" (external or pre-existing bucket).
@@ -68,18 +80,20 @@ type InfraSettings struct {
 	// Examples: "gp2" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
 	StorageClass string
 
-	// NeedsMetalLB indicates whether this provider requires MetalLB for load balancing.
-	// Cloud providers with native LBs return false; local provider returns true.
-	NeedsMetalLB bool
+	// GatewayHostAddress is the address the platform is reached at when the
+	// gateway is published on host ports of the cluster node instead of a
+	// LoadBalancer service. Non-empty means host-port publishing: the
+	// gateway's Envoy service is pinned to the fixed NodePorts above and the
+	// provider maps them to host ports on this address at cluster creation
+	// (kind extraPortMappings). Empty means the gateway gets a LoadBalancer
+	// service. Only the local provider sets this, to 127.0.0.1: a development
+	// cluster should not be exposed to the LAN, and loopback needs no DNS.
+	GatewayHostAddress string
 
 	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
 	// Used by providers whose cloud controller manager requires annotations
 	// (e.g., {"load-balancer.hetzner.cloud/location": "ash"}).
 	LoadBalancerAnnotations map[string]string
-
-	// MetalLBAddressPool is the IP range for MetalLB's IPAddressPool.
-	// Only used when NeedsMetalLB is true (e.g., "192.168.1.100-192.168.1.110").
-	MetalLBAddressPool string
 
 	// KeycloakBasePath is appended to the Keycloak service URL for the operator.
 	// Most providers leave this empty. Providers using the Keycloak legacy chart

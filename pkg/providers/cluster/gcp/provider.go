@@ -144,7 +144,6 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings {
 	return cluster.InfraSettings{
 		StorageClass:    "standard-rwo",
-		NeedsMetalLB:    false,
 		LonghornEnabled: false,
 	}
 }

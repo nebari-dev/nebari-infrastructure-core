@@ -58,7 +58,7 @@ def test_gateway_reachable_fails_with_a_diagnosis_naming_domain_and_address():
     assert "nebari.example" in message
     assert "192.168.1.100" in message
     assert "443" in message
-    assert "612" in message
+    assert "https_port" in message
 
 
 def _request_marked(marker: str | None):

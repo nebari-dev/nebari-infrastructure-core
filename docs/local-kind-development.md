@@ -18,7 +18,7 @@ make build                                   # build the nic binary
 
 1. Creates a Kind cluster named after `project_name` (`my-nebari-local` in the example config), reusing it if one already exists.
 2. Mounts the default GitOps directory into the node (see below).
-3. Installs MetalLB and derives its `IPAddressPool` from the Kind Docker network.
+3. Publishes the gateway on host ports 80/443 of `127.0.0.1` (see Networking below).
 4. Bootstraps ArgoCD and the foundational apps (cert-manager, Envoy Gateway, Keycloak, etc.).
 
 There is no `make localkind-up`; the local provider does all of this itself.
@@ -74,7 +74,19 @@ kubectl port-forward svc/keycloak -n keycloak 8081:80
 
 ## Networking
 
-MetalLB is always enabled on local clusters (Kind has no built-in LoadBalancer). NIC derives MetalLB's `IPAddressPool` from the Kind node's Docker network - for example a `192.168.1.0/24` network yields `192.168.1.100-192.168.1.110`, and the default `172.18.0.0/16` kind network yields `172.18.255.100-172.18.255.110`. To pin the range, set `cluster.local.metallb.address_pool` in the config. Services of type `LoadBalancer` then become reachable from your host machine within that range.
+The gateway is published on host ports of `127.0.0.1`. NIC pins the gateway's Envoy service to fixed NodePorts and maps them to host ports 80 and 443 (or `cluster.local.https_port`) when it creates the Kind cluster, so no LoadBalancer, MetalLB, or extra host tooling (such as docker-mac-net-connect on macOS) is involved. This works the same on macOS, Linux, and Windows because published ports are plain Docker port mappings.
+
+To reach the platform, point the hostnames at loopback in `/etc/hosts` (the deploy output prints this line too):
+
+```
+127.0.0.1 nebari.local keycloak.nebari.local argocd.nebari.local
+```
+
+`/etc/hosts` has no wildcard support, so services exposed later on other subdomains need their hostname appended to the same line.
+
+Public wildcard loopback domains sidestep both the editing and the wildcard limitation: set the domain to a name under [lvh.me](https://lvh.me) or [localtest.me](https://readme.localtest.me) (for example `domain: nebari.lvh.me`) and every subdomain already resolves to `127.0.0.1`, with no `/etc/hosts` edits and no `dns:` block. The trade-offs are that resolution needs internet access, and some routers and resolvers drop public DNS answers that point at loopback (rebind protection), which is why `/etc/hosts` stays the printed default. The hosts-file instructions deploy prints are safe to ignore in this setup.
+
+One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster (`nic destroy`, then `nic deploy`). NIC records the ports a cluster was created with and `nic deploy` fails when the config no longer matches them, rather than deploying a gateway the host does not publish. The record is written at cluster creation, so a cluster without one (created by an earlier NIC version, or the `nic-local-cluster` ConfigMap was deleted) adopts the configured ports on its first deploy, with a warning: those values are unverified, and if they are wrong the reliable signal is `nic outputs` failing to reach the gateway.
 
 ## Troubleshooting
 

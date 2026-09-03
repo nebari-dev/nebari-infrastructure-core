@@ -147,20 +147,9 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Provider selected").
 		WithMetadata("provider", clusterProvider.Name()))
 
-	// Get provider infrastructure settings up front, before Deploy runs. This
-	// first call is for fail-fast validation only and must rely solely on
-	// statically-known fields (e.g. StorageClass, SupportsLocalGitOps) derived
-	// from clusterConfig alone: nothing here depends on the live cluster, so
-	// misconfiguration is caught before provisioning anything.
-	//
-	// InfraSettings is deliberately called a second time after Deploy below
-	// (see the comment there). Some providers (e.g. local/kind) can only
-	// derive certain settings, like the MetalLB address pool, from a running
-	// cluster, and Deploy is what makes that cluster exist. Do not remove
-	// either call: removing the early one loses fail-fast validation, and
-	// removing the later one silently reintroduces #612, where every local
-	// deploy used an unroutable fallback MetalLB pool because InfraSettings
-	// was never read again after Deploy populated the real value.
+	// Get provider infrastructure settings up front. InfraSettings is a pure
+	// getter, so it is safe to compute before Deploy and lets us fail fast on
+	// misconfiguration before provisioning anything.
 	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
@@ -181,6 +170,16 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
+			WithMetadata("error", err.Error()))
+		return nil, err
+	}
+
+	// Reject a dns block on a loopback host-port gateway before provisioning
+	// any infrastructure, mirroring the validate path for library callers
+	// that skip Validate.
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostAddress); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible dns and cluster providers").
 			WithMetadata("error", err.Error()))
 		return nil, err
 	}
@@ -216,15 +215,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Infrastructure deployment completed").
 		WithMetadata("provider", clusterProvider.Name()))
-
-	// Re-read InfraSettings now that the cluster exists. This is the second of
-	// the two deliberate InfraSettings calls described above: it picks up
-	// values a provider can only compute from a live cluster (e.g. the local
-	// provider's kind-network-derived MetalLB pool), which are still zero/
-	// default in the pre-Deploy read. Every consumer of infraSettings from
-	// this point on (GitOps bootstrap, ArgoCD/foundational install, MetalLB
-	// config) uses this refreshed value.
-	infraSettings = clusterProvider.InfraSettings(cfg.Cluster)
 
 	// Resolve and bootstrap the GitOps repository. Skipped in dry-run because
 	// provisioning has side effects (e.g. creating a directory). The resolved
@@ -328,11 +318,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
 				},
-				// Enable MetalLB only for providers that need it
-				MetalLB: argocd.MetalLBConfig{
-					Enabled:     infraSettings.NeedsMetalLB,
-					AddressPool: infraSettings.MetalLBAddressPool,
-				},
 				Backups:       cfg.Backups.LonghornConfig(),
 				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
@@ -350,9 +335,17 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		status.Info(ctx, "Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Look up LB endpoint and provision DNS records if configured
+	// Look up the LB endpoint and provision DNS records if configured. With a
+	// host-port gateway (local kind clusters) there is no load balancer: the
+	// platform is published on the provider's host address, so report that
+	// directly. There are no DNS records to provision on this path:
+	// ensureDNSSupported rejected any dns block up front.
 	if cfg.Domain != "" && !opts.DryRun {
-		result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		if addr := infraSettings.GatewayHostAddress; addr != "" {
+			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: addr, Port: infraSettings.HTTPSPort}
+		} else {
+			result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		}
 	}
 
 	return result, nil

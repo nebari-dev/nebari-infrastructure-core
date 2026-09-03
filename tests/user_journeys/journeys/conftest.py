@@ -77,11 +77,12 @@ def gateway_reachable(platform_domain, gateway_address) -> bool:
             f"gateway for platform domain {platform_domain!r} is not reachable: "
             f"TCP connect to {gateway_address}:{port} failed. Every journey that "
             "needs Keycloak, ArgoCD, or the Longhorn UI cannot proceed, since a "
-            "real user could not reach them either. A gateway address that is "
-            "not routable from this host is a common cause -- for example a "
-            "MetalLB address pool that does not overlap the kind cluster's "
-            "Docker network (see issue #612) -- so confirm the gateway address "
-            "is actually reachable from this host before re-running."
+            "real user could not reach them either. Common causes: a cloud "
+            "load balancer that is not routable from this host, or a local "
+            "kind cluster created with a custom https_port (the suite probes "
+            f"{port}, and kind host port mappings are fixed at cluster "
+            "creation). Confirm the gateway address is actually reachable "
+            "from this host before re-running."
         )
     return True
 

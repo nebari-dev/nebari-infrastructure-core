@@ -3,6 +3,7 @@ package nic
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"go.opentelemetry.io/otel"
 
@@ -64,6 +65,10 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostAddress); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
@@ -133,6 +138,20 @@ func validateRepositoryProvider(ctx context.Context, cfg *config.NebariConfig, r
 	}
 	if err := repoProvider.Validate(ctx, cfg.ProjectName, cfg.Repository); err != nil {
 		return fmt.Errorf("invalid repository: %w", err)
+	}
+	return nil
+}
+
+// ensureDNSSupported rejects a dns block on a cluster whose gateway is
+// published on loopback host ports (local kind clusters). Public DNS records
+// cannot usefully point at loopback, and deploy would skip provisioning them
+// anyway, so the block is dead configuration at best and at worst suppresses
+// the /etc/hosts guidance the user actually needs. A host-port gateway on a
+// routable address (no provider does this today) would pass: DNS records can
+// point at it.
+func ensureDNSSupported(cfg *config.NebariConfig, gatewayHostAddress string) error {
+	if cfg.DNS != nil && gatewayHostAddress != "" && net.ParseIP(gatewayHostAddress).IsLoopback() {
+		return fmt.Errorf("a dns provider is not supported by cluster provider %q: the gateway is published on host ports of %s, which DNS records cannot usefully point to. Remove the dns block and use the /etc/hosts instructions printed by deploy", cfg.Cluster.ProviderName(), gatewayHostAddress)
 	}
 	return nil
 }

@@ -8,7 +8,7 @@ NIC's configuration philosophy:
 2. **Discriminator pattern for providers**: `cluster.<provider>:` and `dns.<provider>:` use the provider name as the map key, with provider-specific config underneath. The `config` package never imports a provider package; per-provider decoding happens inside each provider.
 3. **No secrets in config**: Credentials live in environment variables (typically loaded from `.env`). Config files are safe to check into a GitOps repo.
 4. **Validate at parse time**: `NebariConfig.Validate(opts)` checks required fields and provider-name validity before any infrastructure call.
-5. **Provider capabilities flow through `InfraSettings`**: Code outside `cmd/nic` and a provider's own package never branches on provider name; capabilities like `NeedsMetalLB` or `StorageClass` are read from `provider.InfraSettings(cfg)`.
+5. **Provider capabilities flow through `InfraSettings`**: Code outside `cmd/nic` and a provider's own package never branches on provider name; capabilities like `GatewayHostAddress` or `StorageClass` are read from `provider.InfraSettings(cfg)`.
 
 ## 7.2 Top-Level Schema
 
@@ -146,7 +146,7 @@ Authoritative examples live under [`examples/`](../../../examples/) in the repo.
 
 - [`examples/aws-config.yaml`](../../../examples/aws-config.yaml) - EKS with EFS and remote GitOps repo
 - [`examples/hetzner-config.yaml`](../../../examples/hetzner-config.yaml) - Hetzner k3s with `node_groups.master` and `node_groups.workers`
-- [`examples/local-config.yaml`](../../../examples/local-config.yaml) - Kind cluster with optional `kind:` tuning, MetalLB address pool, and `file://` GitOps repo
+- [`examples/local-config.yaml`](../../../examples/local-config.yaml) - Kind cluster with optional `kind:` tuning, gateway host ports, and `file://` GitOps repo
 - [`examples/custom-tls-config.yaml`](../../../examples/custom-tls-config.yaml) - `certificate.type: existing` (bring your own TLS cert)
 - [`examples/longhorn-backups-config.yaml`](../../../examples/longhorn-backups-config.yaml) - EKS with a dedicated Longhorn storage pool and S3 backups
 - [`examples/existing-config.yaml`](../../../examples/existing-config.yaml) - Adopt an existing kubeconfig

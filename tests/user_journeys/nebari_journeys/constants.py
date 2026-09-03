@@ -29,6 +29,13 @@ ARGOCD_NAMESPACE = "argocd"
 GATEWAY_NAMESPACE = "envoy-gateway-system"
 GATEWAY_LABEL_SELECTOR = "gateway.envoyproxy.io/owning-gateway-name=nebari-gateway"
 
+# pkg/providers/cluster/provider.go. A host-port gateway (local kind
+# clusters) pins the Envoy service to these NodePorts and publishes them on
+# host ports of the machine running the cluster; the service never gets load
+# balancer ingress entries.
+GATEWAY_HTTP_NODE_PORT = 30080
+GATEWAY_HTTPS_NODE_PORT = 30443
+
 # pkg/config/config.go
 GATEWAY_TLS_SECRET = "nebari-gateway-tls"
 

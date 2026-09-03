@@ -9,7 +9,6 @@ Configuration options for local Kubernetes deployments.
 - [Config](#config)
 - [KindConfig](#kindconfig)
 - [KindMount](#kindmount)
-- [MetalLBConfig](#metallbconfig)
 
 ---
 
@@ -21,8 +20,8 @@ Config represents local provider configuration
 |-------|----------|------|----------|-------------|
 | Kind | `kind` | `*KindConfig` | No |  |
 | NodeSelectors | `node_selectors` | `map[string]map[string]string` | No |  |
-| HTTPSPort | `https_port` | int | No |  |
-| MetalLB | `metallb` | `*MetalLBConfig` | No |  |
+| HTTPSPort | `https_port` | int | No | HTTPSPort is the host port the gateway's HTTPS listener is published on (default 443). Override it when 443 is taken on the host or when running several local clusters side by side. Takes effect on... |
+| HTTPPort | `http_port` | int | No | HTTPPort is the host port the gateway's HTTP listener (the HTTPS redirect) is published on (default 80). Override it under the same circumstances as HTTPSPort, including rootless container runtimes... |
 
 ---
 
@@ -47,16 +46,4 @@ KindMount mounts a host directory into the kind node container.
 | HostPath | `host_path` | string | Yes |  |
 | ContainerPath | `container_path` | string | Yes |  |
 | ReadOnly | `read_only` | bool | No |  |
-
----
-
-## MetalLBConfig
-
-MetalLBConfig holds MetalLB-specific settings for the local provider.
-MetalLB is always enabled on local clusters — kind has no built-in
-LoadBalancer, so disabling it would leave the gateway without an IP.
-
-| Field | YAML Key | Type | Required | Description |
-|-------|----------|------|----------|-------------|
-| AddressPool | `address_pool` | string | No | AddressPool is the IP range for MetalLB's IPAddressPool. When unset, NIC derives a pool from the kind Docker network during Deploy. |
 

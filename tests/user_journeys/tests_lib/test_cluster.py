@@ -7,6 +7,7 @@ from kubernetes.config import ConfigException
 
 from nebari_journeys import constants
 from nebari_journeys.cluster import LONGHORN_STORAGE_CLASS, Cluster
+from nebari_journeys.waits import wait_for_value
 
 
 def _secret(data: dict[str, str]):
@@ -21,6 +22,23 @@ def _svc(ip=None, hostname=None):
     ingress.hostname = hostname
     svc = MagicMock()
     svc.status.load_balancer.ingress = [ingress]
+    item_list = MagicMock()
+    item_list.items = [svc]
+    return item_list
+
+
+def _node_port_svc(*node_ports):
+    """The Envoy service as a host-port gateway publishes it: type NodePort,
+    pinned nodePorts, and never any load balancer ingress."""
+    svc = MagicMock()
+    svc.status.load_balancer.ingress = None
+    svc.spec.type = "NodePort"
+    ports = []
+    for node_port in node_ports:
+        port = MagicMock()
+        port.node_port = node_port
+        ports.append(port)
+    svc.spec.ports = ports
     item_list = MagicMock()
     item_list.items = [svc]
     return item_list
@@ -73,6 +91,42 @@ def test_gateway_address_falls_back_to_hostname():
     core = MagicMock()
     core.list_namespaced_service.return_value = _svc(hostname="lb.example")
     assert _cluster(core).gateway_address() == "lb.example"
+
+
+def test_gateway_address_host_port_uses_the_api_host():
+    core = MagicMock()
+    core.list_namespaced_service.return_value = _node_port_svc(
+        constants.GATEWAY_HTTP_NODE_PORT, constants.GATEWAY_HTTPS_NODE_PORT
+    )
+    with patch.object(Cluster, "api_host", return_value="192.0.2.7"):
+        assert _cluster(core).gateway_address() == "192.0.2.7"
+
+
+def test_gateway_address_host_port_falls_back_to_loopback():
+    core = MagicMock()
+    core.list_namespaced_service.return_value = _node_port_svc(
+        constants.GATEWAY_HTTP_NODE_PORT, constants.GATEWAY_HTTPS_NODE_PORT
+    )
+    with patch.object(Cluster, "api_host", return_value=None):
+        assert _cluster(core).gateway_address() == "127.0.0.1"
+
+
+def test_gateway_address_rejects_unpinned_node_ports():
+    """Random nodePorts are what a no-op EnvoyProxy service patch produces.
+    They mean nothing is listening behind the host ports, so the address
+    must not resolve from them."""
+    core = MagicMock()
+    core.list_namespaced_service.return_value = _node_port_svc(31234, 32456)
+    with (
+        patch(
+            "nebari_journeys.cluster.wait_for_value",
+            lambda fetch, **kwargs: wait_for_value(
+                fetch, timeout=0.01, interval=0.001, description="the gateway address"
+            ),
+        ),
+        pytest.raises(TimeoutError, match="gateway address"),
+    ):
+        _cluster(core).gateway_address()
 
 
 def test_gateway_address_uses_the_pinned_namespace_and_selector():

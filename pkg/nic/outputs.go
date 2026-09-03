@@ -18,6 +18,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/argocd"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -34,6 +35,12 @@ type PlatformOutputs struct {
 	ArgoCDAdminPassword        string `json:"argocd_admin_password"`
 	GatewayAddress             string `json:"gateway_address"`
 }
+
+// gatewayAddressField is PlatformOutputs.GatewayAddress's JSON key, which is
+// also its identifier in unresolved-field errors (see PlatformOutputs). It is
+// the one output resolved through a chain of checks rather than a single
+// read, so it names its unresolved entry from several places.
+const gatewayAddressField = "gateway_address"
 
 // OutputsOptions controls how Outputs handles fields that are not yet
 // available. Some outputs materialize after the deploy call returns: the Argo
@@ -308,10 +315,26 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 
 	// The gateway address is read last, so the deadline may already have
 	// passed by the time its turn comes.
-	if err := ctx.Err(); err != nil {
-		missing = append(missing, unresolved{field: "gateway_address", reason: abandonedReason(err)})
+	if data.GatewayHostAddress != "" {
+		// A host-port gateway (local kind clusters) has no load balancer
+		// status to read: the address comes from the provider, so it is
+		// substantiated before it is reported. The Envoy service must carry
+		// the pinned NodePorts the kind host ports point at, and the gateway
+		// must answer a real HTTPS request at the address. Either failing
+		// reports the field unresolved instead of an address nothing serves.
+		if err := ctx.Err(); err != nil {
+			missing = append(missing, unresolved{field: gatewayAddressField, reason: abandonedReason(err)})
+		} else if err := endpoint.CheckNodePorts(ctx, client, []int32{cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort}); err != nil {
+			missing = append(missing, unresolved{field: gatewayAddressField, reason: err.Error()})
+		} else if err := endpoint.ProbeGateway(ctx, data.GatewayHostAddress, data.Domain, data.HTTPSPort); err != nil {
+			missing = append(missing, unresolved{field: gatewayAddressField, reason: err.Error()})
+		} else {
+			outputs.GatewayAddress = data.GatewayHostAddress
+		}
+	} else if err := ctx.Err(); err != nil {
+		missing = append(missing, unresolved{field: gatewayAddressField, reason: abandonedReason(err)})
 	} else if ep, err := endpoint.Check(ctx, client); err != nil {
-		missing = append(missing, unresolved{field: "gateway_address", reason: err.Error()})
+		missing = append(missing, unresolved{field: gatewayAddressField, reason: err.Error()})
 	} else {
 		// Prefer the hostname: cloud load balancers publish a hostname and
 		// leave the IP empty, and the hostname is what DNS should point at.
@@ -321,7 +344,7 @@ func readOutputs(ctx context.Context, client kubernetes.Interface, data argocd.T
 		}
 		if outputs.GatewayAddress == "" {
 			missing = append(missing, unresolved{
-				field:  "gateway_address",
+				field:  gatewayAddressField,
 				reason: "load balancer ingress has neither a hostname nor an IP",
 			})
 		}

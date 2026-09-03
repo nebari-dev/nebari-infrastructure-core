@@ -168,7 +168,6 @@ func TestInfraSettings(t *testing.T) {
 		name                string
 		config              map[string]any
 		wantStorageClass    string
-		wantMetalLB         bool
 		wantLBAnnotationLen int
 		wantLBAnnotations   map[string]string
 	}{
@@ -176,13 +175,11 @@ func TestInfraSettings(t *testing.T) {
 			name:             "default storage class",
 			config:           map[string]any{"context": "my-context"},
 			wantStorageClass: "standard",
-			wantMetalLB:      false,
 		},
 		{
 			name:             "custom storage class",
 			config:           map[string]any{"context": "my-context", "storage_class": "longhorn"},
 			wantStorageClass: "longhorn",
-			wantMetalLB:      false,
 		},
 		{
 			name: "load balancer annotations",
@@ -194,7 +191,6 @@ func TestInfraSettings(t *testing.T) {
 				},
 			},
 			wantStorageClass:    "hcloud-volumes",
-			wantMetalLB:         false,
 			wantLBAnnotationLen: 1,
 			wantLBAnnotations:   map[string]string{"load-balancer.hetzner.cloud/location": "ash"},
 		},
@@ -205,7 +201,6 @@ func TestInfraSettings(t *testing.T) {
 				"longhorn": map[string]any{},
 			},
 			wantStorageClass: "longhorn",
-			wantMetalLB:      false,
 		},
 		{
 			name: "longhorn explicitly disabled keeps default StorageClass",
@@ -214,7 +209,6 @@ func TestInfraSettings(t *testing.T) {
 				"longhorn": map[string]any{"enabled": false},
 			},
 			wantStorageClass: "standard",
-			wantMetalLB:      false,
 		},
 		{
 			name: "explicit storage_class wins over longhorn block",
@@ -224,7 +218,6 @@ func TestInfraSettings(t *testing.T) {
 				"longhorn":      map[string]any{},
 			},
 			wantStorageClass: "hcloud-volumes",
-			wantMetalLB:      false,
 		},
 	}
 
@@ -236,8 +229,8 @@ func TestInfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantStorageClass {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantStorageClass)
 			}
-			if settings.NeedsMetalLB != tt.wantMetalLB {
-				t.Errorf("NeedsMetalLB = %v, want %v", settings.NeedsMetalLB, tt.wantMetalLB)
+			if settings.GatewayHostAddress != "" {
+				t.Errorf("GatewayHostAddress = %q, want empty", settings.GatewayHostAddress)
 			}
 			if len(settings.LoadBalancerAnnotations) != tt.wantLBAnnotationLen {
 				t.Errorf("LoadBalancerAnnotations count = %d, want %d", len(settings.LoadBalancerAnnotations), tt.wantLBAnnotationLen)

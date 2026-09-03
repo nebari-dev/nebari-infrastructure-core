@@ -18,35 +18,10 @@ const (
 	ProviderName = "local"
 	// defaultStorageClass is the StorageClass kind installs by default
 	defaultStorageClass = "standard"
-	// defaultMetalLBAddressPool is the fallback MetalLB pool used only when
-	// the kind node network cannot be inspected (e.g. dry-run, or no
-	// container runtime). The normal path derives the pool from the node IP.
-	defaultMetalLBAddressPool = "192.168.1.100-192.168.1.110"
 )
 
 // Provider implements the local kind provider
-type Provider struct {
-	// metalLBPool caches the MetalLB address pool derived from the kind node
-	// network during Deploy, for InfraSettings to read. InfraSettings has no
-	// projectName or runtime access of its own, and deriving from the live
-	// environment there would make unit tests depend on whatever kind
-	// clusters happen to be running. Keying is unnecessary: every kind
-	// cluster on a host shares the one "kind" Docker network, so the pool is
-	// identical for all local clusters.
-	//
-	// Empty until Deploy runs. The orchestration layer (pkg/nic Deploy) calls
-	// InfraSettings twice by design: once before Deploy for fail-fast
-	// validation (see the comment there), and again after Deploy specifically
-	// so this field is populated by the time InfraSettings reads it. Only the
-	// pre-Deploy call ever observes metalLBPool empty and falls back to
-	// defaultMetalLBAddressPool; if a caller reads InfraSettings without ever
-	// calling Deploy first (dry-run, tests), it also gets the fallback.
-	//
-	// No locking: Deploy (writer) and InfraSettings (reader) run sequentially
-	// on the same goroutine in the deploy flow, and the local provider is not
-	// used to deploy multiple clusters concurrently.
-	metalLBPool string
-}
+type Provider struct{}
 
 // NewProvider creates a new local provider
 func NewProvider() *Provider {
@@ -102,6 +77,30 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 	}
 
+	for _, p := range []struct {
+		name string
+		port int
+	}{
+		{"http_port", localCfg.HTTPPort},
+		{"https_port", localCfg.HTTPSPort},
+	} {
+		if p.port < 0 || p.port > 65535 {
+			err := fmt.Errorf("%s must be between 1 and 65535 or omitted, got %d", p.name, p.port)
+			span.RecordError(err)
+			return err
+		}
+	}
+
+	// Compare the ports kind will actually map (hostPort applies the 80/443
+	// defaults), so a collision with a defaulted port is also caught. kind
+	// rejects duplicate port mappings too, but only after provisioning has
+	// started.
+	if hostPort(localCfg.HTTPPort, defaultHTTPPort) == hostPort(localCfg.HTTPSPort, defaultHTTPSPort) {
+		err := fmt.Errorf("http_port and https_port must differ, both are %d", hostPort(localCfg.HTTPPort, defaultHTTPPort))
+		span.RecordError(err)
+		return err
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Successfully validated local provider configuration").
 		WithResource("provider").
 		WithAction("validate").
@@ -111,8 +110,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 }
 
 // Deploy creates the NIC-managed kind cluster (named after the project) if it
-// does not already exist, then derives the MetalLB address pool from the
-// cluster's network for InfraSettings to consume.
+// does not already exist. The gateway's NodePorts are published on host ports
+// at creation time (see gatewayPortMappings), so the platform is reachable at
+// 127.0.0.1 without any load-balancer or DNS setup.
 func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.Deploy")
@@ -157,6 +157,26 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
+
+		// Fail before anything is rendered when the configured ports differ
+		// from the ones the cluster was created with: the mappings cannot
+		// change on a live cluster, so continuing would move the gateway
+		// listeners and printed URLs to ports the host does not publish.
+		client, err := clusterClient(kp, projectName)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if err := verifyClusterPorts(ctx, client, projectName,
+			hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort)); err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Configured host ports do not match the existing kind cluster").
+				WithResource("provider").
+				WithAction("deploy").
+				WithMetadata("cluster_name", projectName).
+				WithMetadata("error", err.Error()))
+			return err
+		}
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").
@@ -164,7 +184,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("gitops_path", config.DefaultLocalRepositoryPath(projectName)))
 
-		if err := createKindCluster(ctx, kp, projectName, kindCfg); err != nil {
+		if err := createKindCluster(ctx, kp, projectName, kindCfg, localCfg.HTTPPort, localCfg.HTTPSPort); err != nil {
 			span.RecordError(err)
 			return err
 		}
@@ -174,21 +194,24 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("kube_context", kindContextName(projectName)))
-	}
 
-	// Derive the MetalLB pool from the cluster's network for InfraSettings.
-	// On failure we keep the static default and say so, rather
-	// than failing the deploy over a load-balancer address range.
-	if pool, err := kindNodeAddressPool(ctx, kp, projectName); err == nil {
-		p.metalLBPool = pool
-		span.SetAttributes(attribute.String("metallb_address_pool", pool))
-	} else {
-		span.RecordError(err)
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Could not derive MetalLB address pool from the kind network, using default %s", defaultMetalLBAddressPool)).
-			WithResource("provider").
-			WithAction("deploy").
-			WithMetadata("cluster_name", projectName).
-			WithMetadata("error", err.Error()))
+		// Record the ports the cluster was just created with, so the next
+		// deploy can verify them. A failed write costs only that check (a
+		// later deploy adopts and records the values it finds configured),
+		// so it does not fail a deploy that is otherwise healthy.
+		client, err := clusterClient(kp, projectName)
+		if err == nil {
+			err = recordClusterPorts(ctx, client,
+				hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort))
+		}
+		if err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not record the cluster's host ports, so the next deploy cannot verify them against the config").
+				WithResource("provider").
+				WithAction("deploy").
+				WithMetadata("cluster_name", projectName).
+				WithMetadata("error", err.Error()))
+		}
 	}
 
 	return nil
@@ -311,8 +334,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:        defaultStorageClass,
-		NeedsMetalLB:        true,
-		MetalLBAddressPool:  defaultMetalLBAddressPool,
+		GatewayHostAddress:  gatewayHostAddress,
 		SupportsLocalGitOps: true,
 		LonghornEnabled:     false,
 	}
@@ -324,21 +346,6 @@ func (p *Provider) InfraSettings(cfg *config.ClusterConfig) cluster.InfraSetting
 
 	if localCfg.HTTPSPort != 0 {
 		settings.HTTPSPort = localCfg.HTTPSPort
-	}
-
-	explicitPool := localCfg.MetalLB != nil && localCfg.MetalLB.AddressPool != ""
-	if explicitPool {
-		settings.MetalLBAddressPool = localCfg.MetalLB.AddressPool
-	}
-
-	// Explicit pool takes precedence. When no explicit pool was configured, use
-	// the pool derived from the live cluster network during Deploy, so MetalLB IPs
-	// are routable on whatever subnet Docker picked. If Deploy produced none
-	// (dry-run, tests), defaultMetalLBAddressPool is kept.
-	// This relies on Deploy having populated p.metalLBPool on this same Provider
-	// instance before InfraSettings is called.
-	if !explicitPool && p.metalLBPool != "" {
-		settings.MetalLBAddressPool = p.metalLBPool
 	}
 
 	return settings

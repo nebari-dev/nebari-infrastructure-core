@@ -19,39 +19,19 @@ func TestInfraSettings(t *testing.T) {
 		name           string
 		providerConfig map[string]any
 		wantSC         string
-		wantMetalLB    bool
-		wantPool       string
 		wantHTTPSPort  int
 	}{
 		{
 			name:           "no local config block returns defaults",
 			providerConfig: nil,
 			wantSC:         "standard",
-			wantMetalLB:    true,
-			wantPool:       "192.168.1.100-192.168.1.110",
 			wantHTTPSPort:  0,
 		},
 		{
 			name:           "empty local config returns defaults",
 			providerConfig: map[string]any{"local": map[string]any{}},
 			wantSC:         "standard",
-			wantMetalLB:    true,
-			wantPool:       "192.168.1.100-192.168.1.110",
 			wantHTTPSPort:  0,
-		},
-		{
-			name: "metallb address_pool override",
-			providerConfig: map[string]any{
-				"local": map[string]any{
-					"metallb": map[string]any{
-						"address_pool": "172.18.255.100-172.18.255.110",
-					},
-				},
-			},
-			wantSC:        "standard",
-			wantMetalLB:   true,
-			wantPool:      "172.18.255.100-172.18.255.110",
-			wantHTTPSPort: 0,
 		},
 		{
 			name: "https_port override",
@@ -59,23 +39,6 @@ func TestInfraSettings(t *testing.T) {
 				"local": map[string]any{"https_port": 8443},
 			},
 			wantSC:        "standard",
-			wantMetalLB:   true,
-			wantPool:      "192.168.1.100-192.168.1.110",
-			wantHTTPSPort: 8443,
-		},
-		{
-			name: "https_port and address_pool override together",
-			providerConfig: map[string]any{
-				"local": map[string]any{
-					"https_port": 8443,
-					"metallb": map[string]any{
-						"address_pool": "10.0.0.100-10.0.0.110",
-					},
-				},
-			},
-			wantSC:        "standard",
-			wantMetalLB:   true,
-			wantPool:      "10.0.0.100-10.0.0.110",
 			wantHTTPSPort: 8443,
 		},
 		{
@@ -84,8 +47,6 @@ func TestInfraSettings(t *testing.T) {
 				"local": "not-a-map",
 			},
 			wantSC:        "standard",
-			wantMetalLB:   true,
-			wantPool:      "192.168.1.100-192.168.1.110",
 			wantHTTPSPort: 0,
 		},
 	}
@@ -101,11 +62,8 @@ func TestInfraSettings(t *testing.T) {
 			if settings.StorageClass != tt.wantSC {
 				t.Errorf("StorageClass = %q, want %q", settings.StorageClass, tt.wantSC)
 			}
-			if settings.NeedsMetalLB != tt.wantMetalLB {
-				t.Errorf("NeedsMetalLB = %v, want %v", settings.NeedsMetalLB, tt.wantMetalLB)
-			}
-			if settings.MetalLBAddressPool != tt.wantPool {
-				t.Errorf("MetalLBAddressPool = %q, want %q", settings.MetalLBAddressPool, tt.wantPool)
+			if settings.GatewayHostAddress != "127.0.0.1" {
+				t.Errorf("GatewayHostAddress = %q, want 127.0.0.1", settings.GatewayHostAddress)
 			}
 			if settings.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", settings.HTTPSPort, tt.wantHTTPSPort)
@@ -176,6 +134,47 @@ func TestValidateKindMode(t *testing.T) {
 			},
 			wantErr: "must be absolute",
 		},
+		{
+			name: "https_port above the port range is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"https_port": 99999999},
+			},
+			wantErr: "https_port must be between 1 and 65535",
+		},
+		{
+			name: "negative http_port is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": -1},
+			},
+			wantErr: "http_port must be between 1 and 65535",
+		},
+		{
+			name: "valid custom ports pass",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 8080, "https_port": 8443},
+			},
+		},
+		{
+			name: "both ports invalid reports http_port first",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": -1, "https_port": 99999999},
+			},
+			wantErr: "http_port must be between 1 and 65535",
+		},
+		{
+			name: "equal ports are rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 8443, "https_port": 8443},
+			},
+			wantErr: "http_port and https_port must differ",
+		},
+		{
+			name: "http_port colliding with the default https_port is rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"http_port": 443},
+			},
+			wantErr: "http_port and https_port must differ",
+		},
 	}
 
 	for _, tt := range tests {
@@ -194,90 +193,6 @@ func TestValidateKindMode(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("Validate error = %q, want it to contain %q", err.Error(), tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestInfraSettingsKindModeExplicitPool(t *testing.T) {
-	p := NewProvider()
-
-	// An explicit address_pool must win over network-derived pools.
-	cfg := &config.ClusterConfig{
-		Providers: map[string]any{
-			"local": map[string]any{
-				"kind": map[string]any{},
-				"metallb": map[string]any{
-					"address_pool": "10.0.0.100-10.0.0.110",
-				},
-			},
-		},
-	}
-
-	settings := p.InfraSettings(cfg)
-	if settings.MetalLBAddressPool != "10.0.0.100-10.0.0.110" {
-		t.Errorf("MetalLBAddressPool = %q, want explicit pool to win", settings.MetalLBAddressPool)
-	}
-}
-
-// TestInfraSettingsMetalLBPoolLifecycle pins the fix for #612: InfraSettings
-// must return the pool derived from the live kind network (cached in
-// p.metalLBPool by Deploy) once it is populated, fall back to
-// defaultMetalLBAddressPool when it is not (dry-run, or InfraSettings called
-// before Deploy), and always defer to an explicit config override regardless
-// of what Deploy derived.
-func TestInfraSettingsMetalLBPoolLifecycle(t *testing.T) {
-	const derivedPool = "172.18.255.100-172.18.255.110"
-	const explicitPool = "10.0.0.100-10.0.0.110"
-
-	tests := []struct {
-		name           string
-		metalLBPool    string // simulates Deploy having run (or not) and cached this
-		providerConfig map[string]any
-		wantPool       string
-	}{
-		{
-			name:        "before Deploy runs, falls back to the static default",
-			metalLBPool: "",
-			wantPool:    defaultMetalLBAddressPool,
-		},
-		{
-			name:        "after Deploy runs, returns the network-derived pool",
-			metalLBPool: derivedPool,
-			wantPool:    derivedPool,
-		},
-		{
-			name:        "explicit pool wins over the derived pool",
-			metalLBPool: derivedPool,
-			providerConfig: map[string]any{
-				"local": map[string]any{
-					"metallb": map[string]any{"address_pool": explicitPool},
-				},
-			},
-			wantPool: explicitPool,
-		},
-		{
-			name:        "explicit pool wins even when Deploy has not run",
-			metalLBPool: "",
-			providerConfig: map[string]any{
-				"local": map[string]any{
-					"metallb": map[string]any{"address_pool": explicitPool},
-				},
-			},
-			wantPool: explicitPool,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := NewProvider()
-			p.metalLBPool = tt.metalLBPool
-
-			cfg := &config.ClusterConfig{Providers: tt.providerConfig}
-
-			settings := p.InfraSettings(cfg)
-			if settings.MetalLBAddressPool != tt.wantPool {
-				t.Errorf("MetalLBAddressPool = %q, want %q", settings.MetalLBAddressPool, tt.wantPool)
 			}
 		})
 	}

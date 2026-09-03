@@ -31,7 +31,6 @@ This document describes the architectural design for Nebari Infrastructure Core 
 │ ├── cert-manager + cluster-issuers (TLS automation)         │
 │ ├── Envoy Gateway + gateway-config + httproutes (ingress)   │
 │ ├── Keycloak + postgresql (authentication)                  │
-│ ├── MetalLB + metallb-config (LB, local/bare-metal only)    │
 │ ├── OpenTelemetry Collector (telemetry pipeline)            │
 │ ├── Nebari Operator (NebariApp reconciler, out-of-tree)     │
 │ └── Nebari Landing Page (service catalog UI)                │

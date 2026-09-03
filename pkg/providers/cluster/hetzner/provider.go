@@ -395,7 +395,6 @@ func (p *Provider) GetKubeconfig(ctx context.Context, projectName string, _ *con
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass:    longhorn.StorageClassName,
-		NeedsMetalLB:    false,
 		LonghornEnabled: true, // Hetzner default — see Config.LonghornEnabled
 	}
 

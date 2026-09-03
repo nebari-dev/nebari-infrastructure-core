@@ -125,7 +125,7 @@ A few representative cases:
 **Local Kind deploy (manual):**
 
 - `nic deploy -f examples/local-config.yaml`
-- Expect: Kind cluster `my-nebari-local` (named after `project_name`) up, MetalLB syncing, gateway with an IP from the configured pool, foundational apps green.
+- Expect: Kind cluster `my-nebari-local` (named after `project_name`) up, the gateway's Envoy service published as `NodePort` on host ports 80/443 of `127.0.0.1`, foundational apps green, the hosts-file instructions printed.
 
 **Dry-run (any provider):**
 

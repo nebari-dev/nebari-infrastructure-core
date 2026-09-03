@@ -177,7 +177,7 @@ type Provider interface {
 }
 ```
 
-`InfraSettings` describes Kubernetes-level capabilities the rest of NIC needs to know about. Current fields: `StorageClass`, `NeedsMetalLB`, `LoadBalancerAnnotations`, `MetalLBAddressPool`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`.
+`InfraSettings` describes Kubernetes-level capabilities the rest of NIC needs to know about. Current fields: `StorageClass`, `GatewayHostAddress`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`, `LonghornEnabled`.
 
 Cluster-shaped branching anywhere outside the cluster provider package itself **must** go through `InfraSettings` - never `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code. The same pattern is followed by `dnsprovider.DNSProvider`, and is intended to scale to certificate, git hosting, and installer categories.
 
@@ -233,7 +233,7 @@ nic deploy -> nic.Client.Deploy (pkg/nic) orchestrates:
                 -> generate cluster.yaml
                 -> exec hetzner-k3s create -c cluster.yaml
                 -> kubeconfig written
-  -> pkg/argocd.Bootstrap(kubeconfig, InfraSettings{NeedsMetalLB: true, LoadBalancerAnnotations: ...})
+  -> pkg/argocd.Bootstrap(kubeconfig, InfraSettings{StorageClass: ..., LoadBalancerAnnotations: ...})
   -> dnsprovider.ProvisionRecords
   -> pkg/endpoint discovers LB and prints DNS records
 ```
@@ -428,7 +428,7 @@ Either way, a failure that can leave resources behind must surface in the exit c
 - **Provider implementations** do not import each other - they are independent.
 - **Config package** does not know about provider-specific types - it uses `map[string]any` with per-provider runtime unmarshaling.
 - Provider-specific types belong in their respective packages (e.g., `pkg/providers/cluster/aws/config.go`).
-- **Cluster-shaped capabilities flow through `InfraSettings`.** When the CLI or `pkg/argocd` needs to branch on a cluster-provider-specific capability (MetalLB requirement, Keycloak context path, HTTPS port, local GitOps support, etc.), add a field to `InfraSettings` and set it in each provider's `InfraSettings()` method. Do not introduce `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code - those become architectural debt that make adding a new provider require changes across the codebase. Existing examples: `NeedsMetalLB`, `StorageClass`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LoadBalancerAnnotations`, `SupportsLocalGitOps`.
+- **Cluster-shaped capabilities flow through `InfraSettings`.** When the CLI or `pkg/argocd` needs to branch on a cluster-provider-specific capability (host-port gateway publishing, Keycloak context path, HTTPS port, local GitOps support, etc.), add a field to `InfraSettings` and set it in each provider's `InfraSettings()` method. Do not introduce `cfg.Cluster.ProviderName() == "..."` switches in CLI or library code - those become architectural debt that make adding a new provider require changes across the codebase. Existing examples: `GatewayHostAddress`, `StorageClass`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `LoadBalancerAnnotations`, `SupportsLocalGitOps`.
 
 **Why this matters:**
 - Adding a new provider should not require changes to CLI commands or the config package.

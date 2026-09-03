@@ -4,17 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
 
 // pythonConstantsPath is the mirrored constants module the journey suite uses.
 const pythonConstantsPath = "../../tests/user_journeys/nebari_journeys/constants.py"
 
-// parsePythonConstants extracts NAME = "value" assignments, ignoring comments
-// and any trailing "# noqa: ..." pragma.
+// parsePythonConstants extracts NAME = "value" and NAME = 123 assignments,
+// ignoring comments and any trailing "# noqa: ..." pragma. Numeric values are
+// returned as their decimal string, so both kinds compare through one map.
 func parsePythonConstants(t *testing.T, path string) map[string]string {
 	t.Helper()
 
@@ -23,10 +26,14 @@ func parsePythonConstants(t *testing.T, path string) map[string]string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	re := regexp.MustCompile(`(?m)^([A-Z][A-Z0-9_]*)\s*=\s*"([^"]*)"`)
+	re := regexp.MustCompile(`(?m)^([A-Z][A-Z0-9_]*)\s*=\s*(?:"([^"]*)"|(\d+))`)
 	out := make(map[string]string)
 	for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
-		out[m[1]] = m[2]
+		value := m[2]
+		if m[3] != "" {
+			value = m[3]
+		}
+		out[m[1]] = value
 	}
 	if len(out) == 0 {
 		t.Fatalf("no constants parsed from %s; the format may have changed", path)
@@ -53,6 +60,8 @@ func TestPythonConstantsMatchGo(t *testing.T) {
 		{"FOUNDATIONAL_PART_OF", NebariFoundationalPartOf},
 		{"GATEWAY_NAMESPACE", endpoint.DefaultNamespace},
 		{"GATEWAY_LABEL_SELECTOR", endpoint.DefaultLabelSelector},
+		{"GATEWAY_HTTP_NODE_PORT", strconv.Itoa(cluster.GatewayHTTPNodePort)},
+		{"GATEWAY_HTTPS_NODE_PORT", strconv.Itoa(cluster.GatewayHTTPSNodePort)},
 		{"GATEWAY_TLS_SECRET", config.DefaultGatewayTLSSecretName},
 		{"ARGOCD_NAMESPACE", DefaultNamespace},
 	}
@@ -86,6 +95,7 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 		"REALM_ADMIN_SECRET", "REALM_ADMIN_PASSWORD_KEY",
 		"LONGHORN_OIDC_CLIENT_SECRET", "PART_OF_LABEL", "FOUNDATIONAL_PART_OF",
 		"GATEWAY_NAMESPACE", "GATEWAY_LABEL_SELECTOR", "GATEWAY_TLS_SECRET",
+		"GATEWAY_HTTP_NODE_PORT", "GATEWAY_HTTPS_NODE_PORT",
 		"ARGOCD_NAMESPACE",
 		"GATEWAY_CERTIFICATE_NAME", "GATEWAY_NAME", "ROOT_APP_NAME",
 		"LONGHORN_BACKUP_APP",

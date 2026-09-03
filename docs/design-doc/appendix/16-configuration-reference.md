@@ -249,15 +249,12 @@ cluster:
     #       container_path: /absolute/node/path
     #       read_only: true
 
-    # Optional: HTTPS port for the Gateway listener (default: 443).
-    # Override e.g. to 8443 if 443 is in use or requires root.
+    # Optional: host ports publishing the gateway's listeners on 127.0.0.1
+    # (defaults: 80 and 443). Override if the defaults are in use, when running
+    # several local clusters, or on rootless runtimes that cannot bind ports
+    # below 1024. Takes effect on cluster creation only.
+    # http_port: 8080
     # https_port: 8443
-
-    # Optional: MetalLB address pool. MetalLB is ALWAYS enabled on local
-    # (kind has no built-in LoadBalancer, so there is no `enabled` field).
-    # When unset, NIC derives the pool from the kind Docker network at deploy time.
-    # metallb:
-    #   address_pool: 172.18.255.100-172.18.255.110
 
     # Optional: per-node-group selectors used by software packs
     # node_selectors:

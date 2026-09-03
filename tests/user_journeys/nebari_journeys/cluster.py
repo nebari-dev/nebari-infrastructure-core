@@ -143,7 +143,20 @@ class Cluster:
         )
 
     def gateway_address(self) -> str:
-        """IP if the load balancer has one, else its hostname."""
+        """Address the gateway is reachable at.
+
+        Two gateway shapes exist. A LoadBalancer gateway publishes its
+        address in the service status (IP preferred, else hostname). A
+        host-port gateway (local kind clusters) never gets ingress entries:
+        NIC pins the Envoy service to fixed NodePorts and maps them to host
+        ports of the machine hosting the cluster, and that mapping is
+        host-side state the cluster cannot report. The published host is the
+        same machine boundary the kubeconfig's API server address crosses,
+        so that host stands in for it. The NodePorts are checked against the
+        pinned constants first: a NodePort service with other values means
+        the EnvoyProxy service patch did not apply, and nothing is listening
+        behind the host ports.
+        """
 
         def fetch():
             services = self.core.list_namespaced_service(
@@ -152,15 +165,25 @@ class Cluster:
             )
             for svc in services.items:
                 ingress = (svc.status.load_balancer.ingress or [None])[0]
-                if ingress is None:
+                if ingress is not None:
+                    if ingress.ip:
+                        return ingress.ip
+                    if ingress.hostname:
+                        return ingress.hostname
                     continue
-                if ingress.ip:
-                    return ingress.ip
-                if ingress.hostname:
-                    return ingress.hostname
+                if svc.spec.type != "NodePort":
+                    continue
+                node_ports = {p.node_port for p in (svc.spec.ports or [])}
+                pinned = {
+                    constants.GATEWAY_HTTP_NODE_PORT,
+                    constants.GATEWAY_HTTPS_NODE_PORT,
+                }
+                if not pinned <= node_ports:
+                    continue
+                return self.api_host() or "127.0.0.1"
             return None
 
-        return wait_for_value(fetch, description="the gateway load balancer address")
+        return wait_for_value(fetch, description="the gateway address")
 
     def gateway(self) -> dict | None:
         """The Nebari Gateway object, or None when it does not exist."""
