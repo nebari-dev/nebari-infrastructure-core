@@ -133,6 +133,11 @@ func generateSchemasInRoot(ctx context.Context, outDir, providersFlag, version s
 		}
 	}
 
+	// Track what the filter actually let through, per category: the summary
+	// below reports the files this run wrote, not everything the registry
+	// knows about. `-schema-providers aws` writes one schema, and saying so is
+	// the difference between a summary and a claim.
+	written := make(map[string][]string, len(categories))
 	for _, c := range categories {
 		for _, name := range names[c.group] {
 			if !accepts(filter, c.group, name) {
@@ -143,6 +148,7 @@ func generateSchemasInRoot(ctx context.Context, outDir, providersFlag, version s
 				fmt.Sprintf("%s %s configuration", name, c.label), pkgPaths, nil); err != nil {
 				return err
 			}
+			written[c.group] = append(written[c.group], name)
 		}
 	}
 
@@ -152,8 +158,13 @@ func generateSchemasInRoot(ctx context.Context, outDir, providersFlag, version s
 		}
 	}
 
-	fmt.Printf("Schemas generated successfully in %s (cluster: %v, dns: %v, repository: %v)\n",
-		outDir, names["cluster"], names["dns"], names["repository"])
+	// Built from categories rather than a hard-coded cluster/dns/repository
+	// triple so a fourth category cannot be silently left out of the summary.
+	parts := make([]string, 0, len(categories))
+	for _, c := range categories {
+		parts = append(parts, fmt.Sprintf("%s: %v", c.group, written[c.group]))
+	}
+	fmt.Printf("Schemas generated successfully in %s (%s)\n", outDir, strings.Join(parts, ", "))
 	return nil
 }
 
