@@ -2,6 +2,10 @@ package endpoint
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +232,136 @@ func TestCheck(t *testing.T) {
 			}
 		})
 	}
+}
+
+// nodePortGatewaySvc builds a NodePort service carrying the default
+// owning-gateway label, shaped like the Envoy service of a host-port gateway:
+// pinned nodePorts and no load balancer ingress.
+func nodePortGatewaySvc(nodePorts ...int32) *corev1.Service {
+	svc := gatewaySvc()
+	svc.Spec.Type = corev1.ServiceTypeNodePort
+	for i, nodePort := range nodePorts {
+		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+			Port:     int32(80 * (i + 1)),
+			NodePort: nodePort,
+		})
+	}
+	return svc
+}
+
+func TestCheckNodePorts(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("passes when the service carries every wanted nodePort", func(t *testing.T) {
+		client := fake.NewSimpleClientset(nodePortGatewaySvc(30080, 30443))
+		if err := CheckNodePorts(ctx, client, []int32{30080, 30443}); err != nil {
+			t.Errorf("CheckNodePorts() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("fails naming the missing nodePort and the ports found", func(t *testing.T) {
+		client := fake.NewSimpleClientset(nodePortGatewaySvc(31234, 32456))
+		err := CheckNodePorts(ctx, client, []int32{30080, 30443})
+		if err == nil {
+			t.Fatal("CheckNodePorts() expected error, got nil")
+		}
+		for _, want := range []string{"30080", "31234", "does not carry"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("fails when no gateway service exists", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		err := CheckNodePorts(ctx, client, []int32{30080})
+		if err == nil {
+			t.Fatal("CheckNodePorts() expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "no services found") {
+			t.Errorf("error %q should contain %q", err.Error(), "no services found")
+		}
+	})
+}
+
+// startProbeTarget serves TLS on a loopback port, answering every request
+// with status, and returns the port. Its certificate is httptest's
+// self-signed one, which also pins that ProbeGateway does not verify TLS.
+func startProbeTarget(t *testing.T, status int) int {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The probe pins the TCP connection to the address but must keep
+		// addressing the domain, because the gateway routes by hostname.
+		if !strings.HasPrefix(r.Host, "nebari.local") {
+			t.Errorf("probe Host = %q, want the domain nebari.local", r.Host)
+		}
+		if status >= 300 && status < 400 {
+			// A Location nothing listens on: following it would fail the probe.
+			w.Header().Set("Location", "https://127.0.0.1:1/")
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(server.Close)
+
+	_, portStr, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
+	if err != nil {
+		t.Fatalf("parse test server address %q: %v", server.URL, err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parse test server port %q: %v", portStr, err)
+	}
+	return port
+}
+
+// closedPort returns a loopback port nothing listens on.
+func closedPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	return port
+}
+
+func TestProbeGateway(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("any HTTP response proves the path", func(t *testing.T) {
+		port := startProbeTarget(t, http.StatusOK)
+		if err := ProbeGateway(ctx, "127.0.0.1", "nebari.local", port); err != nil {
+			t.Errorf("ProbeGateway() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("an error status still proves the path", func(t *testing.T) {
+		port := startProbeTarget(t, http.StatusNotFound)
+		if err := ProbeGateway(ctx, "127.0.0.1", "nebari.local", port); err != nil {
+			t.Errorf("ProbeGateway() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("redirects are not followed", func(t *testing.T) {
+		port := startProbeTarget(t, http.StatusMovedPermanently)
+		if err := ProbeGateway(ctx, "127.0.0.1", "nebari.local", port); err != nil {
+			t.Errorf("ProbeGateway() unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a refused connection fails naming the target", func(t *testing.T) {
+		port := closedPort(t)
+		err := ProbeGateway(ctx, "127.0.0.1", "nebari.local", port)
+		if err == nil {
+			t.Fatal("ProbeGateway() expected error, got nil")
+		}
+		for _, want := range []string{"did not answer", "nebari.local", "127.0.0.1"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q should contain %q", err.Error(), want)
+			}
+		}
+	})
 }
 
 // TestExportedFunctionsStartSpans pins the project's instrumentation

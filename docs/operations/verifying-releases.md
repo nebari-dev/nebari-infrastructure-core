@@ -48,7 +48,25 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
 ## Maintainer prerequisites (one-time repo-admin setup)
 
 1. **Create the `release` environment** (Settings -> Environments) with required
-   reviewers. This activates the approval gate on the release job.
+   reviewers. Two jobs in `release.yml` use it - `Release` and `Publish to
+   prefix.dev` - so a release asks for approval twice, once before cutting and
+   once before publishing to the channel.
+
+2. **Register the prefix.dev trusted publisher** for the conda channel, under
+   the channel's settings: this repository, workflow file `release.yml`, and
+   the `release` environment. If a registration against an older workflow
+   filename exists, this is a cutover rather than a one-time setup: it has to
+   happen between merging the workflow and cutting the next tag, or that
+   release fails at upload. Publishing uses OIDC, so there is no token to
+   store, but there is also nothing in the repository that fails when the
+   registration is missing or wrong. It surfaces only as a failed upload at the
+   end of the `Publish to prefix.dev` job. See
+   [packaging.md](packaging.md#the-conda-channel).
+
+3. **Create the `quay-publish` environment** with required reviewers, and move
+   `QUAY_OCI_STARTERS_USERNAME` and `QUAY_OCI_STARTERS_TOKEN` into it. They are
+   repository-scoped today, so the starter publish has no approval gate and any
+   job in the repository can read them.
 
 `ADD_TO_PROJECT_PAT` is already a fine-grained token with least-privilege scope
 (organization Projects: read and write; repository Issues, Pull requests, and

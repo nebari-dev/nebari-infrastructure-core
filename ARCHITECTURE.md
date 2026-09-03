@@ -436,9 +436,10 @@ defer cleanup()
 
 | Location | Purpose |
 |----------|---------|
-| `.github/workflows/test.yml` | Runs tests on PRs and pushes |
-| `.github/workflows/lint.yml` | Runs golangci-lint on PRs |
-| `.github/workflows/release.yml` | Creates GitHub releases with binaries |
+| `.github/workflows/ci.yml` | Tests, lint, vulnerability scan and the workflow-pin check on PRs |
+| `.github/workflows/release.yml` | Cuts the GitHub release, then publishes the conda package to prefix.dev and the starter workspaces to quay.io |
+| `.github/workflows/starters.yml` | Validates the generated starter workspaces on PRs |
+| `.github/workflows/deployment-tests.yml` | Real-cloud deploy tests, one job per provider |
 
 ### Scripts
 

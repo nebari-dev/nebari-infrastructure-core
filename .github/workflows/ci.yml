@@ -58,6 +58,55 @@ jobs:
           name: codecov-umbrella
         continue-on-error: true
 
+  test-journeys-lib:
+    name: Journey library tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up pixi
+        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+        with:
+          manifest-path: tests/user_journeys/pixi.toml
+          # Both, space separated: `make test-journeys-lib` runs in the
+          # default environment and the lint step runs in `dev`. Naming
+          # only `dev` would leave the default environment uninstalled.
+          environments: >-
+            default
+            dev
+
+      # These are unit tests of the journey action library
+      # (tests/user_journeys/nebari_journeys). They need NO cluster, so they
+      # run here in the fast lane rather than in the journey job, and they
+      # gate every PR: the library is what the journeys are written in, and
+      # nothing else would catch it drifting.
+      - name: Run journey library tests
+        run: make test-journeys-lib
+
+      - name: Lint the journey suite
+        run: cd tests/user_journeys && pixi run --environment dev lint
+
+  verify-docs:
+    name: Verify docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Verify docs are up-to-date
+        run: |
+          make docs
+          git add -N docs/reference/cli docs/configuration
+          git diff --exit-code -- docs/reference/cli docs/configuration
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -81,11 +130,11 @@ jobs:
           path: nic
           retention-days: 1
 
-  deploy:
-    name: Deploy
+  deploy-and-journeys:
+    name: Deploy & user journeys
     runs-on: ubuntu-latest
     needs: build
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
@@ -101,15 +150,30 @@ jobs:
         run: chmod +x nic
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@204a274e743397d45c79318aa21210bdd06b3dac # v0.2.0
+        uses: nebari-dev/deploy-nebari-action@13484a5f9f42f8378b88d4426d3b0244522e347d # v0.3.0
         with:
           nic-binary: nic
 
-      - name: Verify docs are up-to-date
-        run: |
-          make docs
-          git add -N docs/reference/cli docs/configuration
-          git diff --exit-code -- docs/reference/cli docs/configuration
+      # There is deliberately no step installing the gateway's certificate
+      # into the runner's system trust store. An earlier version had one, on
+      # the stated grounds that OpenSSL -- and therefore the requests-based
+      # journeys -- would read it. That is not true inside a pixi
+      # environment, which resolves its own CA material:
+      #
+      #   requests default CA bundle: .pixi/envs/default/.../certifi/cacert.pem
+      #   openssl default verify paths: .pixi/envs/default/ssl/cert.pem
+      #
+      # So `update-ca-certificates` on the runner was invisible to the suite.
+      # Nothing needs it either: the API journeys pass the anchor explicitly
+      # via `verify=` from the `trust_anchor` fixture, Chromium is pinned to
+      # the anchor's SPKI hash when and only when the chain is not publicly
+      # trusted (see nebari_journeys.trust.classify_anchor), and `verify=True`
+      # is only ever reached on a publicly trusted cluster anyway.
+      - name: Run user journey tests
+        timeout-minutes: 20
+        uses: ./.github/actions/run-user-journeys
+        with:
+          artifact-name: journey-artifacts
 
   workflow-pins:
     name: Workflow pins & release config

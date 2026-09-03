@@ -64,6 +64,8 @@ make test-all                 # unit + integration
 make test-coverage            # coverage report
 make test-race                # race detector
 go test ./pkg/providers/cluster/aws -v # single package
+make test-journeys-lib        # journey action library unit tests (no cluster)
+make test-journeys            # user journey (e2e) tests against $KUBECONFIG
 ```
 
 ### Code Quality
@@ -344,8 +346,9 @@ func SomeFunction(ctx context.Context, ...) error {
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
 6. Add an `examples/<name>-config.yaml`.
 7. Cover the provider with table-driven unit tests; integration tests gated on credentials.
-8. Wire the provider into the deployment tests: a `.github/fixtures/deploy/<name>-config.yaml` (validated by `TestExampleConfigsValidate`), a job in `.github/workflows/deployment-tests.yml` (plus its `workflow_dispatch` provider option, `if:` condition, a `concurrency: group: deploy-test-<name>` block so overlapping runs cannot wipe the gitops branch under each other, and a Deploy-step `timeout-minutes` set below the job timeout so teardown always has budget), and an `environment:` with credentials if the provider needs real cloud access. The `<name>` branch in the `nic-ci-gitops` scratch repo is created automatically by `reset-gitops-branch` on first run.
+8. Wire the provider into the deployment tests (the job runs the user journey suite against the new cluster automatically via `.github/actions/run-user-journeys`, so the provider is verified on behaviour and not just on deploy success): a `.github/fixtures/deploy/<name>-config.yaml` (validated by `TestExampleConfigsValidate`), a job in `.github/workflows/deployment-tests.yml` (plus its `workflow_dispatch` provider option, `if:` condition, a `concurrency: group: deploy-test-<name>` block so overlapping runs cannot wipe the gitops branch under each other, and a Deploy-step `timeout-minutes` set below the job timeout so teardown always has budget), and an `environment:` with credentials if the provider needs real cloud access. The `<name>` branch in the `nic-ci-gitops` scratch repo is created automatically by `reset-gitops-branch` on first run.
 9. Update the deployment-tests section in `docs/design-doc/operations/12-testing-strategy.md` (the §12.1 scope/runner bullets and the CI-prerequisites list).
+10. If the provider changes anything a user journey observes (gateway address discovery, storage class, TLS issuance), run `make test-journeys` against a real cluster of that provider before claiming it works; the journey suite needs only a kubeconfig.
 
 ### Adding a New DNS Provider
 
@@ -403,6 +406,14 @@ Either way, a failure that can leave resources behind must surface in the exit c
 
 ### Integration Tests
 - `make test-integration` runs the AWS provider's integration tests (build tag `integration`) using [testcontainers](https://golang.testcontainers.org/); requires Docker.
+
+### User Journey Tests (end-to-end)
+- `tests/user_journeys/` is a pixi-managed Python/pytest suite that verifies what a user can DO on a deployed platform (sign in through Keycloak, get durable storage, be admitted to or refused from a UI, reach the gateway over a valid TLS chain), as opposed to whether `nic deploy` succeeded. See [ADR-0017](docs/adr/0017-user-journey-tests-for-foundational-software.md) and `tests/user_journeys/README.md`.
+- A kubeconfig is the only required input; everything else is discovered from the cluster, so the suite runs against clusters this checkout never deployed.
+- `make test-journeys-lib` runs the action library's own unit tests and needs no cluster. It gates every PR via the `Journey library tests` CI job, so add tests there for anything added under `tests/user_journeys/nebari_journeys/`.
+- `make test-journeys` needs a live cluster in `$KUBECONFIG`. CI runs it in the `Deploy & user journeys` job, and every provider job in `deployment-tests.yml` runs it too, both through `.github/actions/run-user-journeys`.
+- Constants the suite mirrors from Go or from manifest templates are pinned by `pkg/argocd/python_constants_test.go`. Adding one to `tests/user_journeys/nebari_journeys/constants.py` without enrolling it there fails that test on purpose.
+- **Never disable TLS verification** in this suite (no `verify=False`, no `ignore_https_errors`). A self-signed cluster is handled by deriving the anchor from the gateway's own secret and pinning Chromium to its SPKI hash.
 
 ### Provider Tests (real cloud)
 - Deploy against real cloud APIs only on significant changes. Expensive - run sparingly.
