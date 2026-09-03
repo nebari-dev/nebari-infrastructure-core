@@ -146,26 +146,63 @@ Every NIC deployment includes a landing page where users discover and access all
 
 ### Prerequisites
 
-- Go 1.26+
 - Cloud provider credentials (AWS, GCP, or Azure) configured via environment variables
+- Go 1.26+ **only if building from source** (see [From source](#from-source-contributors) below)
 
 NIC automatically downloads and manages its own OpenTofu binary — no manual installation required. If you already have a compatible OpenTofu installed (e.g. via a package manager), NIC uses it instead: an explicit path via `NIC_TOFU_PATH`, or `tofu` found on `PATH`. See [Packaging and External Binaries](docs/operations/packaging.md).
 
 ### Install
 
-```bash
-# From source
-make build
+Pick the path that matches how you'll use `nic`:
 
-# Or install to $GOPATH/bin
-make install
+**A Nebi starter workspace (recommended).** The toolchain and the config travel together: the workspace pins `nic` in its `pixi.lock`, ships a ready-to-edit `config.yaml`, and carries the `validate` and `deploy` tasks.
+
+```bash
+pixi global install -c conda-forge "nebi-cli>=0.13"   # older nebi ships a partial workspace
+
+nebi import quay.io/nebari/starters/local:v0.14.0 -o local   # or starters/aws
+cd local && pixi install
+```
+
+Check the [releases page](https://github.com/nebari-dev/nebari-infrastructure-core/releases) for the current tag. Then fill in the placeholders (`grep -n CHANGEME config.yaml`) and run `pixi run validate` followed by `pixi run deploy`.
+
+**pixi, into a project you already have.** Same pinning, without the starter's config and tasks:
+
+```bash
+pixi workspace channel add https://prefix.dev/nebari-dev/nebari
+pixi add nebari-infrastructure-core
+```
+
+**pixi, as a machine-wide CLI.** No lockfile, so nothing pins the version for a teammate:
+
+```bash
+pixi global install -c https://prefix.dev/nebari-dev/nebari nebari-infrastructure-core
+```
+
+**Homebrew (macOS).** Installs a cask. The binaries are not notarized, so the post-install hook strips the Gatekeeper quarantine attribute: `nic` launches without a prompt, and without Apple's notarization check.
+
+```bash
+brew install --cask nebari-dev/tap/nic
+```
+
+**Release archives.** Download from the [releases page](https://github.com/nebari-dev/nebari-infrastructure-core/releases). Archives are named `nebari-infrastructure-core_<version>_<os>_<arch>`, where `<version>` is the tag without its leading `v`, `<os>` is `linux`, `darwin` or `windows`, and `<arch>` is `x86_64` or `arm64`. Linux and macOS ship `.tar.gz`; Windows ships `.zip`. Verify before use: check the cosign signature over `checksums.txt`, then verify the archive against `checksums.txt`. Checksums fetched from the same origin as the archive prove integrity, not authenticity - the signature is what proves authenticity. Full steps in [Verifying a NIC release](docs/operations/verifying-releases.md).
+
+#### From source (contributors)
+
+Requires Go 1.26+.
+
+```bash
+make build     # builds ./nic
+make install   # installs to $GOPATH/bin
 ```
 
 ### Deploy
 
+How you invoke `nic` depends on how you installed it. From a starter workspace, use the tasks it ships (`pixi run validate`, `pixi run deploy`). Installed via Homebrew, `pixi global` or a release archive, `nic` is on your `PATH` and you supply your own config. From a source checkout:
+
 ```bash
 # Copy and edit a sample config
-cp examples/aws-config.yaml config.yaml
+cp examples/aws-config.yaml config.yaml   # or examples/local-config.yaml
 
 # Set your credentials
 cp .env.example .env  # Edit with your cloud provider credentials
