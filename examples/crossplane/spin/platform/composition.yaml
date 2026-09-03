@@ -1,0 +1,149 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: datasciencespin-packs
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  compositeTypeRef:
+    apiVersion: platform.nebari.dev/v1alpha1
+    kind: DataScienceSpin
+  mode: Pipeline
+  pipeline:
+    - step: render-applications
+      functionRef:
+        name: crossplane-contrib-function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $domain := $xr.spec.domain }}
+
+            {{- /* Fallbacks mirror the XRD schema defaults. The API server
+                 applies those on admission, but `crossplane render` has no
+                 API server, so the template repeats them to stay testable
+                 offline. */}}
+            {{- $nebi := default (dict) $xr.spec.nebi }}
+            {{- $nebiNS := dig "namespace" "nebi" $nebi }}
+            {{- $nebiRelease := dig "releaseName" "nebi-pack" $nebi }}
+            {{- $nebiVersion := dig "version" "0.1.3" $nebi }}
+            {{- $nebiExtra := dig "values" (dict) $nebi }}
+            {{- $ds := default (dict) $xr.spec.dataScience }}
+            {{- $dsNS := dig "namespace" "data-science" $ds }}
+            {{- $dsRelease := dig "releaseName" "data-science-pack" $ds }}
+            {{- $dsVersion := dig "version" "0.1.5" $ds }}
+            {{- $dsExtra := dig "values" (dict) $ds }}
+
+            {{- /* An Application is ready once ArgoCD reports it Healthy. */}}
+            {{- $nebiHealthy := false }}
+            {{- $dsHealthy := false }}
+            {{- range $name, $r := .observed.resources }}
+            {{- $health := dig "status" "health" "status" "" $r.resource }}
+            {{- if and (eq $name "nebi-app") (eq $health "Healthy") }}{{ $nebiHealthy = true }}{{ end }}
+            {{- if and (eq $name "dsp-app") (eq $health "Healthy") }}{{ $dsHealthy = true }}{{ end }}
+            {{- end }}
+
+            {{- /* Wiring the composition owns. It wins over spec.*.values.
+                 All of it is render-time derivation: this pair is
+                 convention-complete, so nothing needs to be read back from
+                 the cluster. Runtime consumption of pack-created resources
+                 (go-templating's ExtraResources) is deferred to a pack with
+                 genuinely underivable outputs, e.g. dask-gateway's
+                 connection ConfigMap (issue #551). */}}
+            {{- $nebiWiring := dict "nebariapp" (dict "hostname" (printf "nebi.%s" $domain)) }}
+            {{- $nebiValues := mergeOverwrite (deepCopy $nebiExtra) $nebiWiring }}
+            {{- $dsWiring := dict "keycloak" (dict "hostname" (printf "keycloak.%s" $domain)) }}
+            {{- $_ := set $dsWiring "nebi" (dict "namespace" $nebiNS "releaseName" $nebiRelease) }}
+            {{- $dsValues := mergeOverwrite (deepCopy $dsExtra) $dsWiring }}
+            ---
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: {{ $xr.metadata.name }}-nebi
+              namespace: argocd
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: nebi-app
+                {{- if $nebiHealthy }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- end }}
+              labels:
+                nebari.dev/spin: {{ $xr.metadata.name }}
+              finalizers:
+                - resources-finalizer.argocd.argoproj.io
+            spec:
+              project: nebari-apps
+              source:
+                repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+                chart: nebari-nebi-pack
+                targetRevision: {{ $nebiVersion }}
+                helm:
+                  releaseName: {{ $nebiRelease }}
+                  valuesObject:
+                    {{- toYaml $nebiValues | nindent 20 }}
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: {{ $nebiNS }}
+              syncPolicy:
+                managedNamespaceMetadata:
+                  labels:
+                    nebari.dev/managed: "true"
+                automated:
+                  prune: true
+                  selfHeal: true
+                syncOptions:
+                  - CreateNamespace=true
+                  - ServerSideApply=true
+            ---
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: {{ $xr.metadata.name }}-data-science
+              namespace: argocd
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: dsp-app
+                {{- if $dsHealthy }}
+                gotemplating.fn.crossplane.io/ready: "True"
+                {{- end }}
+              labels:
+                nebari.dev/spin: {{ $xr.metadata.name }}
+              finalizers:
+                - resources-finalizer.argocd.argoproj.io
+            spec:
+              project: nebari-apps
+              source:
+                repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+                chart: nebari-data-science-pack
+                targetRevision: {{ $dsVersion }}
+                helm:
+                  releaseName: {{ $dsRelease }}
+                  valuesObject:
+                    {{- toYaml $dsValues | nindent 20 }}
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: {{ $dsNS }}
+              syncPolicy:
+                managedNamespaceMetadata:
+                  labels:
+                    nebari.dev/managed: "true"
+                automated:
+                  prune: true
+                  selfHeal: true
+                syncOptions:
+                  - CreateNamespace=true
+                  - ServerSideApply=true
+    - step: enforce-install-order
+      functionRef:
+        name: crossplane-contrib-function-sequencer
+      input:
+        apiVersion: sequencer.fn.crossplane.io/v1beta1
+        kind: Input
+        rules:
+          - sequence:
+              - nebi-app
+              - dsp-app
+    - step: auto-ready
+      functionRef:
+        name: crossplane-contrib-function-auto-ready
