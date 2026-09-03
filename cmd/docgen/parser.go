@@ -27,6 +27,14 @@ type FieldDoc struct {
 	Doc       string
 	IsInline  bool
 	IsIgnored bool // yaml:"-"
+
+	// Enum and Default come from the `jsonschema` tag, the same tag the JSON
+	// Schema emitter reads. Constraints declared there would otherwise appear
+	// only in schemas/ and silently vanish from the markdown reference, which
+	// is what happened when the allowed values for aws.Taint.Effect and
+	// azure.NodeGroup.Mode moved out of trailing comments and into tags.
+	Enum    []string
+	Default string
 }
 
 // ParseFile parses a Go source file and extracts struct documentation.
@@ -190,6 +198,22 @@ func parseTag(tagValue string, doc *FieldDoc) {
 		parts := strings.Split(jsonTag, ",")
 		if parts[0] != "-" && parts[0] != "" {
 			doc.JSONKey = parts[0]
+		}
+	}
+
+	// Parse the jsonschema tag so constraints declared for the schema emitter
+	// also reach the markdown reference. Only the two keys that carry
+	// user-facing meaning are read; the rest are schema-shaping directives.
+	for _, opt := range strings.Split(tag.Get("jsonschema"), ",") {
+		key, value, ok := strings.Cut(opt, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "enum":
+			doc.Enum = append(doc.Enum, value)
+		case "default":
+			doc.Default = value
 		}
 	}
 }

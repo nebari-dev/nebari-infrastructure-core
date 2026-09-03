@@ -40,7 +40,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | Longhorn | `longhorn` | `*longhorn.Config` | No |  |
 | AWSLoadBalancerController | `aws_load_balancer_controller` | `*AWSLoadBalancerControllerConfig` | No |  |
 | ClusterAutoscaler | `cluster_autoscaler` | `*ClusterAutoscalerConfig` | No |  |
-| LoadBalancerScheme | `load_balancer_scheme` | string | No |  |
+| LoadBalancerScheme | `load_balancer_scheme` | string | No | One of: `internet-facing`, `internal`. Defaults to `internet-facing`. |
 | EnableIRSA | `enable_irsa` | `*bool` | No | EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for Service Accounts. When unset, the upstream module default (true) applies. Set false when the cluster relies exclusively on EKS... |
 
 ---
@@ -50,7 +50,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | Enabled | `enabled` | `*bool` | No |  |
-| ChartVersion | `chart_version` | string | No |  |
+| ChartVersion | `chart_version` | string | No | Defaults to `3.4.3`. |
 | DestroyTimeout | `destroy_timeout` | `*time.Duration` | No |  |
 
 ---
@@ -87,7 +87,7 @@ Configuration options specific to Amazon Web Services (EKS).
 |-------|----------|------|----------|-------------|
 | Key | `key` | string | Yes |  |
 | Value | `value` | string | Yes |  |
-| Effect | `effect` | string | Yes | NO_SCHEDULE, NO_EXECUTE, PREFER_NO_SCHEDULE |
+| Effect | `effect` | string | Yes | One of: `NO_SCHEDULE`, `NO_EXECUTE`, `PREFER_NO_SCHEDULE`. |
 
 ---
 

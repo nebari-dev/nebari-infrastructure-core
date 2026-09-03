@@ -34,6 +34,27 @@ func TestParseTag(t *testing.T) {
 			},
 		},
 		{
+			// The jsonschema tag is the schema emitter's input; the markdown
+			// emitter reads enum/default out of it too so a constraint declared
+			// once shows up in both outputs.
+			name:     "jsonschema enum and default",
+			tagValue: "`yaml:\"mode,omitempty\" jsonschema:\"enum=System,enum=User,default=User\"`",
+			want: FieldDoc{
+				YAMLKey:  "mode",
+				Required: false,
+				Enum:     []string{"System", "User"},
+				Default:  "User",
+			},
+		},
+		{
+			name:     "jsonschema directives without a value are ignored",
+			tagValue: "`yaml:\"name\" jsonschema:\"required,minLength=1\"`",
+			want: FieldDoc{
+				YAMLKey:  "name",
+				Required: true,
+			},
+		},
+		{
 			name:     "yaml ignored field",
 			tagValue: "`yaml:\"-\"`",
 			want: FieldDoc{

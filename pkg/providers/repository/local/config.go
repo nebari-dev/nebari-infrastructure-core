@@ -11,10 +11,10 @@ type Config struct {
 	// defaults to ~/.nic/gitops/<project_name>, falling back to a per-project
 	// directory under the OS temp dir only when the home directory cannot be
 	// resolved.
-	Path string `yaml:"path" json:"path"`
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 
 	// Branch is the git branch to use (default: "main").
-	Branch string `yaml:"branch" json:"branch"`
+	Branch string `yaml:"branch,omitempty" json:"branch,omitempty"`
 }
 
 // Validate checks that the configuration is well-formed.
