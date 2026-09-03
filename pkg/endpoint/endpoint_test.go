@@ -234,11 +234,6 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// TestExportedFunctionsStartSpans pins the project's instrumentation
-// convention: an exported function in pkg/ that accepts a context opens a span
-// of its own. Delegating to an already-instrumented helper is not enough - the
-// caller's own frame is what makes a trace attributable to the operation the
-// operator asked for.
 // nodePortGatewaySvc builds a NodePort service carrying the default
 // owning-gateway label, shaped like the Envoy service of a host-port gateway:
 // pinned nodePorts and no load balancer ingress.
@@ -369,6 +364,11 @@ func TestProbeGateway(t *testing.T) {
 	})
 }
 
+// TestExportedFunctionsStartSpans pins the project's instrumentation
+// convention: an exported function in pkg/ that accepts a context opens a span
+// of its own. Delegating to an already-instrumented helper is not enough - the
+// caller's own frame is what makes a trace attributable to the operation the
+// operator asked for.
 func TestExportedFunctionsStartSpans(t *testing.T) {
 	client := fake.NewSimpleClientset(gatewaySvc(corev1.LoadBalancerIngress{IP: "10.89.0.2"}))
 

@@ -47,7 +47,7 @@ The mechanics, and where each value lives:
 - A `dns:` block is rejected on loopback host-port gateways at validate and deploy time. Public DNS records cannot usefully point at another machine's loopback, and the deploy prints `/etc/hosts` guidance instead.
 - The ports are recorded in a `nic-local-cluster` ConfigMap in `kube-system` at creation (the kubeadm-config pattern), and a redeploy fails on mismatch, because kind port mappings cannot change on a live cluster.
 - `nic outputs` reports the host address only after substantiating it at read time: the Envoy service must carry the pinned NodePorts, and the gateway must answer a real HTTPS request at the address. A strategic-merge patch that silently stopped matching, or a listener nothing published, surfaces as an unresolved field instead of a wrong URL. This holds at every later read too, since the cluster keeps reconciling after deploy.
-- CI consumes that same substantiated read: [deploy-nebari-action](https://github.com/nebari-dev/deploy-nebari-action) runs `nic outputs` after its convergence wait ([deploy-nebari-action#26](https://github.com/nebari-dev/deploy-nebari-action/pull/26)) and reaches this repo with the action's pin bump, so an unreachable local gateway can no longer produce a usable `gateway-address`. Deploy-time gating (a `nic deploy --wait` that ends by probing the gateway) is [#574](https://github.com/nebari-dev/nebari-infrastructure-core/issues/574).
+- The CI gate that goes red on an unreachable gateway is the user journey suite ([ADR-0017](0017-user-journey-tests-for-foundational-software.md)): its discovery refuses to resolve a NodePort Envoy service that does not carry both pinned NodePorts, and its reachability fixture fails rather than skips when nothing answers on the gateway port. Alongside it, [deploy-nebari-action](https://github.com/nebari-dev/deploy-nebari-action) runs `nic outputs` after its convergence wait ([deploy-nebari-action#26](https://github.com/nebari-dev/deploy-nebari-action/pull/26)), which surfaces the same failure as a run warning with blanked outputs, not a failed check. Deploy-time gating (a `nic deploy --wait` that ends by probing the gateway) is [#574](https://github.com/nebari-dev/nebari-infrastructure-core/issues/574).
 
 ### Consequences
 
@@ -56,7 +56,7 @@ The mechanics, and where each value lives:
 - The #639 failure class is gone structurally: no address derivation, no deploy-time computed `InfraSettings` value, no LoadBalancer wait.
 - The dev loop is identical on macOS, Linux, and Windows. Published ports are plain Docker port mappings, and docker-mac-net-connect is not needed.
 - Net deletion of code and of one runtime controller. MetalLB, its config app, and the pool derivation are removed.
-- The reachability signal in CI gets stronger: a real request through Envoy (the deploy action's post-convergence probe) instead of a status field populated by a controller no production cluster runs.
+- The reachability signal in CI gets stronger: the journey suite fails the run on a gateway that does not answer, and `nic outputs` refuses to report an address it cannot substantiate, instead of trusting a status field populated by a controller no production cluster runs.
 - The platform binds loopback only, so a development cluster is not exposed to the LAN.
 
 **Bad:**
