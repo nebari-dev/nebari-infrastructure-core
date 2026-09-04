@@ -146,9 +146,16 @@ then whether `pixi lock` resolved - a starter cannot lock until the package it
 pins is actually on the channel.
 
 **Nothing published for a release cut before this pipeline existed.** There is no
-backfill path: publishing happens only as part of a release run. v0.14.0 and
-earlier are not on the channel and will not be, so `pixi add` against this channel
-starts working with the first stable release cut after this landed.
+backfill path in CI: publishing happens only as part of a release run. v0.14.0 is
+on the channel because it was uploaded by hand once, to seed it so the install
+path could be verified before the first pipeline release; releases before that are
+not there and will not be. Everything from the next stable tag onward arrives
+through `release.yml`.
+
+**A package can 404 for a minute after it uploads.** The channel's per-subdir
+`repodata.json` is regenerated asynchronously, so a subdir can return 404 while
+the upload itself succeeded. Re-check before concluding an upload failed, and
+prefer `--skip-existing` so a retry is harmless either way.
 
 This channel is a bridge. The intended home is prefix.dev's shared
 [`github-releases`](https://prefix.dev/channels/github-releases) channel, which is
