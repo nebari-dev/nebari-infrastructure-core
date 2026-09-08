@@ -1,0 +1,87 @@
+# Consuming the packaged data science spin (examples/crossplane/datascience-spin)
+# gitops-style: commit both manifests to the spins/ directory of the gitops
+# repo. The Configuration installs the XRD, Composition, embedded render
+# function, and function dependencies; the DataScienceSpin instance is
+# expanded by Crossplane into the pre-wired pack Applications.
+apiVersion: pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: datascience-spin
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  package: quay.io/nebari/datascience-spin-poc:v0.1.0
+---
+apiVersion: platform.nebari.dev/v1alpha1
+kind: DataScienceSpin
+metadata:
+  name: ds
+  annotations:
+    # The DataScienceSpin CRD arrives asynchronously once the package manager
+    # installs the Configuration, so ArgoCD must skip the dry run for the
+    # unknown kind on the first sync. The sync retry covers that window.
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  domain: nebari.lvh.me
+  crossplane:
+    compositionRef:
+      name: datasciencespins.platform.nebari.dev
+  nebi:
+    values:
+      # Trust the self-signed gateway cert for nebi's JWKS fetch. Stopgap:
+      # requires the manually created nebari-trust-bundle ConfigMap (key
+      # ca-bundle.crt) in the nebi namespace and the CoreDNS rewrite that
+      # resolves platform hostnames to the gateway in-cluster. Both become
+      # NIC features (trust distribution, local split DNS).
+      orgCABundle:
+        configMapName: nebari-trust-bundle
+      # Chart 0.1.3 pins sha-bd25921, which is amd64-only and cannot run on
+      # arm64 local clusters (Apple Silicon). sha-256da80 is multi-arch.
+      image:
+        tag: sha-256da80
+  dataScience:
+    values:
+      # Same amd64-only pin as the nebi-pack server image: DSP's init
+      # container copies the nebi CLI from this image into each JupyterLab
+      # pod. sha-256da80 is multi-arch.
+      nebi:
+        image:
+          tag: sha-256da80
+      # Self-signed cluster without a distributed trust bundle: send the
+      # hub's OIDC backchannel legs (token_url, userdata_url) over the
+      # in-cluster HTTP service instead of the untrusted public hostname.
+      # Browsers keep using https://keycloak.<domain> and click through the
+      # self-signed warning.
+      keycloak:
+        backchannelURL: http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080
+      # backchannelURL only covers the authenticator's token legs. The hub's
+      # nebi token exchange (03-nebi-envs.py) has its own URL, derived from
+      # the public keycloak.hostname when unset, which fails TLS on
+      # self-signed clusters and leaves the per-pod nebi unauthenticated
+      # (environments owned by local-user instead of the real user).
+      jupyterhub:
+        custom:
+          # Singleuser pods need to trust the self-signed gateway cert for
+          # nebi remote mode (pod -> https://nebi.<domain>). DSP merges the
+          # nebari-trust-bundle ConfigMap (key ca-certificates.crt, in this
+          # namespace) into the system bundle. The ConfigMap is created by
+          # local-workarounds/setup.sh pending NIC trust distribution (#447).
+          trust-bundle-enabled: true
+          keycloak-token-url: http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari/protocol/openid-connect/token
+          # DSP derives this as jupyterhub-<release>-<chart>, but the operator
+          # provisions clients as <namespace>-<fullname>. Wrong id makes the
+          # nebi token exchange fail with invalid_client. DSP chart bug: its
+          # assumption about the operator naming convention is stale.
+          jupyterhub-client-id: data-science-data-science-pack-nebari-data-science-pack
+        hub:
+          # jhub-apps runs inside the hub pod and calls the hub API through
+          # the hub Service, but the chart's hub NetworkPolicy only admits
+          # labeled peers and the hub pod itself carries no access label, so
+          # on netpol-enforcing CNIs (including kind's kindnetd) the token
+          # exchange times out. DSP chart bug, works around it by labeling
+          # the hub pod as its own client.
+          labels:
+            hub.jupyter.org/network-access-hub: "true"
+      sharedStorage:
+        enabled: false

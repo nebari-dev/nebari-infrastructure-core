@@ -1,0 +1,80 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: datasciencespins.platform.nebari.dev
+spec:
+  group: platform.nebari.dev
+  names:
+    categories:
+    - crossplane
+    kind: DataScienceSpin
+    plural: datasciencespins
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        description: DataScienceSpin is the Schema for the DataScienceSpin API.
+        properties:
+          spec:
+            properties:
+              dataScience:
+                default: {}
+                properties:
+                  namespace:
+                    default: data-science
+                    type: string
+                  releaseName:
+                    default: data-science-pack
+                    description: Load-bearing. The chart hardcodes the OIDC client
+                      Secret name as <release>-nebari-data-science-pack, so a different
+                      release name silently falls back to dummy auth unless the values
+                      override both hub mounts.
+                    type: string
+                  values:
+                    description: Extra Helm values passed through to the chart. The
+                      wiring keys the composition owns (keycloak.hostname, nebi.namespace,
+                      nebi.releaseName) win over anything set here.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  version:
+                    default: 0.1.5
+                    type: string
+                type: object
+              domain:
+                description: Base domain of the platform. Everything derives from
+                  it by the packs' conventions. Keycloak at keycloak.<domain>, Nebi
+                  at nebi.<domain>, the hub at hub.<domain>.
+                type: string
+              nebi:
+                default: {}
+                properties:
+                  namespace:
+                    default: nebi
+                    type: string
+                  releaseName:
+                    default: nebi-pack
+                    description: Drives the operator-provisioned OIDC client id (nebi-<releaseName>-nebari-nebi-pack)
+                      and the in-cluster service name DSP derives. The DSP defaults
+                      assume nebi-pack, so change both sides together.
+                    type: string
+                  values:
+                    description: Extra Helm values passed through to the chart. The
+                      wiring keys the composition owns (nebariapp.hostname) win over
+                      anything set here.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  version:
+                    default: 0.1.3
+                    type: string
+                type: object
+            required:
+            - domain
+            type: object
+          status:
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
