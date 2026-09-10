@@ -19,6 +19,27 @@ spec:
         properties:
           spec:
             properties:
+              daskGateway:
+                default: {}
+                properties:
+                  namespace:
+                    default: dask-gateway
+                    type: string
+                  releaseName:
+                    default: dask-gateway-pack
+                    type: string
+                  values:
+                    description: Extra Helm values passed through to the pack chart.
+                      Wiring keys the composition owns (nebariapp.hostname, gateway.auth.*)
+                      win over anything set here.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  version:
+                    default: 3f35ed41115f25da8d029b2d9a55a66b4c7f2e12
+                    description: Git revision of nebari-dev/dask-gateway-pack (the
+                      pack is unreleased; switches to a chart version once it publishes).
+                    type: string
+                type: object
               dataScience:
                 default: {}
                 properties:

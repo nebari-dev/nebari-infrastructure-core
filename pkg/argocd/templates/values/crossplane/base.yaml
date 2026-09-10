@@ -1,3 +1,6 @@
+args:
+  - --enable-dependency-version-upgrades
+
 resourcesCrossplane:
   requests:
     cpu: 100m

@@ -10,7 +10,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
-  package: quay.io/nebari/datascience-spin-poc:v0.1.0
+  package: quay.io/nebari/datascience-spin-poc:v0.3.0
 ---
 apiVersion: platform.nebari.dev/v1alpha1
 kind: DataScienceSpin
@@ -27,6 +27,35 @@ spec:
   crossplane:
     compositionRef:
       name: datasciencespins.platform.nebari.dev
+  daskGateway:
+    values:
+      dask-gateway:
+        gateway:
+          backend:
+            # Single-node local cluster sizing: upstream defaults request a
+            # full CPU + 2G per scheduler/worker, which does not fit next to
+            # the platform on one kind node.
+            scheduler:
+              cores:
+                request: 0.2
+                limit: 1
+              memory:
+                request: 256M
+                limit: 1G
+            worker:
+              cores:
+                request: 0.2
+                limit: 1
+              memory:
+                request: 512M
+                limit: 2G
+            # The pack's first-party cluster image is an unpublished
+            # placeholder (pack docs mark this override as the stopgap until
+            # it ships). The scheduler/worker image also defines the
+            # dask/python versions notebook environments must match.
+            image:
+              name: ghcr.io/dask/dask-gateway
+              tag: "2026.3.0"
   nebi:
     values:
       # Trust the self-signed gateway cert for nebi's JWKS fetch. Stopgap:
@@ -85,3 +114,21 @@ spec:
             hub.jupyter.org/network-access-hub: "true"
       sharedStorage:
         enabled: false
+---
+# Admin-owned grant (standard Crossplane pattern, see "Grant access to
+# composed resources" in the composition docs): Crossplane may only compose
+# kinds an admin has granted via an aggregated ClusterRole. This spin's
+# README documents that it composes NetworkPolicies (pack glue). Nothing is
+# granted by default; pruned with the spin.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: datascience-spin-compose
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    rbac.crossplane.io/aggregate-to-crossplane: "true"
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
