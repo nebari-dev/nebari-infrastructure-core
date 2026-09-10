@@ -11,6 +11,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	provider "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 const testCAPEM = `-----BEGIN CERTIFICATE-----
@@ -99,6 +100,44 @@ func TestWriteAllToGit_TrustManager(t *testing.T) {
 		}
 		if !strings.Contains(string(got), "BEGIN CERTIFICATE") {
 			t.Errorf("rendered bundle missing PEM, got:\n%s", got)
+		}
+	})
+
+	// Operators need a visible signal that the bundle was actually wired into
+	// trust-manager; the orchestrator owns the "nothing configured" message, so
+	// this layer stays quiet in the no-op case.
+	captureTrustBundleUpdates := func(t *testing.T, pemText string) []status.Update {
+		t.Helper()
+		var updates []status.Update
+		ctx, cleanup := status.StartHandler(context.Background(), func(u status.Update) {
+			if u.Resource == "trust-bundle" {
+				updates = append(updates, u)
+			}
+		})
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		if err := WriteAllToGit(ctx, t.TempDir(), cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, pemText); err != nil {
+			t.Fatalf("WriteAllToGit: %v", err)
+		}
+		cleanup()
+		return updates
+	}
+
+	t.Run("reports the bundle being wired into trust-manager", func(t *testing.T) {
+		updates := captureTrustBundleUpdates(t, testCAPEM)
+		if len(updates) != 1 {
+			t.Fatalf("got %d trust-bundle status updates, want 1: %+v", len(updates), updates)
+		}
+		if updates[0].Level != status.LevelInfo {
+			t.Errorf("level = %q, want %q", updates[0].Level, status.LevelInfo)
+		}
+		if !strings.Contains(updates[0].Message, "trust-manager") {
+			t.Errorf("message should name trust-manager, got %q", updates[0].Message)
+		}
+	})
+
+	t.Run("silent when no trust bundle", func(t *testing.T) {
+		if updates := captureTrustBundleUpdates(t, ""); len(updates) != 0 {
+			t.Errorf("expected no trust-bundle status updates, got %+v", updates)
 		}
 	})
 }

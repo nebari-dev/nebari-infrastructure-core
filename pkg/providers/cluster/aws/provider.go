@@ -314,6 +314,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	}
 
 	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, opts.BackupBucket)
+	if opts.TrustBundle != "" {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Trust bundle passed to EKS module as extra_ca_bundle; worker nodes will trust it before kubelet starts").
+			WithResource("trust-bundle").
+			WithAction("configuring"))
+	}
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)
