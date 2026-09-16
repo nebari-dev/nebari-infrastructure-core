@@ -251,7 +251,6 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
 	settings := cluster.InfraSettings{
 		StorageClass: defaultStorageClass,
-		NeedsMetalLB: false,
 	}
 
 	rawCfg := clusterConfig.ProviderConfig()

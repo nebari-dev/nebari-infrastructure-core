@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -109,13 +110,13 @@ func TestWriteAll(t *testing.T) {
 
 func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	tests := []struct {
-		name                    string
-		settings                cluster.InfraSettings
-		wantStorageClass        string
-		wantLBAnnotationCount   int
-		wantKeycloakBasePath    string
-		wantMetalLBAddressRange string
-		wantHTTPSPort           int
+		name                   string
+		settings               cluster.InfraSettings
+		wantStorageClass       string
+		wantLBAnnotationCount  int
+		wantKeycloakBasePath   string
+		wantGatewayHostAddress string
+		wantHTTPSPort          int
 	}{
 		{
 			name:             "aws defaults",
@@ -134,15 +135,14 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			wantHTTPSPort:         443,
 		},
 		{
-			name: "local with MetalLB",
+			name: "local with host-port gateway",
 			settings: cluster.InfraSettings{
 				StorageClass:       "standard",
-				NeedsMetalLB:       true,
-				MetalLBAddressPool: "192.168.1.100-192.168.1.110",
+				GatewayHostAddress: "127.0.0.1",
 			},
-			wantStorageClass:        "standard",
-			wantMetalLBAddressRange: "192.168.1.100-192.168.1.110",
-			wantHTTPSPort:           443,
+			wantStorageClass:       "standard",
+			wantGatewayHostAddress: "127.0.0.1",
+			wantHTTPSPort:          443,
 		},
 		{
 			name: "custom HTTPS port",
@@ -167,11 +167,14 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.KeycloakBasePath != tt.wantKeycloakBasePath {
 				t.Errorf("KeycloakBasePath = %q, want %q", data.KeycloakBasePath, tt.wantKeycloakBasePath)
 			}
-			if data.MetalLBAddressRange != tt.wantMetalLBAddressRange {
-				t.Errorf("MetalLBAddressRange = %q, want %q", data.MetalLBAddressRange, tt.wantMetalLBAddressRange)
+			if data.GatewayHostAddress != tt.wantGatewayHostAddress {
+				t.Errorf("GatewayHostAddress = %q, want %q", data.GatewayHostAddress, tt.wantGatewayHostAddress)
 			}
 			if data.HTTPSPort != tt.wantHTTPSPort {
 				t.Errorf("HTTPSPort = %d, want %d", data.HTTPSPort, tt.wantHTTPSPort)
+			}
+			if data.GatewayHTTPNodePort != cluster.GatewayHTTPNodePort || data.GatewayHTTPSNodePort != cluster.GatewayHTTPSNodePort {
+				t.Errorf("gateway NodePorts = %d/%d, want %d/%d", data.GatewayHTTPNodePort, data.GatewayHTTPSNodePort, cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort)
 			}
 		})
 	}
@@ -679,6 +682,67 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 	}
 }
 
+// The Keycloak secret names and keys used to be literals in the templates and
+// are now TemplateData fields, so that `nic outputs` and the manifests cannot
+// disagree about them. An unpopulated field renders as the empty string rather
+// than failing, which would leave the realm-setup Job and the Keycloak
+// StatefulSet pointing at a nameless secret key. Pin the rendered strings.
+func TestKeycloakSecretCoordinatesRender(t *testing.T) {
+	data := NewTemplateData(&config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{})
+
+	tests := []struct {
+		name     string
+		template string
+		want     []string
+	}{
+		{
+			name:     "keycloak base values reference the admin password key",
+			template: "templates/values/keycloak/base.yaml",
+			want: []string{
+				"name: " + KeycloakDefaultAdminSecretName,
+				"key: " + KeycloakAdminPasswordKey,
+			},
+		},
+		{
+			name:     "realm setup job references both secrets and keys",
+			template: "templates/manifests/keycloak/realm-setup-job.yaml",
+			want: []string{
+				"name: " + KeycloakDefaultAdminSecretName,
+				"key: " + KeycloakAdminPasswordKey,
+				"name: " + NebariRealmAdminSecretName,
+				"key: " + NebariRealmAdminPasswordKey,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.template)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.template, err)
+			}
+
+			rendered, err := processTemplate(tt.template, content, data)
+			if err != nil {
+				t.Fatalf("processTemplate(%s): %v", tt.template, err)
+			}
+
+			output := string(rendered)
+			for _, want := range tt.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("rendered %s does not contain %q:\n%s", tt.template, want, output)
+				}
+			}
+			// An unpopulated field renders as an empty value after the colon.
+			for _, empty := range []string{"name:\n", "key:\n", "name: \n", "key: \n"} {
+				if strings.Contains(output, empty) {
+					t.Errorf("rendered %s has an empty secret reference (%q):\n%s", tt.template, empty, output)
+				}
+			}
+		})
+	}
+}
+
 func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -858,6 +922,88 @@ func TestSyncWaveOrdering(t *testing.T) {
 	}
 }
 
+// egOIDCIssuerPattern is the validation Envoy Gateway applies to
+// SecurityPolicy's spec.oidc.provider.issuer as of v1.9.1, copied verbatim from
+// the CRD (api/v1alpha1/oidc_types.go). EG enforces the same https-scheme rule a
+// second time in the translator (validateOIDCIssuerURL), so a value that fails
+// this is rejected at apply time AND would leave the policy Accepted: False with
+// no oauth2 filter on the route. Asserted directly rather than only comparing
+// against an expected literal, so that changing the template and the expected
+// constant together still fails.
+var egOIDCIssuerPattern = regexp.MustCompile(`^https://[^/?#@]+(/[^?#]*)?$`)
+
+func assertValidEGIssuer(t *testing.T, issuer string) {
+	t.Helper()
+	if !egOIDCIssuerPattern.MatchString(issuer) {
+		t.Errorf("oidc.provider.issuer %q does not satisfy the Envoy Gateway issuer constraint %s",
+			issuer, egOIDCIssuerPattern)
+	}
+}
+
+// longhornSecurityPolicyShape mirrors the subset of the rendered SecurityPolicy
+// we assert on. It exists so tests can verify the split-URL invariant on a
+// per-field basis instead of relying on strings.Contains over the whole file,
+// which cannot distinguish `oidc.provider.issuer` from `jwt.providers[0].issuer`
+// when they render as different lines with the same key.
+type longhornSecurityPolicyShape struct {
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Metadata   struct {
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
+	} `yaml:"metadata"`
+	Spec struct {
+		TargetRefs []struct {
+			Group string `yaml:"group"`
+			Kind  string `yaml:"kind"`
+			Name  string `yaml:"name"`
+		} `yaml:"targetRefs"`
+		OIDC struct {
+			Provider struct {
+				Issuer                string `yaml:"issuer"`
+				TokenEndpoint         string `yaml:"tokenEndpoint"`
+				AuthorizationEndpoint string `yaml:"authorizationEndpoint"`
+				EndSessionEndpoint    string `yaml:"endSessionEndpoint"`
+			} `yaml:"provider"`
+			ClientID     string `yaml:"clientID"`
+			ClientSecret struct {
+				Name string `yaml:"name"`
+			} `yaml:"clientSecret"`
+			RedirectURL           string `yaml:"redirectURL"`
+			LogoutPath            string `yaml:"logoutPath"`
+			ForwardAccessToken    bool   `yaml:"forwardAccessToken"`
+			RefreshToken          bool   `yaml:"refreshToken"`
+			PassThroughAuthHeader bool   `yaml:"passThroughAuthHeader"`
+		} `yaml:"oidc"`
+		JWT struct {
+			Providers []struct {
+				Name       string `yaml:"name"`
+				Issuer     string `yaml:"issuer"`
+				RemoteJWKS struct {
+					URI string `yaml:"uri"`
+				} `yaml:"remoteJWKS"`
+			} `yaml:"providers"`
+		} `yaml:"jwt"`
+		Authorization struct {
+			DefaultAction string `yaml:"defaultAction"`
+			Rules         []struct {
+				Name      string `yaml:"name"`
+				Action    string `yaml:"action"`
+				Principal struct {
+					JWT struct {
+						Provider string `yaml:"provider"`
+						Claims   []struct {
+							Name      string   `yaml:"name"`
+							ValueType string   `yaml:"valueType"`
+							Values    []string `yaml:"values"`
+						} `yaml:"claims"`
+					} `yaml:"jwt"`
+				} `yaml:"principal"`
+			} `yaml:"rules"`
+		} `yaml:"authorization"`
+	} `yaml:"spec"`
+}
+
 func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 	ctx := context.Background()
 
@@ -877,39 +1023,200 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
 		}
-		out := string(content)
 
-		for _, want := range []string{
-			"kind: SecurityPolicy",
-			"apiVersion: gateway.envoyproxy.io/v1alpha1",
-			"name: longhorn-oidc",
-			"namespace: longhorn-system",
-			"kind: HTTPRoute",
-			"name: longhorn",
-			`issuer: "https://keycloak.test.example.com/realms/nebari"`,
-			"clientID: longhorn",
-			"name: longhorn-oidc-client-secret",
-			`redirectURL: "https://longhorn.test.example.com/oauth2/callback"`,
-			`logoutPath: "/oauth2/logout"`,
-			"forwardAccessToken: true",
-			"jwt:",
-			"name: keycloak",
-			"/realms/nebari/protocol/openid-connect/certs",
-			"authorization:",
-			"defaultAction: Deny",
-			"name: allow-longhorn-admins",
-			"action: Allow",
-			"valueType: StringArray",
-			"- /longhorn-admins",
-		} {
-			if !strings.Contains(out, want) {
-				t.Errorf("longhorn-securitypolicy.yaml missing %q\ngot:\n%s", want, out)
-			}
+		var sp longhornSecurityPolicyShape
+		if err := yaml.Unmarshal(content, &sp); err != nil {
+			t.Fatalf("failed to unmarshal SecurityPolicy: %v\ngot:\n%s", err, string(content))
+		}
+
+		const (
+			inClusterBase = "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/realms/nebari"
+			publicBase    = "https://keycloak.test.example.com/realms/nebari"
+		)
+
+		// Top-level shape.
+		if got, want := sp.APIVersion, "gateway.envoyproxy.io/v1alpha1"; got != want {
+			t.Errorf("apiVersion: got %q, want %q", got, want)
+		}
+		if got, want := sp.Kind, "SecurityPolicy"; got != want {
+			t.Errorf("kind: got %q, want %q", got, want)
+		}
+		if got, want := sp.Metadata.Name, "longhorn-oidc"; got != want {
+			t.Errorf("metadata.name: got %q, want %q", got, want)
+		}
+		if got, want := sp.Metadata.Namespace, "longhorn-system"; got != want {
+			t.Errorf("metadata.namespace: got %q, want %q", got, want)
+		}
+
+		// Target: the Longhorn HTTPRoute.
+		if len(sp.Spec.TargetRefs) != 1 {
+			t.Fatalf("spec.targetRefs: got %d, want 1", len(sp.Spec.TargetRefs))
+		}
+		if tr := sp.Spec.TargetRefs[0]; tr.Kind != "HTTPRoute" || tr.Name != "longhorn" {
+			t.Errorf("spec.targetRefs[0]: got %+v, want kind=HTTPRoute name=longhorn", tr)
+		}
+
+		// OIDC provider — split-URL invariant. tokenEndpoint is in-cluster
+		// (back-channel); authorizationEndpoint + endSessionEndpoint are public
+		// (front-channel). Swapping any two silently reintroduces the
+		// private-domain OIDC-discovery bug this template exists to fix.
+		// issuer is public purely to satisfy the CRD's https constraint; it is
+		// inert at runtime once discovery is suppressed.
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
+			t.Errorf("oidc.provider.issuer: got %q, want %q (public; EG constrains this field to an https scheme)", got, want)
+		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
+		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
+			t.Errorf("oidc.provider.tokenEndpoint: got %q, want %q (in-cluster)", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.AuthorizationEndpoint, publicBase+"/protocol/openid-connect/auth"; got != want {
+			t.Errorf("oidc.provider.authorizationEndpoint: got %q, want %q (public)", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.EndSessionEndpoint, publicBase+"/protocol/openid-connect/logout"; got != want {
+			t.Errorf("oidc.provider.endSessionEndpoint: got %q, want %q (public)", got, want)
+		}
+
+		// OIDC client fields.
+		if got, want := sp.Spec.OIDC.ClientID, "longhorn"; got != want {
+			t.Errorf("oidc.clientID: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.ClientSecret.Name, "longhorn-oidc-client-secret"; got != want {
+			t.Errorf("oidc.clientSecret.name: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.RedirectURL, "https://longhorn.test.example.com/oauth2/callback"; got != want {
+			t.Errorf("oidc.redirectURL: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.LogoutPath, "/oauth2/logout"; got != want {
+			t.Errorf("oidc.logoutPath: got %q, want %q", got, want)
+		}
+		if !sp.Spec.OIDC.ForwardAccessToken {
+			t.Errorf("oidc.forwardAccessToken: got false, want true")
+		}
+		// refreshToken keeps the session alive from the refresh token instead of
+		// bouncing the user back through Keycloak when the access token expires.
+		if !sp.Spec.OIDC.RefreshToken {
+			t.Errorf("oidc.refreshToken: got false, want true")
+		}
+		// passThroughAuthHeader lets a request that already carries an
+		// `Authorization: Bearer <token>` skip the oauth2 redirect and reach the
+		// jwt block below. Without it, EG's oauth2 filter (which runs ahead of
+		// jwt_authn) treats the Bearer as an unknown session and
+		// bounces the request back to Keycloak — breaking scripted API access.
+		// Browser flow is unaffected because browsers arrive with the oauth2
+		// session cookie, not a Bearer.
+		if !sp.Spec.OIDC.PassThroughAuthHeader {
+			t.Errorf("oidc.passThroughAuthHeader: got false, want true")
+		}
+
+		// JWT provider — issuer MUST be public, because it has to match the
+		// `iss` claim Keycloak stamps into tokens, which is KC_HOSTNAME
+		// (always the public URL) regardless of which endpoint minted the token.
+		if len(sp.Spec.JWT.Providers) != 1 {
+			t.Fatalf("jwt.providers: got %d, want 1", len(sp.Spec.JWT.Providers))
+		}
+		jp := sp.Spec.JWT.Providers[0]
+		if got, want := jp.Name, "keycloak"; got != want {
+			t.Errorf("jwt.providers[0].name: got %q, want %q", got, want)
+		}
+		if got, want := jp.Issuer, publicBase; got != want {
+			t.Errorf("jwt.providers[0].issuer: got %q, want %q (public — must match `iss` claim)", got, want)
+		}
+		if got, want := jp.RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri: got %q, want %q (in-cluster)", got, want)
+		}
+
+		// Authorization: default-deny, allow only /longhorn-admins group.
+		if got, want := sp.Spec.Authorization.DefaultAction, "Deny"; got != want {
+			t.Errorf("authorization.defaultAction: got %q, want %q", got, want)
+		}
+		if len(sp.Spec.Authorization.Rules) != 1 {
+			t.Fatalf("authorization.rules: got %d, want 1", len(sp.Spec.Authorization.Rules))
+		}
+		rule := sp.Spec.Authorization.Rules[0]
+		if rule.Name != "allow-longhorn-admins" || rule.Action != "Allow" {
+			t.Errorf("authorization.rules[0]: got name=%q action=%q, want allow-longhorn-admins/Allow",
+				rule.Name, rule.Action)
+		}
+		if rule.Principal.JWT.Provider != "keycloak" {
+			t.Errorf("authorization.rules[0].principal.jwt.provider: got %q, want %q",
+				rule.Principal.JWT.Provider, "keycloak")
+		}
+		if len(rule.Principal.JWT.Claims) != 1 {
+			t.Fatalf("authorization.rules[0].principal.jwt.claims: got %d, want 1",
+				len(rule.Principal.JWT.Claims))
+		}
+		claim := rule.Principal.JWT.Claims[0]
+		if claim.Name != "groups" || claim.ValueType != "StringArray" {
+			t.Errorf("authorization claim: got name=%q valueType=%q, want groups/StringArray",
+				claim.Name, claim.ValueType)
+		}
+		if len(claim.Values) != 1 || claim.Values[0] != "/longhorn-admins" {
+			t.Errorf("authorization claim.values: got %v, want [/longhorn-admins]", claim.Values)
 		}
 
 		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
 		if _, err := os.Stat(appPath); err != nil {
 			t.Errorf("apps/securitypolicies.yaml should be written when LonghornEnabled=true: %v", err)
+		}
+	})
+
+	t.Run("renders correctly with a KeycloakBasePath override", func(t *testing.T) {
+		// A non-empty KeycloakBasePath (e.g. "/auth" on Keycloak deployments
+		// that keep the pre-Quarkus path prefix) has to land in the right
+		// position on all four rendered URLs. Notably: `KeycloakServiceURL`
+		// already embeds the base path (see writer.go), while the public URLs
+		// interpolate `{{ .KeycloakBasePath }}` directly. Regressing either
+		// side would mis-render only under this configuration.
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		settings := cluster.InfraSettings{
+			StorageClass:     "longhorn",
+			LonghornEnabled:  true,
+			KeycloakBasePath: "/auth",
+		}
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+
+		policyPath := filepath.Join(tmpDir, "manifests", "networking", "policies", "longhorn-securitypolicy.yaml")
+		content, err := os.ReadFile(policyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read longhorn securitypolicy: %v", err)
+		}
+
+		var sp longhornSecurityPolicyShape
+		if err := yaml.Unmarshal(content, &sp); err != nil {
+			t.Fatalf("failed to unmarshal SecurityPolicy: %v\ngot:\n%s", err, string(content))
+		}
+
+		const (
+			inClusterBase = "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth/realms/nebari"
+			publicBase    = "https://keycloak.test.example.com/auth/realms/nebari"
+		)
+
+		if got, want := sp.Spec.OIDC.Provider.Issuer, publicBase; got != want {
+			t.Errorf("oidc.provider.issuer with basePath=/auth: got %q, want %q", got, want)
+		}
+		assertValidEGIssuer(t, sp.Spec.OIDC.Provider.Issuer)
+		if got, want := sp.Spec.OIDC.Provider.TokenEndpoint, inClusterBase+"/protocol/openid-connect/token"; got != want {
+			t.Errorf("oidc.provider.tokenEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.AuthorizationEndpoint, publicBase+"/protocol/openid-connect/auth"; got != want {
+			t.Errorf("oidc.provider.authorizationEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.OIDC.Provider.EndSessionEndpoint, publicBase+"/protocol/openid-connect/logout"; got != want {
+			t.Errorf("oidc.provider.endSessionEndpoint with basePath=/auth: got %q, want %q", got, want)
+		}
+
+		if len(sp.Spec.JWT.Providers) != 1 {
+			t.Fatalf("jwt.providers with basePath=/auth: got %d, want 1", len(sp.Spec.JWT.Providers))
+		}
+		if got, want := sp.Spec.JWT.Providers[0].Issuer, publicBase; got != want {
+			t.Errorf("jwt.providers[0].issuer with basePath=/auth: got %q, want %q", got, want)
+		}
+		if got, want := sp.Spec.JWT.Providers[0].RemoteJWKS.URI, inClusterBase+"/protocol/openid-connect/certs"; got != want {
+			t.Errorf("jwt.providers[0].remoteJWKS.uri with basePath=/auth: got %q, want %q",
+				got, want)
 		}
 	})
 
@@ -956,6 +1263,73 @@ func TestWriteAllToGit_LonghornSecurityPolicy(t *testing.T) {
 		appPath := filepath.Join(tmpDir, "apps", "securitypolicies.yaml")
 		if _, err := os.Stat(appPath); !os.IsNotExist(err) {
 			t.Errorf("apps/securitypolicies.yaml should not be written when LonghornEnabled=false, stat err: %v", err)
+		}
+	})
+}
+
+func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
+	ctx := context.Background()
+
+	renderEnvoyProxy := func(t *testing.T, settings cluster.InfraSettings) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
+			t.Fatalf("WriteAllToGit() error: %v", err)
+		}
+		proxyPath := filepath.Join(tmpDir, "manifests", "networking", "envoyproxy.yaml")
+		content, err := os.ReadFile(proxyPath) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("failed to read envoyproxy.yaml: %v", err)
+		}
+		return string(content)
+	}
+
+	t.Run("pins the Envoy service to the provider's NodePorts when GatewayHostAddress is set", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
+		})
+
+		for _, want := range []string{
+			"envoyService:",
+			"type: NodePort",
+			"type: StrategicMerge",
+			"- port: 80",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPNodePort),
+			"- port: 443",
+			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPSNodePort),
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("envoyproxy.yaml missing %q\ngot:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("targets the overridden HTTPS listener port so the patch merges into an existing port", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass:       "standard",
+			GatewayHostAddress: "127.0.0.1",
+			HTTPSPort:          8443,
+		})
+
+		if want := fmt.Sprintf("- port: 8443\n                  nodePort: %d", cluster.GatewayHTTPSNodePort); !strings.Contains(out, want) {
+			t.Errorf("envoyproxy.yaml should pin the HTTPS NodePort to listener port 8443, got:\n%s", out)
+		}
+		if strings.Contains(out, "- port: 443") {
+			t.Errorf("envoyproxy.yaml should not reference port 443 when https_port is 8443, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits the service pinning when GatewayHostAddress is empty", func(t *testing.T) {
+		out := renderEnvoyProxy(t, cluster.InfraSettings{
+			StorageClass: "gp2",
+		})
+
+		for _, unwanted := range []string{"envoyService:", "NodePort"} {
+			if strings.Contains(out, unwanted) {
+				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
+			}
 		}
 	})
 }
@@ -1173,7 +1547,6 @@ var helmValueFilesApps = []struct {
 	{"envoy-gateway", "controllerName: gateway.envoyproxy.io/gatewayclass-controller"},
 	{"cert-manager", "installCRDs: true"},
 	{"cloudnative-pg", "Operator-only install: per-database Cluster resources"},
-	{"metallb", "speaker:"},
 	{"trust-manager", "The default CA package (debian ca-certificates)"},
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
@@ -1340,56 +1713,46 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// Seed a user overlay and a stale base.yaml from a previous
-		// enabled-state run for both gated apps.
-		for _, app := range []string{"metallb", "trust-manager"} {
-			overlayDir := filepath.Join(tmpDir, "values", app, "overlays")
-			if err := os.MkdirAll(overlayDir, 0o750); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(tmpDir, "values", app, "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+		// enabled-state run.
+		overlayDir := filepath.Join(tmpDir, "values", "trust-manager", "overlays")
+		if err := os.MkdirAll(overlayDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
+			t.Fatal(err)
 		}
 
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := cluster.InfraSettings{StorageClass: "gp2"}                     // NeedsMetalLB=false
+		settings := cluster.InfraSettings{StorageClass: "gp2"}
 		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
-		for _, app := range []string{"metallb", "trust-manager"} {
-			basePath := filepath.Join(tmpDir, "values", app, "base.yaml")
-			if _, err := os.Stat(basePath); !os.IsNotExist(err) {
-				t.Errorf("%s: stale base.yaml should be removed when the app is disabled", app)
-			}
-			overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", app, "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
-			if err != nil {
-				t.Fatalf("%s: user overlay was destroyed: %v", app, err)
-			}
-			if string(overlay) != "user: overlay\n" {
-				t.Errorf("%s: user overlay content changed: %q", app, overlay)
-			}
+		basePath := filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")
+		if _, err := os.Stat(basePath); !os.IsNotExist(err) {
+			t.Error("stale base.yaml should be removed when the app is disabled")
+		}
+		overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", "trust-manager", "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
+		if err != nil {
+			t.Fatalf("user overlay was destroyed: %v", err)
+		}
+		if string(overlay) != "user: overlay\n" {
+			t.Errorf("user overlay content changed: %q", overlay)
 		}
 	})
 
 	t.Run("enabled gates write base.yaml", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := cluster.InfraSettings{
-			StorageClass:       "gp2",
-			NeedsMetalLB:       true,
-			MetalLBAddressPool: "10.0.0.100-10.0.0.110",
-		}
+		settings := cluster.InfraSettings{StorageClass: "gp2"}
 		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, testCAPEM); err != nil { // PEM => TrustManagerEnabled=true
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
-		for _, app := range []string{"metallb", "trust-manager"} {
-			if _, err := os.Stat(filepath.Join(tmpDir, "values", app, "base.yaml")); err != nil {
-				t.Errorf("%s: expected values/%s/base.yaml to be written: %v", app, app, err)
-			}
+		if _, err := os.Stat(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")); err != nil {
+			t.Errorf("expected values/trust-manager/base.yaml to be written: %v", err)
 		}
 	})
 }
@@ -1484,7 +1847,7 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 // repeated regeneration runs.
 //
 // Scope note: this covers only the UNGATED case. envoy-gateway is never matched
-// by isMetalLBPath/isTrustBundlePath, so this test does not exercise the
+// by isTrustBundlePath/isLonghornOnlyPath, so this test does not exercise the
 // gated-off removal path at all. The file-versus-directory gating regression is
 // pinned by TestWriteAllToGit_GatedValuesBase, and the structural guard behind
 // it by TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not de-scope
@@ -1643,15 +2006,6 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 			template: "templates/values/envoy-gateway/base.yaml",
 			want: []string{
 				"    resources:\n      requests:\n        cpu: 50m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 512Mi",
-			},
-		},
-		{
-			name:     "metallb controller, speaker, and frr sidecar",
-			template: "templates/values/metallb/base.yaml",
-			want: []string{
-				"controller:\n  replicas: 1\n  resources:\n    requests:\n      cpu: 25m\n      memory: 64Mi\n    limits:\n      cpu: 100m\n      memory: 128Mi",
-				"speaker:\n  enabled: true\n  resources:\n    requests:\n      cpu: 50m\n      memory: 128Mi\n    limits:\n      cpu: 200m\n      memory: 256Mi",
-				"  frr:\n    resources:\n      requests:\n        cpu: 25m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 256Mi",
 			},
 		},
 		{

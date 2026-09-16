@@ -1,0 +1,49 @@
+name: Run user journey tests
+description: >-
+  Run the user journey (e2e) suite against the cluster the deploy action
+  just stood up, and upload Playwright artifacts when a browser journey
+  fails. Used by both ci.yml and deployment-tests.yml so the two cannot
+  drift.
+
+inputs:
+  artifact-name:
+    description: >-
+      Name for the failure-artifact upload. Must be unique within a
+      workflow run, so each caller passes its provider name.
+    required: true
+  retention-days:
+    description: >-
+      How long to keep failure artifacts. Deliberately short: a Playwright
+      trace from a failed login journey can contain the throwaway user's
+      password, and Playwright has no trace redaction API. Do not raise
+      this without solving redaction first.
+    required: false
+    default: '3'
+
+runs:
+  using: composite
+  steps:
+    # The deploy action exports KUBECONFIG, so the suite finds the cluster
+    # with no further wiring. A kubeconfig is its only required input:
+    # domain, gateway address, credentials and which optional components
+    # exist are all discovered from the cluster itself.
+    - name: Set up pixi
+      uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+      with:
+        manifest-path: tests/user_journeys/pixi.toml
+
+    - name: Run user journey tests
+      shell: bash
+      run: make test-journeys
+
+    - name: Upload journey failure artifacts
+      # The `test` pixi task passes --tracing=retain-on-failure,
+      # --screenshot=only-on-failure and --video=retain-on-failure, so
+      # these exist only for a failing browser journey.
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: tests/user_journeys/test-results/
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: ignore

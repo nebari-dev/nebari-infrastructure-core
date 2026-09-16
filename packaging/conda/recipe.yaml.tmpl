@@ -1,0 +1,47 @@
+# Repackages a published nic release archive as a conda package. The binary is
+# never rebuilt: the sha256 below is the one from the release's own
+# checksums.txt, which the release pipeline signs with cosign, so the bytes a
+# conda user installs are the bytes we signed.
+#
+# Rendered per target platform by build-packages.sh; every __PLACEHOLDER__ is
+# substituted there. Not a standalone recipe - rattler-build will reject this
+# file as-is.
+package:
+  name: nebari-infrastructure-core
+  version: "__CONDA_VERSION__"
+
+source:
+  url: https://github.com/nebari-dev/nebari-infrastructure-core/releases/download/v__VERSION__/__ASSET__
+  sha256: __SHA256__
+
+build:
+  # A slot, not a constant. The filename is
+  # name-version-<varianthash>_<number>, and the variant hash covers the variant
+  # configuration rather than the recipe body - adding a requirements block or
+  # editing build.script leaves it unchanged. So a fixed recipe republished for
+  # an already-published version would collide with the old filename and, under
+  # --skip-existing, be skipped silently. Bump this when republishing.
+  number: __BUILD_NUMBER__
+  script:
+    - mkdir -p "${PREFIX}/__BIN_DIR__"
+    - cp __BIN_SRC__ "${PREFIX}/__BIN_DIR__/__BIN_SRC__"
+    - chmod +x "${PREFIX}/__BIN_DIR__/__BIN_SRC__"
+  # A statically linked Go binary (CGO_ENABLED=0): there is nothing to relink
+  # and no build prefix embedded in it to rewrite.
+  dynamic_linking:
+    binary_relocation: false
+  prefix_detection:
+    ignore: true
+
+tests:
+  - script:
+      - nic version
+
+about:
+  homepage: https://github.com/nebari-dev/nebari-infrastructure-core
+  repository: https://github.com/nebari-dev/nebari-infrastructure-core
+  documentation: https://github.com/nebari-dev/nebari-infrastructure-core/tree/main/docs
+  license: Apache-2.0
+  # Shipped inside every release archive by .goreleaser.yml's archives.files.
+  license_file: LICENSE
+  summary: Provisions Kubernetes clusters for Nebari and bootstraps foundational software

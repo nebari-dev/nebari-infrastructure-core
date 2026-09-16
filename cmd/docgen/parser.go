@@ -111,6 +111,12 @@ func parseField(field *ast.Field) []FieldDoc {
 
 	// Handle named fields
 	for _, name := range field.Names {
+		// Unexported fields are not part of the config schema: the YAML decoder
+		// cannot populate them, so documenting one invents a key users can set.
+		if !name.IsExported() {
+			continue
+		}
+
 		doc := FieldDoc{
 			Name:   name.Name,
 			GoType: typeToString(field.Type),

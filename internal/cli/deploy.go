@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,9 @@ var (
 		Long: `Deploy cloud infrastructure and Kubernetes resources based on the
 provided nebari-config.yaml file. This command will create all necessary
 resources to establish a fully functional Nebari cluster.
+
+Configs that still contain the reserved CHANGEME placeholder are rejected before
+any provider API call, so an unedited starter cannot provision infrastructure.
 
 Use --dry-run to preview changes without applying them.`,
 		RunE: runDeploy,
@@ -109,8 +113,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printDNSGuidance prints instructions for manual DNS configuration
+// printDNSGuidance prints instructions for manual DNS configuration. When the
+// endpoint is loopback (local kind clusters publish the gateway on host ports
+// of 127.0.0.1), it prints /etc/hosts guidance instead: public DNS records
+// pointing at loopback make no sense, and /etc/hosts is the whole setup.
 func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
+	if lb != nil && net.ParseIP(lb.IP).IsLoopback() {
+		printHostsFileGuidance(cfg, lb)
+		return
+	}
+
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println("  DNS CONFIGURATION REQUIRED")
@@ -163,6 +175,35 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 	fmt.Println()
 }
 
+// printHostsFileGuidance prints /etc/hosts instructions for clusters whose
+// gateway is published on loopback host ports (local kind clusters). The URL
+// carries the HTTPS port when it is non-standard; the /etc/hosts line never
+// does (hosts files map names to addresses, not ports).
+func printHostsFileGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
+	url := "https://" + cfg.Domain
+	if lb.Port != 0 && lb.Port != 443 {
+		url = fmt.Sprintf("https://%s:%d", cfg.Domain, lb.Port)
+	}
+
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  HOSTS FILE CONFIGURATION REQUIRED")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Printf("  The platform is published on host ports of %s.\n", lb.IP)
+	fmt.Println("  Point the platform hostnames at it by adding this line to /etc/hosts:")
+	fmt.Println()
+	fmt.Printf("    %s %s keycloak.%s argocd.%s\n", lb.IP, cfg.Domain, cfg.Domain, cfg.Domain)
+	fmt.Println()
+	fmt.Printf("  Then open %s in your browser.\n", url)
+	fmt.Println()
+	fmt.Println("  /etc/hosts has no wildcard support: services exposed later on other")
+	fmt.Println("  subdomains need their hostname appended to the same line.")
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
 // printArgoCDInstructions prints instructions for accessing Argo CD
 func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
@@ -185,8 +226,7 @@ func printArgoCDInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Println("  Get the admin password:")
 	fmt.Println()
-	fmt.Println("    kubectl -n argocd get secret argocd-initial-admin-secret \\")
-	fmt.Println("      -o jsonpath=\"{.data.password}\" | base64 -d")
+	fmt.Println("    nic outputs --show-secrets")
 	fmt.Println()
 	fmt.Println("  Login credentials:")
 	fmt.Println("    Username: admin")
@@ -222,8 +262,7 @@ func printKeycloakInstructions(cfg *config.NebariConfig) {
 	fmt.Println()
 	fmt.Println("  Get the admin password:")
 	fmt.Println()
-	fmt.Println("    kubectl -n keycloak get secret keycloak-admin-credentials \\")
-	fmt.Println("      -o jsonpath=\"{.data.admin-password}\" | base64 -d")
+	fmt.Println("    nic outputs --show-secrets")
 	fmt.Println()
 	fmt.Println("  Login credentials:")
 	fmt.Println("    Username: admin")

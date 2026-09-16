@@ -15,7 +15,7 @@ validated on a local k3d bed; the evidence is recorded here.
 
 2026-07-17
 
-Last updated: 2026-07-20
+Last updated: 2026-08-28
 
 ## Context
 
@@ -64,7 +64,7 @@ Short-term mitigation (not a target architecture): scoped Argo CD
 
 **Option 2 is chosen:** the operator owns a per-app
 `ListenerSet` (standard-channel `gateway.networking.k8s.io/v1`) attached to NIC's
-Gateway, on Envoy Gateway v1.8.x.
+Gateway, on Envoy Gateway v1.9.x.
 
 Rationale:
 
@@ -73,9 +73,12 @@ Rationale:
   Envoy Gateway v1.8 reconciles it unconditionally (no feature flag, no
   experimental channel). This is the stable `ListenerSet`, not the experimental
   `x-k8s.io/XListenerSet` the first draft analyzed. The remaining cost of Option
-  2 is the EG v1.6.2 -> v1.8.x upgrade and its compatibility testing (NIC PR
-  #496). v1.8.2 is the minimum because it fixed ListenerSet conflict precedence
-  and route-status behavior used by the migration below.
+  2 is the EG v1.6.2 -> v1.9.x upgrade and its compatibility testing (NIC PR
+  #496). v1.8.2 was the original floor because it fixed ListenerSet conflict
+  precedence and route-status behavior used by the migration below; the target
+  moved to v1.9.x because v1.9.0 additionally accepts `ListenerSet` as an xPolicy
+  `targetRef` and adds hostname/protocol conflict resolution and per-listener
+  status, all of which the migration below relies on.
 - **Option 3 does not avoid that upgrade; it defers it and adds work.** If
   ListenerSet is the intended end state, Option 3 still needs the EG upgrade
   eventually, while adding the `mergeGateways` implementation now plus a later
@@ -126,12 +129,29 @@ NIC authorizes that attachment through `Gateway.spec.allowedListeners`.
   migration, unlike the Option 3 -> Option 2 path).
 
 **Bad:**
-- Requires upgrading Envoy Gateway from v1.6.2 to a supported v1.8.x patch, with
-  testing across every supported Kubernetes version (NIC PR #496).
-- `ListenerSet` is newer than the core kinds; ecosystem/tooling support is thinner
-  and EG does not yet support `ListenerSet` as an xPolicy `targetRef` (not a
-  blocker today - the operator's SecurityPolicy targets the HTTPRoute - but worth
-  integration-test coverage).
+- Requires upgrading Envoy Gateway from v1.6.2 to a supported v1.9.x patch, with
+  testing across every supported Kubernetes version (NIC PR #496). This skips the
+  1.7 and 1.8 minors. No NIC manifest needed editing: the two EG-proprietary CRs
+  (`EnvoyProxy`, `SecurityPolicy`) stay on `v1alpha1`, and the Gateway API
+  objects that ride the CRD bump - `Gateway`, `GatewayClass`, four `HTTPRoute`s,
+  and a `v1beta1` `ReferenceGrant` - remain on served versions in the bundle
+  v1.9.1 ships. But the skip is not free at runtime: v1.8.0
+  reworked SecurityPolicy OIDC into a single native
+  `envoy.filters.http.oauth2` filter, so during the rolling upgrade the old
+  data-plane Envoy rejects the new controller's config
+  (`Didn't find a registered implementation for 'envoy.filters.http.oauth2'`)
+  and serves its last known good config until it is replaced. Measured on a
+  Hetzner cluster with Longhorn: a ~30s window, no failed requests on either a
+  plain or an OIDC-protected route, ending when the old pod drained. The risk it
+  leaves is that a proxy restarting inside that window cannot load config, and
+  the data plane runs a single replica: `manifests/networking/envoyproxy.yaml`
+  sets only container resources, so the replica count is Envoy Gateway's own
+  default of 1. (`values/envoy-gateway/base.yaml`'s `deployment.replicas` is the
+  control plane, not the proxy.)
+- `ListenerSet` is newer than the core kinds, so ecosystem/tooling support is
+  thinner. EG v1.9.0 removed the xPolicy gap - `ListenerSet` is now accepted as a
+  `targetRef` for ClientTrafficPolicy, SecurityPolicy, BackendTrafficPolicy, and
+  EnvoyExtensionPolicy - but this is still worth integration-test coverage.
 
 ## Options Detail
 
@@ -156,8 +176,8 @@ ListenerSet.
 
 **Pros:** purpose-built Gateway API delegation; removes co-ownership and the
 64-listener cap; keeps `routing.tls.secretName` working with per-app certs; native
-`allowedListeners` boundary; stable API on EG v1.8.x.
-**Cons:** requires the EG v1.6.2 -> v1.8.x upgrade + test matrix.
+`allowedListeners` boundary; stable API on EG v1.9.x.
+**Cons:** requires the EG v1.6.2 -> v1.9.x upgrade + test matrix.
 
 **Initial bed validation (EG v1.8.1 on k3d):** the standard
 `listenersets.gateway.networking.k8s.io` (v1) CRD is present and EG reconciles it
@@ -167,8 +187,9 @@ Programmed=True; its HTTPRoute resolved; `curl` returned HTTP 200 serving the
 app's own SNI cert; and NIC's `Gateway.spec.listeners` was not modified by the
 ListenerSet (no co-ownership). This proves the end-state shape, not the migration
 sequence: v1.8.2 subsequently fixed Gateway-vs-ListenerSet conflict precedence
-and route acceptance, so the full cutover must be revalidated on the selected
-v1.8.x patch.
+and route acceptance, and v1.9.0 reworked hostname/protocol conflict resolution
+and listener status again, so the full cutover must be revalidated on the
+selected v1.9.x patch.
 
 ### Option 3: Per-app Gateway + mergeGateways
 
@@ -200,12 +221,20 @@ cap; no architectural isolation. Fallback, not a target.
 
 ## Migration considerations
 
-Two layers move: NIC upgrades Envoy Gateway to the selected v1.8.x patch and
+Two layers move: NIC upgrades Envoy Gateway to the selected v1.9.x patch and
 authorizes ListenerSets through `spec.allowedListeners`; the operator moves
 per-app listeners out of the shared Gateway. The normal Helm/Argo CD upgrade
 applied the bundled Gateway API CRDs on the k3d bed without a separate manual CRD
-step. Existing Gateway, route, TLS, and authentication behavior still needs the
-supported-version test matrix before ListenerSets are enabled.
+step; the same held on a Hetzner cluster, where Argo CD moved the bundled CRDs
+from v1.4.1 to v1.6.1 with no manual step. Existing Gateway, route, TLS, and
+authentication behavior still needs the supported-version test matrix before
+ListenerSets are enabled.
+
+Schedule the Envoy Gateway upgrade itself for a window where a brief gateway
+restart is tolerable, or give the data plane a second replica for the duration
+via the `EnvoyProxy` CR's `provider.kubernetes.envoyDeployment.replicas`: see
+the v1.8.0 OIDC filter note under Option 2 for why a proxy restarting mid-roll
+cannot load config.
 
 Existing apps require a staged handoff. A listener defined directly on the parent
 Gateway has precedence over an equivalent ListenerSet listener, so the replacement
@@ -295,7 +324,7 @@ coupling this design is intended to remove and is not the target contract.
   trust boundary only if ordinary namespace owners cannot grant themselves the
   selected label. Use a protected label applied by trusted NIC/operator automation
   and enforced by RBAC or admission. `from: All` is simpler but drops the boundary.
-- **EG v1.8.x validation gates:** verify per-ListenerSet `allowedRoutes` namespace
+- **EG v1.9.x validation gates:** verify per-ListenerSet `allowedRoutes` namespace
   selectors, route attachment by `kind: ListenerSet` + `sectionName`, staged
   handoff availability, conflicting-listener status, managed-Secret adoption,
   HTTP-01 issuance and renewal, OIDC and public-route SecurityPolicy behavior,
@@ -305,7 +334,7 @@ coupling this design is intended to remove and is not the target contract.
 
 - #484 (shared-Gateway co-ownership; option analysis and the per-app-secret axis)
 - #403 (Listener-only TLS; a related missing-primitive proposal)
-- PR #496 (NIC: Envoy Gateway v1.6.2 -> v1.8.x; prerequisite for
+- PR #496 (NIC: Envoy Gateway v1.6.2 -> v1.9.x; prerequisite for
   Option 2)
 - PR #492 (NIC: mergeGateways - the Option 3 implementation) and
   nebari-dev/nebari-operator#167 (operator: per-app Gateway behind
@@ -316,5 +345,8 @@ coupling this design is intended to remove and is not the target contract.
 - [Gateway API ListenerSet documentation](https://gateway-api.sigs.k8s.io/api-types/listenerset/)
 - Envoy Gateway v1.8.2 release notes (ListenerSet precedence and route-status
   fixes): [v1.8.2](https://gateway.envoyproxy.io/news/releases/notes/v1.8.2/)
+- Envoy Gateway v1.9.0 release notes (ListenerSet as an xPolicy `targetRef`,
+  hostname/protocol conflict resolution, listener status; Gateway API CRDs move
+  to v1.6): [v1.9.0](https://gateway.envoyproxy.io/news/releases/notes/v1.9.0/)
 - [cert-manager backup and restore guidance](https://cert-manager.io/docs/devops-tips/backup/)
   (restore Secrets before Certificates to avoid unnecessary reissuance)

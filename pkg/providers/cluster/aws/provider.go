@@ -857,7 +857,6 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 
 	return cluster.InfraSettings{
 		StorageClass:    sc,
-		NeedsMetalLB:    false,
 		EFSStorageClass: efsSC,
 		LonghornEnabled: longhornEnabled,
 		LoadBalancerAnnotations: map[string]string{

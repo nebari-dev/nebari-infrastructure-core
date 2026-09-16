@@ -10,7 +10,7 @@ func TestNewRootCmdHasExactlyExpectedCommands(t *testing.T) {
 		got[c.Name()] = true
 	}
 
-	want := []string{"deploy", "destroy", "validate", "version", "kubeconfig"}
+	want := []string{"deploy", "destroy", "validate", "version", "kubeconfig", "outputs"}
 	if len(got) != len(want) {
 		t.Fatalf("got %d commands (%v), want %d: %v", len(got), got, len(want), want)
 	}

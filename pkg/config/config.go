@@ -45,6 +45,27 @@ type NebariConfig struct {
 
 	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
 	Backups *BackupsConfig `yaml:"backups,omitempty"`
+
+	// sourcePath and sourceRaw record where this config was parsed from, when it
+	// was parsed from YAML at all. Checks that must inspect the original document
+	// rather than the decoded struct (placeholder rejection, which has to see
+	// mapping keys and untyped scalars) read them through SourcePath/SourceRaw.
+	// Both are empty for a config built programmatically in Go, which by
+	// definition has no YAML text to inspect.
+	sourcePath string
+	sourceRaw  []byte
+}
+
+// SourcePath returns the file this config was parsed from, or "" when it was
+// not parsed from a file.
+func (c *NebariConfig) SourcePath() string {
+	return c.sourcePath
+}
+
+// SourceRaw returns the original YAML this config was parsed from, or nil when
+// it was not parsed from YAML. Callers must treat it as read-only.
+func (c *NebariConfig) SourceRaw() []byte {
+	return c.sourceRaw
 }
 
 // DNSConfig holds typed DNS provider configuration.

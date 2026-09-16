@@ -239,7 +239,7 @@
                 </div>
                 <p class="layer-description">
                     Curated collections of open-source tools packaged as ArgoCD applications. Each pack includes a
-                    <code>NicApp</code> CRD that automatically registers with the platform for routing, auth, and discovery.
+                    <code>NebariApp</code> CRD that automatically registers with the platform for routing, auth, and discovery.
                     Packs can be developed independently and composed together.
                 </p>
                 <div class="software-packs">
@@ -296,7 +296,7 @@
                 </div>
                 <p class="layer-description">
                     A React SPA backed by a API server. Automatically discovers all registered services via
-                    <code>NicApp</code> resources and displays them in a unified portal. Real-time updates via WebSocket,
+                    <code>NebariApp</code> resources and displays them in a unified portal. Real-time updates via WebSocket,
                     health status monitoring, and category-based filtering.
                 </p>
                 <div class="layer-components">
@@ -314,12 +314,12 @@
                     <div class="layer-title">Nebari Operator</div>
                 </div>
                 <p class="layer-description">
-                    Kubernetes operator that watches <code>NicApp</code> Custom Resources. Automatically configures routing
+                    Kubernetes operator that watches <code>NebariApp</code> Custom Resources. Automatically configures routing
                     (HTTPRoute), TLS certificates (cert-manager), and SSO integration (Keycloak) for registered applications.
                     Enables self-service app onboarding via GitOps.
                 </p>
                 <div class="layer-components">
-                    <span class="component">NicApp CRD</span>
+                    <span class="component">NebariApp CRD</span>
                     <span class="component">HTTPRoute Generation</span>
                     <span class="component">Keycloak Integration</span>
                     <span class="component">Certificate Management</span>
@@ -399,7 +399,7 @@
             <div class="concept">
                 <div class="concept-title">Self-Registering Services</div>
                 <p class="concept-text">
-                    Deploy a <code>NicApp</code> CR and the platform automatically handles routing, authentication,
+                    Deploy a <code>NebariApp</code> CR and the platform automatically handles routing, authentication,
                     TLS, and landing page registration. No manual configuration required.
                 </p>
             </div>

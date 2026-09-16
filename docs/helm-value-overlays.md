@@ -1,6 +1,6 @@
 # Overriding foundational Helm values
 
-The foundational Helm apps, that is, those with a `values/<app>/` directory in your gitops repo (currently: envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, metallb, trust-manager, nebari-landingpage), read their Helm values from the GitOps repo:
+The foundational Helm apps, that is, those with a `values/<app>/` directory in your gitops repo (currently: envoy-gateway, keycloak, opentelemetry-collector, cert-manager, cloudnative-pg, trust-manager, nebari-landingpage), read their Helm values from the GitOps repo:
 
 ```
 values/<app>/base.yaml          # NIC-owned; --regen-apps rewrites it
@@ -75,7 +75,7 @@ kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[0].helm.valueFiles}{
 kubectl -n argocd get app <app> -o jsonpath='{.spec.sources[?(@.ref=="values")]}{"\n"}'
 ```
 
-Expect both `valueFiles` entries carrying your `repository.existing.path` prefix, and a source with `ref: values` pointing at your GitOps repo. The chart source is always `sources[0]` (the tests pin that), but the `ref: values` source is selected by its `ref` field rather than by position, so the filter form keeps working if an app carries additional sources. Gated-off apps (metallb and trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
+Expect both `valueFiles` entries carrying your `repository.existing.path` prefix, and a source with `ref: values` pointing at your GitOps repo. The chart source is always `sources[0]` (the tests pin that), but the `ref: values` source is selected by its `ref` field rather than by position, so the filter form keeps working if an app carries additional sources. Gated-off apps (trust-manager on most providers) should have no `values/<app>/` directory in the repo at all.
 
 **3. Confirm `base.yaml` applies before testing overlays.** Assert specific values, not just that the app is Healthy. Because `ignoreMissingValueFiles: true` also covers the `base.yaml` entry, a typo in `repository.existing.path` silently falls back to the chart's own defaults instead of erroring. If you see chart defaults here, fix that before going further; step 4 would be meaningless.
 

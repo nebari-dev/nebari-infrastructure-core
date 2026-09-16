@@ -40,7 +40,7 @@ The specific commit dates for the 2026 entries can be reconstructed from git his
 - ✅ AWS, Azure, and Hetzner cluster providers functional
 - ✅ Local Kind workflow via `nic deploy -f examples/local-config.yaml` (the local provider provisions the Kind cluster)
 - ✅ `existing` provider for adopting clusters NIC didn't provision
-- ✅ Foundational stack syncing via ArgoCD: cert-manager, Envoy Gateway, Keycloak (+ postgresql), MetalLB (conditional), OpenTelemetry Collector, Nebari Operator, Nebari Landing Page
+- ✅ Foundational stack syncing via ArgoCD: cert-manager, Envoy Gateway, Keycloak (+ postgresql), OpenTelemetry Collector, Nebari Operator, Nebari Landing Page
 - ✅ NIC instrumented with OpenTelemetry (with documented exemptions; operation-granularity wrappers on `TerraformExecutor` are tracked as outstanding work)
 - ✅ Unit tests + lint + race + coverage in CI
 

@@ -2,11 +2,19 @@ package local
 
 // Config represents local provider configuration
 type Config struct {
-	Kind             *KindConfig                  `yaml:"kind,omitempty"`
-	NodeSelectors    map[string]map[string]string `yaml:"node_selectors,omitempty"`
-	HTTPSPort        int                          `yaml:"https_port,omitempty"`
-	MetalLB          *MetalLBConfig               `yaml:"metallb,omitempty"`
-	AdditionalFields map[string]any               `yaml:",inline"`
+	Kind          *KindConfig                  `yaml:"kind,omitempty"`
+	NodeSelectors map[string]map[string]string `yaml:"node_selectors,omitempty"`
+	// HTTPSPort is the host port the gateway's HTTPS listener is published on
+	// (default 443). Override it when 443 is taken on the host or when running
+	// several local clusters side by side. Takes effect on cluster creation
+	// only. kind port mappings cannot be changed on an existing cluster.
+	HTTPSPort int `yaml:"https_port,omitempty"`
+	// HTTPPort is the host port the gateway's HTTP listener (the HTTPS
+	// redirect) is published on (default 80). Override it under the same
+	// circumstances as HTTPSPort, including rootless container runtimes that
+	// cannot bind ports below 1024. Takes effect on cluster creation only.
+	HTTPPort         int            `yaml:"http_port,omitempty"`
+	AdditionalFields map[string]any `yaml:",inline"`
 }
 
 // KindConfig holds optional config for the deployed kind cluster. It may be
@@ -29,13 +37,4 @@ type KindMount struct {
 	HostPath      string `yaml:"host_path"`
 	ContainerPath string `yaml:"container_path"`
 	ReadOnly      bool   `yaml:"read_only,omitempty"`
-}
-
-// MetalLBConfig holds MetalLB-specific settings for the local provider.
-// MetalLB is always enabled on local clusters — kind has no built-in
-// LoadBalancer, so disabling it would leave the gateway without an IP.
-type MetalLBConfig struct {
-	// AddressPool is the IP range for MetalLB's IPAddressPool. When unset, NIC
-	// derives a pool from the kind Docker network during Deploy.
-	AddressPool string `yaml:"address_pool,omitempty"`
 }

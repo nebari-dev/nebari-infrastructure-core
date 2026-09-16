@@ -20,9 +20,12 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0008](0008-otel-collector-software-pack-override-point.md) | OpenTelemetry Collector Software Pack Override Point | Accepted | 2026-06-02 |
 | [ADR-0009](0009-declarative-keycloak-configuration.md) | Declarative Keycloak Configuration via keycloak-config-cli | Accepted | 2026-07-15 |
 | [ADR-0010](0010-high-security-mode.md) | High-Security Mode (Opt-In Whitelist-Everything Hardening) | Proposed | 2026-07-15 |
+| [ADR-0012](0012-crossplane-pack-infrastructure.md) | Crossplane Capability APIs for Software Pack Cloud Infrastructure | Rejected | 2026-08-26 |
 | [ADR-0014](0014-helm-valuefiles-overlay-seam.md) | Helm valueFiles Overlay Seam for Foundational Apps | Accepted | 2026-07-22 |
 | [ADR-0015](0015-repository-provider-abstraction.md) | Repository Provider Abstraction for GitOps Bootstrap | Accepted | 2026-07-10 |
 | [ADR-0016](0016-opentofu-runtime-version-policy.md) | OpenTofu Runtime Version Policy (External Binaries and Compatibility Window) | Proposed | 2026-08-12 |
+| [ADR-0017](0017-user-journey-tests-for-foundational-software.md) | User Journey (E2E) Tests for Foundational Software | Accepted | 2026-08-27 |
+| [ADR-0018](0018-local-gateway-host-ports.md) | Publish the Local Gateway on Host Ports Instead of MetalLB | Accepted | 2026-09-01 |
 
 ## ADR Statuses
 

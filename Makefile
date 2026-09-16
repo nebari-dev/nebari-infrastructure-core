@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters
 
 # Variables
 BINARY_NAME=nic
@@ -26,6 +26,10 @@ docs: ## Generate CLI and configuration reference documentation
 	@mkdir -p docs/reference/cli docs/configuration
 	@rm -f docs/reference/cli/*.md docs/configuration/*.md
 	go run ./cmd/docgen
+
+starters: ## Generate the Nebi starter workspaces into dist/starters
+	@echo "Generating starters..."
+	go run ./cmd/starters -out dist/starters
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
@@ -88,6 +92,15 @@ test-all: ## Run all tests (unit + integration)
 	$(MAKE) test-unit
 	$(MAKE) test-integration
 	@echo "All tests passed successfully"
+
+test-journeys: ## Run user journey tests against the cluster in $KUBECONFIG
+	@echo "Running user journey tests..."
+	@which pixi > /dev/null || (echo "Error: pixi is not installed (https://pixi.sh)" && exit 1)
+	cd tests/user_journeys && pixi run test
+	@echo "User journey tests passed successfully"
+
+test-journeys-lib: ## Run tests of the journey library itself (no cluster needed)
+	cd tests/user_journeys && pixi run test-lib
 
 LOCAL_CONFIG?=./examples/local-config.yaml
 REGEN_APPS?=

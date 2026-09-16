@@ -42,7 +42,6 @@ The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/ar
 | Envoy Gateway + gateway-config + httproutes + securitypolicies | ✅ |
 | PostgreSQL + Keycloak (Codecentric keycloakx chart) | ✅ |
 | CloudNativePG operator (per [ADR-0007](../../adr/0007-cloudnativepg-managed-databases.md)) | ✅ |
-| MetalLB + metallb-config (conditional on `InfraSettings.NeedsMetalLB`) | ✅ |
 | trust-manager + trust-bundle (conditional on `trust_bundle:`) | ✅ |
 | Longhorn backup target + RecurringJobs (conditional on `backups.longhorn`) | ✅ |
 | AppProject scoping (`foundational` / `nebari-apps` / locked-down `default`) | ✅ |

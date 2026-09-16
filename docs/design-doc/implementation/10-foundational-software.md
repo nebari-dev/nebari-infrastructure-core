@@ -28,8 +28,6 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | **postgresql** | `postgresql.yaml` | Bitnami PostgreSQL; backs Keycloak today |
 | **CloudNativePG** | `cloudnative-pg.yaml` | CloudNativePG operator (operator-only install per [ADR-0007](../../adr/0007-cloudnativepg-managed-databases.md); per-database `Cluster` resources are created separately). Installed foundationally as Keycloak's DB backend migrates to CNPG |
 | **Keycloak** | `keycloak.yaml` | OIDC identity provider (Codecentric keycloakx chart - context path `/auth`) |
-| **MetalLB** | `metallb.yaml` | Bare-metal `LoadBalancer` implementation (only when `InfraSettings.NeedsMetalLB` is true) |
-| **metallb-config** | `metallb-config.yaml` | `IPAddressPool` and `L2Advertisement` for MetalLB |
 | **longhorn-backup** | `longhorn-backup.yaml` | Longhorn `BackupTarget`, the snapshot/backup `RecurringJob`s, and the `allow-recurring-job-while-volume-detached` Setting (only when `backups.longhorn` is enabled) |
 | **OpenTelemetry Collector** | `opentelemetry-collector.yaml` | Telemetry pipeline (no backend deployed yet) |
 | **Nebari Operator** | `nebari-operator.yaml` | Reconciles `NebariApp` CRs; source lives in `nebari-dev/nebari-operator` |
@@ -64,15 +62,12 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 │   ├── postgresql.yaml
 │   ├── cloudnative-pg.yaml
 │   ├── keycloak.yaml
-│   ├── metallb.yaml                 # Gated on NeedsMetalLB
-│   ├── metallb-config.yaml          # Gated on NeedsMetalLB
 │   ├── longhorn-backup.yaml         # Gated on backups.longhorn
 │   ├── opentelemetry-collector.yaml
 │   ├── nebari-operator.yaml
 │   └── nebari-landingpage.yaml
 └── manifests/                       # Plain-manifest and values content, grouped by concern
     ├── keycloak/                    # Realm-setup job, values
-    ├── metallb/
     ├── nebari-operator/             # Kustomize patch over the upstream operator
     ├── networking/                  # Gateway, HTTPRoutes, SecurityPolicies, ReferenceGrants
     ├── security/                    # ClusterIssuers, Certificates, trust bundle
@@ -115,14 +110,14 @@ That derivation only recognizes specific shapes: namespaces from `metadata.names
 
 The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provider.go`), and the foundational layer reads from it instead of branching on provider name:
 
-- **`NeedsMetalLB`** - if false, the MetalLB apps are skipped entirely
-- **`MetalLBAddressPool`** - feeds `metallb-config`'s `IPAddressPool`
+- **`GatewayHostAddress`** - when non-empty, pins the gateway's Envoy service to fixed NodePorts that the provider publishes on host ports of this address at cluster creation (local only, `127.0.0.1`)
 - **`StorageClass`** - default `StorageClass` name for foundational PVCs (postgresql, etc.)
 - **`KeycloakBasePath`** - `/auth` for the Codecentric keycloakx chart; empty for upstream/Bitnami Keycloak
 - **`HTTPSPort`** - Gateway HTTPS listener port (`443` normalized from `0`; can be overridden e.g. for local-dev on `8443`)
 - **`LoadBalancerAnnotations`** - applied to the Gateway's provisioned `LoadBalancer` Service
 - **`EFSStorageClass`** - name of the EFS-backed `StorageClass` if available (AWS-only)
 - **`SupportsLocalGitOps`** - whether `file://` GitOps repos are acceptable (`local` only)
+- **`LonghornEnabled`** - whether Longhorn (and its UI, OIDC client, and gateway route) is deployed by this provider
 
 Adding a new provider-shaped capability means adding a field to `InfraSettings` and populating it in each provider's `InfraSettings(cfg)`. There must be no `switch cfg.Cluster.ProviderName()` in `pkg/argocd` or `cmd/nic`.
 
@@ -132,14 +127,14 @@ Cross-app dependencies are expressed via ArgoCD sync waves on each `Application`
 
 | Wave | Apps | Why here |
 |------|------|----------|
-| 1 | envoy-gateway, metallb, metallb-config | CRDs and the `LoadBalancer` implementation must exist before anything asks for an address |
+| 1 | envoy-gateway | Its CRDs must exist before the `Gateway` and everything routed through it |
 | 2 | cert-manager, gateway-config | cert-manager CRDs/webhooks before any issuer or `Certificate`; the `Gateway` once its CRDs are in |
 | 3 | cluster-issuers, certificates, httproutes, trust-manager, cloudnative-pg, securitypolicies, longhorn-backup | Issuers and certs on top of cert-manager; routes on top of the `Gateway`; operators before the resources that need them |
 | 4 | postgresql, keycloak, opentelemetry-collector, trust-bundle | Keycloak needs its database and a served certificate; the trust `Bundle` needs trust-manager |
 | 5 | nebari-operator | Reconciles `NebariApp` CRs, so it wants routing and auth already up |
 | 6 | nebari-landingpage | Discovers services registered by everything above |
 
-The waves are the authoritative ordering; do not infer it from the table in §10.2. Note in particular that cert-manager is **not** first: Envoy Gateway and MetalLB precede it.
+The waves are the authoritative ordering; do not infer it from the table in §10.2. Note in particular that cert-manager is **not** first: Envoy Gateway precedes it.
 
 ## 10.8 Health and Readiness
 

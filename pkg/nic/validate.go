@@ -3,6 +3,7 @@ package nic
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"go.opentelemetry.io/otel"
 
@@ -19,6 +20,14 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "nic.Validate")
 	defer span.End()
+
+	// Reject unfilled CHANGEME placeholders before anything else looks at the
+	// values, so an unedited starter config fails naming the fields to fill in
+	// rather than failing later on a nonsense value.
+	if err := rejectPlaceholders(cfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	if err := cfg.Validate(validateOptions(ctx, c.registry)); err != nil {
 		span.RecordError(err)
@@ -59,7 +68,38 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostAddress); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
 
+	return nil
+}
+
+// rejectPlaceholders rejects a config that still carries the CHANGEME sentinel
+// in any scalar value or mapping key. It reads the YAML the config was parsed
+// from, because the sentinel can sit in places the decoded struct cannot show:
+// mapping keys such as node_groups, and values whose field is not a string.
+// A config built programmatically in Go has no source and is a no-op here.
+//
+// Called by validate and deploy only, for the same reason as the validators
+// below: destroy and kubeconfig must keep working against a config that was
+// already edited to deploy the cluster, and blocking a teardown because someone
+// reintroduced a placeholder would be the wrong trade.
+//
+// The file path is attached here rather than in pkg/config, so the error names
+// both the fields to edit and the file to edit them in.
+func rejectPlaceholders(cfg *config.NebariConfig) error {
+	raw := cfg.SourceRaw()
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := config.CheckPlaceholders(raw); err != nil {
+		if path := cfg.SourcePath(); path != "" {
+			return fmt.Errorf("%w (in config file %q)", err, path)
+		}
+		return err
+	}
 	return nil
 }
 
@@ -98,6 +138,20 @@ func validateRepositoryProvider(ctx context.Context, cfg *config.NebariConfig, r
 	}
 	if err := repoProvider.Validate(ctx, cfg.ProjectName, cfg.Repository); err != nil {
 		return fmt.Errorf("invalid repository: %w", err)
+	}
+	return nil
+}
+
+// ensureDNSSupported rejects a dns block on a cluster whose gateway is
+// published on loopback host ports (local kind clusters). Public DNS records
+// cannot usefully point at loopback, and deploy would skip provisioning them
+// anyway, so the block is dead configuration at best and at worst suppresses
+// the /etc/hosts guidance the user actually needs. A host-port gateway on a
+// routable address (no provider does this today) would pass: DNS records can
+// point at it.
+func ensureDNSSupported(cfg *config.NebariConfig, gatewayHostAddress string) error {
+	if cfg.DNS != nil && gatewayHostAddress != "" && net.ParseIP(gatewayHostAddress).IsLoopback() {
+		return fmt.Errorf("a dns provider is not supported by cluster provider %q: the gateway is published on host ports of %s, which DNS records cannot usefully point to. Remove the dns block and use the /etc/hosts instructions printed by deploy", cfg.Cluster.ProviderName(), gatewayHostAddress)
 	}
 	return nil
 }

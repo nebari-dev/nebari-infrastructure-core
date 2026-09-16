@@ -210,13 +210,13 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 **Status:** NIC-managed kind (Kubernetes-in-Docker) cluster for local development
 
-**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Installs MetalLB so the gateway gets a LoadBalancer IP, deriving the address pool from the kind Docker network so it is routable. To deploy onto a pre-existing cluster instead, use the `existing` provider.
+**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Publishes the gateway's pinned NodePorts on host ports of 127.0.0.1 at cluster creation, so the platform is reachable via /etc/hosts entries without a LoadBalancer. To deploy onto a pre-existing cluster instead, use the `existing` provider.
 
 | File | Purpose |
 |------|---------|
-| `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig, derive the MetalLB pool for `InfraSettings` |
-| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, gitops mount, address-pool derivation) |
-| `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount`, `MetalLBConfig` |
+| `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig |
+| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, gitops mount, gateway host port mappings) |
+| `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount` |
 
 ## DNS Provider System (pkg/providers/dns/)
 
@@ -436,9 +436,10 @@ defer cleanup()
 
 | Location | Purpose |
 |----------|---------|
-| `.github/workflows/test.yml` | Runs tests on PRs and pushes |
-| `.github/workflows/lint.yml` | Runs golangci-lint on PRs |
-| `.github/workflows/release.yml` | Creates GitHub releases with binaries |
+| `.github/workflows/ci.yml` | Tests, lint, vulnerability scan and the workflow-pin check on PRs |
+| `.github/workflows/release.yml` | Cuts the GitHub release, then publishes the conda package to prefix.dev and the starter workspaces to quay.io |
+| `.github/workflows/starters.yml` | Validates the generated starter workspaces on PRs |
+| `.github/workflows/deployment-tests.yml` | Real-cloud deploy tests, one job per provider |
 
 ### Scripts
 

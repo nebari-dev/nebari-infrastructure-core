@@ -22,12 +22,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .KeycloakAdminSecretName }}
-                  key: admin-password
+                  key: {{ .KeycloakAdminPasswordKey }}
             - name: REALM_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: nebari-realm-admin-credentials
-                  key: password
+                  name: {{ .RealmAdminSecretName }}
+                  key: {{ .RealmAdminPasswordKey }}
             - name: KEYCLOAK_URL
               value: {{ .KeycloakServiceURL }}
             - name: ARGOCD_CLIENT_SECRET

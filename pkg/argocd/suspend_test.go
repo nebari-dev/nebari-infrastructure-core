@@ -16,7 +16,7 @@ import (
 func controllerStatefulSet(replicas int32) *appsv1.StatefulSet {
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: defaultNamespace,
+			Namespace: DefaultNamespace,
 			Name:      applicationControllerStatefulSet,
 		},
 		Spec: appsv1.StatefulSetSpec{Replicas: &replicas},
@@ -26,7 +26,7 @@ func controllerStatefulSet(replicas int32) *appsv1.StatefulSet {
 func controllerPod(name string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: defaultNamespace,
+			Namespace: DefaultNamespace,
 			Name:      name,
 			Labels:    map[string]string{"app.kubernetes.io/name": applicationControllerStatefulSet},
 		},
@@ -41,7 +41,7 @@ func TestSuspendReconciliation(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sts, err := client.AppsV1().StatefulSets(defaultNamespace).Get(context.Background(), applicationControllerStatefulSet, metav1.GetOptions{})
+		sts, err := client.AppsV1().StatefulSets(DefaultNamespace).Get(context.Background(), applicationControllerStatefulSet, metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

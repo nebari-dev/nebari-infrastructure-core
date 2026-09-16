@@ -83,6 +83,14 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		}
 	}()
 
+	// Reject unfilled CHANGEME placeholders before provisioning anything, so a
+	// deploy against an unedited starter config fails fast instead of creating
+	// real infrastructure from nonsense values.
+	if err := rejectPlaceholders(cfg); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
 	// Validate configuration with registered providers
 	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)
@@ -162,6 +170,16 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	if err := ensureLocalRepositorySupported(cfg, infraSettings.SupportsLocalGitOps); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible repository and cluster providers").
+			WithMetadata("error", err.Error()))
+		return nil, err
+	}
+
+	// Reject a dns block on a loopback host-port gateway before provisioning
+	// any infrastructure, mirroring the validate path for library callers
+	// that skip Validate.
+	if err := ensureDNSSupported(cfg, infraSettings.GatewayHostAddress); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "Incompatible dns and cluster providers").
 			WithMetadata("error", err.Error()))
 		return nil, err
 	}
@@ -300,11 +318,6 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 				LandingPage: argocd.LandingPageConfig{
 					RedisPassword: secrets.Redis,
 				},
-				// Enable MetalLB only for providers that need it
-				MetalLB: argocd.MetalLBConfig{
-					Enabled:     infraSettings.NeedsMetalLB,
-					AddressPool: infraSettings.MetalLBAddressPool,
-				},
 				Backups:       cfg.Backups.LonghornConfig(),
 				BackupRoleARN: resolveBackupRoleARN(ctx, cfg, clusterProvider),
 			}
@@ -322,9 +335,17 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		status.Info(ctx, "Would install Argo CD and foundational services (dry-run mode)")
 	}
 
-	// Look up LB endpoint and provision DNS records if configured
+	// Look up the LB endpoint and provision DNS records if configured. With a
+	// host-port gateway (local kind clusters) there is no load balancer: the
+	// platform is published on the provider's host address, so report that
+	// directly. There are no DNS records to provision on this path:
+	// ensureDNSSupported rejected any dns block up front.
 	if cfg.Domain != "" && !opts.DryRun {
-		result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		if addr := infraSettings.GatewayHostAddress; addr != "" {
+			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: addr, Port: infraSettings.HTTPSPort}
+		} else {
+			result.LBEndpoint = c.lookupEndpointAndProvisionDNS(ctx, cfg, clusterProvider, reg)
+		}
 	}
 
 	return result, nil
