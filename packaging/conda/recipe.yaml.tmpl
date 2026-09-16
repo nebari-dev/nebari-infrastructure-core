@@ -44,4 +44,22 @@ about:
   license: Apache-2.0
   # Shipped inside every release archive by .goreleaser.yml's archives.files.
   license_file: LICENSE
-  summary: Provisions Kubernetes clusters for Nebari and bootstraps foundational software
+  # Matches the repository description, so the package page and GitHub do not
+  # drift into describing the same tool two different ways.
+  summary: CLI tool for managing Nebari cloud infrastructure using OpenTofu, ArgoCD, and GitOps
+  description: |
+    nic provisions Kubernetes clusters for Nebari and bootstraps the foundational
+    software on top of them. It is organised around pluggable providers - AWS and
+    Azure through OpenTofu, Hetzner through hetzner-k3s, kind for local
+    development, or an existing cluster - and hands the platform over to ArgoCD
+    once the cluster is up.
+
+    This package repackages the official release binary rather than rebuilding
+    from source. The sha256 it installs comes from the release's checksums.txt,
+    which is cosign-verified against the release workflow's identity before any
+    digest is read.
+
+    Provider tooling is deliberately not a dependency here: nic only needs
+    OpenTofu for the AWS and Azure providers, and conda-forge does not publish
+    opentofu for every platform nic ships. Pin it in the workspace instead, as
+    the starter workspaces do.
