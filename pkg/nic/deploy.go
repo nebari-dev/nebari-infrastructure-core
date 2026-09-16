@@ -189,14 +189,25 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
 	// store. Resolving once avoids a second disk read and the TOCTOU window
 	// between two reads.
-	trustPEM, err := cfg.TrustBundle.ResolvePEM()
+	trustBundle, err := cfg.TrustBundle.Resolve()
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("resolve trust_bundle: %w", err)
 	}
-	var caBundle string
-	if trustPEM != "" {
-		caBundle = base64.StdEncoding.EncodeToString([]byte(trustPEM))
+	trustPEM := trustBundle.PEM
+	caBundle := trustBundle.Base64()
+	// Say what was picked up (or that nothing was) so operators can confirm the
+	// bundle reached both halves of the propagation without inspecting nodes.
+	if trustBundle.IsSet() {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Trust bundle resolved; installing on worker nodes and syncing in-cluster via trust-manager").
+			WithResource("trust-bundle").
+			WithAction("resolving").
+			WithMetadata("source", trustBundle.Source).
+			WithMetadata("certificates", trustBundle.Certificates))
+	} else {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "No trust_bundle configured; skipping enterprise CA propagation").
+			WithResource("trust-bundle").
+			WithAction("resolving"))
 	}
 
 	// Deploy infrastructure
