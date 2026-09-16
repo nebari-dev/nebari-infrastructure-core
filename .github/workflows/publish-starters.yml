@@ -1,0 +1,263 @@
+name: Publish starters
+
+# Publishes the per-provider Nebi starter workspaces to quay.io for a released
+# version of nic.
+#
+# This used to be a job in `release.yml`, ordered behind the conda upload by a
+# `needs:` edge. That edge existed because the starters pin nic as a conda
+# dependency and `pixi lock` cannot resolve until the package is on the channel.
+# Now that nic reaches prefix.dev through the shared `github-releases` channel,
+# which octoconda populates on a two-hourly cron, the package lands up to
+# roughly two hours after the release - long after the release run has ended.
+#
+# So the ordering became a wait rather than an edge, and this workflow makes the
+# wait free: it is fired by `release.yml` (which usually finds the channel not
+# ready and exits in seconds) and re-fired by its own cron until the channel
+# catches up. Nothing holds a runner.
+#
+# Every run is idempotent and self-checking. It resolves the version, skips if
+# the channel does not have it yet, skips if quay already carries that tag, and
+# only then builds and publishes. That is what lets a blind cron be safe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish starters for (e.g. v0.15.0). Defaults to the latest stable release.'
+        required: false
+        type: string
+  schedule:
+    # Every three hours. octoconda's own cron is two-hourly and its runs finish
+    # in under ten minutes, so three hours clears one full cycle with margin
+    # rather than racing it.
+    - cron: '17 1,4,7,10,13,16,19,22 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  publish-starters:
+    name: Publish starters to quay.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      # Keyed on the workflow, not the tag: the tag is resolved inside the job,
+      # so two overlapping cron runs would otherwise both resolve the same
+      # release and race each other to publish it.
+      group: publish-starters
+      cancel-in-progress: false
+    # NOTE: this environment does not exist yet, and the Quay credentials are
+    # currently repository-scoped rather than scoped to it. Create it with
+    # required reviewers and move them, or this push has no approval gate.
+    environment: quay-publish
+    permissions:
+      contents: read  # no OIDC here; the Quay push uses a static token
+    env:
+      # Starters publish under the existing nebari project in a starters/ subdir,
+      # mirroring how the charts live at quay.io/nebari/charts.
+      QUAY_NAMESPACE: nebari
+      STARTER_REPO_PREFIX: starters
+      CHANNEL: https://prefix.dev/github-releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      # Resolve the tag first so every later step, and every skip message, names
+      # a concrete version. A dispatch may supply one; a cron never does.
+      - name: Resolve the release tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_TAG:-}" ]]; then
+            tag="$INPUT_TAG"
+          else
+            # --exclude-pre-releases so a cron never picks an rc that no channel
+            # will ever carry.
+            if ! tag="$(gh release list --repo "$GITHUB_REPOSITORY" \
+                          --exclude-pre-releases --exclude-drafts \
+                          --limit 1 --json tagName -q '.[0].tagName' \
+                          2>"$RUNNER_TEMP/gh.err")"; then
+              echo "::error::could not list releases: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
+              exit 1
+            fi
+          fi
+          if [[ -z "$tag" ]]; then
+            echo "::error::no stable release to publish starters for"
+            exit 1
+          fi
+          # Prereleases have nothing to lock against: conda forbids `-` in a
+          # version string, so an rc is never packaged under its own name.
+          if [[ "$tag" == *-* ]]; then
+            echo "::error::$tag is a release candidate; only stable releases get starters"
+            exit 1
+          fi
+          echo "tag=$tag"           >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}"   >> "$GITHUB_OUTPUT"
+          echo "==> resolved $tag"
+
+      # Guard 1: has octoconda published this version yet? Asked by resolving a
+      # throwaway workspace against the real channel rather than by parsing
+      # repodata - the question is precisely "can pixi lock find it", so the
+      # resolver is the honest way to ask, and repodata for this channel is 17MB.
+      - name: Install pixi and nebi
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Installer pinned to the v0.77.0 tag commit; PIXI_VERSION pins the
+          # binary it fetches. Same shape as the k3d pin in deployment-tests.
+          curl -fsSL https://raw.githubusercontent.com/prefix-dev/pixi/e3c26fbf7d8294d4ddbe7c913b4f8e60bcbafe5a/install/install.sh \
+            | PIXI_VERSION=v0.77.0 bash
+          echo "$HOME/.pixi/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pixi/bin:$PATH"
+          # Asset-layer bundling (config.yaml and the README travelling with the
+          # workspace) needs nebi >= 0.10; older versions silently ship only
+          # pixi.toml and pixi.lock. Floor plus ceiling rather than ==, so patch
+          # releases are allowed. Channel pinned explicitly: this job holds the
+          # Quay push token, and an unpinned channel decides which build of nebi
+          # runs beside it.
+          pixi global install -c conda-forge "nebi>=0.13,<0.14"
+
+      - name: Is the package on the channel yet?
+        id: channel
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/channel-probe"
+          mkdir -p "$probe"
+          cat > "$probe/pixi.toml" <<EOF
+          [workspace]
+          name = "channel-probe"
+          channels = ["conda-forge", "${CHANNEL}"]
+          platforms = ["linux-64"]
+          version = "0.0.0"
+
+          [dependencies]
+          nebari-infrastructure-core = "==${VERSION}"
+          EOF
+          if (cd "$probe" && pixi lock --quiet); then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "==> ${VERSION} is on ${CHANNEL}"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${VERSION} is not on ${CHANNEL} yet; the cron will retry"
+          fi
+
+      # Guard 2: did an earlier run already publish this tag? Without this a
+      # three-hourly cron would republish the same starters forever. Anonymous
+      # pull scope is enough to ask; 200 means present, 404 means absent.
+      - name: Are these starters already on quay?
+        id: quay
+        if: steps.channel.outputs.ready == 'true'
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo="${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/local"
+          token="$(curl -fsS "https://quay.io/v2/auth?service=quay.io&scope=repository:${repo}:pull" \
+                    | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                    -H "Authorization: Bearer ${token}" \
+                    -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json' \
+                    "https://quay.io/v2/${repo}/manifests/${TAG}")"
+          case "$code" in
+            200) echo "published=true"  >> "$GITHUB_OUTPUT"
+                 echo "::notice::${TAG} starters are already on quay; nothing to do" ;;
+            404) echo "published=false" >> "$GITHUB_OUTPUT"
+                 echo "==> ${TAG} not on quay yet" ;;
+            # Anything else is a real failure. Treating it as "absent" would
+            # republish on every cron tick during a quay outage.
+            *)   echo "::error::unexpected HTTP ${code} probing quay for ${TAG}"
+                 exit 1 ;;
+          esac
+
+      - name: Set up Go
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build nic and put it on PATH
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          make build
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+
+      - name: Generate starters
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        shell: bash
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          # -version explicitly rather than cmd/starters' git describe fallback,
+          # which needs tag objects and treats an empty value as unset.
+          : "${VERSION:?resolved version is empty}"
+          go run ./cmd/starters -out dist/starters -version "$VERSION"
+
+      - name: Configure quay registry
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        shell: bash
+        env:
+          QUAY_USERNAME: ${{ vars.QUAY_OCI_STARTERS_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_OCI_STARTERS_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_OCI_STARTERS_USERNAME is not set}"
+          : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set}"
+          printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
+            --name quay \
+            --url quay.io \
+            --namespace "$QUAY_NAMESPACE" \
+            --username "$QUAY_USERNAME" \
+            --password-stdin
+
+      - name: Lock and publish each starter
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        shell: bash
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            pushd "dist/starters/${provider}" > /dev/null
+            # Resolves against the shared github-releases channel, which the
+            # guard above confirmed carries this version.
+            pixi lock
+            nebi init
+            nebi publish --local \
+              --registry quay \
+              --repo "${STARTER_REPO_PREFIX}/${provider}" \
+              --tag "$TAG"
+            popd > /dev/null
+          done
+
+      - name: Imported starters still carry their placeholders
+        if: steps.channel.outputs.ready == 'true' && steps.quay.outputs.published == 'false'
+        shell: bash
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for provider in local aws; do
+            dest="/tmp/imported-${provider}"
+            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
+            test -f "$dest/config.yaml"
+            test -f "$dest/README.md"
+            grep -q CHANGEME "$dest/config.yaml"
+            # The published bundle must be rejected unedited, same as the
+            # freshly generated one.
+            if nic validate -f "$dest/config.yaml"; then
+              echo "::error::published ${provider} starter validates unedited"
+              exit 1
+            fi
+            echo "OK: ${provider} round-tripped and is still not deployable as-is"
+          done
