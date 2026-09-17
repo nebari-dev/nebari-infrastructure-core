@@ -445,8 +445,13 @@ defer cleanup()
 
 | Location | Purpose |
 |----------|---------|
-| `scripts/build.sh` | Multi-platform build script |
-| `scripts/install-tools.sh` | Installs golangci-lint and other dev tools |
+| `scripts/install.sh` | **Published** `curl \| sh` installer for the released `nic` binary. Its URL is a public contract — see [AGENTS.md](AGENTS.md) before renaming or moving it |
+| `scripts/check-installer-contract.sh` | Fails CI when `install.sh` drifts from the release facts it hand-reimplements from `.goreleaser.yml` |
+| `scripts/test-installer.sh` | Offline tests for `install.sh`: the signature decision table, the arch mapping, and the shells it must parse under |
+| `scripts/check-action-pins.sh` | Fails CI on unpinned GitHub Actions or a floating GoReleaser version |
+| `scripts/govulncheck-gate.sh` | Fails CI on vulnerabilities that have a fix available |
+| `scripts/pre-commit-tofu-lock.sh` | Keeps the OpenTofu lockfile in step with the embedded templates |
+| `scripts/verify-tls-proxy.sh` | Checks a deployment behind a TLS-inspecting corporate proxy |
 
 ## Key Architectural Principles
 
