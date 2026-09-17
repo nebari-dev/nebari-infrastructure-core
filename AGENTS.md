@@ -435,6 +435,15 @@ that should exist is missing or does not verify. Suppressing the signature is th
 cheapest attack on a piped installer, so "the bundle 404'd" must never become a
 warning for a release that publishes one.
 
+The same reasoning governs the failure *messages*, which is subtler and has
+regressed once already. `NIC_SKIP_SIGNATURE=1` is offered only where its premise
+holds — the bundle fetch failed, or cosign could not reach the Sigstore trust
+root — because there the user really may be behind a proxy. It is never offered
+when the server answered and the signature is absent or does not verify: that
+fallback trusts a `checksums.txt` from the same origin as the problem, so the
+advice would walk the user into the attack the check exists to stop.
+`scripts/test-installer.sh` asserts this message by message.
+
 ## Testing Strategy
 
 ### Unit Tests
