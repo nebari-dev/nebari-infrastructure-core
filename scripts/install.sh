@@ -145,7 +145,7 @@ verify_with_cosign() {
         log "         The checksum is still checked. See ${DOCS_URL}"
         return 0
       fi
-      fail "no signature bundle for ${tag} (HTTP 404), but every release from v${SIGNING_SINCE} on publishes one; refusing to install. A missing signature on a signed release is indistinguishable from one that was removed to suppress this check. Verify manually (${DOCS_URL}), or re-run with NIC_SKIP_SIGNATURE=1 if you accept that risk."
+      fail "no signature bundle for ${tag} (HTTP 404), but every release from v${SIGNING_SINCE} on publishes one; refusing to install. The server answered, so this is not a network problem: a signature is absent from a release that should carry one, which is what removing it to suppress this check looks like. Do not work around it -- falling back to checksums.txt would trust the same origin the signature is missing from. Verify manually (${DOCS_URL}) and please report it at https://github.com/${NIC_REPO}/issues."
       ;;
     *)
       fail "could not fetch the signature bundle for ${tag} (HTTP ${code}); refusing to install. If you are offline or on a network that blocks sigstore.dev, verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."

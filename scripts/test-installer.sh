@@ -171,8 +171,10 @@ expect_verify() { # <desc> <expected> <code> <vrc> <irc> <tag>
 expect_verify "signed release, valid signature"        install 200 0 0 v0.13.0
 expect_verify "pre-signing tag, bundle 404"            install 404 0 0 v0.9.0
 expect_verify "signed tag, bundle 404 (suppression)"   abort   404 0 0 v0.13.0
+suppressed_msg="$LAST_MSG"
 expect_verify "first signed tag, bundle 404"           abort   404 0 0 v0.10.0
 expect_verify "bundle fetch 500"                       abort   500 0 0 v0.13.0
+fetch_failed_msg="$LAST_MSG"
 expect_verify "bundle fetch transport failure"         abort   000 0 0 v0.13.0
 
 expect_verify "invalid signature, trust root reachable" abort 200 1 0 v0.13.0
@@ -198,6 +200,24 @@ if [[ $airgap_msg == *NIC_SKIP_SIGNATURE* ]]; then
   ok "the unreachable-trust-root message keeps the NIC_SKIP_SIGNATURE escape hatch"
 else
   bad "the unreachable-trust-root message lost its escape hatch; air-gapped users have no documented way through"
+fi
+
+# The same rule applied to the two fetch outcomes. A 404 on a release that
+# should be signed is not a network condition -- the server answered -- so the
+# escape hatch has no true premise there and offering it walks the user into
+# installing on a checksums.txt from the same origin the signature is missing
+# from. A 5xx or a transport failure genuinely can be a blocked network, so it
+# keeps the hatch. Asserted because this regressed once already, in the very
+# branch added to make a suppressed signature fatal.
+if [[ $suppressed_msg == *NIC_SKIP_SIGNATURE* ]]; then
+  bad "the suppressed-signature (404 on a signed release) message offers NIC_SKIP_SIGNATURE=1; following that advice installs on an attacker-controlled checksums.txt"
+else
+  ok "the suppressed-signature message does not offer NIC_SKIP_SIGNATURE"
+fi
+if [[ $fetch_failed_msg == *NIC_SKIP_SIGNATURE* ]]; then
+  ok "the bundle-fetch-failure message keeps the NIC_SKIP_SIGNATURE escape hatch"
+else
+  bad "the bundle-fetch-failure message lost its escape hatch; a blocked network has no documented way through"
 fi
 
 # --- report ------------------------------------------------------------------
