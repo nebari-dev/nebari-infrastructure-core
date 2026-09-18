@@ -1376,6 +1376,34 @@ func TestEnvoyGatewayBeforeCertManager(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_RealmSetupEnablesAdminEvents(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	jobPath := filepath.Join(tmpDir, "manifests", "keycloak", "realm-setup-job.yaml")
+	content, err := os.ReadFile(jobPath) //nolint:gosec // path is t.TempDir() + constant
+	if err != nil {
+		t.Fatalf("failed to read realm-setup-job: %v", err)
+	}
+	out := string(content)
+	// The nebari-operator polls admin events to detect user deletions. Both
+	// flags are required: without details the DELETE event has no username.
+	for _, want := range []string{
+		"update events/config -r nebari",
+		"adminEventsEnabled=true",
+		"adminEventsDetailsEnabled=true",
+		"attributes.adminEventsExpiration=604800",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("realm-setup-job missing %q\nfull contents:\n%s", want, out)
+		}
+	}
+}
+
 func TestWriteAllToGit_RealmSetupRegistersLonghornClient(t *testing.T) {
 	ctx := context.Background()
 
