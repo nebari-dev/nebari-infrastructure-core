@@ -6,6 +6,13 @@ Show version information
 
 Display the version information for Nebari Infrastructure Core (NIC).
 
+This reports the identity of the binary in your hand. To ask which NIC build
+produced a cluster that is already running, read the ConfigMap nic deploy
+writes into it:
+
+  kubectl get cm nic-deployment-info -n nebari-system \
+    -o jsonpath='{.data.nic-version}@{.data.nic-commit}'
+
 ```
 nic version [flags]
 ```
