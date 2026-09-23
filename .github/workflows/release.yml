@@ -5,9 +5,9 @@ name: Release
 # NIC no longer builds or uploads its own conda package. The binary reaches
 # prefix.dev through the shared `github-releases` channel, which octoconda
 # repackages from published GitHub releases with no recipe on our side. That
-# makes publication asynchronous: octoconda runs on a two-hourly cron and takes
-# a few minutes, so the package lands up to roughly two hours after the release,
-# well after this run has finished.
+# makes publication asynchronous: octoconda runs on a two-hourly cron, and its
+# runs start late and vary in length, so the package lands up to about three
+# hours after the release, well after this run has finished.
 #
 # The starters pin nic as a conda dependency, so their `pixi lock` cannot
 # resolve until that has happened. Rather than hold a runner waiting, this
@@ -25,8 +25,32 @@ permissions:
   attestations: write    # write the build-provenance attestation
 
 jobs:
+  # Runs before the approval gate, so a malformed tag fails in seconds instead
+  # of after someone approves it. The shape matters beyond tidiness: octoconda
+  # decides what is a prerelease by substring (rc, alpha, beta, prerelease), not
+  # by GitHub's prerelease flag, and treats everything before the first `-` as
+  # the version. A tag like v0.15.0-pre.1 would be packaged as 0.15.0, take that
+  # version's slot on the channel, and the real v0.15.0 would never be packaged.
+  # Prereleases are therefore -rc.N, and nothing else is accepted.
+  check-tag:
+    name: Check tag format
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Tag is vX.Y.Z or vX.Y.Z-rc.N
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::$TAG is not vX.Y.Z or vX.Y.Z-rc.N; see the comment on this job"
+            exit 1
+          fi
+
   release:
     name: Release
+    needs: check-tag
     runs-on: ubuntu-latest
     environment: release   # approval gate (see prerequisites)
 
