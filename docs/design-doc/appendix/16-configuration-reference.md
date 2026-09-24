@@ -244,6 +244,7 @@ cluster:
     # Optional: kind cluster tuning. Omit the whole block for defaults.
     # kind:
     #   node_image: kindest/node:v1.35.0        # default: bundled kind's default image
+    #   workers: 1                              # default: 0 (single node). Creation only.
     #   extra_mounts:
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path

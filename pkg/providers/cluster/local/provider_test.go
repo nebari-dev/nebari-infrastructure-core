@@ -119,6 +119,19 @@ func TestValidateKindMode(t *testing.T) {
 			},
 		},
 		{
+			name: "kind with workers is valid",
+			providerConfig: map[string]any{
+				"local": map[string]any{"kind": map[string]any{"workers": 2}},
+			},
+		},
+		{
+			name: "negative workers are rejected",
+			providerConfig: map[string]any{
+				"local": map[string]any{"kind": map[string]any{"workers": -1}},
+			},
+			wantErr: "kind workers must be 0 or more",
+		},
+		{
 			name: "relative mount paths are rejected",
 			providerConfig: map[string]any{
 				"local": map[string]any{
@@ -193,6 +206,43 @@ func TestValidateKindMode(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("Validate error = %q, want it to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestDeployRejectsInvalidWorkers covers Deploy's own guard: the provider's
+// Validate is not on the deploy path, so Deploy must reject a bad count
+// itself rather than silently creating a single-node cluster. Dry-run keeps
+// the test off the container runtime.
+func TestDeployRejectsInvalidWorkers(t *testing.T) {
+	p := NewProvider()
+
+	tests := []struct {
+		name    string
+		workers int
+		wantErr string
+	}{
+		{name: "zero workers", workers: 0},
+		{name: "positive workers", workers: 2},
+		{name: "negative workers", workers: -1, wantErr: "kind workers must be 0 or more"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{
+				"local": map[string]any{"kind": map[string]any{"workers": tt.workers}},
+			}}
+
+			err := p.Deploy(context.Background(), "test-project", cfg, cluster.DeployOptions{DryRun: true})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Deploy returned error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Deploy error = %v, want it to contain %q", err, tt.wantErr)
 			}
 		})
 	}

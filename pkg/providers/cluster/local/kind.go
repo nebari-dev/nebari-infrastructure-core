@@ -9,12 +9,15 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	clusterapi "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 const (
@@ -35,6 +38,10 @@ const (
 	// through InfraSettings.GatewayHostAddress. Loopback on purpose: a local
 	// development cluster should not be exposed to the LAN.
 	gatewayHostAddress = "127.0.0.1"
+
+	// controlPlaneLabel is the label kubeadm puts on control-plane nodes.
+	// Nodes without it are the cluster's workers.
+	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 )
 
 // kindContextName returns the kubeconfig context kind generates for a cluster.
@@ -107,6 +114,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		attribute.String("cluster_name", name),
 		attribute.String("node_image", kindCfg.NodeImage),
 		attribute.Int("extra_mounts", len(kindCfg.ExtraMounts)),
+		attribute.Int("workers", kindCfg.Workers),
 	)
 
 	mounts := make([]v1alpha4.Mount, 0, 1+len(kindCfg.ExtraMounts))
@@ -143,14 +151,8 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	}
 
 	clusterConfig := &v1alpha4.Cluster{
-		Name: name,
-		Nodes: []v1alpha4.Node{
-			{
-				Role:              v1alpha4.ControlPlaneRole,
-				ExtraMounts:       mounts,
-				ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
-			},
-		},
+		Name:  name,
+		Nodes: kindNodes(mounts, kindCfg.Workers, httpPort, httpsPort),
 	}
 
 	opts := []cluster.CreateOption{
@@ -166,6 +168,66 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	if err := kp.Create(name, opts...); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("create kind cluster %s: %w", name, err)
+	}
+	return nil
+}
+
+// kindNodes builds the cluster's node list: one control plane plus workers
+// worker nodes. Every node gets the mounts, so a pod reading one (ArgoCD's
+// repo-server for a file:// GitOps repo) can schedule on any node. Only the
+// control plane gets the gateway's port mappings, since a host port can be
+// bound once; the pinned NodePorts forward to Envoy wherever it runs (see
+// externalTrafficPolicy in the EnvoyProxy manifest). With workers present,
+// kind keeps the control plane tainted, so workloads run on the workers.
+func kindNodes(mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1alpha4.Node {
+	nodes := []v1alpha4.Node{
+		{
+			Role:              v1alpha4.ControlPlaneRole,
+			ExtraMounts:       slices.Clone(mounts),
+			ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
+		},
+	}
+	for range workers {
+		nodes = append(nodes, v1alpha4.Node{
+			Role:        v1alpha4.WorkerRole,
+			ExtraMounts: slices.Clone(mounts),
+		})
+	}
+	return nodes
+}
+
+// checkClusterWorkers compares the configured worker count against the
+// worker nodes of an existing cluster and warns when they differ. kind sets
+// the node list at creation only, so a changed count needs a recreate. A
+// mismatch leaves a working cluster of a different size, unlike a changed
+// host port, so it warns rather than failing the deploy.
+func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "local.checkClusterWorkers")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.Int("configured_workers", configured),
+	)
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("list nodes of kind cluster %s: %w", clusterName, err)
+	}
+	actual := 0
+	for _, n := range nodes.Items {
+		if _, ok := n.Labels[controlPlaneLabel]; !ok {
+			actual++
+		}
+	}
+	span.SetAttributes(attribute.Int("actual_workers", actual))
+
+	if actual != configured {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s has %d worker node(s) but the config says workers: %d. kind sets the nodes at cluster creation only, so recreate the cluster (nic destroy, then nic deploy) to apply the change", clusterName, actual, configured)).
+			WithResource("provider").
+			WithAction("deploy").
+			WithMetadata("cluster_name", clusterName))
 	}
 	return nil
 }

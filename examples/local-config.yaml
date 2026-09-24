@@ -8,6 +8,7 @@ cluster:
     # Optional kind config. Can be omitted entirely to use defaults.
     # kind:
     #   node_image: kindest/node:v1.35.0    # default: bundled kind's default image
+    #   workers: 1                          # default: 0 (single node). Creation only.
     #   extra_mounts:
     #     # Any additional host directory you want available inside the node
     #     - host_path: /absolute/host/path

@@ -45,6 +45,14 @@ func parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (Conf
 	return localCfg, nil
 }
 
+// validateWorkers rejects a negative kind worker count.
+func validateWorkers(workers int) error {
+	if workers < 0 {
+		return fmt.Errorf("kind workers must be 0 or more, got %d", workers)
+	}
+	return nil
+}
+
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
@@ -68,6 +76,10 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	}
 
 	if localCfg.Kind != nil {
+		if err := validateWorkers(localCfg.Kind.Workers); err != nil {
+			span.RecordError(err)
+			return err
+		}
 		for _, m := range localCfg.Kind.ExtraMounts {
 			if !filepath.IsAbs(m.HostPath) || !filepath.IsAbs(m.ContainerPath) {
 				err := fmt.Errorf("kind extra_mounts paths must be absolute: %s -> %s", m.HostPath, m.ContainerPath)
@@ -132,6 +144,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	if kindCfg == nil {
 		kindCfg = &KindConfig{}
 	}
+	// Checked here as well as in Validate, which is not on the deploy path.
+	if err := validateWorkers(kindCfg.Workers); err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Would create kind cluster %s (dry-run)", projectName)).
@@ -153,7 +170,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 	if exists {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, or the default local GitOps mount path only take effect on a recreate)", projectName)).
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, workers, or the default local GitOps mount path only take effect on a recreate)", projectName)).
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
@@ -175,6 +192,10 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithAction("deploy").
 				WithMetadata("cluster_name", projectName).
 				WithMetadata("error", err.Error()))
+			return err
+		}
+		if err := checkClusterWorkers(ctx, client, projectName, kindCfg.Workers); err != nil {
+			span.RecordError(err)
 			return err
 		}
 	} else {

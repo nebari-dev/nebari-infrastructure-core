@@ -1294,6 +1294,9 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 		for _, want := range []string{
 			"envoyService:",
 			"type: NodePort",
+			// Local, Envoy Gateway's default, would drop traffic arriving at
+			// the control plane's host ports whenever Envoy runs on a worker.
+			"externalTrafficPolicy: Cluster",
 			"type: StrategicMerge",
 			"- port: 80",
 			fmt.Sprintf("nodePort: %d", cluster.GatewayHTTPNodePort),
@@ -1326,7 +1329,7 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 			StorageClass: "gp2",
 		})
 
-		for _, unwanted := range []string{"envoyService:", "NodePort"} {
+		for _, unwanted := range []string{"envoyService:", "NodePort", "externalTrafficPolicy"} {
 			if strings.Contains(out, unwanted) {
 				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
 			}

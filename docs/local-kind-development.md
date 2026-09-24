@@ -88,6 +88,21 @@ Public wildcard loopback domains sidestep both the editing and the wildcard limi
 
 One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster (`nic destroy`, then `nic deploy`). NIC records the ports a cluster was created with and `nic deploy` fails when the config no longer matches them, rather than deploying a gateway the host does not publish. The record is written at cluster creation, so a cluster without one (created by an earlier NIC version, or the `nic-local-cluster` ConfigMap was deleted) adopts the configured ports on its first deploy, with a warning: those values are unverified, and if they are wrong the reliable signal is `nic outputs` failing to reach the gateway.
 
+## Multi-Node Clusters
+
+By default the Kind cluster is a single node that runs everything. Set `cluster.local.kind.workers` to add worker nodes, for example to exercise scheduling, node selectors, or anti-affinity locally:
+
+```yaml
+cluster:
+  local:
+    kind:
+      workers: 1
+```
+
+With workers present, Kind keeps the control-plane node tainted, so workloads schedule onto the workers and only system pods stay on the control plane. Every node gets the same mounts (the GitOps repository and any `extra_mounts`), so ArgoCD's repo-server can read a `file://` repository from any node. Only the control plane publishes the host ports: the gateway's Envoy service uses `externalTrafficPolicy: Cluster`, so traffic arriving at the control plane is forwarded to Envoy on whichever node it runs.
+
+Like the ports, the node list is fixed at cluster creation. Changing `workers` on an existing cluster requires recreating it (`nic destroy`, then `nic deploy`). `nic deploy` warns when the configured count no longer matches the cluster, but continues, since the cluster still works at its original size.
+
 ## Troubleshooting
 
 **Check pod status:**
