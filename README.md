@@ -153,8 +153,53 @@ NIC automatically downloads and manages its own OpenTofu binary — no manual in
 
 ### Install
 
+**Install script (Linux/macOS)** — downloads the release binary for your
+OS/arch, verifies it against the release `checksums.txt` (and, when `cosign` is
+installed and a signature is published, against the release workflow's signing
+identity), and installs it:
+
 ```bash
-# From source
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | sh
+```
+
+Pin a version or change the install location with environment variables:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | NIC_VERSION=v0.11.0 sh
+curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+`NIC_VERSION` defaults to `latest`. `INSTALL_DIR` defaults to `/usr/local/bin`;
+the installer escalates with `sudo` when that directory exists but is not
+writable, and creates it (unprivileged) when it does not exist — so a location
+that neither exists nor is creatable as your user needs to be created first.
+`NIC_REPO` overrides the source repository, for installing from a fork.
+
+Authenticity is checked with whichever tool is available. With `cosign`
+(>= 2.4.2) the installer verifies the release signature over `checksums.txt`,
+pinned to the release workflow's signing identity. Without cosign it falls back
+to the GitHub build-provenance attestation when `gh` is installed and
+authenticated. If neither is available the install continues on the checksum
+alone, with a warning — the checksum proves the bytes were not corrupted, not
+who produced them. On an air-gapped host or a network that blocks
+`sigstore.dev`, `NIC_SKIP_SIGNATURE=1` falls back to checksum-only
+deliberately. For the strongest guarantee, verify the release yourself first,
+see [docs/operations/verifying-releases.md](docs/operations/verifying-releases.md).
+
+> The installer URL is pinned to `main`, so `scripts/install.sh` is a stable
+> published entry point: it must not be renamed or moved, and `main` must keep
+> the installer working, or every in-flight `curl | sh` breaks.
+
+**Homebrew (macOS):**
+
+```bash
+brew install nebari-dev/tap/nic
+```
+
+**From source:**
+
+```bash
+# Build the binary
 make build
 
 # Or install to $GOPATH/bin
