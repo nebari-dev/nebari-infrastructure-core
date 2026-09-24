@@ -40,6 +40,9 @@ Core architectural decisions, principles, and system design.
 5. **[State Management](architecture/05-state-management.md)**
    Terraform state backends, locking, and drift detection
 
+- **[Storage](architecture/storage.md)** (proposed in [ADR-0019](../adr/0019-storage-strategy/))
+  Where each kind of data lives, the storage contract packs rely on, and migration off Longhorn
+
 ### Implementation
 
 Detailed implementation specifications and technical designs.

@@ -521,6 +521,28 @@ dot:
 (5) [Shape F removes the pin on block homes]: Mounting home and workspace only into the JupyterLab pod, with app pods consuming published bundles, releases the pin while keeping block latency, Nebi local mode, and shape D's cost and prerequisites.
     +> [Home access mode is a product decision]
 
+<Splitting the file path from the environment path releases the pin>: The two things a second pod needs from a user — their files and their environment — do not have to travel by the same mechanism.
+
+(1) An RWX home mounts into every user pod, so app pods read the user's live authored files with no publish step and no write-back contract.
+(2) Environments are the metadata-heavy consumer, and nothing requires them to live on the home, so the detached pixi prefix, the package cache, and the Nebi data directory all relocate to node-local storage by configuration.
+(3) App pods obtain environments by lockfile through the `nebi-pull` init container rather than by mounting the workspace store, so no volume has two consumers.
+(4) Two pods building from one lockfile converge on identical environments without sharing a filesystem, which is the parity property a mutable shared prefix cannot guarantee.
+----
+(5) [Shape G removes the pin without a publish contract]: Combining an RWX home with a node-local environment path releases the pin, keeps app pods reading live files, and confines the RWX penalty to genuine home file operations.
+    +> [Home access mode is a product decision]
+
+[Shape G inherits E's Nebi and isolation risk]: Shape G requires Nebi server mode, which is alpha, both for the environment picker app launches read and to relocate the local database off the home. It also inherits the unsolved per-user isolation controller for managed RWX, leaves `git checkout` on the home at roughly 18 s against 0.32 s on gp3, and still costs a publish for a `pixi add` to reach a running app. #open-decision
+    _> <Splitting the file path from the environment path releases the pin>
+
+[Managed RWX is what makes cross-namespace homes possible at all]: A PVC is namespace-scoped, so a Ray worker cannot reference the user's claim directly, but managed RWX has no single-attach semantics and a second PV and PVC onto the same access point mounts the same directory concurrently. Block-backed shapes cannot do this at any access mode, so shape G converts an impossibility into unbuilt provisioning.
+    +> <Splitting the file path from the environment path releases the pin>
+
+[Cross-namespace access is unbuilt and needs the gateway layer]: Nothing today creates or resolves the per-user PV and PVC pair in the Ray namespace, dynamic provisioning mints a fresh access point per claim rather than reusing the user's, and the chart has no volume surface to mount one. The pin never covered Ray either: it selects on a label DSP stamps on pods it spawns, so KubeRay pods were never co-located and distributed Ray has never reached a user's home on any shape. #open-decision
+    _> [Managed RWX is what makes cross-namespace homes possible at all]
+
+[Ray environment delivery is a tenancy question before a storage one]: A RayCluster is one shared long-lived object while workspaces are per-user, so no single environment is correct for it to hold, and a worker KubeRay creates has no user identity with which to authenticate a pull. Baked images fix parity, runtime identity, and relocatability, but a shared cluster runs one image, so they do not fix tenancy either — they point at per-user or per-job clusters and add a build service the platform does not have. #open-decision
+    _> [Managed RWX is what makes cross-namespace homes possible at all]
+
 [Shape F is gated on the publish contract]: Bundles are one-directional, so shape F requires app pods to be stateless consumers of published content, with outputs going to `/shared`, object storage, or an explicit pull-back — unverified against current jhub-apps. It inherits the unresolved user publish path and unmeasured delivery performance, apps see the last publish rather than a live home, and a second concurrent Jupyter server for the same user still co-locates on the RWO home. #open-decision
     _> <A single-mount home releases the pin>
 

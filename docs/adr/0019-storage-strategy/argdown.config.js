@@ -39,7 +39,7 @@ const svg = [
   "save-svg-as-svg",
 ];
 
-const dir = "./docs/adr/storage-strategy";
+const dir = "./docs/adr/0019-storage-strategy";
 
 const processes = {};
 for (const [name, selectedSections] of Object.entries(maps)) {
