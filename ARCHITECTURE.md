@@ -437,7 +437,8 @@ defer cleanup()
 | Location | Purpose |
 |----------|---------|
 | `.github/workflows/ci.yml` | Tests, lint, vulnerability scan and the workflow-pin check on PRs |
-| `.github/workflows/release.yml` | Cuts the GitHub release, then publishes the conda package to prefix.dev and the starter workspaces to quay.io |
+| `.github/workflows/release.yml` | Cuts the GitHub release, then fires the starter publish. The conda package reaches prefix.dev's shared `github-releases` channel via octoconda, with no step here |
+| `.github/workflows/publish-starters.yml` | Publishes the starter workspaces to quay.io once the channel carries the release; fired by `release.yml` and retried on a cron |
 | `.github/workflows/starters.yml` | Validates the generated starter workspaces on PRs |
 | `.github/workflows/deployment-tests.yml` | Real-cloud deploy tests, one job per provider |
 

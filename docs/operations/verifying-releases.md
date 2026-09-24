@@ -48,25 +48,26 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
 ## Maintainer prerequisites (one-time repo-admin setup)
 
 1. **Create the `release` environment** (Settings -> Environments) with required
-   reviewers. Two jobs in `release.yml` use it - `Release` and `Publish to
-   prefix.dev` - so a release asks for approval twice, once before cutting and
-   once before publishing to the channel.
+   reviewers. The `Release` job in `release.yml` uses it, so a release asks for
+   approval once, before it is cut. Publishing the conda package needs nothing
+   from this repository: octoconda picks up the published release on its own
+   (see [packaging.md](packaging.md#the-conda-channel)).
 
-2. **Register the prefix.dev trusted publisher** for the conda channel, under
-   the channel's settings: this repository, workflow file `release.yml`, and
-   the `release` environment. If a registration against an older workflow
-   filename exists, this is a cutover rather than a one-time setup: it has to
-   happen between merging the workflow and cutting the next tag, or that
-   release fails at upload. Publishing uses OIDC, so there is no token to
-   store, but there is also nothing in the repository that fails when the
-   registration is missing or wrong. It surfaces only as a failed upload at the
-   end of the `Publish to prefix.dev` job. See
-   [packaging.md](packaging.md#the-conda-channel).
-
-3. **Create the `quay-publish` environment** with required reviewers, and move
+2. **Create the `quay-publish` environment** with required reviewers, and move
    `QUAY_OCI_STARTERS_USERNAME` and `QUAY_OCI_STARTERS_TOKEN` into it. They are
    repository-scoped today, so the starter publish has no approval gate and any
-   job in the repository can read them.
+   job in the repository can read them. If the environment gets a
+   deployment-branch policy, it must admit both `main` (the hourly cron runs
+   there) and `v*` tags (the dispatch from `release.yml` runs on the tag). Only
+   the `publish` job uses the environment, so an approval is requested only when
+   a starter actually needs pushing, not on every cron tick.
+
+3. **Revoke the old prefix.dev trusted publisher** on the `nebari-dev/nebari`
+   channel (a one-time cleanup). It was registered for this repository,
+   `release.yml` and the `release` environment while NIC published its own conda
+   package. Nothing uses it any more, but until it is removed it still accepts an
+   upload from any job that matches that triple. Keep the channel itself: the
+   v0.14.0 starters on quay resolve `nic` from it.
 
 `ADD_TO_PROJECT_PAT` is already a fine-grained token with least-privilege scope
 (organization Projects: read and write; repository Issues, Pull requests, and

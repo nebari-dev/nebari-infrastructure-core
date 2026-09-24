@@ -5,9 +5,9 @@
 // toolchain and the provider's README. examples/ stays the single source of
 // truth for config content, so there is no second copy to drift.
 //
-// Output is published as OCI bundles and deliberately not committed; see the
-// publish-starters job in .github/workflows/release.yml, which publishes them
-// after the conda package they pin reaches the channel.
+// Output is published as OCI bundles and deliberately not committed; see
+// .github/workflows/publish-starters.yml, which publishes them once the conda
+// package they pin reaches the channel.
 //
 // Usage:
 //
