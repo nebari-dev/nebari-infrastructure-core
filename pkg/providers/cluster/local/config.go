@@ -38,7 +38,7 @@ type KindConfig struct {
 	Workers int `yaml:"workers,omitempty"`
 }
 
-// KindMount mounts a host directory into the kind node container.
+// KindMount mounts a host directory into every kind node container.
 type KindMount struct {
 	HostPath      string `yaml:"host_path"`
 	ContainerPath string `yaml:"container_path"`

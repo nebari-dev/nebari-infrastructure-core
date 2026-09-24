@@ -46,9 +46,16 @@ func parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (Conf
 }
 
 // validateWorkers rejects a negative kind worker count.
-func validateWorkers(workers int) error {
+func validateWorkers(ctx context.Context, workers int) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "local.validateWorkers")
+	defer span.End()
+	span.SetAttributes(attribute.Int("workers", workers))
+
 	if workers < 0 {
-		return fmt.Errorf("kind workers must be 0 or more, got %d", workers)
+		err := fmt.Errorf("kind workers must be 0 or more, got %d", workers)
+		span.RecordError(err)
+		return err
 	}
 	return nil
 }
@@ -56,7 +63,7 @@ func validateWorkers(workers int) error {
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Validate")
+	ctx, span := tracer.Start(ctx, "local.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -76,7 +83,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	}
 
 	if localCfg.Kind != nil {
-		if err := validateWorkers(localCfg.Kind.Workers); err != nil {
+		if err := validateWorkers(ctx, localCfg.Kind.Workers); err != nil {
 			span.RecordError(err)
 			return err
 		}
@@ -145,7 +152,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		kindCfg = &KindConfig{}
 	}
 	// Checked here as well as in Validate, which is not on the deploy path.
-	if err := validateWorkers(kindCfg.Workers); err != nil {
+	if err := validateWorkers(ctx, kindCfg.Workers); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -194,10 +201,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithMetadata("error", err.Error()))
 			return err
 		}
-		if err := checkClusterWorkers(ctx, client, projectName, kindCfg.Workers); err != nil {
-			span.RecordError(err)
-			return err
-		}
+		checkClusterWorkers(ctx, client, projectName, kindCfg.Workers)
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").

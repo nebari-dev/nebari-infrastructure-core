@@ -40,7 +40,7 @@ omitted entirely (nil), in which case the cluster is created with defaults.
 
 ## KindMount
 
-KindMount mounts a host directory into the kind node container.
+KindMount mounts a host directory into every kind node container.
 
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|

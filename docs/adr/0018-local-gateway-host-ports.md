@@ -43,6 +43,7 @@ The mechanics, and where each value lives:
 
 - kind maps host ports 80 and 443 of `127.0.0.1` (configurable via `cluster.local.http_port` / `https_port`) to the fixed NodePorts `GatewayHTTPNodePort` (30080) and `GatewayHTTPSNodePort` (30443) at cluster creation. The constants live in `pkg/providers/cluster` and are read by both the provider's port mappings and the rendered EnvoyProxy manifest, so the two sides cannot drift.
 - The EnvoyProxy resource pins the gateway's Envoy service to those NodePorts through a strategic-merge patch that matches the Gateway's listener ports.
+- The Envoy service sets `externalTrafficPolicy: Cluster` instead of Envoy Gateway's default `Local`. Only the kind control plane publishes the host ports, and with `cluster.local.kind.workers` set, kind keeps the control plane tainted, so Envoy runs on a worker. `Local` would drop that traffic; `Cluster` lets kube-proxy forward it across nodes (added with #686).
 - `InfraSettings.GatewayHostAddress` (non-empty means host-port publishing) carries the address as a static provider fact. Deploy, outputs, and the CLI consume it instead of deriving or asserting an address.
 - A `dns:` block is rejected on loopback host-port gateways at validate and deploy time. Public DNS records cannot usefully point at another machine's loopback, and the deploy prints `/etc/hosts` guidance instead.
 - The ports are recorded in a `nic-local-cluster` ConfigMap in `kube-system` at creation (the kubeadm-config pattern), and a redeploy fails on mismatch, because kind port mappings cannot change on a live cluster.
@@ -62,6 +63,7 @@ The mechanics, and where each value lives:
 **Bad:**
 
 - Local diverges from cloud at the last hop: a `NodePort` service behind host ports instead of a `LoadBalancer` service. The divergence is explicit (`GatewayHostAddress`) but real, and endpoint discovery (`endpoint.GetLoadBalancerEndpoint`) is no longer exercised by the free local CI job, only by the paid cloud jobs.
+- The local gateway does not preserve the client source IP, on single-node and multi-node clusters alike, because of `externalTrafficPolicy: Cluster`. Cloud `LoadBalancer` services keep Envoy Gateway's default `Local` and do preserve it. Anything keyed on client IP (SecurityPolicy IP allowlists, rate limiting, Keycloak brute-force detection) behaves differently on local than on cloud.
 - Changing `http_port` / `https_port` requires recreating the cluster. The provisioning marker turns this from silent breakage into a deploy-time error, but the restriction itself is inherent to kind.
 - Ports 80 and 443 must be free on the host (or overridden), and only one local cluster can own a given pair at a time.
 - Wildcard DNS for subdomains is not solved by `/etc/hosts`. Public wildcard loopback domains (`lvh.me`, `localtest.me`) cover this without any NIC involvement, at the cost of internet-dependent resolution and resolver rebind-protection caveats.

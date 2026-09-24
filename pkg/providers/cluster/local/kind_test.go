@@ -2,12 +2,15 @@ package local
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 
 	clusterapi "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -90,7 +93,7 @@ func TestKindNodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nodes := kindNodes(mounts, tt.workers, 8080, 8443)
+			nodes := kindNodes(context.Background(), mounts, tt.workers, 8080, 8443)
 			if len(nodes) != 1+tt.wantWorkers {
 				t.Fatalf("kindNodes() returned %d nodes, want %d", len(nodes), 1+tt.wantWorkers)
 			}
@@ -139,11 +142,16 @@ func TestCheckClusterWorkers(t *testing.T) {
 		return n
 	}
 
+	mismatch := []string{"test-project", "workers", "recreate"}
+
 	tests := []struct {
-		name        string
-		nodes       []*corev1.Node
-		configured  int
-		wantWarning bool
+		name       string
+		nodes      []*corev1.Node
+		listErr    error
+		configured int
+		// wantWarning lists the substrings of the single expected warning;
+		// nil means no warning.
+		wantWarning []string
 	}{
 		{
 			name:       "single-node cluster with no workers configured",
@@ -159,13 +167,20 @@ func TestCheckClusterWorkers(t *testing.T) {
 			name:        "more workers configured than the cluster has",
 			nodes:       []*corev1.Node{node("cp", true)},
 			configured:  1,
-			wantWarning: true,
+			wantWarning: mismatch,
 		},
 		{
 			name:        "fewer workers configured than the cluster has",
 			nodes:       []*corev1.Node{node("cp", true), node("w1", false)},
 			configured:  0,
-			wantWarning: true,
+			wantWarning: mismatch,
+		},
+		{
+			// The check is advisory, so an API failure must not fail the deploy.
+			name:        "node list failure warns instead of failing",
+			listErr:     errors.New("connection refused"),
+			configured:  1,
+			wantWarning: []string{"test-project", "could not check", "connection refused"},
 		},
 	}
 
@@ -177,12 +192,15 @@ func TestCheckClusterWorkers(t *testing.T) {
 					t.Fatalf("create node %s: %v", n.Name, err)
 				}
 			}
+			if tt.listErr != nil {
+				client.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.listErr
+				})
+			}
 			ch := make(chan status.Update, 10)
 			ctx := status.WithChannel(context.Background(), ch)
 
-			if err := checkClusterWorkers(ctx, client, "test-project", tt.configured); err != nil {
-				t.Fatalf("checkClusterWorkers() error: %v", err)
-			}
+			checkClusterWorkers(ctx, client, "test-project", tt.configured)
 			close(ch)
 
 			var warnings []string
@@ -191,7 +209,7 @@ func TestCheckClusterWorkers(t *testing.T) {
 					warnings = append(warnings, u.Message)
 				}
 			}
-			if !tt.wantWarning {
+			if tt.wantWarning == nil {
 				if len(warnings) != 0 {
 					t.Errorf("unexpected warnings: %v", warnings)
 				}
@@ -200,7 +218,7 @@ func TestCheckClusterWorkers(t *testing.T) {
 			if len(warnings) != 1 {
 				t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
 			}
-			for _, want := range []string{"test-project", "workers", "recreate"} {
+			for _, want := range tt.wantWarning {
 				if !strings.Contains(warnings[0], want) {
 					t.Errorf("warning %q should contain %q", warnings[0], want)
 				}

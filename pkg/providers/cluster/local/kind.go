@@ -108,7 +108,7 @@ func gatewayPortMappings(httpPort, httpsPort int) []v1alpha4.PortMapping {
 // (0 means the defaults, 80 and 443).
 func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig, httpPort, httpsPort int) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.createKindCluster")
+	ctx, span := tracer.Start(ctx, "local.createKindCluster")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("cluster_name", name),
@@ -152,7 +152,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 
 	clusterConfig := &v1alpha4.Cluster{
 		Name:  name,
-		Nodes: kindNodes(mounts, kindCfg.Workers, httpPort, httpsPort),
+		Nodes: kindNodes(ctx, mounts, kindCfg.Workers, httpPort, httpsPort),
 	}
 
 	opts := []cluster.CreateOption{
@@ -179,7 +179,15 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 // bound once; the pinned NodePorts forward to Envoy wherever it runs (see
 // externalTrafficPolicy in the EnvoyProxy manifest). With workers present,
 // kind keeps the control plane tainted, so workloads run on the workers.
-func kindNodes(mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1alpha4.Node {
+func kindNodes(ctx context.Context, mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1alpha4.Node {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "local.kindNodes")
+	defer span.End()
+	span.SetAttributes(
+		attribute.Int("workers", workers),
+		attribute.Int("mounts", len(mounts)),
+	)
+
 	nodes := []v1alpha4.Node{
 		{
 			Role:              v1alpha4.ControlPlaneRole,
@@ -200,8 +208,9 @@ func kindNodes(mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1al
 // worker nodes of an existing cluster and warns when they differ. kind sets
 // the node list at creation only, so a changed count needs a recreate. A
 // mismatch leaves a working cluster of a different size, unlike a changed
-// host port, so it warns rather than failing the deploy.
-func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) error {
+// host port, so it warns rather than failing the deploy. For the same reason
+// a failure to list the nodes is a warning too.
+func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.checkClusterWorkers")
 	defer span.End()
@@ -213,7 +222,11 @@ func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clust
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		span.RecordError(err)
-		return fmt.Errorf("list nodes of kind cluster %s: %w", clusterName, err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s: could not check the worker node count against the config: %v", clusterName, err)).
+			WithResource("provider").
+			WithAction("deploy").
+			WithMetadata("cluster_name", clusterName))
+		return
 	}
 	actual := 0
 	for _, n := range nodes.Items {
@@ -229,5 +242,4 @@ func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clust
 			WithAction("deploy").
 			WithMetadata("cluster_name", clusterName))
 	}
-	return nil
 }

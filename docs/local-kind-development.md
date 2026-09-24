@@ -17,7 +17,7 @@ make build                                   # build the nic binary
 `nic deploy` with a `cluster.local` config:
 
 1. Creates a Kind cluster named after `project_name` (`my-nebari-local` in the example config), reusing it if one already exists.
-2. Mounts the default GitOps directory into the node (see below).
+2. Mounts the default GitOps directory into every node (see below).
 3. Publishes the gateway on host ports 80/443 of `127.0.0.1` (see Networking below).
 4. Bootstraps ArgoCD and the foundational apps (cert-manager, Envoy Gateway, Keycloak, etc.).
 
@@ -33,7 +33,7 @@ NIC reads `examples/local-config.yaml` and handles three scenarios automatically
 | `repository.local.path: /path/to/repo` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
 | `repository.existing.url: "git@github.com:..."` | No mount - ArgoCD pulls from the remote repo directly |
 
-For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
+For local `file://` repos, the path is mounted into both the Kind nodes and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
 
 When initializing or committing to any local `file://` repo, NIC makes the repository root and Git-serving data under `.git` group/other-readable and traversable so the non-root ArgoCD repo-server can read committed content. This applies whether the repo is auto-generated or user-supplied. NIC preserves existing and special permission bits, and does not touch working-tree files, hooks, reflogs, the Git index, or unrelated `extra_mounts`.
 
