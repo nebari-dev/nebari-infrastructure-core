@@ -201,7 +201,16 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithMetadata("error", err.Error()))
 			return err
 		}
-		checkClusterWorkers(ctx, client, projectName, kindCfg.Workers)
+		// A reused cluster may still have workers joining, for example on a
+		// retry after the create-time wait below timed out. Wait for the
+		// nodes the cluster actually has, not the configured count: a
+		// mismatch only warns, so it must not turn into a timeout here.
+		if actual := checkClusterWorkers(ctx, client, projectName, kindCfg.Workers); actual > 0 {
+			if err := waitForNodesReady(ctx, client, projectName, 1+actual, kindReadyTimeout); err != nil {
+				span.RecordError(err)
+				return err
+			}
+		}
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").
@@ -246,6 +255,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		if kindCfg.Workers > 0 {
 			if clientErr != nil {
 				span.RecordError(clientErr)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Could not connect to the new kind cluster to wait for its worker nodes").
+					WithResource("provider").
+					WithAction("deploy").
+					WithMetadata("cluster_name", projectName).
+					WithMetadata("error", clientErr.Error()))
 				return clientErr
 			}
 			if err := waitForNodesReady(ctx, client, projectName, 1+kindCfg.Workers, kindReadyTimeout); err != nil {

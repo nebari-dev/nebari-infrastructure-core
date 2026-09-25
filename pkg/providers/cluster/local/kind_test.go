@@ -150,6 +150,8 @@ func TestCheckClusterWorkers(t *testing.T) {
 		nodes      []*corev1.Node
 		listErr    error
 		configured int
+		// wantActual is the worker count returned; -1 means it could not be read.
+		wantActual int
 		// wantWarning lists the substrings of the single expected warning;
 		// nil means no warning.
 		wantWarning []string
@@ -158,22 +160,28 @@ func TestCheckClusterWorkers(t *testing.T) {
 			name:       "single-node cluster with no workers configured",
 			nodes:      []*corev1.Node{node("cp", true)},
 			configured: 0,
+			wantActual: 0,
 		},
 		{
 			name:       "worker count matches",
 			nodes:      []*corev1.Node{node("cp", true), node("w1", false), node("w2", false)},
 			configured: 2,
+			wantActual: 2,
 		},
 		{
 			name:        "more workers configured than the cluster has",
 			nodes:       []*corev1.Node{node("cp", true)},
 			configured:  1,
+			wantActual:  0,
 			wantWarning: mismatch,
 		},
 		{
+			// The cluster's real count is returned, not the configured one,
+			// so the caller waits for the nodes that exist.
 			name:        "fewer workers configured than the cluster has",
 			nodes:       []*corev1.Node{node("cp", true), node("w1", false)},
 			configured:  0,
+			wantActual:  1,
 			wantWarning: mismatch,
 		},
 		{
@@ -181,6 +189,7 @@ func TestCheckClusterWorkers(t *testing.T) {
 			name:        "node list failure warns instead of failing",
 			listErr:     errors.New("connection refused"),
 			configured:  1,
+			wantActual:  -1,
 			wantWarning: []string{"test-project", "could not check", "connection refused"},
 		},
 	}
@@ -201,7 +210,9 @@ func TestCheckClusterWorkers(t *testing.T) {
 			ch := make(chan status.Update, 10)
 			ctx := status.WithChannel(context.Background(), ch)
 
-			checkClusterWorkers(ctx, client, "test-project", tt.configured)
+			if got := checkClusterWorkers(ctx, client, "test-project", tt.configured); got != tt.wantActual {
+				t.Errorf("checkClusterWorkers() = %d, want %d", got, tt.wantActual)
+			}
 			close(ch)
 
 			var warnings []string
@@ -265,6 +276,17 @@ func TestWaitForNodesReady(t *testing.T) {
 		{
 			name:    "worker not registered yet",
 			nodes:   []*corev1.Node{node("cp", true)},
+			want:    2,
+			wantErr: []string{"test-project", "1 of 2"},
+		},
+		{
+			// Each node counts once, however many Ready conditions it carries.
+			name: "duplicate Ready conditions on one node count once",
+			nodes: func() []*corev1.Node {
+				n := node("cp", true)
+				n.Status.Conditions = append(n.Status.Conditions, n.Status.Conditions[0])
+				return []*corev1.Node{n}
+			}(),
 			want:    2,
 			wantErr: []string{"test-project", "1 of 2"},
 		},

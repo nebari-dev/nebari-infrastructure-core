@@ -243,6 +243,7 @@ func waitForNodesReady(ctx context.Context, client kubernetes.Interface, cluster
 			for _, c := range n.Status.Conditions {
 				if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
 					ready++
+					break
 				}
 			}
 		}
@@ -262,8 +263,9 @@ func waitForNodesReady(ctx context.Context, client kubernetes.Interface, cluster
 // the node list at creation only, so a changed count needs a recreate. A
 // mismatch leaves a working cluster of a different size, unlike a changed
 // host port, so it warns rather than failing the deploy. For the same reason
-// a failure to list the nodes is a warning too.
-func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) {
+// a failure to list the nodes is a warning too. It returns the cluster's
+// actual worker count, or -1 when the nodes could not be listed.
+func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) int {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.checkClusterWorkers")
 	defer span.End()
@@ -279,7 +281,7 @@ func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clust
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", clusterName))
-		return
+		return -1
 	}
 	actual := 0
 	for _, n := range nodes.Items {
@@ -295,4 +297,5 @@ func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clust
 			WithAction("deploy").
 			WithMetadata("cluster_name", clusterName))
 	}
+	return actual
 }
