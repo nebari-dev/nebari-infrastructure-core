@@ -244,6 +244,7 @@ cluster:
     # Optional: kind cluster tuning. Omit the whole block for defaults.
     # kind:
     #   node_image: kindest/node:v1.35.0        # default: bundled kind's default image
+    #   workers: 1                              # default: 0 (single node). Creation only.
     #   extra_mounts:
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path
@@ -563,7 +564,7 @@ Notes:
 - The `repository:` block is required on every provider; `nic validate` rejects a config without one.
 - The `local` provider is only valid on a cluster provider with `InfraSettings.SupportsLocalGitOps = true` (currently only the local provider); it enables a zero-credential GitOps workflow for development. Deploy fails with an incompatibility error on any other cluster provider.
 - When `repository.local.path` is omitted, NIC auto-creates **`~/.nic/gitops/<project_name>`** and points ArgoCD at it (`config.DefaultLocalRepositoryPath`). It falls back to `$TMPDIR/nebari-gitops-<project_name>` only when the home directory cannot be resolved. The home-directory location is deliberate: it is a host path kind and Docker Desktop can mount reliably.
-- On the local (kind) provider, NIC auto-mounts that default path into the node container. A **custom** `repository.local.path` needs a matching `cluster.local.kind.extra_mounts` entry with identical `host_path` and `container_path`, or the in-cluster ArgoCD repo-server cannot see it.
+- On the local (kind) provider, NIC auto-mounts that default path into every node container. A **custom** `repository.local.path` needs a matching `cluster.local.kind.extra_mounts` entry with identical `host_path` and `container_path`, or the in-cluster ArgoCD repo-server cannot see it.
 - The copy of the config NIC commits into the repo (`nic-config.yaml`) carries only env-var names for credentials, never resolved secrets; a `path:`-based trust bundle is rewritten to its resolved inline form (`committedConfig` in `pkg/nic/deploy.go`).
 
 ---

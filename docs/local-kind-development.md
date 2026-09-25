@@ -17,7 +17,7 @@ make build                                   # build the nic binary
 `nic deploy` with a `cluster.local` config:
 
 1. Creates a Kind cluster named after `project_name` (`my-nebari-local` in the example config), reusing it if one already exists.
-2. Mounts the default GitOps directory into the node (see below).
+2. Mounts the default GitOps directory into every node (see below).
 3. Publishes the gateway on host ports 80/443 of `127.0.0.1` (see Networking below).
 4. Bootstraps ArgoCD and the foundational apps (cert-manager, Envoy Gateway, Keycloak, etc.).
 
@@ -33,7 +33,7 @@ NIC reads `examples/local-config.yaml` and handles three scenarios automatically
 | `repository.local.path: /path/to/repo` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
 | `repository.existing.url: "git@github.com:..."` | No mount - ArgoCD pulls from the remote repo directly |
 
-For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
+For local `file://` repos, the path is mounted into both the Kind nodes and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
 
 When initializing or committing to any local `file://` repo, NIC makes the repository root and Git-serving data under `.git` group/other-readable and traversable so the non-root ArgoCD repo-server can read committed content. This applies whether the repo is auto-generated or user-supplied. NIC preserves existing and special permission bits, and does not touch working-tree files, hooks, reflogs, the Git index, or unrelated `extra_mounts`.
 
@@ -87,6 +87,21 @@ To reach the platform, point the hostnames at loopback in `/etc/hosts` (the depl
 Public wildcard loopback domains sidestep both the editing and the wildcard limitation: set the domain to a name under [lvh.me](https://lvh.me) or [localtest.me](https://readme.localtest.me) (for example `domain: nebari.lvh.me`) and every subdomain already resolves to `127.0.0.1`, with no `/etc/hosts` edits and no `dns:` block. The trade-offs are that resolution needs internet access, and some routers and resolvers drop public DNS answers that point at loopback (rebind protection), which is why `/etc/hosts` stays the printed default. The hosts-file instructions deploy prints are safe to ignore in this setup.
 
 One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster (`nic destroy`, then `nic deploy`). NIC records the ports a cluster was created with and `nic deploy` fails when the config no longer matches them, rather than deploying a gateway the host does not publish. The record is written at cluster creation, so a cluster without one (created by an earlier NIC version, or the `nic-local-cluster` ConfigMap was deleted) adopts the configured ports on its first deploy, with a warning: those values are unverified, and if they are wrong the reliable signal is `nic outputs` failing to reach the gateway.
+
+## Multi-Node Clusters
+
+By default the Kind cluster is a single node that runs everything. Set `cluster.local.kind.workers` to add worker nodes, for example to exercise scheduling, node selectors, or anti-affinity locally:
+
+```yaml
+cluster:
+  local:
+    kind:
+      workers: 1
+```
+
+With workers present, Kind keeps the control-plane node tainted, so workloads schedule onto the workers and only system pods stay on the control plane. Kind's own readiness wait covers only the control plane, so `nic deploy` also waits (up to 90 seconds) for every worker to report Ready before it installs anything. Every node gets the same mounts (the GitOps repository and any `extra_mounts`), so ArgoCD's repo-server can read a `file://` repository from any node. Only the control plane publishes the host ports: the gateway's Envoy service uses `externalTrafficPolicy: Cluster`, so traffic arriving at the control plane is forwarded to Envoy on whichever node it runs.
+
+Like the ports, the node list is fixed at cluster creation. Changing `workers` on an existing cluster requires recreating it (`nic destroy`, then `nic deploy`). `nic deploy` warns when the configured count no longer matches the cluster, but continues, since the cluster still works at its original size.
 
 ## Troubleshooting
 

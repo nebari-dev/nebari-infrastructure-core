@@ -215,7 +215,8 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 | File | Purpose |
 |------|---------|
 | `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig |
-| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, gitops mount, gateway host port mappings) |
+| `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, node list with optional workers, gitops mount, gateway host port mappings, wait for all nodes Ready when there are workers, worker-count check on reuse) |
+| `marker.go` | Provisioning marker (`nic-local-cluster` ConfigMap) recording the host ports a cluster was created with, verified on redeploy |
 | `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount` |
 
 ## DNS Provider System (pkg/providers/dns/)

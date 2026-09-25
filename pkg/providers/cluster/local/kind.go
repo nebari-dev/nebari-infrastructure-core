@@ -9,21 +9,32 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	clusterapi "github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 const (
-	// kindReadyTimeout bounds how long cluster creation waits for the node
+	// kindReadyTimeout bounds how long cluster creation waits for the nodes
 	// to become Ready. ArgoCD is installed immediately after Deploy, so we
-	// need a schedulable node, not just a responding API server. This is fixed
+	// need a schedulable node, not just a responding API server. kind itself
+	// waits only for the control plane, so on a cluster with workers Deploy
+	// waits for them separately (waitForNodesReady). This is fixed
 	// on purpose and not wired through DeployOptions.Timeout which is meant to be
 	// used for the whole deploy.
 	kindReadyTimeout = 90 * time.Second
+
+	// nodeReadyPollInterval is how often waitForNodesReady checks the nodes
+	// of a multi-node cluster.
+	nodeReadyPollInterval = 2 * time.Second
 
 	// Default host ports publishing the gateway's listeners, used when
 	// http_port / https_port are unset.
@@ -35,6 +46,10 @@ const (
 	// through InfraSettings.GatewayHostAddress. Loopback on purpose: a local
 	// development cluster should not be exposed to the LAN.
 	gatewayHostAddress = "127.0.0.1"
+
+	// controlPlaneLabel is the label kubeadm puts on control-plane nodes.
+	// Nodes without it are the cluster's workers.
+	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 )
 
 // kindContextName returns the kubeconfig context kind generates for a cluster.
@@ -101,19 +116,21 @@ func gatewayPortMappings(httpPort, httpsPort int) []v1alpha4.PortMapping {
 // (0 means the defaults, 80 and 443).
 func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, kindCfg *KindConfig, httpPort, httpsPort int) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.createKindCluster")
+	ctx, span := tracer.Start(ctx, "local.createKindCluster")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("cluster_name", name),
 		attribute.String("node_image", kindCfg.NodeImage),
 		attribute.Int("extra_mounts", len(kindCfg.ExtraMounts)),
+		attribute.Int("workers", kindCfg.Workers),
 	)
 
 	mounts := make([]v1alpha4.Mount, 0, 1+len(kindCfg.ExtraMounts))
 
-	// Mount NIC's managed local gitops repo into the node. ArgoCD's
+	// Mount NIC's managed local gitops repo into the nodes. ArgoCD's
 	// repo-server runs inside the cluster, so for it to read a file:// repo the
-	// host directory has to be visible from within the node. kind requires a mount's
+	// host directory has to be visible from within whichever node it runs on
+	// (kindNodes gives every node these mounts). kind requires a mount's
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
 	defaultGitOps := config.DefaultLocalRepositoryPath(name)
@@ -143,14 +160,8 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	}
 
 	clusterConfig := &v1alpha4.Cluster{
-		Name: name,
-		Nodes: []v1alpha4.Node{
-			{
-				Role:              v1alpha4.ControlPlaneRole,
-				ExtraMounts:       mounts,
-				ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
-			},
-		},
+		Name:  name,
+		Nodes: kindNodes(ctx, mounts, kindCfg.Workers, httpPort, httpsPort),
 	}
 
 	opts := []cluster.CreateOption{
@@ -168,4 +179,123 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		return fmt.Errorf("create kind cluster %s: %w", name, err)
 	}
 	return nil
+}
+
+// kindNodes builds the cluster's node list: one control plane plus workers
+// worker nodes. Every node gets the mounts, so a pod reading one (ArgoCD's
+// repo-server for a file:// GitOps repo) can schedule on any node. Only the
+// control plane gets the gateway's port mappings, since a host port can be
+// bound once; the pinned NodePorts forward to Envoy wherever it runs (see
+// externalTrafficPolicy in the EnvoyProxy manifest). With workers present,
+// kind keeps the control plane tainted, so workloads run on the workers.
+func kindNodes(ctx context.Context, mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1alpha4.Node {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "local.kindNodes")
+	defer span.End()
+	span.SetAttributes(
+		attribute.Int("workers", workers),
+		attribute.Int("mounts", len(mounts)),
+	)
+
+	nodes := []v1alpha4.Node{
+		{
+			Role:              v1alpha4.ControlPlaneRole,
+			ExtraMounts:       slices.Clone(mounts),
+			ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
+		},
+	}
+	for range workers {
+		nodes = append(nodes, v1alpha4.Node{
+			Role:        v1alpha4.WorkerRole,
+			ExtraMounts: slices.Clone(mounts),
+		})
+	}
+	return nodes
+}
+
+// waitForNodesReady waits until want nodes are registered and Ready. kind's
+// own ready-wait (kindReadyTimeout) covers only the control plane, which
+// stays tainted once workers exist, so on a multi-node cluster it can return
+// before any node can take workloads.
+func waitForNodesReady(ctx context.Context, client kubernetes.Interface, clusterName string, want int, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "local.waitForNodesReady")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.Int("want_nodes", want),
+	)
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Waiting for all %d nodes of kind cluster %s to be Ready", want, clusterName)).
+		WithResource("provider").
+		WithAction("deploy").
+		WithMetadata("cluster_name", clusterName))
+
+	ready := 0
+	err := wait.PollUntilContextTimeout(ctx, nodeReadyPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			// Transient while nodes join; keep polling until the timeout.
+			return false, nil
+		}
+		ready = 0
+		for _, n := range nodes.Items {
+			for _, c := range n.Status.Conditions {
+				if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
+					ready++
+					break
+				}
+			}
+		}
+		return ready >= want, nil
+	})
+	span.SetAttributes(attribute.Int("ready_nodes", ready))
+	if err != nil {
+		err = fmt.Errorf("kind cluster %s: only %d of %d nodes Ready after %s: %w", clusterName, ready, want, timeout, err)
+		span.RecordError(err)
+		return err
+	}
+	return nil
+}
+
+// checkClusterWorkers compares the configured worker count against the
+// worker nodes of an existing cluster and warns when they differ. kind sets
+// the node list at creation only, so a changed count needs a recreate. A
+// mismatch leaves a working cluster of a different size, unlike a changed
+// host port, so it warns rather than failing the deploy. For the same reason
+// a failure to list the nodes is a warning too. It returns the cluster's
+// actual worker count, or -1 when the nodes could not be listed.
+func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clusterName string, configured int) int {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "local.checkClusterWorkers")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.Int("configured_workers", configured),
+	)
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s: could not check the worker node count against the config: %v", clusterName, err)).
+			WithResource("provider").
+			WithAction("deploy").
+			WithMetadata("cluster_name", clusterName))
+		return -1
+	}
+	actual := 0
+	for _, n := range nodes.Items {
+		if _, ok := n.Labels[controlPlaneLabel]; !ok {
+			actual++
+		}
+	}
+	span.SetAttributes(attribute.Int("actual_workers", actual))
+
+	if actual != configured {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s has %d worker node(s) but the config says workers: %d. kind sets the nodes at cluster creation only, so recreate the cluster (nic destroy, then nic deploy) to apply the change", clusterName, actual, configured)).
+			WithResource("provider").
+			WithAction("deploy").
+			WithMetadata("cluster_name", clusterName))
+	}
+	return actual
 }

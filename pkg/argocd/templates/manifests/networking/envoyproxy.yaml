@@ -31,6 +31,10 @@ spec:
       # Envoy Gateway generates from the Gateway listeners.
       envoyService:
         type: NodePort
+        # Cluster, not Envoy Gateway's default Local: host-port publishing
+        # binds the ports on a subset of the nodes, so Local would drop
+        # traffic whenever Envoy runs on a node that does not publish them.
+        externalTrafficPolicy: Cluster
         patch:
           type: StrategicMerge
           value:

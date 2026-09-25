@@ -24,15 +24,21 @@ type KindConfig struct {
 	// Empty means the default image of the bundled kind version.
 	NodeImage string `yaml:"node_image,omitempty"`
 
-	// ExtraMounts are additional host directories mounted into the cluster node
+	// ExtraMounts are additional host directories mounted into every cluster node
 	// container. NIC mounts its auto-created local GitOps repository
 	// automatically; an explicit file:// repository needs a matching entry here.
 	// Other custom mounts are user-managed, and NIC does not recursively
 	// normalize their permissions.
 	ExtraMounts []KindMount `yaml:"extra_mounts,omitempty"`
+
+	// Workers is the number of worker nodes created alongside the control
+	// plane (default 0, a single node that runs everything). With workers,
+	// kind keeps the control plane tainted, so workloads run on the workers.
+	// Takes effect on cluster creation only.
+	Workers int `yaml:"workers,omitempty"`
 }
 
-// KindMount mounts a host directory into the kind node container.
+// KindMount mounts a host directory into every kind node container.
 type KindMount struct {
 	HostPath      string `yaml:"host_path"`
 	ContainerPath string `yaml:"container_path"`

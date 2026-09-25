@@ -33,13 +33,14 @@ omitted entirely (nil), in which case the cluster is created with defaults.
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | NodeImage | `node_image` | string | No | NodeImage is the kindest/node image to use (e.g. "kindest/node:v1.32.2"). Empty means the default image of the bundled kind version. |
-| ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are additional host directories mounted into the cluster node container. NIC mounts its auto-created local GitOps repository automatically; an explicit file:// repository needs a matchi... |
+| ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are additional host directories mounted into every cluster node container. NIC mounts its auto-created local GitOps repository automatically; an explicit file:// repository needs a matc... |
+| Workers | `workers` | int | No | Workers is the number of worker nodes created alongside the control plane (default 0, a single node that runs everything). With workers, kind keeps the control plane tainted, so workloads run on th... |
 
 ---
 
 ## KindMount
 
-KindMount mounts a host directory into the kind node container.
+KindMount mounts a host directory into every kind node container.
 
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|

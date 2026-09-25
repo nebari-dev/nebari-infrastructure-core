@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -45,10 +46,25 @@ func parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (Conf
 	return localCfg, nil
 }
 
+// validateWorkers rejects a negative kind worker count.
+func validateWorkers(ctx context.Context, workers int) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	_, span := tracer.Start(ctx, "local.validateWorkers")
+	defer span.End()
+	span.SetAttributes(attribute.Int("workers", workers))
+
+	if workers < 0 {
+		err := fmt.Errorf("kind workers must be 0 or more, got %d", workers)
+		span.RecordError(err)
+		return err
+	}
+	return nil
+}
+
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Validate")
+	ctx, span := tracer.Start(ctx, "local.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -68,6 +84,10 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	}
 
 	if localCfg.Kind != nil {
+		if err := validateWorkers(ctx, localCfg.Kind.Workers); err != nil {
+			span.RecordError(err)
+			return err
+		}
 		for _, m := range localCfg.Kind.ExtraMounts {
 			if !filepath.IsAbs(m.HostPath) || !filepath.IsAbs(m.ContainerPath) {
 				err := fmt.Errorf("kind extra_mounts paths must be absolute: %s -> %s", m.HostPath, m.ContainerPath)
@@ -132,6 +152,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	if kindCfg == nil {
 		kindCfg = &KindConfig{}
 	}
+	// Checked here as well as in Validate, which is not on the deploy path.
+	if err := validateWorkers(ctx, kindCfg.Workers); err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Would create kind cluster %s (dry-run)", projectName)).
@@ -153,7 +178,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 	if exists {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, or the default local GitOps mount path only take effect on a recreate)", projectName)).
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, workers, or the default local GitOps mount path only take effect on a recreate)", projectName)).
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
@@ -177,6 +202,16 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithMetadata("error", err.Error()))
 			return err
 		}
+		// A reused cluster may still have workers joining, for example on a
+		// retry after the create-time wait below timed out. Wait for the
+		// nodes the cluster actually has, not the configured count: a
+		// mismatch only warns, so it must not turn into a timeout here.
+		if actual := checkClusterWorkers(ctx, client, projectName, kindCfg.Workers); actual > 0 {
+			if err := waitForNodesReady(ctx, client, projectName, 1+actual, kindReadyTimeout); err != nil {
+				span.RecordError(err)
+				return err
+			}
+		}
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").
@@ -199,7 +234,8 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		// deploy can verify them. A failed write costs only that check (a
 		// later deploy adopts and records the values it finds configured),
 		// so it does not fail a deploy that is otherwise healthy.
-		client, err := clusterClient(kp, projectName)
+		client, clientErr := clusterClient(kp, projectName)
+		err := clientErr
 		if err == nil {
 			err = recordClusterPorts(ctx, client,
 				hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort))
@@ -211,6 +247,26 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithAction("deploy").
 				WithMetadata("cluster_name", projectName).
 				WithMetadata("error", err.Error()))
+		}
+
+		// kind waited for the control plane only, and with workers it stays
+		// tainted, so wait for the workers too before anything is scheduled.
+		// This runs after the marker write so a timeout here still leaves the
+		// ports recorded for the retry.
+		if kindCfg.Workers > 0 {
+			if clientErr != nil {
+				span.RecordError(clientErr)
+				status.Send(ctx, status.NewUpdate(status.LevelError, "Could not connect to the new kind cluster to wait for its worker nodes").
+					WithResource("provider").
+					WithAction("deploy").
+					WithMetadata("cluster_name", projectName).
+					WithMetadata("error", clientErr.Error()))
+				return clientErr
+			}
+			if err := waitForNodesReady(ctx, client, projectName, 1+kindCfg.Workers, kindReadyTimeout); err != nil {
+				span.RecordError(err)
+				return err
+			}
 		}
 	}
 
@@ -321,6 +377,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	}
 	if localCfg.Kind != nil && localCfg.Kind.NodeImage != "" {
 		result["Kind Node Image"] = localCfg.Kind.NodeImage
+	}
+	if localCfg.Kind != nil && localCfg.Kind.Workers > 0 {
+		result["Kind Workers"] = strconv.Itoa(localCfg.Kind.Workers)
 	}
 	return result
 }
