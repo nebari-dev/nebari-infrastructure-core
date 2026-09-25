@@ -9,7 +9,9 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
@@ -21,12 +23,18 @@ import (
 )
 
 const (
-	// kindReadyTimeout bounds how long cluster creation waits for the node
+	// kindReadyTimeout bounds how long cluster creation waits for the nodes
 	// to become Ready. ArgoCD is installed immediately after Deploy, so we
-	// need a schedulable node, not just a responding API server. This is fixed
+	// need a schedulable node, not just a responding API server. kind itself
+	// waits only for the control plane, so on a cluster with workers Deploy
+	// waits for them separately (waitForNodesReady). This is fixed
 	// on purpose and not wired through DeployOptions.Timeout which is meant to be
 	// used for the whole deploy.
 	kindReadyTimeout = 90 * time.Second
+
+	// nodeReadyPollInterval is how often waitForNodesReady checks the nodes
+	// of a multi-node cluster.
+	nodeReadyPollInterval = 2 * time.Second
 
 	// Default host ports publishing the gateway's listeners, used when
 	// http_port / https_port are unset.
@@ -119,9 +127,10 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 
 	mounts := make([]v1alpha4.Mount, 0, 1+len(kindCfg.ExtraMounts))
 
-	// Mount NIC's managed local gitops repo into the node. ArgoCD's
+	// Mount NIC's managed local gitops repo into the nodes. ArgoCD's
 	// repo-server runs inside the cluster, so for it to read a file:// repo the
-	// host directory has to be visible from within the node. kind requires a mount's
+	// host directory has to be visible from within whichever node it runs on
+	// (kindNodes gives every node these mounts). kind requires a mount's
 	// host path to exist when the cluster is created, so it gets created here if it
 	// does not exist already
 	defaultGitOps := config.DefaultLocalRepositoryPath(name)
@@ -202,6 +211,50 @@ func kindNodes(ctx context.Context, mounts []v1alpha4.Mount, workers, httpPort, 
 		})
 	}
 	return nodes
+}
+
+// waitForNodesReady waits until want nodes are registered and Ready. kind's
+// own ready-wait (kindReadyTimeout) covers only the control plane, which
+// stays tainted once workers exist, so on a multi-node cluster it can return
+// before any node can take workloads.
+func waitForNodesReady(ctx context.Context, client kubernetes.Interface, clusterName string, want int, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "local.waitForNodesReady")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.Int("want_nodes", want),
+	)
+
+	status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Waiting for all %d nodes of kind cluster %s to be Ready", want, clusterName)).
+		WithResource("provider").
+		WithAction("deploy").
+		WithMetadata("cluster_name", clusterName))
+
+	ready := 0
+	err := wait.PollUntilContextTimeout(ctx, nodeReadyPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			// Transient while nodes join; keep polling until the timeout.
+			return false, nil
+		}
+		ready = 0
+		for _, n := range nodes.Items {
+			for _, c := range n.Status.Conditions {
+				if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
+					ready++
+				}
+			}
+		}
+		return ready >= want, nil
+	})
+	span.SetAttributes(attribute.Int("ready_nodes", ready))
+	if err != nil {
+		err = fmt.Errorf("kind cluster %s: only %d of %d nodes Ready after %s: %w", clusterName, ready, want, timeout, err)
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
 
 // checkClusterWorkers compares the configured worker count against the

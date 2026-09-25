@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -221,6 +222,76 @@ func TestCheckClusterWorkers(t *testing.T) {
 			for _, want := range tt.wantWarning {
 				if !strings.Contains(warnings[0], want) {
 					t.Errorf("warning %q should contain %q", warnings[0], want)
+				}
+			}
+		})
+	}
+}
+
+func TestWaitForNodesReady(t *testing.T) {
+	node := func(name string, ready bool) *corev1.Node {
+		cond := corev1.ConditionFalse
+		if ready {
+			cond = corev1.ConditionTrue
+		}
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: cond},
+			}},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		nodes   []*corev1.Node
+		want    int
+		wantErr []string
+	}{
+		{
+			name:  "all nodes ready",
+			nodes: []*corev1.Node{node("cp", true), node("w1", true)},
+			want:  2,
+		},
+		{
+			// kind's own ready-wait covers only the control plane, which stays
+			// tainted once workers exist, so a Ready control plane alone must
+			// not count as a schedulable cluster.
+			name:    "control plane ready but worker not ready",
+			nodes:   []*corev1.Node{node("cp", true), node("w1", false)},
+			want:    2,
+			wantErr: []string{"test-project", "1 of 2"},
+		},
+		{
+			name:    "worker not registered yet",
+			nodes:   []*corev1.Node{node("cp", true)},
+			want:    2,
+			wantErr: []string{"test-project", "1 of 2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset()
+			for _, n := range tt.nodes {
+				if _, err := client.CoreV1().Nodes().Create(context.Background(), n, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("create node %s: %v", n.Name, err)
+				}
+			}
+
+			err := waitForNodesReady(context.Background(), client, "test-project", tt.want, 50*time.Millisecond)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("waitForNodesReady() error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("waitForNodesReady() returned nil, want a timeout error")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should contain %q", err.Error(), want)
 				}
 			}
 		})

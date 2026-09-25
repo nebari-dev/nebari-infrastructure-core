@@ -224,7 +224,8 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		// deploy can verify them. A failed write costs only that check (a
 		// later deploy adopts and records the values it finds configured),
 		// so it does not fail a deploy that is otherwise healthy.
-		client, err := clusterClient(kp, projectName)
+		client, clientErr := clusterClient(kp, projectName)
+		err := clientErr
 		if err == nil {
 			err = recordClusterPorts(ctx, client,
 				hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort))
@@ -236,6 +237,21 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithAction("deploy").
 				WithMetadata("cluster_name", projectName).
 				WithMetadata("error", err.Error()))
+		}
+
+		// kind waited for the control plane only, and with workers it stays
+		// tainted, so wait for the workers too before anything is scheduled.
+		// This runs after the marker write so a timeout here still leaves the
+		// ports recorded for the retry.
+		if kindCfg.Workers > 0 {
+			if clientErr != nil {
+				span.RecordError(clientErr)
+				return clientErr
+			}
+			if err := waitForNodesReady(ctx, client, projectName, 1+kindCfg.Workers, kindReadyTimeout); err != nil {
+				span.RecordError(err)
+				return err
+			}
 		}
 	}
 

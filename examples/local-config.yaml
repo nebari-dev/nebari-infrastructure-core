@@ -10,7 +10,7 @@ cluster:
     #   node_image: kindest/node:v1.35.0    # default: bundled kind's default image
     #   workers: 1                          # default: 0 (single node). Creation only.
     #   extra_mounts:
-    #     # Any additional host directory you want available inside the node
+    #     # Any additional host directory you want available inside every node
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path
     #       read_only: true

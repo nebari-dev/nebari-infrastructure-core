@@ -99,7 +99,7 @@ cluster:
       workers: 1
 ```
 
-With workers present, Kind keeps the control-plane node tainted, so workloads schedule onto the workers and only system pods stay on the control plane. Every node gets the same mounts (the GitOps repository and any `extra_mounts`), so ArgoCD's repo-server can read a `file://` repository from any node. Only the control plane publishes the host ports: the gateway's Envoy service uses `externalTrafficPolicy: Cluster`, so traffic arriving at the control plane is forwarded to Envoy on whichever node it runs.
+With workers present, Kind keeps the control-plane node tainted, so workloads schedule onto the workers and only system pods stay on the control plane. Kind's own readiness wait covers only the control plane, so `nic deploy` also waits (up to 90 seconds) for every worker to report Ready before it installs anything. Every node gets the same mounts (the GitOps repository and any `extra_mounts`), so ArgoCD's repo-server can read a `file://` repository from any node. Only the control plane publishes the host ports: the gateway's Envoy service uses `externalTrafficPolicy: Cluster`, so traffic arriving at the control plane is forwarded to Envoy on whichever node it runs.
 
 Like the ports, the node list is fixed at cluster creation. Changing `workers` on an existing cluster requires recreating it (`nic destroy`, then `nic deploy`). `nic deploy` warns when the configured count no longer matches the cluster, but continues, since the cluster still works at its original size.
 

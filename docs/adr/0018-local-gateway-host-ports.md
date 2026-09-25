@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-09-01)
+Accepted (2026-09-01) · Amended (2026-09-25): records `externalTrafficPolicy: Cluster` for multi-node local clusters and the local client-address divergence ([#686](https://github.com/nebari-dev/nebari-infrastructure-core/pull/686))
 
 Records the decision implemented by [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640) (closes [#639](https://github.com/nebari-dev/nebari-infrastructure-core/issues/639)). Amends the MetalLB references in [ADR-0006](0006-conditional-foundational-software-helm.md) (which expected MetalLB to migrate to the conditional Helm interface) and [ADR-0014](0014-helm-valuefiles-overlay-seam.md) (which used metallb as a gated-app example). Both carry notes under their Status pointing here.
 
@@ -63,7 +63,7 @@ The mechanics, and where each value lives:
 **Bad:**
 
 - Local diverges from cloud at the last hop: a `NodePort` service behind host ports instead of a `LoadBalancer` service. The divergence is explicit (`GatewayHostAddress`) but real, and endpoint discovery (`endpoint.GetLoadBalancerEndpoint`) is no longer exercised by the free local CI job, only by the paid cloud jobs.
-- The local gateway does not preserve the client source IP, on single-node and multi-node clusters alike, because of `externalTrafficPolicy: Cluster`. Cloud `LoadBalancer` services keep Envoy Gateway's default `Local` and do preserve it. Anything keyed on client IP (SecurityPolicy IP allowlists, rate limiting, Keycloak brute-force detection) behaves differently on local than on cloud.
+- The local gateway never sees the real client address. Docker's port publishing presents loopback clients as the kind network's bridge gateway, and when Envoy runs on a worker, `externalTrafficPolicy: Cluster` has kube-proxy rewrite the source again to the publishing node's address. Cloud `LoadBalancer` services keep Envoy Gateway's default `Local` and do see the client address, so anything keyed on client IP (SecurityPolicy IP allowlists, IP-based rate limits) behaves differently on local than on cloud.
 - Changing `http_port` / `https_port` requires recreating the cluster. The provisioning marker turns this from silent breakage into a deploy-time error, but the restriction itself is inherent to kind.
 - Ports 80 and 443 must be free on the host (or overridden), and only one local cluster can own a given pair at a time.
 - Wildcard DNS for subdomains is not solved by `/etc/hosts`. Public wildcard loopback domains (`lvh.me`, `localtest.me`) cover this without any NIC involvement, at the cost of internet-dependent resolution and resolver rebind-protection caveats.
