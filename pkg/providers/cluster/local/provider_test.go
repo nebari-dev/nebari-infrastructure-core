@@ -251,19 +251,52 @@ func TestDeployRejectsInvalidWorkers(t *testing.T) {
 func TestSummaryKindMode(t *testing.T) {
 	p := NewProvider()
 
-	cfg := &config.ClusterConfig{
-		Providers: map[string]any{
-			"local": map[string]any{
-				"kind": map[string]any{"node_image": "kindest/node:v1.32.2"},
-			},
+	tests := []struct {
+		name string
+		kind map[string]any
+		// want maps summary keys to expected values; "" means the key must be absent.
+		want map[string]string
+	}{
+		{
+			name: "node image shown",
+			kind: map[string]any{"node_image": "kindest/node:v1.32.2"},
+			want: map[string]string{"Kind Node Image": "kindest/node:v1.32.2", "Kind Workers": ""},
+		},
+		{
+			// Destroy prints this, so the teardown shows how many nodes go away.
+			name: "worker count shown when set",
+			kind: map[string]any{"workers": 2},
+			want: map[string]string{"Kind Workers": "2", "Kind Node Image": ""},
+		},
+		{
+			name: "single-node default shows neither",
+			kind: map[string]any{},
+			want: map[string]string{"Kind Workers": "", "Kind Node Image": ""},
 		},
 	}
 
-	summary := p.Summary(cfg)
-	if summary["Kind Cluster"] == "" {
-		t.Error("Summary missing Kind Cluster entry for managed mode")
-	}
-	if summary["Kind Node Image"] != "kindest/node:v1.32.2" {
-		t.Errorf("Kind Node Image = %q, want kindest/node:v1.32.2", summary["Kind Node Image"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.ClusterConfig{Providers: map[string]any{
+				"local": map[string]any{"kind": tt.kind},
+			}}
+
+			summary := p.Summary(cfg)
+			if summary["Kind Cluster"] == "" {
+				t.Error("Summary missing Kind Cluster entry for managed mode")
+			}
+			for key, want := range tt.want {
+				got, ok := summary[key]
+				if want == "" {
+					if ok {
+						t.Errorf("Summary[%q] = %q, want it absent", key, got)
+					}
+					continue
+				}
+				if got != want {
+					t.Errorf("Summary[%q] = %q, want %q", key, got, want)
+				}
+			}
+		})
 	}
 }

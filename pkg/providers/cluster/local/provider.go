@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -376,6 +377,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	}
 	if localCfg.Kind != nil && localCfg.Kind.NodeImage != "" {
 		result["Kind Node Image"] = localCfg.Kind.NodeImage
+	}
+	if localCfg.Kind != nil && localCfg.Kind.Workers > 0 {
+		result["Kind Workers"] = strconv.Itoa(localCfg.Kind.Workers)
 	}
 	return result
 }
