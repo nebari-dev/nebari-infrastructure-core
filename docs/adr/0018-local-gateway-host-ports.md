@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-09-01) · Amended (2026-09-25): records `externalTrafficPolicy: Cluster` on the host-port Envoy service (required by multi-node local clusters, applied to every local cluster) and the local client-address divergence ([#686](https://github.com/nebari-dev/nebari-infrastructure-core/pull/686))
+Accepted (2026-09-01) · Amended (2026-09-25): records `externalTrafficPolicy: Cluster` on the host-port Envoy service (required by multi-node local clusters, applied to every local cluster), the rejected alternative of keeping `Local` with Envoy on the control plane, and the local client-address divergence ([#686](https://github.com/nebari-dev/nebari-infrastructure-core/pull/686))
 
 Records the decision implemented by [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640) (closes [#639](https://github.com/nebari-dev/nebari-infrastructure-core/issues/639)). Amends the MetalLB references in [ADR-0006](0006-conditional-foundational-software-helm.md) (which expected MetalLB to migrate to the conditional Helm interface) and [ADR-0014](0014-helm-valuefiles-overlay-seam.md) (which used metallb as a gated-app example). Both carry notes under their Status pointing here.
 
@@ -35,6 +35,8 @@ This construction had four standing problems:
 2. Keep MetalLB with a static, operator-configured address pool
 3. Publish the gateway on host ports of the loopback interface via kind port mappings pinned to fixed NodePorts, and remove MetalLB
 
+For the multi-node case added by #686, two ways of getting host-port traffic to Envoy were compared: `externalTrafficPolicy: Cluster` (chosen, see Decision Outcome) and keeping `Local` with Envoy placed on the control plane (see Options Detail).
+
 ## Decision Outcome
 
 Chosen option: **Option 3**.
@@ -43,7 +45,7 @@ The mechanics, and where each value lives:
 
 - kind maps host ports 80 and 443 of `127.0.0.1` (configurable via `cluster.local.http_port` / `https_port`) to the fixed NodePorts `GatewayHTTPNodePort` (30080) and `GatewayHTTPSNodePort` (30443) at cluster creation. The constants live in `pkg/providers/cluster` and are read by both the provider's port mappings and the rendered EnvoyProxy manifest, so the two sides cannot drift.
 - The EnvoyProxy resource pins the gateway's Envoy service to those NodePorts through a strategic-merge patch that matches the Gateway's listener ports.
-- The Envoy service sets `externalTrafficPolicy: Cluster` instead of Envoy Gateway's default `Local`. Only the kind control plane publishes the host ports, and with `cluster.local.kind.workers` set, kind keeps the control plane tainted, so Envoy runs on a worker. `Local` would drop that traffic; `Cluster` lets kube-proxy forward it across nodes (added with #686).
+- The Envoy service sets `externalTrafficPolicy: Cluster` instead of Envoy Gateway's default `Local`. Only the kind control plane publishes the host ports, and with `cluster.local.kind.node_groups` set, kind keeps the control plane tainted, so Envoy runs on a worker. `Local` would drop that traffic; `Cluster` lets kube-proxy forward it across nodes (added with #686).
 - `InfraSettings.GatewayHostAddress` (non-empty means host-port publishing) carries the address as a static provider fact. Deploy, outputs, and the CLI consume it instead of deriving or asserting an address.
 - A `dns:` block is rejected on loopback host-port gateways at validate and deploy time. Public DNS records cannot usefully point at another machine's loopback, and the deploy prints `/etc/hosts` guidance instead.
 - The ports are recorded in a `nic-local-cluster` ConfigMap in `kube-system` at creation (the kubeadm-config pattern), and a redeploy fails on mismatch, because kind port mappings cannot change on a live cluster.
@@ -81,6 +83,13 @@ Removes the derivation and its ordering, but pushes the burden of picking a rout
 ### Option 3: Host ports on pinned NodePorts (chosen)
 
 See Decision Outcome.
+
+### Multi-node alternative: keep `Local` and place Envoy on the control plane (rejected, #686)
+
+kind's documented ingress pattern keeps `externalTrafficPolicy: Local` and runs the ingress proxy on the node that publishes the host ports. That avoids the cross-node hop and keeps local on the same policy as the cloud `LoadBalancer` services. It lost for two reasons:
+
+- A toleration for the control-plane taint only allows Envoy there. Keeping it there also needs a nodeSelector on the control-plane label, which puts every Envoy replica on the one node that also runs the API server and etcd, and moves the gateway off the workers that a multi-node cluster exists to exercise.
+- `Local` would buy nothing locally. Its benefit is preserving the client source IP, and Docker's port publishing already presents loopback clients as the kind network's bridge gateway before traffic reaches the node (see Consequences), so the gateway never sees the real client address under either policy.
 
 ## References
 

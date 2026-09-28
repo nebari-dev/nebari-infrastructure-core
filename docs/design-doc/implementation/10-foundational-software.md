@@ -110,7 +110,7 @@ That derivation only recognizes specific shapes: namespaces from `metadata.names
 
 The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provider.go`), and the foundational layer reads from it instead of branching on provider name:
 
-- **`GatewayHostAddress`** - when non-empty, pins the gateway's Envoy service to fixed NodePorts that the provider publishes on host ports of this address at cluster creation (local only, `127.0.0.1`)
+- **`GatewayHostAddress`** - when non-empty, pins the gateway's Envoy service to fixed NodePorts that the provider publishes on host ports of this address at cluster creation (local only, `127.0.0.1`), and sets `externalTrafficPolicy: Cluster` so traffic reaches Envoy on any node, which means the gateway does not see the client source IP
 - **`StorageClass`** - default `StorageClass` name for foundational PVCs (postgresql, etc.)
 - **`KeycloakBasePath`** - `/auth` for the Codecentric keycloakx chart; empty for upstream/Bitnami Keycloak
 - **`HTTPSPort`** - Gateway HTTPS listener port (`443` normalized from `0`; can be overridden e.g. for local-dev on `8443`)

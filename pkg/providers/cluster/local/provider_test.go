@@ -119,17 +119,24 @@ func TestValidateKindMode(t *testing.T) {
 			},
 		},
 		{
-			name: "kind with workers is valid",
+			name: "kind with node groups is valid",
 			providerConfig: map[string]any{
-				"local": map[string]any{"kind": map[string]any{"workers": 2}},
+				"local": map[string]any{"kind": map[string]any{
+					"node_groups": map[string]any{
+						"general": map[string]any{"count": 2},
+						"infra":   map[string]any{"count": 1, "labels": map[string]any{"dedicated": "infra"}},
+					},
+				}},
 			},
 		},
 		{
-			name: "negative workers are rejected",
+			name: "node group without a count is rejected",
 			providerConfig: map[string]any{
-				"local": map[string]any{"kind": map[string]any{"workers": -1}},
+				"local": map[string]any{"kind": map[string]any{
+					"node_groups": map[string]any{"general": map[string]any{}},
+				}},
 			},
-			wantErr: "kind workers must be 0 or more",
+			wantErr: `node_groups["general"].count must be at least 1`,
 		},
 		{
 			name: "relative mount paths are rejected",
@@ -211,28 +218,50 @@ func TestValidateKindMode(t *testing.T) {
 	}
 }
 
-// TestDeployRejectsInvalidWorkers covers Deploy's own guard: the provider's
-// Validate is not on the deploy path, so Deploy must reject a bad count
-// itself rather than silently creating a single-node cluster. Dry-run keeps
-// the test off the container runtime.
-func TestDeployRejectsInvalidWorkers(t *testing.T) {
+// TestDeployValidatesConfig covers Deploy's own guard: the provider's
+// Validate is not on the deploy path, so Deploy must run the same checks
+// itself rather than failing inside kind after creation has started, or
+// silently creating a cluster of the wrong shape. Dry-run keeps the test off
+// the container runtime.
+func TestDeployValidatesConfig(t *testing.T) {
 	p := NewProvider()
 
 	tests := []struct {
 		name    string
-		workers int
+		local   map[string]any
 		wantErr string
 	}{
-		{name: "zero workers", workers: 0},
-		{name: "positive workers", workers: 2},
-		{name: "negative workers", workers: -1, wantErr: "kind workers must be 0 or more"},
+		{name: "no config block", local: map[string]any{}},
+		{
+			name: "valid node groups",
+			local: map[string]any{"kind": map[string]any{
+				"node_groups": map[string]any{"general": map[string]any{"count": 2}},
+			}},
+		},
+		{
+			name: "zero node group count",
+			local: map[string]any{"kind": map[string]any{
+				"node_groups": map[string]any{"general": map[string]any{"count": 0}},
+			}},
+			wantErr: `node_groups["general"].count must be at least 1`,
+		},
+		{
+			name: "relative extra_mounts path",
+			local: map[string]any{"kind": map[string]any{
+				"extra_mounts": []any{map[string]any{"host_path": "data", "container_path": "/data"}},
+			}},
+			wantErr: "must be absolute",
+		},
+		{
+			name:    "equal host ports",
+			local:   map[string]any{"http_port": 8443, "https_port": 8443},
+			wantErr: "http_port and https_port must differ",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.ClusterConfig{Providers: map[string]any{
-				"local": map[string]any{"kind": map[string]any{"workers": tt.workers}},
-			}}
+			cfg := &config.ClusterConfig{Providers: map[string]any{"local": tt.local}}
 
 			err := p.Deploy(context.Background(), "test-project", cfg, cluster.DeployOptions{DryRun: true})
 			if tt.wantErr == "" {
@@ -264,9 +293,12 @@ func TestSummaryKindMode(t *testing.T) {
 		},
 		{
 			// Destroy prints this, so the teardown shows how many nodes go away.
-			name: "worker count shown when set",
-			kind: map[string]any{"workers": 2},
-			want: map[string]string{"Kind Workers": "2", "Kind Node Image": ""},
+			name: "worker count shown per group in name order",
+			kind: map[string]any{"node_groups": map[string]any{
+				"infra":   map[string]any{"count": 1},
+				"general": map[string]any{"count": 2},
+			}},
+			want: map[string]string{"Kind Workers": "3 (general: 2, infra: 1)", "Kind Node Image": ""},
 		},
 		{
 			name: "single-node default shows neither",

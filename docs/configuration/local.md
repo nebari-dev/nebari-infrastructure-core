@@ -8,6 +8,7 @@ Configuration options for local Kubernetes deployments.
 
 - [Config](#config)
 - [KindConfig](#kindconfig)
+- [KindNodeGroup](#kindnodegroup)
 - [KindMount](#kindmount)
 
 ---
@@ -34,7 +35,22 @@ omitted entirely (nil), in which case the cluster is created with defaults.
 |-------|----------|------|----------|-------------|
 | NodeImage | `node_image` | string | No | NodeImage is the kindest/node image to use (e.g. "kindest/node:v1.32.2"). Empty means the default image of the bundled kind version. |
 | ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are additional host directories mounted into every cluster node container. NIC mounts its auto-created local GitOps repository automatically; an explicit file:// repository needs a matc... |
-| Workers | `workers` | int | No | Workers is the number of worker nodes created alongside the control plane (default 0, a single node that runs everything). With workers, kind keeps the control plane tainted, so workloads run on th... |
+| NodeGroups | `node_groups` | `map[string]KindNodeGroup` | No | NodeGroups are the cluster's worker nodes, keyed by group name. NIC always creates exactly one control-plane node, which is not configurable here: node_groups defines workers only. With no node gro... |
+
+---
+
+## KindNodeGroup
+
+KindNodeGroup is a set of identical kind worker nodes. Every node in the
+group is labeled nebari.dev/node-group=<group name>, so workloads can
+target a group with a nodeSelector without extra labels.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Count | `count` | int | Yes | Count is the number of worker nodes in the group (at least 1). |
+| Image | `image` | string | No | Image overrides node_image for this group's nodes (e.g. "kindest/node:v1.32.2"). Empty means node_image, or kind's default image when that is unset too. kind allows nodes of different Kubernetes ve... |
+| Labels | `labels` | `map[string]string` | No | Labels are added to every node in the group. Keys in the kubernetes.io and k8s.io namespaces are rejected unless the kubelet may set them itself (node.kubernetes.io/ and kubelet.kubernetes.io/ pref... |
+| ExtraMounts | `extra_mounts` | `[]KindMount` | No | ExtraMounts are mounted into this group's nodes only, in addition to the shared extra_mounts and NIC's GitOps mount. |
 
 ---
 

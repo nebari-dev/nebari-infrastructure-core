@@ -3,8 +3,10 @@ package local
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -32,10 +34,6 @@ const (
 	// used for the whole deploy.
 	kindReadyTimeout = 90 * time.Second
 
-	// nodeReadyPollInterval is how often waitForNodesReady checks the nodes
-	// of a multi-node cluster.
-	nodeReadyPollInterval = 2 * time.Second
-
 	// Default host ports publishing the gateway's listeners, used when
 	// http_port / https_port are unset.
 	defaultHTTPPort  int32 = 80
@@ -51,6 +49,10 @@ const (
 	// Nodes without it are the cluster's workers.
 	controlPlaneLabel = "node-role.kubernetes.io/control-plane"
 )
+
+// nodeReadyPollInterval is how often waitForNodesReady checks the nodes of a
+// multi-node cluster. A variable so tests can shorten it.
+var nodeReadyPollInterval = 2 * time.Second
 
 // kindContextName returns the kubeconfig context kind generates for a cluster.
 func kindContextName(clusterName string) string {
@@ -122,7 +124,7 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		attribute.String("cluster_name", name),
 		attribute.String("node_image", kindCfg.NodeImage),
 		attribute.Int("extra_mounts", len(kindCfg.ExtraMounts)),
-		attribute.Int("workers", kindCfg.Workers),
+		attribute.Int("worker_nodes", kindCfg.WorkerCount()),
 	)
 
 	mounts := make([]v1alpha4.Mount, 0, 1+len(kindCfg.ExtraMounts))
@@ -144,24 +146,30 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		Readonly:      true,
 	})
 
+	// Create custom mount roots with the historical restricted default.
+	// Existing paths are untouched. GitOps bootstrap separately upgrades only
+	// the root and Git-serving metadata of a configured file:// repository.
+	// kind requires every host path to exist, the node groups' too.
+	hostPaths := make([]string, 0, len(kindCfg.ExtraMounts))
 	for _, m := range kindCfg.ExtraMounts {
-		// Create custom mount roots with the historical restricted default.
-		// Existing paths are untouched. GitOps bootstrap separately upgrades only
-		// the root and Git-serving metadata of a configured file:// repository.
-		if err := os.MkdirAll(m.HostPath, 0o750); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("create extra_mount host path %s: %w", m.HostPath, err)
-		}
-		mounts = append(mounts, v1alpha4.Mount{
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
-			Readonly:      m.ReadOnly,
-		})
+		hostPaths = append(hostPaths, m.HostPath)
 	}
+	for _, g := range kindCfg.NodeGroups {
+		for _, m := range g.ExtraMounts {
+			hostPaths = append(hostPaths, m.HostPath)
+		}
+	}
+	for _, hp := range hostPaths {
+		if err := os.MkdirAll(hp, 0o750); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("create extra_mount host path %s: %w", hp, err)
+		}
+	}
+	mounts = append(mounts, kindMounts(kindCfg.ExtraMounts)...)
 
 	clusterConfig := &v1alpha4.Cluster{
 		Name:  name,
-		Nodes: kindNodes(ctx, mounts, kindCfg.Workers, httpPort, httpsPort),
+		Nodes: kindNodes(ctx, kindCfg, mounts, httpPort, httpsPort),
 	}
 
 	opts := []cluster.CreateOption{
@@ -170,9 +178,8 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 		cluster.CreateWithDisplayUsage(false),
 		cluster.CreateWithDisplaySalutation(false),
 	}
-	if kindCfg.NodeImage != "" {
-		opts = append(opts, cluster.CreateWithNodeImage(kindCfg.NodeImage))
-	}
+	// Images are set per node by kindNodes. cluster.CreateWithNodeImage is
+	// not used: it overrides every node's image, node groups' included.
 
 	if err := kp.Create(name, opts...); err != nil {
 		span.RecordError(err)
@@ -181,34 +188,65 @@ func createKindCluster(ctx context.Context, kp *cluster.Provider, name string, k
 	return nil
 }
 
-// kindNodes builds the cluster's node list: one control plane plus workers
-// worker nodes. Every node gets the mounts, so a pod reading one (ArgoCD's
-// repo-server for a file:// GitOps repo) can schedule on any node. Only the
-// control plane gets the gateway's port mappings, since a host port can be
-// bound once; the pinned NodePorts forward to Envoy wherever it runs (see
-// externalTrafficPolicy in the EnvoyProxy manifest). With workers present,
-// kind keeps the control plane tainted, so workloads run on the workers.
-func kindNodes(ctx context.Context, mounts []v1alpha4.Mount, workers, httpPort, httpsPort int) []v1alpha4.Node {
+// kindMounts converts config mounts to kind's mount type.
+func kindMounts(mounts []KindMount) []v1alpha4.Mount {
+	out := make([]v1alpha4.Mount, 0, len(mounts))
+	for _, m := range mounts {
+		out = append(out, v1alpha4.Mount{
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+			Readonly:      m.ReadOnly,
+		})
+	}
+	return out
+}
+
+// kindNodes builds the cluster's node list: one control plane, then each node
+// group's Count workers, groups in name order. shared are the mounts every
+// node gets, so a pod reading one (ArgoCD's repo-server for a file:// GitOps
+// repo) can schedule on any node; a group's own mounts and labels go on its
+// nodes only. Only the control plane gets the gateway's port mappings, since
+// a host port can be bound once; the pinned NodePorts forward to Envoy
+// wherever it runs (see externalTrafficPolicy in the EnvoyProxy manifest).
+// With workers present, kind keeps the control plane tainted, so workloads
+// run on the workers. An empty image leaves kind to apply its default.
+func kindNodes(ctx context.Context, kindCfg *KindConfig, shared []v1alpha4.Mount, httpPort, httpsPort int) []v1alpha4.Node {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "local.kindNodes")
 	defer span.End()
 	span.SetAttributes(
-		attribute.Int("workers", workers),
-		attribute.Int("mounts", len(mounts)),
+		attribute.Int("worker_nodes", kindCfg.WorkerCount()),
+		attribute.Int("shared_mounts", len(shared)),
 	)
 
 	nodes := []v1alpha4.Node{
 		{
 			Role:              v1alpha4.ControlPlaneRole,
-			ExtraMounts:       slices.Clone(mounts),
+			Image:             kindCfg.NodeImage,
+			ExtraMounts:       slices.Clone(shared),
 			ExtraPortMappings: gatewayPortMappings(httpPort, httpsPort),
 		},
 	}
-	for range workers {
-		nodes = append(nodes, v1alpha4.Node{
-			Role:        v1alpha4.WorkerRole,
-			ExtraMounts: slices.Clone(mounts),
-		})
+	for _, name := range kindCfg.groupNames() {
+		g := kindCfg.NodeGroups[name]
+		image := g.Image
+		if image == "" {
+			image = kindCfg.NodeImage
+		}
+		groupMounts := kindMounts(g.ExtraMounts)
+		for range g.Count {
+			labels := maps.Clone(g.Labels)
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			labels[nodeGroupLabel] = name
+			nodes = append(nodes, v1alpha4.Node{
+				Role:        v1alpha4.WorkerRole,
+				Image:       image,
+				Labels:      labels,
+				ExtraMounts: slices.Concat(shared, groupMounts),
+			})
+		}
 	}
 	return nodes
 }
@@ -231,20 +269,30 @@ func waitForNodesReady(ctx context.Context, client kubernetes.Interface, cluster
 		WithAction("deploy").
 		WithMetadata("cluster_name", clusterName))
 
-	ready := 0
+	var (
+		ready    int
+		notReady []string
+		// lastErr is the most recent node list error, cleared by a list that
+		// succeeds. PollUntilContextTimeout only returns the context's own
+		// error, so without it an unreachable or forbidden API would read
+		// as nodes that never got Ready.
+		lastErr error
+	)
 	err := wait.PollUntilContextTimeout(ctx, nodeReadyPollInterval, timeout, true, func(ctx context.Context) (bool, error) {
 		nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			// Transient while nodes join; keep polling until the timeout.
+			lastErr = err
 			return false, nil
 		}
+		lastErr = nil
 		ready = 0
+		notReady = notReady[:0]
 		for _, n := range nodes.Items {
-			for _, c := range n.Status.Conditions {
-				if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
-					ready++
-					break
-				}
+			if nodeIsReady(n) {
+				ready++
+			} else {
+				notReady = append(notReady, n.Name)
 			}
 		}
 		return ready >= want, nil
@@ -252,6 +300,58 @@ func waitForNodesReady(ctx context.Context, client kubernetes.Interface, cluster
 	span.SetAttributes(attribute.Int("ready_nodes", ready))
 	if err != nil {
 		err = fmt.Errorf("kind cluster %s: only %d of %d nodes Ready after %s: %w", clusterName, ready, want, timeout, err)
+		switch {
+		case lastErr != nil:
+			err = fmt.Errorf("%w (last node list error: %v)", err, lastErr)
+		case len(notReady) > 0:
+			slices.Sort(notReady)
+			err = fmt.Errorf("%w (not Ready: %s)", err, strings.Join(notReady, ", "))
+		default:
+			err = fmt.Errorf("%w (only %d nodes registered)", err, ready)
+		}
+		span.RecordError(err)
+		return err
+	}
+	return nil
+}
+
+// nodeIsReady reports whether the node's Ready condition is True.
+func nodeIsReady(n corev1.Node) bool {
+	for _, c := range n.Status.Conditions {
+		if c.Type == corev1.NodeReady {
+			return c.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// waitForClusterNodes makes Deploy's post-create or post-reuse wait. kind
+// waited for the control plane only, and with workers it stays tainted, so
+// the workers are waited for before anything is scheduled. A new cluster is
+// waited on for its configured workers. A reused one is waited on for the
+// workers it actually has (a retry after the create-time wait timed out may
+// still have some joining): a count mismatch only warns, so it must not
+// become a timeout here, and a failed node list skips the wait for the same
+// reason. A single-node cluster is not waited on at all.
+func waitForClusterNodes(ctx context.Context, client kubernetes.Interface, clusterName string, configuredWorkers int, reused bool, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "local.waitForClusterNodes")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("cluster_name", clusterName),
+		attribute.Int("configured_workers", configuredWorkers),
+		attribute.Bool("reused", reused),
+	)
+
+	workers := configuredWorkers
+	if reused {
+		workers = checkClusterWorkers(ctx, client, clusterName, configuredWorkers)
+	}
+	span.SetAttributes(attribute.Int("wait_workers", workers))
+	if workers <= 0 {
+		return nil
+	}
+	if err := waitForNodesReady(ctx, client, clusterName, 1+workers, timeout); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -292,7 +392,7 @@ func checkClusterWorkers(ctx context.Context, client kubernetes.Interface, clust
 	span.SetAttributes(attribute.Int("actual_workers", actual))
 
 	if actual != configured {
-		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s has %d worker node(s) but the config says workers: %d. kind sets the nodes at cluster creation only, so recreate the cluster (nic destroy, then nic deploy) to apply the change", clusterName, actual, configured)).
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Kind cluster %s has %d worker node(s) but the config's node_groups add up to %d. kind sets the nodes at cluster creation only, so recreate the cluster (nic destroy, then nic deploy --regen-apps, so a GitOps repository bootstrapped by an earlier NIC version picks up the multi-node gateway settings) to apply the change", clusterName, actual, configured)).
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", clusterName))

@@ -244,7 +244,12 @@ cluster:
     # Optional: kind cluster tuning. Omit the whole block for defaults.
     # kind:
     #   node_image: kindest/node:v1.35.0        # default: bundled kind's default image
-    #   workers: 1                              # default: 0 (single node). Creation only.
+    #   node_groups:                            # workers only; one control plane is always created
+    #     general:                              # default: none (single node). Creation only.
+    #       count: 1                            # required, at least 1
+    #       image: kindest/node:v1.35.0         # optional, overrides node_image
+    #       labels: { dedicated: general }      # optional; nodes also get nebari.dev/node-group
+    #       extra_mounts: []                    # optional, this group's nodes only
     #   extra_mounts:
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path
