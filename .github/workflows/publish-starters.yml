@@ -7,8 +7,8 @@ name: Publish starters
 # `needs:` edge. That edge existed because the starters pin nic as a conda
 # dependency and `pixi lock` cannot resolve until the package is on the channel.
 # Now that nic reaches prefix.dev through the shared `github-releases` channel,
-# which octoconda populates on a two-hourly cron, the package lands well after
-# the release run has ended.
+# the package lands whenever octoconda next picks the repository up, which can
+# be many hours after the release (see docs/operations/packaging.md).
 #
 # So the ordering became a wait rather than an edge. `release.yml` fires this
 # workflow once (it usually finds the channel not ready), and an hourly cron
@@ -19,11 +19,12 @@ name: Publish starters
 #            serve it yet. Most runs end here.
 #   publish  gated by the `quay-publish` environment, so an approval is only
 #            ever requested when there is something to push. Runs once per
-#            release that needs it, from that release's own tag checkout.
+#            release that needs it, from that release's own tag checkout, and
+#            re-checks quay before each push.
 #
 # Every decision is re-derived from quay and the channel on each run, so a
-# missed or half-finished publish heals on a later tick, and nothing already on
-# quay is ever republished.
+# publish that failed is picked up again on a later tick, and nothing already on
+# quay is republished.
 
 on:
   workflow_dispatch:
@@ -34,25 +35,24 @@ on:
         type: string
   schedule:
     # Hourly. The check job holds no secrets and needs no approval, so a tick
-    # that finds nothing to do costs one short runner. octoconda's runs start
-    # late and vary in length (roughly 5 to 20 minutes), so polling more often
-    # than its own two-hourly schedule is what keeps tag-to-starters close to
-    # the channel's own delay.
+    # that finds nothing to do costs one short runner, and polling often keeps
+    # tag-to-starters close to whenever the channel actually catches up.
     - cron: '17 * * * *'
 
 permissions:
   contents: read
 
 env:
+  QUAY_REGISTRY: quay.io
   QUAY_NAMESPACE: nebari
   STARTER_REPO_PREFIX: starters
   CHANNEL: https://prefix.dev/github-releases
-  # The providers cmd/starters renders. The publish job fails if the rendered
-  # set ever differs, so a provider added there cannot be silently skipped here.
-  STARTER_PROVIDERS: local aws
-  # The first release that shipped starters. Older releases never had any and
-  # are not candidates, rather than being reported as missing on every tick.
-  STARTERS_SINCE: 0.14.0
+  # Each provider cmd/starters renders, with the first release that shipped its
+  # starter. A provider is only expected for releases at or after its floor, so
+  # adding one here (with the next release as its floor) never makes an older
+  # tag look incomplete. The publish job fails if a tag renders a different set
+  # than this expects for it, so a provider cannot be silently skipped.
+  STARTER_PROVIDERS: 'local:0.14.0 aws:0.14.0'
 
 jobs:
   check:
@@ -63,7 +63,6 @@ jobs:
       pending: ${{ steps.channel.outputs.pending }}
     steps:
       - name: Candidate releases
-        id: candidates
         env:
           INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,14 +92,17 @@ jobs:
             echo "::error::unexpected stable release tag(s): $bad"
             exit 1
           fi
+          # Releases older than every provider's floor never had starters and
+          # are not candidates, rather than being reported missing every tick.
           # Oldest first, so when several releases publish in one run, the
           # newest is pushed last and ends up as :latest.
-          jq -c --arg since "$STARTERS_SINCE" '
+          jq -c --arg providers "$STARTER_PROVIDERS" '
               def v: ltrimstr("v") | split(".") | map(tonumber);
-              map(select((.tagName | v) >= ($since | v))) | sort_by(.tagName | v)
+              ($providers | split(" ") | map(split(":")[1] | v) | min) as $since
+              | map(select((.tagName | v) >= $since)) | sort_by(.tagName | v)
             ' <<<"$releases" > "$RUNNER_TEMP/releases.json"
           if [[ "$(jq length "$RUNNER_TEMP/releases.json")" -eq 0 ]]; then
-            echo "::error::no stable release at or after $STARTERS_SINCE among the candidates"
+            echo "::error::no candidate release has starters to publish"
             exit 1
           fi
           echo "==> candidates: $(jq -r 'map(.tagName) | join(" ")' "$RUNNER_TEMP/releases.json")"
@@ -111,30 +113,48 @@ jobs:
       - name: What is already on quay
         run: |
           set -euo pipefail
+          # Duplicated in the publish job, which runs from the release tag's
+          # tree and so cannot source a helper from main. Keep the two in step.
+          #
+          # Every failure returns non-zero explicitly: this runs inside $(...),
+          # where bash does not apply errexit, and a failure that fell through
+          # to the manifest request would get a 401 and read as "absent".
           probe() {  # probe <provider> <tag> -> prints present|absent
-            local repo="${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/$1" token code
-            token="$(curl -fsS "https://quay.io/v2/auth?service=quay.io&scope=repository:${repo}:pull" | jq -r .token)"
+            local repo="${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/$1" resp token code
+            resp="$(curl -fsS "https://${QUAY_REGISTRY}/v2/auth?service=${QUAY_REGISTRY}&scope=repository:${repo}:pull")" \
+              || { echo "::error::could not get a pull token from ${QUAY_REGISTRY} for ${repo}" >&2; return 1; }
+            token="$(jq -r '.token // empty' <<<"$resp")" \
+              || { echo "::error::unreadable token response from ${QUAY_REGISTRY} for ${repo}" >&2; return 1; }
+            [[ -n "$token" ]] \
+              || { echo "::error::${QUAY_REGISTRY} returned no token for ${repo}" >&2; return 1; }
             code="$(curl -sS -o /dev/null -w '%{http_code}' \
                       -H "Authorization: Bearer ${token}" \
                       -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json' \
-                      "https://quay.io/v2/${repo}/manifests/$2")"
+                      "https://${QUAY_REGISTRY}/v2/${repo}/manifests/$2")" \
+              || { echo "::error::could not reach ${QUAY_REGISTRY} for ${repo}:$2" >&2; return 1; }
             case "$code" in
               200) echo present ;;
-              # 404: the repository exists, the tag does not. 401: the
-              # repository does not exist yet, which is what a newly added
-              # provider looks like before its first publish.
+              # 404: the repository exists, the tag does not. 401 (with a
+              # valid token, checked above): the repository does not exist
+              # yet, which is what a new provider looks like before its first
+              # publish.
               404|401) echo absent ;;
               # Anything else is a real failure. Treating it as absent would
               # republish on every tick during a quay outage.
-              *) echo "::error::unexpected HTTP $code probing quay for $1:$2" >&2; return 1 ;;
+              *) echo "::error::unexpected HTTP $code probing ${QUAY_REGISTRY} for ${repo}:$2" >&2; return 1 ;;
             esac
           }
           missing=()
-          for provider in $STARTER_PROVIDERS; do
+          for entry in $STARTER_PROVIDERS; do
+            provider="${entry%%:*}"
+            floor="${entry#*:}"
             # Releases are oldest first, so every absent tag seen before a
             # present one is older than something already published.
             absent=()
-            for tag in $(jq -r '.[].tagName' "$RUNNER_TEMP/releases.json"); do
+            for tag in $(jq -r --arg floor "$floor" '
+                def v: ltrimstr("v") | split(".") | map(tonumber);
+                .[] | select((.tagName | v) >= ($floor | v)) | .tagName
+              ' "$RUNNER_TEMP/releases.json"); do
               state="$(probe "$provider" "$tag")"
               if [[ "$state" == present ]]; then
                 # nebi publish always moves :latest too, so backfilling a
@@ -169,27 +189,52 @@ jobs:
 
       # Asked by resolving a throwaway workspace against the real channel rather
       # than by parsing repodata: the question is precisely "can pixi lock find
-      # it", so the resolver is the honest way to ask.
+      # it on every platform the starter declares", so the resolver, given the
+      # starter's own platform list, is the honest way to ask.
       - name: Is each release on the channel yet?
         id: channel
         env:
-          # How long after a release "not on the channel" stops meaning "not
-          # yet" and starts meaning "broken". octoconda's worst case is about
-          # three hours; twice that leaves room for a skipped run.
-          STALE_AFTER_HOURS: 6
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # How long before "not on the channel yet" is worth a warning.
+          # octoconda only spot-checks packages that already have its maximum
+          # number of versions, so there is no upper bound on the delay and
+          # half a day is ordinary. This never fails the run: a warning after a
+          # day is a prompt to look, not proof that anything is broken.
+          WARN_AFTER_HOURS: 24
         run: |
           set -euo pipefail
-          stale=()
+          late=()
           pending='[]'
           for tag in $(jq -r '[.[].tag] | unique_by(ltrimstr("v") | split(".") | map(tonumber)) | .[]' "$RUNNER_TEMP/missing.json"); do
             version="${tag#v}"
+            # The platforms the starter will lock for, read from that release's
+            # own template, so a package that has landed for some platforms but
+            # not others is not mistaken for ready.
+            if ! template="$(gh api -H 'Accept: application/vnd.github.raw' \
+                               "repos/${GITHUB_REPOSITORY}/contents/starters/templates/pixi.toml.tmpl?ref=${tag}" \
+                               2>"$RUNNER_TEMP/gh.err")"; then
+              # A tag cut before cmd/starters existed (v0.14.0 is one: its
+              # starters were built from a later tree) cannot be published
+              # from its own checkout, so it is reported, not attempted.
+              if grep -q 'HTTP 404' "$RUNNER_TEMP/gh.err"; then
+                echo "::warning::$tag predates the starter templates, so its starters cannot be built from the tag; publish them by hand if they are missing"
+                continue
+              fi
+              echo "::error::could not read the starter template at $tag: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
+              exit 1
+            fi
+            platforms="$(awk '/^platforms[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }' <<<"$template")"
+            if [[ -z "$platforms" ]]; then
+              echo "::error::no workspace platforms line in the starter template at $tag"
+              exit 1
+            fi
             probe="$RUNNER_TEMP/probe-$version"
             mkdir -p "$probe"
             cat > "$probe/pixi.toml" <<EOF
           [workspace]
           name = "channel-probe"
           channels = ["conda-forge", "${CHANNEL}"]
-          platforms = ["linux-64"]
+          platforms = ${platforms}
           version = "0.0.0"
 
           [dependencies]
@@ -197,18 +242,25 @@ jobs:
           EOF
             if (cd "$probe" && "$HOME/.pixi/bin/pixi" lock --quiet 2>"$probe/lock.err"); then
               providers="$(jq -r --arg t "$tag" '[.[] | select(.tag == $t) | .provider] | join(" ")' "$RUNNER_TEMP/missing.json")"
-              pending="$(jq -c --arg t "$tag" --arg v "$version" --arg p "$providers" \
-                           '. + [{tag: $t, version: $v, providers: $p}]' <<<"$pending")"
-              echo "==> $tag is on the channel; will publish: $providers"
+              # Every provider this release should render, whether or not it is
+              # missing, so the publish job can check cmd/starters against it.
+              expected="$(for entry in $STARTER_PROVIDERS; do
+                            jq -rn --arg p "${entry%%:*}" --arg f "${entry#*:}" --arg v "$version" '
+                                def v: split(".") | map(tonumber);
+                                if ($v | v) >= ($f | v) then $p else empty end'
+                          done | xargs)"
+              pending="$(jq -c --arg t "$tag" --arg v "$version" --arg p "$providers" --arg e "$expected" \
+                           '. + [{tag: $t, version: $v, providers: $p, expected: $e}]' <<<"$pending")"
+              echo "==> $tag is on the channel for ${platforms}; will publish: $providers"
               continue
             fi
             published="$(jq -r --arg t "$tag" '.[] | select(.tagName == $t) | .publishedAt' "$RUNNER_TEMP/releases.json")"
             age_hours=$(( ( $(date +%s) - $(date -d "$published" +%s) ) / 3600 ))
-            if (( age_hours >= STALE_AFTER_HOURS )); then
-              # Kept in the log: this is what tells "octoconda dropped us"
-              # apart from "the channel URL is wrong".
+            if (( age_hours >= WARN_AFTER_HOURS )); then
+              # Kept in the log: this is what tells "octoconda has not got to
+              # us yet" apart from "the channel URL is wrong".
               cat "$probe/lock.err" >&2 || true
-              stale+=("$tag (${age_hours}h)")
+              late+=("$tag (${age_hours}h)")
             else
               echo "::notice::$tag is not on ${CHANNEL} yet (${age_hours}h since release); a later run will retry"
             fi
@@ -216,11 +268,8 @@ jobs:
           # Kept in release order, so the newest release is published last.
           pending="$(jq -c 'sort_by(.version | split(".") | map(tonumber))' <<<"$pending")"
           echo "pending=$pending" >> "$GITHUB_OUTPUT"
-          # Failed only after the output is written, so releases that are ready
-          # still publish in this run.
-          if (( ${#stale[@]} > 0 )); then
-            echo "::error::still not on ${CHANNEL} ${STALE_AFTER_HOURS}h+ after release: ${stale[*]}. Check that octoconda still lists this repository and has run since (see docs/operations/packaging.md)."
-            exit 1
+          if (( ${#late[@]} > 0 )); then
+            echo "::warning::still not on ${CHANNEL} ${WARN_AFTER_HOURS}h+ after release: ${late[*]}. Usually octoconda has simply not reached us yet; if it persists, check that octoconda still lists this repository (see docs/operations/packaging.md). A later run will retry."
           fi
 
   publish:
@@ -231,9 +280,12 @@ jobs:
     timeout-minutes: 20
     strategy:
       # One release at a time, in the order check emitted them (oldest first),
-      # so the last :latest written is the newest release.
+      # so the last :latest written is the newest release. fail-fast stops the
+      # newer releases when an older one fails: publishing a newer one would
+      # leave the older one behind a present tag, where check only warns about
+      # it instead of retrying it.
       max-parallel: 1
-      fail-fast: false
+      fail-fast: true
       matrix:
         include: ${{ fromJSON(needs.check.outputs.pending) }}
     concurrency:
@@ -241,9 +293,9 @@ jobs:
       # the same pending releases and race each other to publish them.
       group: publish-starters
       cancel-in-progress: false
-    # Needs required reviewers, and a deployment-branch policy that admits both
-    # `main` (the cron) and `v*` tags (the dispatch from release.yml). See
-    # docs/operations/verifying-releases.md.
+    # Needs required reviewers, and a deployment-branch policy of `main` only:
+    # both the cron and the dispatch from release.yml run this workflow from
+    # main. See docs/operations/verifying-releases.md.
     environment: quay-publish
     permissions:
       contents: read  # no OIDC here; the Quay push uses a static token
@@ -251,11 +303,12 @@ jobs:
       TAG: ${{ matrix.tag }}
       VERSION: ${{ matrix.version }}
       PROVIDERS: ${{ matrix.providers }}
+      EXPECTED_PROVIDERS: ${{ matrix.expected }}
 
     steps:
-      # The release's own tree, not the branch the run was triggered from. A
-      # scheduled run executes on main, and the starters for vX must carry vX's
-      # examples, templates and OpenTofu window, validated by vX's nic.
+      # The release's own tree, not the branch the run was triggered from. The
+      # run executes on main, and the starters for vX must carry vX's examples,
+      # templates and OpenTofu window, validated by vX's nic.
       - name: Checkout the release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -300,9 +353,9 @@ jobs:
           # which needs tag objects and treats an empty value as unset.
           go run ./cmd/starters -out dist/starters -version "$VERSION"
           rendered="$(find dist/starters -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | xargs)"
-          expected="$(tr ' ' '\n' <<<"$STARTER_PROVIDERS" | sort | xargs)"
+          expected="$(tr ' ' '\n' <<<"$EXPECTED_PROVIDERS" | sort | xargs)"
           if [[ "$rendered" != "$expected" ]]; then
-            echo "::error::cmd/starters rendered [$rendered] but STARTER_PROVIDERS is [$expected]; update the workflow"
+            echo "::error::$TAG renders [$rendered] but STARTER_PROVIDERS expects [$expected] for it; update STARTER_PROVIDERS"
             exit 1
           fi
 
@@ -317,23 +370,53 @@ jobs:
           : "${QUAY_TOKEN:?QUAY_OCI_STARTERS_TOKEN is not set}"
           printf '%s' "$QUAY_TOKEN" | nebi registry add --local \
             --name quay \
-            --url quay.io \
+            --url "$QUAY_REGISTRY" \
             --namespace "$QUAY_NAMESPACE" \
             --username "$QUAY_USERNAME" \
             --password-stdin
 
-      # Only the providers check found missing are touched, each one locked,
-      # published and round-tripped before the next starts. A failed round-trip
-      # leaves that tag on quay, and later runs see it as present, so the red
-      # run is the signal: delete the tag on quay and re-dispatch.
+      # Only the providers check found missing are touched, each one re-checked
+      # on quay, then locked, published and round-tripped before the next
+      # starts. The re-check covers an overlapping run (the release's dispatch
+      # and a cron tick, or an approval left waiting) that published the same
+      # tag after check ran. A failed round-trip leaves that tag on quay, and
+      # later runs see it as present, so the red run is the signal: delete the
+      # tag on quay and re-dispatch.
       - name: Lock, publish and verify each missing starter
         shell: bash
         run: |
           set -euo pipefail
+          # Same as the check job's probe; see the note there.
+          probe() {  # probe <provider> <tag> -> prints present|absent
+            local repo="${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/$1" resp token code
+            resp="$(curl -fsS "https://${QUAY_REGISTRY}/v2/auth?service=${QUAY_REGISTRY}&scope=repository:${repo}:pull")" \
+              || { echo "::error::could not get a pull token from ${QUAY_REGISTRY} for ${repo}" >&2; return 1; }
+            token="$(jq -r '.token // empty' <<<"$resp")" \
+              || { echo "::error::unreadable token response from ${QUAY_REGISTRY} for ${repo}" >&2; return 1; }
+            [[ -n "$token" ]] \
+              || { echo "::error::${QUAY_REGISTRY} returned no token for ${repo}" >&2; return 1; }
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                      -H "Authorization: Bearer ${token}" \
+                      -H 'Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.oci.image.index.v1+json' \
+                      "https://${QUAY_REGISTRY}/v2/${repo}/manifests/$2")" \
+              || { echo "::error::could not reach ${QUAY_REGISTRY} for ${repo}:$2" >&2; return 1; }
+            case "$code" in
+              200) echo present ;;
+              404|401) echo absent ;;
+              *) echo "::error::unexpected HTTP $code probing ${QUAY_REGISTRY} for ${repo}:$2" >&2; return 1 ;;
+            esac
+          }
           for provider in $PROVIDERS; do
+            # Assigned first, not tested inline: inside [[ ]] a failed probe
+            # would compare as "absent" and push anyway.
+            state="$(probe "$provider" "$TAG")"
+            if [[ "$state" == present ]]; then
+              echo "::notice::${provider}:${TAG} appeared on quay since check ran; skipping"
+              continue
+            fi
             pushd "dist/starters/${provider}" > /dev/null
             # Resolves against the shared github-releases channel, which the
-            # check job confirmed carries this version.
+            # check job confirmed carries this version for these platforms.
             pixi lock
             nebi init
             nebi publish --local \
@@ -343,7 +426,7 @@ jobs:
             popd > /dev/null
 
             dest="$RUNNER_TEMP/imported-${provider}"
-            nebi import "quay.io/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
+            nebi import "${QUAY_REGISTRY}/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
             test -f "$dest/config.yaml"
             test -f "$dest/README.md"
             grep -q CHANGEME "$dest/config.yaml"

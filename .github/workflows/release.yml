@@ -5,9 +5,9 @@ name: Release
 # NIC no longer builds or uploads its own conda package. The binary reaches
 # prefix.dev through the shared `github-releases` channel, which octoconda
 # repackages from published GitHub releases with no recipe on our side. That
-# makes publication asynchronous: octoconda runs on a two-hourly cron, and its
-# runs start late and vary in length, so the package lands up to about three
-# hours after the release, well after this run has finished.
+# makes publication asynchronous: the package lands whenever octoconda next
+# picks the repository up, which is often many hours after the release and has
+# no upper bound (see docs/operations/packaging.md), well after this run ends.
 #
 # The starters pin nic as a conda dependency, so their `pixi lock` cannot
 # resolve until that has happened. Rather than hold a runner waiting, this
@@ -117,6 +117,12 @@ jobs:
     permissions:
       actions: write   # workflow_dispatch on publish-starters.yml
     steps:
+      # Dispatched on main, not on the tag. A dispatched run executes the
+      # workflow file from the ref it runs on, and quay-publish's deployment
+      # policy is main-only: running on a tag would let anyone able to push a
+      # v* tag carrying an edited publish-starters.yml reach the Quay token
+      # with only the approval in the way. The publish job checks out the tag
+      # explicitly, so nothing is lost.
       - name: Dispatch publish-starters for this tag
         env:
           TAG: ${{ github.ref_name }}
@@ -125,5 +131,5 @@ jobs:
           set -euo pipefail
           gh workflow run publish-starters.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref "$GITHUB_REF_NAME" \
+            --ref main \
             -f tag="$TAG"

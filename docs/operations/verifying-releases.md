@@ -53,14 +53,22 @@ jq '.spdxVersion, (.packages | length)' nebari-infrastructure-core_<version>_lin
    from this repository: octoconda picks up the published release on its own
    (see [packaging.md](packaging.md#the-conda-channel)).
 
-2. **Create the `quay-publish` environment** with required reviewers, and move
-   `QUAY_OCI_STARTERS_USERNAME` and `QUAY_OCI_STARTERS_TOKEN` into it. They are
-   repository-scoped today, so the starter publish has no approval gate and any
-   job in the repository can read them. If the environment gets a
-   deployment-branch policy, it must admit both `main` (the hourly cron runs
-   there) and `v*` tags (the dispatch from `release.yml` runs on the tag). Only
-   the `publish` job uses the environment, so an approval is requested only when
-   a starter actually needs pushing, not on every cron tick.
+2. **Create the `quay-publish` environment before merging the workflow that
+   uses it**, with required reviewers, and move `QUAY_OCI_STARTERS_USERNAME` and
+   `QUAY_OCI_STARTERS_TOKEN` into it. They are repository-scoped today, so the
+   starter publish has no approval gate and any job in the repository can read
+   them, and a job that names a missing environment creates it with no
+   protection at all. Restrict its deployment branches to `main`: both the hourly
+   cron and the dispatch from `release.yml` run on `main`, and a policy that also
+   admitted `v*` tags would let anyone who can push a tag run an edited copy of
+   the workflow against the Quay token. Only the `publish` job uses the
+   environment, so an approval is requested only when a starter actually needs
+   pushing, not on every cron tick.
+
+   Related hardening worth doing: the "Protect release tags" ruleset only blocks
+   deletion and force-pushes, so anyone with write access can create a `v*` tag.
+   A `creation` rule limited to maintainers closes that, and matters because
+   the publish job builds tag code while holding the Quay token.
 
 3. **Revoke the old prefix.dev trusted publisher** on the `nebari-dev/nebari`
    channel (a one-time cleanup). It was registered for this repository,

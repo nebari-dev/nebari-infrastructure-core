@@ -85,7 +85,9 @@ Highlights:
 Other workflows in `.github/workflows/`:
 
 - `deployment-tests.yml` - deployment tests for all providers (see 12.1)
-- `release.yml` - cuts releases via goreleaser
+- `release.yml` - cuts releases via goreleaser, then fires the starter publish
+- `publish-starters.yml` - publishes the starter workspaces to quay.io once the prefix.dev channel carries the release; fired by `release.yml` and retried hourly
+- `starters.yml` - validates the generated starter workspaces on PRs
 - `opentofu-lockfile-pr.yml` - keeps tofu lockfiles fresh
 - `add-to-project.yaml` - GitHub Projects auto-add
 
