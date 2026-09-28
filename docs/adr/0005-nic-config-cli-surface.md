@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed (2026-06-03) · Amended (2026-07-15) — config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434) · Accepted (2026-09-01).
+Proposed (2026-06-03) · Amended (2026-07-15) — config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434) · Accepted (2026-09-28).
 
-The discussion this ADR was opened for did not happen as a discussion. It was settled by [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) shipping its outcomes instead: the starter workspaces ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)) and placeholder rejection ([#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561)) now cover the onboarding need that Options 1 and 2 were reaching for. This PR records that outcome; the acceptance is the review approval on it.
+The discussion this ADR was opened for did not happen as a discussion. It was settled by [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) shipping its outcomes instead: the starter workspaces ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)) and placeholder rejection ([#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561)) now cover the onboarding need that Options 1 and 2 were reaching for. The outcome was recorded and accepted in [#653](https://github.com/nebari-dev/nebari-infrastructure-core/pull/653).
 
 ## Date
 
@@ -50,7 +50,7 @@ be better than a subcommand.
   additionally pins the `nic` binary in `pixi.lock` and ships the `validate` and `deploy`
   tasks. `nic config init` would have produced only the first of those three.
 - **Schema inspection** is served today by the generated config reference under
-  `docs/configuration/` (docgen, #434). A machine-readable JSON Schema consumed through an
+  `docs/configuration/` (docgen, #567). A machine-readable JSON Schema consumed through an
   editor `$schema` modeline is in flight
   ([#562](https://github.com/nebari-dev/nebari-infrastructure-core/issues/562),
   [#600](https://github.com/nebari-dev/nebari-infrastructure-core/issues/600)) and, per the
@@ -60,20 +60,30 @@ be better than a subcommand.
 The argument for the starter over a generator rests on two things the Options Detail below
 does not already cover:
 
-- **It versions.** Starters are tagged OCI artifacts, so `nebi diff` shows what config
-  changed between two `nic` versions, and rollback is pulling the older tag. A generator
-  emits a file and forgets.
+- **It versions.** A tagged starter pairs a config with the `nic` release it pins, where a
+  generator emits a file and forgets. `nebi diff` between two starter tags shows the
+  toolchain change (`pixi.toml`, and `pixi.lock` with `--lock`), not a config change:
+  comparing configs means importing the two tags side by side. The published starters carry
+  `CHANGEME` templates rather than anyone's filled config, so pulling an older tag rolls
+  back the toolchain, not a user's configuration.
 - **It pins the toolchain with the config.** The workspace's `pixi.lock` fixes the exact
-  `nic` build, `nic` pins OpenTofu, and the embedded `.terraform.lock.hcl` pins the
-  providers, so one lockfile transitively pins the whole infrastructure toolchain.
+  `nic` build, `nic` constrains OpenTofu to the window in
+  [ADR-0016](0016-opentofu-runtime-version-policy.md), which the workspace resolves and
+  locks, and the embedded `.terraform.lock.hcl` pins the providers. One lockfile therefore
+  pins the whole infrastructure toolchain.
 
-Options 1 and 4 are rejected on the Cons already recorded below, with one thing that has
+Options 1, 2 and 4 are rejected on the Cons already recorded below, with one thing that has
 changed since they were written: `examples/` is now the source `cmd/starters` renders the
-starter workspaces from, and every file in it must validate as-is against the Go config
-types in CI (`pkg/nic.TestExampleConfigsValidate`), which also rejects unreplaced
-`CHANGEME` placeholders. The silent drift Option 4 existed to solve is caught by that test
-rather than by deleting the directory. Note its limit, per its own docstring: provider-level
-validation is not reached, so a green result does not prove an example would deploy.
+starter workspaces from, and CI parses and validates every file in it as-is
+(`pkg/nic.TestExampleConfigsValidate`), which also rejects unreplaced `CHANGEME`
+placeholders. That catches part of the drift Option 4 existed to solve, not all of it. The
+test checks the top-level config and the DNS and repository provider blocks, but it never
+runs the cluster provider's validation, and YAML decoding does not reject unknown keys, so a
+renamed or removed cluster-provider field can leave a stale key in every example with CI
+still green. Closing that gap is what the generated JSON Schema
+([#600](https://github.com/nebari-dev/nebari-infrastructure-core/pull/600), closed objects
+checked against the examples) is for. And per the test's own docstring, a green result does
+not prove an example would deploy.
 
 ### Consequences
 
@@ -81,7 +91,7 @@ validation is not reached, so a green result does not prove an example would dep
 
 - Onboarding gets a deployable starting point that pins its own toolchain, which neither
   `examples/` nor a generator provided.
-- A Nebari upgrade becomes a reviewable config diff, and rollback becomes pulling a tag.
+- A Nebari upgrade becomes a reviewable toolchain diff, and rollback becomes pulling a tag.
 - No reflection code to write or maintain: none of the maps, slices, pointers or tri-state
   `*bool` handling Option 1's Cons priced.
 
@@ -92,8 +102,9 @@ validation is not reached, so a green result does not prove an example would dep
 - Onboarding now depends on Nebi, pixi and an OCI registry (`quay.io/nebari`) being
   reachable. That is a materially heavier dependency chain than a `nic` subcommand, and it
   moves part of the onboarding path outside this repo.
-- `examples/` stays hand-maintained. CI catches drift only against the Go types, which does
-  not prove an example deploys.
+- `examples/` stays hand-maintained. CI catches drift in the top-level, DNS and repository
+  blocks only; stale cluster-provider keys pass until the JSON Schema check lands, and even
+  a green run does not prove an example deploys.
 
 ### Distribution belongs in its own ADR
 
@@ -183,7 +194,7 @@ Drop `examples/` entirely. The committed `schemas/<provider>.yaml` (a fully-comm
 
 ## Open questions for discussion
 
-Resolved 2026-09-01 by the decision above. The questions are kept verbatim; each answer follows it.
+Resolved 2026-09-28 by the decision above. The questions are kept verbatim; each answer follows it.
 
 1. **Required-from-omitempty signal.** Is `yaml:"<name>"` without `omitempty` an accurate-enough signal for "must be set on init"? Some required-ness is semantic (e.g. Hetzner's "exactly one node group must have `master: true`") and can't be expressed structurally. Acceptable to push those into `Validate()` and not surface them as flags?
 
@@ -234,6 +245,9 @@ be a separate `cmd/schemagen` binary emitting JSON Schema + YAML under `schemas/
   create exactly the two-sources-of-truth drift this generation effort exists to
   prevent.
 
+*(Superseded by the 2026-09 acceptance above: the paragraph below describes the state at
+the time of this update.)*
+
 **Scope of this update.** This resolves only the *generation pipeline* (how
 config and CLI reference material is produced and where it lives). It does **not**
 decide the user-facing `nic config` surface that is the main subject of this ADR:
@@ -253,7 +267,7 @@ limitation.
 
 ## Links
 
-- [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md)
+- [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md) - related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
 - [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) Epic: distribute NIC via pixi/prefix.dev and ship Nebari deployments as Nebi workspaces - the epic this decision serves
 - [#565](https://github.com/nebari-dev/nebari-infrastructure-core/issues/565) The issue asking for this decision to be recorded
 - [#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560) Publish per-provider Nebi starter workspaces - the config-bootstrap mechanism chosen here
@@ -261,5 +275,5 @@ limitation.
 - [#562](https://github.com/nebari-dev/nebari-infrastructure-core/issues/562) Version-pinned `$schema` modeline in starter configs - answers open question 4, in flight
 - [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) Distribute nic via a prefix.dev channel - the distribution decision deferred to its own ADR
 - [#556](https://github.com/nebari-dev/nebari-infrastructure-core/issues/556) Conda package name for nic
-- [#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620) Move to the shared prefix.dev github-releases channel - open
-- [#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652) Write the distribution and packaging ADR — related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
+- [#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620) Move to the shared prefix.dev github-releases channel
+- [#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652) Write the distribution and packaging ADR
