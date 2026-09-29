@@ -1,0 +1,12 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ds-nebi
+  namespace: argocd
+  annotations:
+    crossplane.io/composition-resource-name: nebi-app
+status:
+  health:
+    status: Healthy
+  sync:
+    status: Synced
