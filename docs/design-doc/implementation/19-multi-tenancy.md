@@ -1,6 +1,6 @@
 # Nebari multi-tenancy design
 
-The unit of this design is the **tenant**: a security perimeter inside a Nebari cluster, drawn as a Kubernetes namespace and owned by one Keycloak group. Not every group is a tenant; a tenant is a group that has been given a namespace. Members of the group share the tenant's pool of resources: a compute quota, the Ray clusters and jobs that run inside it, and cloud data such as an S3 prefix that only the tenant's own ServiceAccounts hold IAM permission to reach. Everything a tenant does stays inside its namespace, and everything that keeps it there is a Kubernetes or IAM control rather than code of ours. None of it is specific to Ray or to any one tool; it is a Nebari concept that any software pack can use. The cloud side is shown on AWS (EKS Pod Identity and the VPC CNI's NetworkPolicy enforcement). The pattern carries to other cluster providers, but each needs its own equivalent of those two.
+The unit of this design is the **tenant**: a security perimeter inside a Nebari cluster, drawn as a Kubernetes namespace and owned by one Keycloak group. Not every group is a tenant; a tenant is a group that has been given a namespace. Members of the group share the tenant's pool of resources: a compute quota, the Ray clusters and jobs that run inside it, and cloud data such as an S3 bucket that only the tenant's own ServiceAccounts hold IAM permission to reach. Everything a tenant does stays inside its namespace, and everything that keeps it there is a Kubernetes or IAM control rather than code of ours. None of it is specific to Ray or to any one tool; it is a Nebari concept that any software pack can use. The cloud side is shown on AWS (EKS Pod Identity and the VPC CNI's NetworkPolicy enforcement). The pattern carries to other cluster providers, but each needs its own equivalent of those two.
 
 A pack takes part in the perimeter in one of two ways.
 
@@ -58,10 +58,10 @@ flowchart TB
     end
   end
   subgraph aws["AWS data plane · EKS Pod Identity · no static credentials"]
-    roleA["IAM roles: analytics runner, analytics launcher<br/>explicit deny on every other prefix"]
-    s3A[("S3 tenants/analytics/")]
-    roleB["IAM roles: research runner, research launcher<br/>explicit deny on every other prefix"]
-    s3B[("S3 tenants/research/")]
+    roleA["IAM roles: analytics runner, analytics launcher<br/>allowed the analytics bucket only"]
+    s3A[("S3 bucket analytics<br/>own KMS key")]
+    roleB["IAM roles: research runner, research launcher<br/>allowed the research bucket only"]
+    s3B[("S3 bucket research<br/>own KMS key")]
   end
   users --> gw
   kc -->|"OIDC login · JWKS"| gw
@@ -107,7 +107,7 @@ flowchart TB
   style aws fill:none,stroke:#2f5f9e
 ```
 
-Two members traced. Alice (purple) is in `/analytics` and Bob (green) in `/research`. The same three front doors (JupyterHub, the launcher UI and the FiftyOne hostnames) take each of them to their own tenant's namespace, application copies and S3 prefix. The dashed red edges are Bob reaching for the analytics tenant's resources, refused once at each layer: the gateway, RBAC and IAM.
+Two members traced. Alice (purple) is in `/analytics` and Bob (green) in `/research`. The same three front doors (JupyterHub, the launcher UI and the FiftyOne hostnames) take each of them to their own tenant's namespace, application copies and S3 bucket. The dashed red edges are Bob reaching for the analytics tenant's resources, refused once at each layer: the gateway, RBAC and IAM.
 
 ```mermaid
 flowchart TB
@@ -130,8 +130,8 @@ flowchart TB
     nsN["tenant-research namespace<br/>RayJob → pods as SA runner<br/>RBAC · quota · admission · NetworkPolicy"]
   end
   subgraph aws["AWS · Pod Identity"]
-    s3C[("S3 tenants/analytics/<br/>roles: analytics runner · analytics launcher")]
-    s3N[("S3 tenants/research/<br/>roles: research runner · research launcher")]
+    s3C[("S3 bucket analytics<br/>roles: analytics runner · analytics launcher")]
+    s3N[("S3 bucket research<br/>roles: research runner · research launcher")]
   end
   alice --> gw
   gw --> hub
@@ -152,7 +152,7 @@ flowchart TB
   apiN -->|"reads results"| s3N
   fo -.-x|"Bob: 403 at gateway"| foC
   hub -.-x|"Bob: RBAC 403 in tenant-analytics"| nsC
-  nsN -.-x|"IAM explicit deny"| s3C
+  nsN -.-x|"IAM: no allow, no key"| s3C
   linkStyle 1,2,3 stroke:#7a7f85,stroke-width:1.5px
   linkStyle 0,4,5,6,7,8,9 stroke:#6f42c1,stroke-width:2.5px
   linkStyle 10,11,12,13,14,15,16 stroke:#2e7d32,stroke-width:2.5px
@@ -215,9 +215,11 @@ Four independent Kubernetes enforcement points, rendered per tenant by the tenan
 | ResourceQuota | `tenant-quota` | `requests.cpu`, `requests.memory`, `pods`, `requests.nvidia.com/gpu`, and concurrency through `count/rayjobs.ray.io` and `count/jobs.batch`. Per namespace, so group quota falls out of the namespace choice |
 | Admission | ValidatingAdmissionPolicy `tenant-workloads`: one cluster-scoped policy, bound per namespace with a `paramRef` to `tenants-system/tenant-params-<group>` | Pod shape: image prefix allow-list, worker `maxReplicas` cap, mandatory `shutdownAfterJobFinishes` and a TTL ceiling, `activeDeadlineSeconds` on Jobs, no `hostPath`/`hostNetwork`/`privileged`, `serviceAccountName` pinned to `runner`, toleration keys allow-listed, per-container GPU ceiling, a mandatory `submitterPodTemplate` in `K8sJobMode` so the submitter cannot run as `default`, and no worker template may set `automountServiceAccountToken: true`. Autoscaling is admitted only on the conditions in [The KubeRay operator is one layer removed](#the-kuberay-operator-is-one-layer-removed) |
 | NetworkPolicy | `default-deny`, `allow-intra-namespace`, `allow-hub-ingress`, `allow-operator-ingress`, DNS, external 443, API-server and Pod Identity egress | Nothing reaches the namespace except hub pods carrying the tenant label on 8265 and 10001, and the KubeRay operator's namespace on 8265. Nothing leaves except DNS, TLS to addresses outside the VPC and the listed endpoint ENIs, the API server, and the Pod Identity agent |
-| Pod Identity | ServiceAccount `runner` (no token mounted, bound to no Role) mapped to `<cluster>-tenant-<group>-runner` | Which S3 prefix the job may write. The role's policy carries an explicit deny on every other tenant's prefix |
+| Pod Identity | ServiceAccount `runner` (no token mounted, bound to no Role) mapped to `<cluster>-tenant-<group>-runner` | Which S3 bucket the job may write. The role is allowed its own tenant's bucket and KMS key and nothing else, so every other tenant's data is refused by IAM's implicit deny |
 
 A tenant cannot loosen any of this. The admission parameters, one ConfigMap per tenant, live in `tenants-system`, where no tenant identity holds any verb. The location matters because `tenant-member` can create and delete ConfigMaps in its own namespace, for the run payload. If the parameters lived there too, a member could delete them and create a replacement carrying their own limits. ArgoCD's selfHeal would restore the original, but that is a race the member can re-run, not a control. Every binding carries `parameterNotFoundAction: Deny`, so a missing ConfigMap stops admission rather than opening it.
+
+The data boundary is a bucket per tenant, not a prefix in a shared bucket. A tenant role is allowed its own bucket and nothing else, so isolation rests on IAM's implicit deny, and a mistake in the allow, such as a resource ARN with the wrong partition, locks the tenant out of its own data instead of letting it into another tenant's. A prefix split depends on an explicit deny covering every other tenant's prefix, and a deny that matches nothing fails open with nothing on the cluster looking wrong. Each bucket is encrypted with the tenant's own KMS customer-managed key, whose key policy grants use only to the tenant's roles and a named list of administrative identities: the deploying principal and a break-glass role. The bucket policy denies every other principal. So a tenant role that somehow reached another tenant's bucket still could not decrypt its objects. The bucket is also where per-tenant versioning, lifecycle, retention, cost allocation and access logging attach. Prefixes stay the tool inside a tenant, for per-user paths and per-run results. The administrative identities can read every tenant's data, and that list is the honest edge of the boundary.
 
 ### The launcher API creates nothing as itself
 
@@ -291,7 +293,7 @@ Cleanup is one layer removed too, so quota comes back in two stages. `ttlSeconds
 
 ### Measured on live EKS, 16 and 17 September 2026
 
-Seven RayJobs ran through `tenant-analytics` on the launcher's impersonation path, and the notebook path ran on `tenant-research` from a pod built to match a spawned notebook (JupyterHub itself was not driven). The data boundary holds on the RayJob shape: a head pod assumes its tenant's own role through Pod Identity with no credentials anywhere in the pod, writes `tenants/analytics/results/`, and is refused `tenants/research/` with an explicit deny in an identity-based policy. For five admission rules, the production manifest with one field changed is refused and the unchanged manifest is admitted. A user in `/research` gets 403 in `tenant-analytics` and is allowed in `tenant-research`, and the refusal names the caller.
+Seven RayJobs ran through `tenant-analytics` on the launcher's impersonation path, and the notebook path ran on `tenant-research` from a pod built to match a spawned notebook (JupyterHub itself was not driven). The data boundary holds on the RayJob shape: a head pod assumes its tenant's own role through Pod Identity with no credentials anywhere in the pod, writes `tenants/analytics/results/`, and is refused `tenants/research/` with an explicit deny in an identity-based policy. That run used per-tenant prefixes in one shared bucket; the bucket per tenant described above keeps the same Pod Identity path and replaces the explicit deny with IAM's implicit one. For five admission rules, the production manifest with one field changed is refused and the unchanged manifest is admitted. A user in `/research` gets 403 in `tenant-analytics` and is allowed in `tenant-research`, and the refusal names the caller.
 
 One image trap: stock `rayproject/ray` images ship botocore older than 1.32, which cannot use Pod Identity at all, and the failure looks like broken IAM. Pin `botocore>=1.32` in every driver image or `runtime_env`.
 
@@ -332,13 +334,13 @@ A gateway policy governs only traffic that arrives through the gateway. Any pod 
 
 The launcher is the front door for users who want to run compute without a notebook. Its UI is one shared deployment behind the gateway, like JupyterHub. Its API is the part that matters for tenancy: it acts on behalf of a human, so it has to place work only where that human is allowed, and it reads results back from S3 with credentials of its own.
 
-The API runs one Deployment per tenant, for a different reason than FiftyOne. It has an identity model: it verifies the bearer token, derives the tenant from the caller's groups, refuses a mismatch before creating anything, and impersonates so that RBAC decides placement. What one pod cannot do is hold two AWS identities. The API reads results from the tenant's S3 prefix as **itself**, through Pod Identity, and Pod Identity gives one IAM role per ServiceAccount while a pod has one ServiceAccount. So each tenant gets a `launcher/launcher-api-<tenant>` ServiceAccount, a `<cluster>-tenant-<tenant>-launcher` IAM role and an API Deployment.
+The API runs one Deployment per tenant, for a different reason than FiftyOne. It has an identity model: it verifies the bearer token, derives the tenant from the caller's groups, refuses a mismatch before creating anything, and impersonates so that RBAC decides placement. What one pod cannot do is hold two AWS identities. The API reads results from the tenant's S3 bucket as **itself**, through Pod Identity, and Pod Identity gives one IAM role per ServiceAccount while a pod has one ServiceAccount. So each tenant gets a `launcher/launcher-api-<tenant>` ServiceAccount, a `<cluster>-tenant-<tenant>-launcher` IAM role and an API Deployment.
 
 The copies carry a credential boundary, and the Kubernetes grants follow it. Each copy's ServiceAccount is the subject of its own tenant's impersonation ClusterRoleBinding and `launcher-api-read` binding and of nothing else, so a copy's Kubernetes blast radius and its IAM blast radius are the same tenant.
 
 The result manifest the API reads is written by the tenant's own job, so its parser is an input surface the tenant controls. That is why the API's Kubernetes rights are bounded to one tenant rather than merely audited: a bug in that parser reaches one tenant, not the cluster.
 
-**Open: routing callers to their own copy.** The shared launcher UI proxies to one fixed API Service, so a user from any other tenant reaches an API copy bound to a tenant that is not theirs, and their reads are refused by RBAC and by IAM. That is the right way to fail, and a broken product. Two fixes close it, and they differ in what each tenant gets a copy of. Group-aware routing at the gateway keeps the per-tenant API copies and sends each caller to their own. A per-tenant credential broker keeps one shared API instead, and gives each tenant only a small pod that holds its Pod Identity and reads its prefix. Where the API carries a database or a programmatic surface of its own, the broker is the better trade, because copying the API duplicates all of that to move one IAM role.
+**Open: routing callers to their own copy.** The shared launcher UI proxies to one fixed API Service, so a user from any other tenant reaches an API copy bound to a tenant that is not theirs, and their reads are refused by RBAC and by IAM. That is the right way to fail, and a broken product. Two fixes close it, and they differ in what each tenant gets a copy of. Group-aware routing at the gateway keeps the per-tenant API copies and sends each caller to their own. A per-tenant credential broker keeps one shared API instead, and gives each tenant only a small pod that holds its Pod Identity and reads its bucket. Where the API carries a database or a programmatic surface of its own, the broker is the better trade, because copying the API duplicates all of that to move one IAM role.
 
 ## Deciding for the next pack
 
@@ -356,18 +358,18 @@ Ask these in order and stop at the first yes.
 Every copied pack carries what the FiftyOne copies carry:
 
 - `nebariapp.yaml` with `enforceAtGateway: false` and `groups: []`;
-- `securitypolicy.yaml` with `forwardAccessToken`, a `jwt` provider carrying `audiences`, `defaultAction: Deny`, a path-form-only group match, and the `Authorization` header stripped before the upstream;
+- `securitypolicy.yaml` with `forwardAccessToken`, a `jwt` provider carrying `audiences`, `defaultAction: Deny`, one path-form-only `Allow` rule per allowed group, and the `Authorization` header stripped before the upstream. The allowed groups are a list: the tenant's own group always, plus any named platform groups a deployment adds, such as an operators group;
 - `networkpolicy.yaml` admitting `envoy-gateway-system` only;
 - storage inside the namespace, with its own credentials;
 - a `tenant.nebari.dev/group` label;
-- the hostname `<app>.<tenant>.<domain>`;
+- the hostname `<app>.<tenant>.<domain>`, or `<tenant>.<domain>` for a tenant with a single front end. Both sit under the wildcard DNS record and take a per-host certificate;
 - a README that says what the boundary is and is not.
 
 ## Limits
 
 - **No per-user boundary inside a tenant.** Same group means shared quota, and on Ray any member can list and delete another member's RayJob and reach their head on 8265 and 10001 while it is up (`pods/exec` is denied, so nobody shells in). In FiftyOne every member sees, edits and deletes the same datasets; per-user FiftyOne is FiftyOne Enterprise. Audit records on the notebook path name the ServiceAccount, not the person: launcher runs are attributable per human through the impersonation extra, notebook runs are not.
 - **Notebook-path revocation lags.** The launcher path reads the group from the caller's token on every request, so removing someone from a tenant group takes effect at once. The notebook path chooses the ServiceAccount at spawn, so a removed member keeps `tenant-<group>` rights until their pod is culled. The culler's max age is the revocation bound for notebook users and is set with that in mind.
-- **FiftyOne's data boundary is the volume, not an IAM refusal.** Two copies cannot see each other's data because they are different pods with different MongoDBs and different PVCs, not because anything denied them. Media on per-tenant S3 prefixes through Pod Identity is the follow-on that gives it the same boundary the RayJob path has.
+- **FiftyOne's data boundary is the volume, not an IAM refusal.** Two copies cannot see each other's data because they are different pods with different MongoDBs and different PVCs, not because anything denied them. Media in the tenant's own S3 bucket through Pod Identity is the follow-on that gives it the same boundary the RayJob path has.
 - **Copies scale with tenant count, not usage.** Each tenant costs a namespace, a Deployment, a MongoDB, a PVC and a Keycloak client, plus an API Deployment for the launcher and whatever that API keeps beside it, a database included. That is fine for a handful of teams and wrong if a tenant is ever a project, where the count grows with every project. That case is what the credential broker in [question 3](#deciding-for-the-next-pack) is for: only the credential has to be per tenant, not the application.
 - **A compromised launcher API pod reaches one tenant.** It can act as any member of its own tenant: the API server takes the API's word for the group, and inside the tenant that word is accepted. It cannot name another tenant's group, another username or a ServiceAccount, because each grant is fenced by name to its own tenant, and the human it claims to act for is only an audit annotation. Impersonation stays. The alternative, EKS trusting Keycloak as an OIDC identity provider so the API can pass the user's own token, needs a publicly trusted certificate on the issuer, which production Keycloak will not have.
 - **Autoscaling puts an API credential in the same pod as tenant code.** Where a controller injects its own container beside the workload, what keeps tenant code away from that container's credential is a mount the workload's container does not receive, and a scheduler (Ray's, for KubeRay) given no reason to place tenant work there. Neither is a kernel boundary. The design accepts this because the grant is namespace-scoped over objects the tenant can already create and delete, so the worst case is a tenant disturbing its own workloads rather than reaching another tenant, `tenants-system`, or an AWS identity that was not already theirs. A tenant unwilling to accept it runs without autoscaling and pays for a fixed-size cluster.
@@ -400,7 +402,7 @@ A tenant today is one line in a values file. The tenant chart renders it into th
 Each line is something to show on the cluster, not something to read in a file.
 
 1. `aws eks describe-addon --addon-name vpc-cni` shows `enableNetworkPolicy: true`, and a pod outside the tenant namespace times out against a tenant head's 8265 and against a FiftyOne copy's 5151.
-2. With enforcement on, a RayJob head still assumes its tenant role through Pod Identity and writes its own prefix. That shows the Pod Identity egress (`169.254.170.23/32:80`), the `https.except` VPC CIDR and the `https.also` endpoint list match the live VPC.
+2. With enforcement on, a RayJob head still assumes its tenant role through Pod Identity and writes its own tenant bucket, and is refused the other tenant's bucket. That shows the Pod Identity egress (`169.254.170.23/32:80`), the `https.except` VPC CIDR and the `https.also` endpoint list match the live VPC.
 3. `kubectl get clusterrole tenant-impersonator-<tenant> -o yaml` shows `users` fenced to `tenant:<tenant>:api`, `groups` fenced to `/<tenant>`, `userextras/caller` and nothing else, and its binding's only subject is `launcher/launcher-api-<tenant>`. No ClusterRole grants `impersonate` on `users` without `resourceNames`.
 4. A request to the launcher API with no bearer token is 401, and a RayJob created through it carries `impersonatedUser.extra.caller` in the audit log.
 5. `kubectl get validatingadmissionpolicybinding tenant-workloads-<tenant> -o yaml` shows `paramRef.namespace: tenants-system`, and `tenant-member` holds no verb in that namespace.
