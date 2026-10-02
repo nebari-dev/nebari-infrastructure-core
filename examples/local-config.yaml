@@ -8,8 +8,20 @@ cluster:
     # Optional kind config. Can be omitted entirely to use defaults.
     # kind:
     #   node_image: kindest/node:v1.35.0    # default: bundled kind's default image
+    #   # Worker nodes. NIC always creates one control-plane node; node_groups
+    #   # adds workers only (default: none, a single node that runs everything).
+    #   # Every worker is labeled nebari.dev/node-group: <group name>. Creation only.
+    #   node_groups:
+    #     general:
+    #       count: 1
+    #     infra:
+    #       count: 1
+    #       image: kindest/node:v1.35.0     # optional, overrides node_image
+    #       labels:                         # optional
+    #         dedicated: infra
+    #       extra_mounts: []                # optional, this group's nodes only
     #   extra_mounts:
-    #     # Any additional host directory you want available inside the node
+    #     # Any additional host directory you want available inside every node
     #     - host_path: /absolute/host/path
     #       container_path: /absolute/node/path
     #       read_only: true

@@ -110,7 +110,7 @@ The deployment tests depend on setup that lives in repo settings and sibling rep
 - `nic deploy -f examples/local-config.yaml` - end-to-end deploy onto a local Kind cluster. The local provider creates the Kind cluster (reusing it if present), then bootstraps ArgoCD and the foundational apps.
 - `nic destroy -f examples/local-config.yaml` - delete the local Kind cluster
 
-The local provider mounts the `file://` GitOps directory into the Kind node so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/providers/cluster/local`.
+The local provider mounts the `file://` GitOps directory into every Kind node so the in-cluster ArgoCD can sync from a local filesystem. See `pkg/providers/cluster/local`.
 
 ## 12.6 What "Test Cases" Look Like
 

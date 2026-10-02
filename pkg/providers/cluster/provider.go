@@ -81,13 +81,16 @@ type InfraSettings struct {
 	StorageClass string
 
 	// GatewayHostAddress is the address the platform is reached at when the
-	// gateway is published on host ports of the cluster node instead of a
+	// gateway is published on host ports of a cluster node instead of a
 	// LoadBalancer service. Non-empty means host-port publishing: the
 	// gateway's Envoy service is pinned to the fixed NodePorts above and the
 	// provider maps them to host ports on this address at cluster creation
-	// (kind extraPortMappings). Empty means the gateway gets a LoadBalancer
-	// service. Only the local provider sets this, to 127.0.0.1: a development
-	// cluster should not be exposed to the LAN, and loopback needs no DNS.
+	// (kind extraPortMappings). The ports may be published on only some of the
+	// nodes, so the Envoy service also forwards across nodes
+	// (externalTrafficPolicy: Cluster), which does not preserve the client
+	// source IP. Empty means the gateway gets a LoadBalancer service. Only the
+	// local provider sets this, to 127.0.0.1: a development cluster should not
+	// be exposed to the LAN, and loopback needs no DNS.
 	GatewayHostAddress string
 
 	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.

@@ -17,7 +17,7 @@ make build                                   # build the nic binary
 `nic deploy` with a `cluster.local` config:
 
 1. Creates a Kind cluster named after `project_name` (`my-nebari-local` in the example config), reusing it if one already exists.
-2. Mounts the default GitOps directory into the node (see below).
+2. Mounts the default GitOps directory into every node (see below).
 3. Publishes the gateway on host ports 80/443 of `127.0.0.1` (see Networking below).
 4. Bootstraps ArgoCD and the foundational apps (cert-manager, Envoy Gateway, Keycloak, etc.).
 
@@ -33,7 +33,7 @@ NIC reads `examples/local-config.yaml` and handles three scenarios automatically
 | `repository.local.path: /path/to/repo` | Uses the matching `cluster.local.kind.extra_mounts` entry supplied by the user |
 | `repository.existing.url: "git@github.com:..."` | No mount - ArgoCD pulls from the remote repo directly |
 
-For local `file://` repos, the path is mounted into both the Kind node and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
+For local `file://` repos, the path is mounted into both the Kind nodes and the ArgoCD repo-server pod. ArgoCD reads commits and refs from `.git` and creates its own checkout; it does not consume the source working-tree files directly.
 
 When initializing or committing to any local `file://` repo, NIC makes the repository root and Git-serving data under `.git` group/other-readable and traversable so the non-root ArgoCD repo-server can read committed content. This applies whether the repo is auto-generated or user-supplied. NIC preserves existing and special permission bits, and does not touch working-tree files, hooks, reflogs, the Git index, or unrelated `extra_mounts`.
 
@@ -88,6 +88,36 @@ Public wildcard loopback domains sidestep both the editing and the wildcard limi
 
 One caveat follows from using host ports: ports 80 and 443 must be free on your machine, and only one local cluster can own them at a time. Set `cluster.local.http_port` and `cluster.local.https_port` to run a second cluster, to avoid a conflict with services already using 80/443, or on rootless Docker/Podman, which cannot bind ports below 1024. Kind port mappings are fixed at cluster creation, so changing the ports requires recreating the cluster (`nic destroy`, then `nic deploy`). NIC records the ports a cluster was created with and `nic deploy` fails when the config no longer matches them, rather than deploying a gateway the host does not publish. The record is written at cluster creation, so a cluster without one (created by an earlier NIC version, or the `nic-local-cluster` ConfigMap was deleted) adopts the configured ports on its first deploy, with a warning: those values are unverified, and if they are wrong the reliable signal is `nic outputs` failing to reach the gateway.
 
+## Multi-Node Clusters
+
+By default the Kind cluster is a single node that runs everything. Add `cluster.local.kind.node_groups` to add worker nodes, for example to exercise scheduling, node selectors, or anti-affinity locally:
+
+```yaml
+cluster:
+  local:
+    kind:
+      node_groups:
+        general:
+          count: 1
+        infra:
+          count: 1
+          labels:
+            dedicated: infra
+```
+
+NIC always creates exactly one control-plane node, and it is not configurable: `node_groups` defines worker nodes only. Each group is a set of identical workers:
+
+- `count` (required, at least 1) is the number of workers in the group.
+- `image` overrides `node_image` for the group's nodes. Kind allows nodes of different Kubernetes versions within the usual version skew limits.
+- `labels` are added to each of the group's nodes. Labels in the `kubernetes.io` and `k8s.io` namespaces are rejected unless the kubelet may set them itself (for example the `node.kubernetes.io/` prefix), since the kubelet refuses to start with any other.
+- `extra_mounts` are mounted into the group's nodes only, on top of the shared `extra_mounts`.
+
+Every worker is also labeled `nebari.dev/node-group: <group name>`, so a workload can target a group with a `nodeSelector` without extra labels. Kind has no native setting for taints, so node groups cannot carry them.
+
+With any node group present, Kind keeps the control-plane node tainted, so workloads schedule onto the workers and only system pods stay on the control plane. The control plane uses `node_image` and the shared `extra_mounts`, publishes the gateway's host ports, and never gets a group's labels or mounts. Kind's own readiness wait covers only the control plane, so `nic deploy` also waits (up to 90 seconds) for every worker to report Ready before it installs anything. Every node gets the GitOps repository mount and the shared `extra_mounts`, so ArgoCD's repo-server can read a `file://` repository from any node. Only the control plane publishes the host ports: the gateway's Envoy service uses `externalTrafficPolicy: Cluster`, so traffic arriving at the control plane is forwarded to Envoy on whichever node it runs.
+
+Like the ports, the node list is fixed at cluster creation. Changing `node_groups` on an existing cluster requires recreating it (`nic destroy`, then `nic deploy`). `nic deploy` warns when the total worker count no longer matches the cluster, but continues, since the cluster still works at its original size. Changes to a group's labels, image, or mounts are not detected, and also only take effect on a recreate. A GitOps repository bootstrapped by an earlier NIC version keeps its old gateway settings across the recreate, so run `nic deploy --regen-apps` once after recreating it. Without that, Envoy lands on a worker with the old `externalTrafficPolicy: Local` and the gateway answers nothing.
+
 ## Troubleshooting
 
 **Check pod status:**
@@ -98,4 +128,10 @@ kubectl get pods -A
 **Check ArgoCD application sync:**
 ```bash
 kubectl get applications -n argocd
+```
+
+**`nic deploy` fails with "only N of M nodes Ready":** the error names the nodes that are not Ready, or carries the last node list error when the API server could not be reached. A worker left NotReady on a reused cluster (for example after a Docker restart) fails every deploy until it recovers. Check it with `kubectl describe node <name>`, restart its container with `docker restart <name>`, or recreate the cluster with `nic destroy` and `nic deploy`. On Linux, multi-node clusters often exhaust the inotify limits, which leaves workers NotReady or pods crash-looping with "too many open files". Raise the limits as the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files) describe:
+```bash
+sudo sysctl fs.inotify.max_user_watches=524288
+sudo sysctl fs.inotify.max_user_instances=512
 ```
