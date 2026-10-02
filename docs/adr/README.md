@@ -14,12 +14,13 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-0002](0002-longhorn-distributed-block-storage-for-aws.md) | Longhorn Distributed Block Storage for AWS | Proposed | 2026-02-13 |
 | [ADR-0003](0003-software-pack-codegen.md) | Software Pack Codegen via ArgoCD Application Generation | Proposed | 2026-03-12 |
 | [ADR-0004](0004-out-of-tree-provider-plugins.md) | Out-of-Tree Provider Plugin Architecture | Proposed | 2026-04-15 |
-| [ADR-0005](0005-nic-config-cli-surface.md) | nic config CLI surface | Proposed | 2026-06-03 |
+| [ADR-0005](0005-nic-config-cli-surface.md) | nic config CLI surface | Accepted | 2026-06-03 |
 | [ADR-0006](0006-conditional-foundational-software-helm.md) | Conditional Foundational Software via Provider-Driven Helm Installs | Proposed | 2026-06-03 |
 | [ADR-0007](0007-cloudnativepg-managed-databases.md) | CloudNativePG as Foundational Database Infrastructure | Proposed | 2026-05-12 |
 | [ADR-0008](0008-otel-collector-software-pack-override-point.md) | OpenTelemetry Collector Software Pack Override Point | Accepted | 2026-06-02 |
 | [ADR-0009](0009-declarative-keycloak-configuration.md) | Declarative Keycloak Configuration via keycloak-config-cli | Accepted | 2026-07-15 |
 | [ADR-0010](0010-high-security-mode.md) | High-Security Mode (Opt-In Whitelist-Everything Hardening) | Proposed | 2026-07-15 |
+| [ADR-0011](0011-gateway-listener-ownership.md) | Per-app Gateway listener ownership | Proposed | 2026-07-17 |
 | [ADR-0012](0012-crossplane-pack-infrastructure.md) | Crossplane Capability APIs for Software Pack Cloud Infrastructure | Rejected | 2026-08-26 |
 | [ADR-0014](0014-helm-valuefiles-overlay-seam.md) | Helm valueFiles Overlay Seam for Foundational Apps | Accepted | 2026-07-22 |
 | [ADR-0015](0015-repository-provider-abstraction.md) | Repository Provider Abstraction for GitOps Bootstrap | Accepted | 2026-07-10 |
