@@ -1,7 +1,9 @@
 [workspace]
 name = "nebari-__PROVIDER__"
 channels = ["conda-forge", "https://prefix.dev/github-releases"]
-platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
+# .github/workflows/publish-starters.yml reads this line to probe the channel
+# before publishing, so keep it a single-line array inside [workspace].
+platforms =["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
 version = "0.1.0"
 
 [dependencies]

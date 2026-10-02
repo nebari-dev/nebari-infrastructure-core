@@ -195,15 +195,28 @@ jobs:
         id: channel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # How long before "not on the channel yet" is worth a warning.
-          # octoconda only spot-checks packages that already have its maximum
-          # number of versions, so there is no upper bound on the delay and
-          # half a day is ordinary. This never fails the run: a warning after a
-          # day is a prompt to look, not proof that anything is broken.
+          # How long before "not on the channel yet" is worth a warning, and
+          # how long before it fails the run. octoconda only spot-checks
+          # packages that already have its maximum number of versions, so there
+          # is no upper bound on the delay and half a day is ordinary. With
+          # about 10 of 66 fully imported packages picked per run every two
+          # hours, a release is missed for 24h roughly 14% of the time, which
+          # is a prompt to look, and for 72h roughly 0.3% of the time, which is
+          # worth a red run: a scheduled-run warning reaches one person, and a
+          # delisting upstream would otherwise never fail anything.
           WARN_AFTER_HOURS: 24
+          FAIL_AFTER_HOURS: 72
+          # The newest release cut before cmd/starters existed. Its starters on
+          # quay were built from a later tree, so a missing template at or
+          # below it is expected. Above it, a missing template means the file
+          # moved, and silently skipping would mean that release's starters
+          # never publish.
+          LAST_RELEASE_WITHOUT_TEMPLATE: 0.14.0
         run: |
           set -euo pipefail
           late=()
+          stale=()
+          failed=()
           pending='[]'
           for tag in $(jq -r '[.[].tag] | unique_by(ltrimstr("v") | split(".") | map(tonumber)) | .[]' "$RUNNER_TEMP/missing.json"); do
             version="${tag#v}"
@@ -213,19 +226,36 @@ jobs:
             if ! template="$(gh api -H 'Accept: application/vnd.github.raw' \
                                "repos/${GITHUB_REPOSITORY}/contents/starters/templates/pixi.toml.tmpl?ref=${tag}" \
                                2>"$RUNNER_TEMP/gh.err")"; then
-              # A tag cut before cmd/starters existed (v0.14.0 is one: its
-              # starters were built from a later tree) cannot be published
-              # from its own checkout, so it is reported, not attempted.
               if grep -q 'HTTP 404' "$RUNNER_TEMP/gh.err"; then
-                echo "::warning::$tag predates the starter templates, so its starters cannot be built from the tag; publish them by hand if they are missing"
+                # A tag cut before cmd/starters existed (v0.14.0 is one: its
+                # starters were built from a later tree) cannot be published
+                # from its own checkout, so it is reported, not attempted.
+                if jq -en --arg v "$version" --arg last "$LAST_RELEASE_WITHOUT_TEMPLATE" '
+                     def v: split(".") | map(tonumber);
+                     ($v | v) <= ($last | v)' >/dev/null; then
+                  echo "::warning::$tag predates the starter templates, so its starters cannot be built from the tag; publish them by hand if they are missing"
+                else
+                  # Failed at the end, after pending is written, so the other
+                  # releases still publish.
+                  failed+=("$tag has no starters/templates/pixi.toml.tmpl; if the template moved, update this workflow")
+                fi
                 continue
               fi
               echo "::error::could not read the starter template at $tag: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
               exit 1
             fi
-            platforms="$(awk '/^platforms[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }' <<<"$template")"
-            if [[ -z "$platforms" ]]; then
-              echo "::error::no workspace platforms line in the starter template at $tag"
+            # Only the [workspace] table's line: [feature.tools] carries its own,
+            # narrower platforms list, and which comes first is not something
+            # the template promises. The value must be a closed single-line
+            # array, because it is pasted verbatim into the probe workspace
+            # below; a multi-line one would print just `[` and make the
+            # release look unresolvable forever.
+            platforms="$(awk '
+                /^[[:space:]]*\[/ { in_ws = ($0 ~ /^[[:space:]]*\[workspace\][[:space:]]*(#.*)?$/); next }
+                in_ws && /^[[:space:]]*platforms[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]*(#.*)?$/, ""); print; exit }
+              ' <<<"$template")"
+            if [[ ! "$platforms" =~ ^\[[^][]*\]$ ]]; then
+              echo "::error::the [workspace] platforms in the starter template at $tag is not a single-line array: '${platforms}'"
               exit 1
             fi
             probe="$RUNNER_TEMP/probe-$version"
@@ -260,7 +290,11 @@ jobs:
               # Kept in the log: this is what tells "octoconda has not got to
               # us yet" apart from "the channel URL is wrong".
               cat "$probe/lock.err" >&2 || true
-              late+=("$tag (${age_hours}h)")
+              if (( age_hours >= FAIL_AFTER_HOURS )); then
+                stale+=("$tag (${age_hours}h)")
+              else
+                late+=("$tag (${age_hours}h)")
+              fi
             else
               echo "::notice::$tag is not on ${CHANNEL} yet (${age_hours}h since release); a later run will retry"
             fi
@@ -270,6 +304,18 @@ jobs:
           echo "pending=$pending" >> "$GITHUB_OUTPUT"
           if (( ${#late[@]} > 0 )); then
             echo "::warning::still not on ${CHANNEL} ${WARN_AFTER_HOURS}h+ after release: ${late[*]}. Usually octoconda has simply not reached us yet; if it persists, check that octoconda still lists this repository (see docs/operations/packaging.md). A later run will retry."
+          fi
+          # Everything below fails the step, but only now that pending is
+          # written: publish runs on !cancelled(), so the releases that are
+          # ready still publish in this run.
+          if (( ${#stale[@]} > 0 )); then
+            echo "::error::still not on ${CHANNEL} ${FAIL_AFTER_HOURS}h+ after release: ${stale[*]}. That is unlikely to be octoconda's spot-check delay alone; check that octoconda still lists this repository and has run since (see docs/operations/packaging.md)."
+          fi
+          for msg in "${failed[@]}"; do
+            echo "::error::$msg"
+          done
+          if (( ${#stale[@]} + ${#failed[@]} > 0 )); then
+            exit 1
           fi
 
   publish:

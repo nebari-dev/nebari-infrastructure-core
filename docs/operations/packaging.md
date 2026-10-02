@@ -141,7 +141,7 @@ is not `vX.Y.Z` or `vX.Y.Z-rc.N` before the release starts.
    [prefix-dev/octoconda actions](https://github.com/prefix-dev/octoconda/actions);
    `nebari-infrastructure-core` falls in the `mk-nt` shard. Because fully imported
    repositories are only spot-checked, several runs going by without us is
-   normal; a day or more is worth a look, not yet a fault.
+   normal; a day or more is worth a look, and three days fails `check`.
 3. Is the repository still listed in octoconda's `config.toml`? Removal upstream
    would be silent from here.
 
@@ -163,8 +163,8 @@ until the package is on the channel. Because that is now asynchronous, starter
 publishing is no longer a job in the release run; it lives in
 `.github/workflows/publish-starters.yml`, which `release.yml` fires once and an
 hourly cron re-fires until the channel catches up. Starters trail the channel by
-at most one cron interval, so they inherit its delay: often many hours after the
-tag, with no upper bound.
+up to one cron interval plus however long the `quay-publish` approval waits, so
+they inherit its delay: often many hours after the tag, with no upper bound.
 
 The workflow is two jobs. `check` holds no secrets and needs no approval: for each
 recent stable release, it asks quay which providers are missing that tag, then asks
@@ -179,7 +179,8 @@ tag, and re-checks quay before each push. So:
 - a provider that failed to publish is retried on a later tick, without touching
   the ones that succeeded;
 - releases publish oldest first, and a failure stops the newer ones in that run,
-  so a failed release is retried rather than left behind a newer one;
+  so a failed release is retried rather than left behind a newer one (see below
+  for when an older release keeps failing);
 - a release missed while a newer one was cut is still picked up, as long as it is
   still among the last five stable releases;
 - nothing already on quay is republished, including by two runs that overlap.
@@ -188,8 +189,9 @@ Three cases are reported instead of healed:
 
 - **A release still not on the channel a day after it was published** is a
   warning in `check`, repeated on each run until it lands. Given octoconda's
-  spot-checking that is usually just the delay; if it persists, work through the
-  list above.
+  spot-checking that is usually just the delay. **After three days it fails
+  `check`**, which is unlikely to be the delay alone; work through the list
+  above. Releases that are ready still publish in that run.
 - **A missing starter older than one already on quay** is a warning, not a
   publish. `nebi publish` also moves `:latest`, so backfilling it automatically
   would point `:latest` at an older release. Publish it by hand and re-tag
@@ -197,15 +199,25 @@ Three cases are reported instead of healed:
 - **A missing starter for a release that predates the starter templates** is a
   warning. v0.14.0 is one: `cmd/starters` landed after it was tagged, and its
   starters on quay were built from a later tree, so they cannot be rebuilt from
-  the tag.
+  the tag. Any release after v0.14.0 that has no template fails `check`
+  instead: the template has moved, and the workflow needs updating to match.
 
 A starter that published but then failed the round-trip check stays on quay, and
 later runs see it as present. The red run is the signal: delete that tag on quay
 and dispatch the workflow again.
 
+An older release whose `publish` keeps failing (a `make build` failure at that
+tag, a provider mismatch, `nebi publish` itself) cancels the newer releases on
+every approved run, because `fail-fast` stops them behind it. To get out of that,
+dispatch the workflow with `tag=<newer release>`, which leaves the failing one out
+of the run, so the newer release publishes. Then publish the older release by hand
+and re-tag `:latest` back to the newer one. From then on `check` only warns about
+the older release, since a newer tag is already on quay.
+
 **Package on the channel but no starter on quay** means that workflow did not run
 or did not pass. Check its `quay-publish` approval first, then its most recent run.
-A release not on the channel yet is a notice, or a warning after a day; a backfill
+A release not on the channel yet is a notice, a warning after a day, and an error
+after three days; a backfill
 it refuses is a warning; a failed publish is an error. Tags already on quay, and
 releases older than the last five stable ones, are skipped without a message.
 
