@@ -69,18 +69,18 @@ does not already cover:
 - **It pins the toolchain with the config.** The workspace's `pixi.lock` fixes the exact
   `nic` build, `nic` constrains OpenTofu to the window in
   [ADR-0016](0016-opentofu-runtime-version-policy.md), which the workspace resolves and
-  locks, and the embedded `.terraform.lock.hcl` pins the providers. One lockfile therefore
-  pins the whole infrastructure toolchain.
+  locks, and the embedded `.terraform.lock.hcl` pins the providers. For in-tree providers that
+  use OpenTofu, one lockfile therefore pins the whole infrastructure toolchain.
 
 Options 1, 2 and 4 are rejected on the Cons already recorded below, with one thing that has
 changed since they were written: `examples/` is now the source `cmd/starters` renders the
 starter workspaces from, and CI parses and validates every file in it as-is
 (`pkg/nic.TestExampleConfigsValidate`), which also rejects unreplaced `CHANGEME`
 placeholders. That catches part of the drift Option 4 existed to solve, not all of it. The
-test checks the top-level config and the DNS and repository provider blocks, but it never
-runs the cluster provider's validation, and YAML decoding does not reject unknown keys, so a
-renamed or removed cluster-provider field can leave a stale key in every example with CI
-still green. Closing that gap is what the generated JSON Schema
+test validates values in the top-level config and the DNS and repository provider blocks,
+but it never runs the cluster provider's own validation, and YAML decoding does not reject
+unknown keys in any block, so a renamed or removed field can leave a stale key in every
+example with CI still green. Closing that gap is what the generated JSON Schema
 ([#600](https://github.com/nebari-dev/nebari-infrastructure-core/pull/600), closed objects
 checked against the examples) is for. And per the test's own docstring, a green result does
 not prove an example would deploy.
@@ -102,9 +102,10 @@ not prove an example would deploy.
 - Onboarding now depends on Nebi, pixi and an OCI registry (`quay.io/nebari`) being
   reachable. That is a materially heavier dependency chain than a `nic` subcommand, and it
   moves part of the onboarding path outside this repo.
-- `examples/` stays hand-maintained. CI catches drift in the top-level, DNS and repository
-  blocks only; stale cluster-provider keys pass until the JSON Schema check lands, and even
-  a green run does not prove an example deploys.
+- `examples/` stays hand-maintained. CI checks values in the top-level, DNS and repository
+  blocks, but in the cluster block only the provider name, placeholders and InfraSettings
+  cross-checks. Stale keys pass in every block until the JSON Schema check lands, and even a
+  green run does not prove an example deploys.
 
 ### Distribution belongs in its own ADR
 
