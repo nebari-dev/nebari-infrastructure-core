@@ -77,6 +77,13 @@ spec:
                 -s resetPasswordAllowed=true \
                 -s bruteForceProtected=true || echo "Realm may already exist"
 
+              echo "Enabling admin events on nebari realm..."
+              $KCADM update events/config -r nebari \
+                -s adminEventsEnabled=true \
+                -s adminEventsDetailsEnabled=true || echo "Failed to enable admin events"
+              $KCADM update realms/nebari \
+                -s 'attributes.adminEventsExpiration=604800' || echo "Failed to set admin events expiration"
+
               echo "Creating realm roles..."
               $KCADM create roles -r nebari -s name=admin -s description="Administrator role" || true
               $KCADM create roles -r nebari -s name=user -s description="Regular user role" || true
