@@ -78,6 +78,10 @@ cluster:
       storage:
         instance: m7g.large # 2 vCPU / 8 GiB Graviton; use m7i.large for x86
         ami_type: AL2023_ARM_64_STANDARD # omit this line for x86 instances
+        # Node groups stay on the AMI release they were created with until the
+        # Kubernetes version changes. Set this to move to a specific release;
+        # changing it rolls the group, so plan it with Longhorn in mind.
+        # ami_release_version: 1.34.11-20260923
         min_nodes: 2
         max_nodes: 2
         disk_size: 500 # GiB gp3 root volume backing /var/lib/longhorn
