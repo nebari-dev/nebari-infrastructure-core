@@ -28,6 +28,8 @@ spec:
               value: "{{ .KeycloakBasePath }}"
             - name: KEYCLOAK_EXTERNAL_URL
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+            - name: LIFECYCLE_GRACE_PERIOD
+              value: "5m"
           # kubebuilder scaffold defaults; idle usage is ~2m/15Mi (#456).
           resources:
             requests:
