@@ -8,6 +8,8 @@ spec:
     spec:
       containers:
         - name: manager
+          # The branch tag is rebuilt on every push, so always pull.
+          imagePullPolicy: Always
           env:
             # Keycloak integration configuration
             - name: KEYCLOAK_ENABLED
