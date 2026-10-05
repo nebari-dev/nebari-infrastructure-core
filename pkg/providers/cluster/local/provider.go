@@ -3,7 +3,7 @@ package local
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -48,7 +48,7 @@ func parseConfig(ctx context.Context, clusterConfig *config.ClusterConfig) (Conf
 // Validate validates the local configuration
 func (p *Provider) Validate(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "local.Validate")
+	ctx, span := tracer.Start(ctx, "local.Validate")
 	defer span.End()
 
 	span.SetAttributes(
@@ -67,36 +67,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
-	if localCfg.Kind != nil {
-		for _, m := range localCfg.Kind.ExtraMounts {
-			if !filepath.IsAbs(m.HostPath) || !filepath.IsAbs(m.ContainerPath) {
-				err := fmt.Errorf("kind extra_mounts paths must be absolute: %s -> %s", m.HostPath, m.ContainerPath)
-				span.RecordError(err)
-				return err
-			}
-		}
-	}
-
-	for _, p := range []struct {
-		name string
-		port int
-	}{
-		{"http_port", localCfg.HTTPPort},
-		{"https_port", localCfg.HTTPSPort},
-	} {
-		if p.port < 0 || p.port > 65535 {
-			err := fmt.Errorf("%s must be between 1 and 65535 or omitted, got %d", p.name, p.port)
-			span.RecordError(err)
-			return err
-		}
-	}
-
-	// Compare the ports kind will actually map (hostPort applies the 80/443
-	// defaults), so a collision with a defaulted port is also caught. kind
-	// rejects duplicate port mappings too, but only after provisioning has
-	// started.
-	if hostPort(localCfg.HTTPPort, defaultHTTPPort) == hostPort(localCfg.HTTPSPort, defaultHTTPSPort) {
-		err := fmt.Errorf("http_port and https_port must differ, both are %d", hostPort(localCfg.HTTPPort, defaultHTTPPort))
+	if err := localCfg.Validate(ctx); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -132,6 +103,12 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	if kindCfg == nil {
 		kindCfg = &KindConfig{}
 	}
+	// Checked here as well as in Validate, which is not on the deploy path,
+	// so a bad config fails before kind starts creating anything.
+	if err := localCfg.Validate(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	if opts.DryRun {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Would create kind cluster %s (dry-run)", projectName)).
@@ -153,7 +130,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 	if exists {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, or the default local GitOps mount path only take effect on a recreate)", projectName)).
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, node_groups, or the default local GitOps mount path only take effect on a recreate)", projectName)).
 			WithResource("provider").
 			WithAction("deploy").
 			WithMetadata("cluster_name", projectName))
@@ -177,6 +154,10 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				WithMetadata("error", err.Error()))
 			return err
 		}
+		if err := waitForClusterNodes(ctx, client, projectName, kindCfg.WorkerCount(), true, kindReadyTimeout); err != nil {
+			span.RecordError(err)
+			return err
+		}
 	} else {
 		status.Send(ctx, status.NewUpdate(status.LevelProgress, fmt.Sprintf("Creating kind cluster %s", projectName)).
 			WithResource("provider").
@@ -195,22 +176,40 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithMetadata("cluster_name", projectName).
 			WithMetadata("kube_context", kindContextName(projectName)))
 
+		// Without a client neither the port record nor the node wait below
+		// can run, and pkg/nic fetches the kubeconfig the same way right
+		// after Deploy returns, so continuing could not produce a working
+		// deploy.
+		client, err := clusterClient(kp, projectName)
+		if err != nil {
+			span.RecordError(err)
+			status.Send(ctx, status.NewUpdate(status.LevelError, "Could not connect to the new kind cluster").
+				WithResource("provider").
+				WithAction("deploy").
+				WithMetadata("cluster_name", projectName).
+				WithMetadata("error", err.Error()))
+			return err
+		}
+
 		// Record the ports the cluster was just created with, so the next
 		// deploy can verify them. A failed write costs only that check (a
 		// later deploy adopts and records the values it finds configured),
 		// so it does not fail a deploy that is otherwise healthy.
-		client, err := clusterClient(kp, projectName)
-		if err == nil {
-			err = recordClusterPorts(ctx, client,
-				hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort))
-		}
-		if err != nil {
+		if err := recordClusterPorts(ctx, client,
+			hostPort(localCfg.HTTPPort, defaultHTTPPort), hostPort(localCfg.HTTPSPort, defaultHTTPSPort)); err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Could not record the cluster's host ports, so the next deploy cannot verify them against the config").
 				WithResource("provider").
 				WithAction("deploy").
 				WithMetadata("cluster_name", projectName).
 				WithMetadata("error", err.Error()))
+		}
+
+		// This runs after the marker write so a timeout here still leaves the
+		// ports recorded for the retry.
+		if err := waitForClusterNodes(ctx, client, projectName, kindCfg.WorkerCount(), false, kindReadyTimeout); err != nil {
+			span.RecordError(err)
+			return err
 		}
 	}
 
@@ -321,6 +320,13 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	}
 	if localCfg.Kind != nil && localCfg.Kind.NodeImage != "" {
 		result["Kind Node Image"] = localCfg.Kind.NodeImage
+	}
+	if n := localCfg.Kind.WorkerCount(); n > 0 {
+		groups := make([]string, 0, len(localCfg.Kind.NodeGroups))
+		for _, name := range localCfg.Kind.groupNames() {
+			groups = append(groups, fmt.Sprintf("%s: %d", name, localCfg.Kind.NodeGroups[name].Count))
+		}
+		result["Kind Workers"] = fmt.Sprintf("%d (%s)", n, strings.Join(groups, ", "))
 	}
 	return result
 }

@@ -39,7 +39,7 @@ This document describes the architectural design for Nebari Infrastructure Core 
 ┌─────────────────────────────────────────────────────────────┐
 │ Kubernetes Cluster (Provisioned by NIC)                     │
 │ - Provider-specific configuration                           │
-│ - Multi-AZ on cloud providers; single-node on local         │
+│ - Multi-AZ on cloud; single-node by default on local        │
 │ - StorageClass and LB integration per provider              │
 └─────────────────────────────────────────────────────────────┘
                            ↓
