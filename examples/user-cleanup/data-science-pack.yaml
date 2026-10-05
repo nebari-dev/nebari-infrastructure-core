@@ -16,6 +16,9 @@ spec:
       values: |
         keycloak:
           hostname: keycloak.nebari.lvh.me
+          # lvh.me resolves to 127.0.0.1 inside pods too, so the hub's token
+          # exchange must go through the in-cluster Service.
+          backchannelURL: http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080
   destination:
     server: https://kubernetes.default.svc
     namespace: data-science
