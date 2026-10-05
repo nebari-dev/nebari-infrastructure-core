@@ -149,6 +149,40 @@ jobs:
           path: nic
           retention-days: 1
 
+  reproducible-build:
+    name: Reproducible build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Binaries are stamped with the commit date and the snapshot version
+          # derives from the previous tag, so this needs real history rather
+          # than the default shallow clone.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+
+      # The release build generates an SBOM per archive, and goreleaser skips
+      # them silently when syft is absent. The check refuses to run without it
+      # rather than passing on a partial comparison.
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Two builds of this commit must produce identical artifacts
+        run: ./scripts/check-reproducible-build.sh
+
   deploy-and-journeys:
     name: Deploy & user journeys
     runs-on: ubuntu-latest
