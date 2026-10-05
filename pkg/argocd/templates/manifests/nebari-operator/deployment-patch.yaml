@@ -30,6 +30,8 @@ spec:
               value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
             - name: LIFECYCLE_GRACE_PERIOD
               value: "5m"
+            - name: LIFECYCLE_POLL_INTERVAL
+              value: "30s"
           # kubebuilder scaffold defaults; idle usage is ~2m/15Mi (#456).
           resources:
             requests:
