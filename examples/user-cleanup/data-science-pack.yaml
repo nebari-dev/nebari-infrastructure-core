@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-science-pack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nebari-apps
+  source:
+    repoURL: https://github.com/nebari-dev/data-science-pack
+    targetRevision: feat/user-cleanup-hooks
+    path: .
+    helm:
+      releaseName: data-science-pack
+      values: |
+        keycloak:
+          hostname: keycloak.nebari.lvh.me
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-science
+  syncPolicy:
+    # The operator only acts on labeled namespaces. ArgoCD applies this
+    # only to a namespace it creates, hence CreateNamespace below.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
