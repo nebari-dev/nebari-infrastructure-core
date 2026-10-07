@@ -1,0 +1,19 @@
+apiVersion: dev.crossplane.io/v1alpha1
+kind: Project
+metadata:
+  name: datascience-spin
+spec:
+  dependencies:
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready
+      version: '>=v0.0.0'
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-sequencer
+      version: '>=v0.0.0'
+  repository: quay.io/nebari/datascience-spin-poc

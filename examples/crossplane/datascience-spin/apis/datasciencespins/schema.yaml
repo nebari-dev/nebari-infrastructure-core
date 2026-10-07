@@ -1,0 +1,19 @@
+apiVersion: platform.nebari.dev/v1alpha1
+kind: DataScienceSpin
+spec:
+  domain: string | required=true description="Base domain of the platform. Everything derives from it by the packs' conventions. Keycloak at keycloak.<domain>, Nebi at nebi.<domain>, the hub at hub.<domain>."
+  nebi:
+    namespace: string | default="nebi"
+    releaseName: string | default="nebi-pack" description="Drives the operator-provisioned OIDC client id (nebi-<releaseName>-nebari-nebi-pack) and the in-cluster service name DSP derives. The DSP defaults assume nebi-pack, so change both sides together."
+    version: string | default="0.1.3"
+    values: object | description="Extra Helm values passed through to the chart. The wiring keys the composition owns (nebariapp.hostname) win over anything set here."
+  daskGateway:
+    namespace: string | default="dask-gateway"
+    releaseName: string | default="dask-gateway-pack"
+    version: string | default="3f35ed41115f25da8d029b2d9a55a66b4c7f2e12" description="Git revision of nebari-dev/dask-gateway-pack (the pack is unreleased; switches to a chart version once it publishes)."
+    values: object | description="Extra Helm values passed through to the pack chart. Wiring keys the composition owns (nebariapp.hostname, gateway.auth.*) win over anything set here."
+  dataScience:
+    namespace: string | default="data-science"
+    releaseName: string | default="data-science-pack" description="Load-bearing. The chart hardcodes the OIDC client Secret name as <release>-nebari-data-science-pack, so a different release name silently falls back to dummy auth unless the values override both hub mounts."
+    version: string | default="0.1.5"
+    values: object | description="Extra Helm values passed through to the chart. The wiring keys the composition owns (keycloak.hostname, nebi.namespace, nebi.releaseName) win over anything set here."

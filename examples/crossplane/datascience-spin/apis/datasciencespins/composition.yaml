@@ -1,0 +1,28 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: datasciencespins.platform.nebari.dev
+spec:
+  compositeTypeRef:
+    apiVersion: platform.nebari.dev/v1alpha1
+    kind: DataScienceSpin
+  mode: Pipeline
+  pipeline:
+  - functionRef:
+      # Derived from crossplane-project.yaml's repository plus the function
+      # directory name: <repo-path>_render-applications as a DNS label.
+      name: nebari-datascience-spin-pocrender-applications
+    step: render-applications
+  - functionRef:
+      name: crossplane-contrib-function-sequencer
+    input:
+      apiVersion: sequencer.fn.crossplane.io/v1beta1
+      kind: Input
+      rules:
+      - sequence:
+        - nebi-app
+        - dsp-app
+    step: enforce-install-order
+  - functionRef:
+      name: crossplane-contrib-function-auto-ready
+    step: crossplane-contrib-function-auto-ready

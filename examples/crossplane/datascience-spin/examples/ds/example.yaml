@@ -1,0 +1,14 @@
+apiVersion: platform.nebari.dev/v1alpha1
+kind: DataScienceSpin
+metadata:
+  name: ds
+spec:
+  domain: nebari.local
+  nebi:
+    namespace: nebi
+    releaseName: nebi-pack
+    version: 0.1.3
+  dataScience:
+    namespace: data-science
+    releaseName: data-science-pack
+    version: 0.1.5
