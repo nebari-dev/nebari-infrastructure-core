@@ -30,9 +30,26 @@ type Auth interface {
 	isAuth()
 }
 
+// DefaultTokenUsername is the HTTPS username sent with a token when none is
+// configured. GitHub and Gitea accept any username with a token; other hosts
+// need a specific one (Bitbucket access tokens: "x-token-auth", GitLab: "oauth2").
+const DefaultTokenUsername = "git"
+
 // TokenAuth authenticates over HTTPS with a token used as the password.
 type TokenAuth struct {
 	Token string
+
+	// Username is sent alongside the token. Empty means DefaultTokenUsername.
+	Username string
+}
+
+// UsernameOrDefault returns the configured username, or DefaultTokenUsername
+// when none is set.
+func (a TokenAuth) UsernameOrDefault() string {
+	if a.Username == "" {
+		return DefaultTokenUsername
+	}
+	return a.Username
 }
 
 // SSHKeyAuth authenticates over SSH with a private key (PEM).

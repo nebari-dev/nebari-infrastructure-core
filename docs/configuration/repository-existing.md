@@ -9,6 +9,7 @@ Configuration options for pointing ArgoCD at a GitOps repository you already hos
 - [Config](#config)
 - [AuthConfig](#authconfig)
 - [EnvRef](#envref)
+- [TokenRef](#tokenref)
 
 ---
 
@@ -39,9 +40,14 @@ environment variable its secret is read from. Example:
 	  ssh:
 	    env: GIT_SSH_KEY
 
+	auth:
+	  token:
+	    env: BITBUCKET_TOKEN
+	    username: x-token-auth
+
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
-| Token | `token` | `*EnvRef` | No | Token authenticates over HTTPS with a token read from Token.Env. |
+| Token | `token` | `*TokenRef` | No | Token authenticates over HTTPS with a token read from Token.Env. |
 | SSH | `ssh` | `*EnvRef` | No | SSH authenticates over SSH with a private key read from SSH.Env. |
 | InsecureSkipHostKeyVerification | `insecure_skip_host_key_verification` | bool | No | InsecureSkipHostKeyVerification disables SSH host key verification, removing protection against man-in-the-middle attacks. Only intended for ephemeral environments (e.g. CI) where maintaining a kno... |
 
@@ -54,4 +60,18 @@ EnvRef names the environment variable a secret is read from.
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
 | Env | `env` | string | Yes |  |
+
+---
+
+## TokenRef
+
+TokenRef names the environment variable a token is read from, and the
+HTTPS username sent with it. Username defaults to "git", which GitHub
+accepts; Bitbucket access tokens need "x-token-auth" and GitLab tokens
+"oauth2".
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Env | `env` | string | Yes |  |
+| Username | `username` | string | No |  |
 

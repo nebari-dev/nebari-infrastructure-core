@@ -16,8 +16,6 @@ import (
 const (
 	// gitRepoType is the ArgoCD repository type for git repositories
 	gitRepoType = "git"
-	// gitTokenUsername is the username used with token-based auth for git providers (GitHub, GitLab, etc.)
-	gitTokenUsername = "git"
 	// argoCDSecretTypeRepository is the value for the argocd.argoproj.io/secret-type label on repository secrets.
 	argoCDSecretTypeRepository = "repository"
 )
@@ -45,7 +43,7 @@ func ConfigureGitRepoAccess(ctx context.Context, client kubernetes.Interface, sr
 		secretData["sshPrivateKey"] = a.Key
 	case repository.TokenAuth:
 		secretData["password"] = a.Token
-		secretData["username"] = gitTokenUsername
+		secretData["username"] = a.UsernameOrDefault()
 	default:
 		return fmt.Errorf("no valid credentials found for git repository")
 	}

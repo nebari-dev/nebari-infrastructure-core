@@ -76,7 +76,7 @@ func TestAuthType(t *testing.T) {
 		want string
 	}{
 		{"ssh", NewSSHKeyAuth("key", false), "ssh"},
-		{"token", NewAuthToken("tok"), "token"},
+		{"token", NewAuthToken("tok", ""), "token"},
 		{"none", Auth{}, "none"},
 	}
 	for _, tt := range tests {
@@ -90,7 +90,7 @@ func TestAuthType(t *testing.T) {
 
 func TestAuthMethod(t *testing.T) {
 	t.Run("token returns BasicAuth", func(t *testing.T) {
-		m, err := NewAuthToken("ghp_testtoken").method()
+		m, err := NewAuthToken("ghp_testtoken", "").method()
 		if err != nil {
 			t.Fatalf("method() unexpected error: %v", err)
 		}
@@ -100,6 +100,26 @@ func TestAuthMethod(t *testing.T) {
 		}
 		if basic.Password != "ghp_testtoken" {
 			t.Errorf("BasicAuth.Password = %q, want %q", basic.Password, "ghp_testtoken")
+		}
+	})
+
+	t.Run("token sends git as the username by default", func(t *testing.T) {
+		m, err := NewAuthToken("ghp_testtoken", "").method()
+		if err != nil {
+			t.Fatalf("method() unexpected error: %v", err)
+		}
+		if got := m.(*http.BasicAuth).Username; got != "git" {
+			t.Errorf("BasicAuth.Username = %q, want %q", got, "git")
+		}
+	})
+
+	t.Run("token sends the configured username", func(t *testing.T) {
+		m, err := NewAuthToken("bb_testtoken", "x-token-auth").method()
+		if err != nil {
+			t.Fatalf("method() unexpected error: %v", err)
+		}
+		if got := m.(*http.BasicAuth).Username; got != "x-token-auth" {
+			t.Errorf("BasicAuth.Username = %q, want %q", got, "x-token-auth")
 		}
 	})
 

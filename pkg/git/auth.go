@@ -14,8 +14,9 @@ import (
 
 // Auth carries resolved git credentials for a remote repository
 type Auth struct {
-	token  string
-	sshKey string
+	token         string
+	tokenUsername string
+	sshKey        string
 
 	// insecureSkipHostKeyVerification disables SSH host key verification,
 	// removing protection against man-in-the-middle attacks. Only intended
@@ -24,8 +25,11 @@ type Auth struct {
 	insecureSkipHostKeyVerification bool
 }
 
-// NewAuthToken creates an Auth object with a token used as the password.
-func NewAuthToken(token string) Auth { return Auth{token: token} }
+// NewAuthToken creates an Auth object with a token used as the password and
+// username as the HTTPS username. An empty username sends "git".
+func NewAuthToken(token, username string) Auth {
+	return Auth{token: token, tokenUsername: username}
+}
 
 // NewSSHKeyAuth creates an Auth object with an ssh key used for authentication.
 // Host keys are verified against the standard known_hosts files unless
@@ -79,7 +83,11 @@ func (a Auth) method() (transport.AuthMethod, error) {
 			},
 		}, nil
 	case a.token != "":
-		return &http.BasicAuth{Username: "git", Password: a.token}, nil
+		username := a.tokenUsername
+		if username == "" {
+			username = "git"
+		}
+		return &http.BasicAuth{Username: username, Password: a.token}, nil
 	default:
 		return nil, nil
 	}
