@@ -31,8 +31,8 @@ type Auth interface {
 }
 
 // DefaultTokenUsername is the HTTPS username sent with a token when none is
-// configured. GitHub and Gitea accept any username with a token; other hosts
-// need a specific one (Bitbucket access tokens: "x-token-auth", GitLab: "oauth2").
+// configured. GitHub accepts any username with a token; Bitbucket checks it
+// (access tokens: "x-token-auth", API tokens: "x-bitbucket-api-token-auth").
 const DefaultTokenUsername = "git"
 
 // TokenAuth authenticates over HTTPS with a token used as the password.

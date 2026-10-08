@@ -67,8 +67,8 @@ type EnvRef struct {
 
 // TokenRef names the environment variable a token is read from, and the
 // HTTPS username sent with it. Username defaults to "git", which GitHub
-// accepts; Bitbucket access tokens need "x-token-auth" and GitLab tokens
-// "oauth2".
+// accepts. Bitbucket checks it: "x-token-auth" for access tokens,
+// "x-bitbucket-api-token-auth" for API tokens.
 type TokenRef struct {
 	Env      string `yaml:"env" json:"env"`
 	Username string `yaml:"username,omitempty" json:"username,omitempty"`
