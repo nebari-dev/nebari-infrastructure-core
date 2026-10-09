@@ -22,6 +22,11 @@
 #     in #569; do not read a green run here as proof of POSIX compliance.
 #
 # Run: ./scripts/test-installer.sh
+#
+# The stubs below (fetch, cosign, gh, uname, ...) and the variables they set
+# (NIC_REQUIRE_SIGNATURE, INSTALL_DIR, ...) are consumed by the sourced
+# installer, which shellcheck cannot follow, so it reports them as unused.
+# shellcheck disable=SC2034,SC2329
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -44,10 +49,11 @@ for shell in sh dash bash "busybox ash"; do
   fi
 done
 
-# --- 2. version_lt --------------------------------------------------------
-# Drives both the cosign floor and the release-signing cutover. An unparseable
-# version must compare as "not older", so an unknown build still verifies and an
-# unknown tag is still expected to be signed.
+# --- 2. version_lt and the cosign floor --------------------------------------
+# version_lt drives the release-signing cutover; cosign_capable applies the
+# per-major cosign floor. An unparseable version must count as "not older" and
+# "capable", so an unknown build still verifies and an unknown tag is still
+# expected to be signed.
 # shellcheck source=scripts/install.sh
 NIC_INSTALL_SH_SOURCE_ONLY=1 . "./$installer"
 
@@ -60,18 +66,37 @@ check_version_lt() { # <a> <b> <expected: yes|no>
   fi
 }
 
-check_version_lt 2.4.1     "$COSIGN_MIN"    yes   # below the cosign floor
-check_version_lt 2.4.2     "$COSIGN_MIN"    no    # exactly the floor
-check_version_lt 2.4.3     "$COSIGN_MIN"    no
-check_version_lt 3.1.1     "$COSIGN_MIN"    no    # cosign 3.x parses correctly
-check_version_lt 1.13.1    "$COSIGN_MIN"    yes
-check_version_lt ""        "$COSIGN_MIN"    no    # fail safe: attempt verification
-check_version_lt garbage   "$COSIGN_MIN"    no    # fail safe
-check_version_lt 2.4.2-rc1 "$COSIGN_MIN"    no    # fail safe
-check_version_lt 0.9.0     "$SIGNING_SINCE" yes   # predates signing
-check_version_lt 0.10.0    "$SIGNING_SINCE" no    # first signed release
-check_version_lt 0.13.0    "$SIGNING_SINCE" no
-check_version_lt 1.0.0     "$SIGNING_SINCE" no    # a major bump is still signed
+check_version_lt 0.9.0       "$SIGNING_SINCE" yes   # predates signing
+check_version_lt 0.9.99      "$SIGNING_SINCE" yes
+check_version_lt 0.10.0      "$SIGNING_SINCE" no    # first signed release
+check_version_lt 0.14.0      "$SIGNING_SINCE" no
+check_version_lt 1.0.0       "$SIGNING_SINCE" no    # a major bump is still signed
+check_version_lt 0.14.0-rc.1 "$SIGNING_SINCE" no    # fail safe: expected to be signed
+check_version_lt ""          "$SIGNING_SINCE" no    # fail safe
+
+# GHSA-fx35-mq7g-6g98 is fixed in 2.6.5 and 3.1.3. 3.0.0 through 3.1.2 sort
+# above 2.6.5 and are still affected, which is why one floor cannot work.
+check_cosign() { # <version> <expected: yes|no>
+  if cosign_capable "$1"; then got=yes; else got=no; fi
+  if [[ $got == "$2" ]]; then
+    ok "cosign_capable('${1:-<empty>}') = $got"
+  else
+    bad "cosign_capable('${1:-<empty>}') = $got, expected $2 (GHSA-fx35-mq7g-6g98: 2.x needs >= $COSIGN_MIN_V2, 3.x needs >= $COSIGN_MIN_V3)"
+  fi
+}
+
+check_cosign 1.13.1    no
+check_cosign 2.4.2     no    # reads the bundle format, but affected
+check_cosign 2.6.4     no    # last affected 2.x
+check_cosign 2.6.5     yes   # first fixed 2.x
+check_cosign 2.7.0     yes
+check_cosign 3.0.0     no    # newer than 2.6.5, still affected
+check_cosign 3.1.2     no    # last affected 3.x
+check_cosign 3.1.3     yes   # first fixed 3.x
+check_cosign 3.2.0     yes
+check_cosign 4.0.0     yes   # a later major postdates both fixes
+check_cosign ""        yes   # fail safe: attempt verification
+check_cosign garbage   yes   # fail safe
 
 # --- 3. detect_suffix ------------------------------------------------------
 # Mirrors the arch rename in .goreleaser.yml; check-installer-contract.sh
@@ -103,122 +128,241 @@ expect_suffix Darwin x86_64  darwin_x86_64
 expect_suffix Linux  riscv64 ABORT
 expect_suffix MINGW64_NT x86_64 ABORT   # Windows users get the .zip
 
-# --- 4. NIC_SKIP_SIGNATURE --------------------------------------------------
-# "Anything but 0 means skip" would disable the check for the natural spellings
-# of leaving it on, so the accepted values are explicit and anything else aborts.
-skip_result() { # <value> -> prints skipped|verified|abort
-  (
-    NIC_SKIP_SIGNATURE="$1"
-    verify_with_cosign() { printf 'verified\n'; }
-    command() { case "$2" in cosign) return 0 ;; *) return 1 ;; esac; }
-    cosign_version() { printf '3.1.1'; }
-    out="$(verify_authenticity /tmp v0.13.0 https://example 2>&1)" || { printf 'abort\n'; exit 0; }
-    case "$out" in
-      *"skipped"*)  printf 'skipped\n' ;;
-      *verified*)   printf 'verified\n' ;;
-      *)            printf 'other:%s\n' "$out" ;;
-    esac
-  )
+# --- 4. inputs ------------------------------------------------------------------
+# NIC_REQUIRE_SIGNATURE: "anything but 0 means on" would read =false as on, so
+# both spellings are explicit and anything else aborts. NIC_EXPECTED_SHA256: a
+# mistyped pin must abort rather than read as "no pin".
+bool_result() { # <value> -> on|off|abort
+  local out rc
+  out="$(bool_env NIC_REQUIRE_SIGNATURE "$1" 2>&1)" && rc=0 || rc=$?
+  if [[ $out == *error:* ]]; then echo abort
+  elif [[ $rc -eq 0 ]]; then echo on
+  else echo off; fi
 }
-expect_skip() { # <value> <expected>
-  local got; got="$(skip_result "$1")"
-  if [[ $got == "$2" ]]; then ok "NIC_SKIP_SIGNATURE='$1' -> $got"
-  else bad "NIC_SKIP_SIGNATURE='$1' -> $got, expected $2 (a security control must not turn off by accident)"; fi
+expect_bool() { # <value> <expected>
+  local got; got="$(bool_result "$1")"
+  if [[ $got == "$2" ]]; then ok "NIC_REQUIRE_SIGNATURE='$1' -> $got"
+  else bad "NIC_REQUIRE_SIGNATURE='$1' -> $got, expected $2 (a security control must not flip by accident)"; fi
 }
+expect_bool 1     on
+expect_bool true  on
+expect_bool yes   on
+expect_bool 0     off
+expect_bool false off
+expect_bool no    off
+expect_bool ""    off
+expect_bool maybe abort
 
-expect_skip 1     skipped
-expect_skip true  skipped
-expect_skip yes   skipped
-expect_skip 0     verified
-expect_skip false verified
-expect_skip no    verified
-expect_skip ""    verified
-expect_skip maybe abort
+pin_result() { # <value> -> the normalised digest, <none>, or abort
+  local out
+  if out="$(NIC_EXPECTED_SHA256="$1"; expected_sha256 2>&1)"; then printf '%s' "${out:-<none>}"
+  else printf 'abort'; fi
+}
+expect_pin() { # <desc> <value> <expected>
+  local got; got="$(pin_result "$2")"
+  if [[ $got == "$3" ]]; then ok "NIC_EXPECTED_SHA256 $1 -> ${got:0:16}"
+  else bad "NIC_EXPECTED_SHA256 $1 -> $got, expected $3"; fi
+}
+digest="$(printf 'ab%.0s' {1..32})"
+expect_pin "unset"                ""                          "<none>"
+expect_pin "lower-case digest"    "$digest"                   "$digest"
+expect_pin "upper-case digest"    "${digest^^}"               "$digest"
+expect_pin "63 characters"        "${digest:1}"               abort
+expect_pin "non-hex character"    "${digest:1}g"              abort
+expect_pin "with a filename"      "$digest  nic.tar.gz"       abort
 
-# --- 5. the signature decision table ----------------------------------------
-# The core of the installer's threat model: which outcomes install and which
-# abort. `fetch` returns the stubbed HTTP status, `cosign verify-blob` and
-# `cosign initialize` return stubbed exit codes.
-verify_case() { # <http_code> <verify_rc> <initialize_rc> <tag> -> prints install|abort, then the messages
+# --- 5. the authenticity decision table ----------------------------------------
+# Which outcomes install and which abort. `command -v` reports which of cosign/gh
+# exist, cosign_version the cosign build, `fetch` the bundle's HTTP status, and
+# `cosign verify-blob` / `gh` their exit codes. The rule under test: with no
+# capable verifier the install degrades to checksum-only (or stops under
+# NIC_REQUIRE_SIGNATURE); with one, nothing degrades, for any tag.
+auth_case() { # <cosign: absent|VERSION> <gh: absent|loggedout|pass|fail> <bundle http code> <verify rc> <require> <tag>
   (
-    STUB_CODE="$1" STUB_VERIFY="$2" STUB_INIT="$3"
+    STUB_COSIGN="$1" STUB_GH="$2" STUB_CODE="$3" STUB_VERIFY="$4"
+    NIC_REQUIRE_SIGNATURE="$5"
+    command() {
+      if [[ $1 == -v ]]; then
+        case "$2" in
+          cosign) [[ $STUB_COSIGN != absent ]]; return ;;
+          gh)     [[ $STUB_GH != absent ]]; return ;;
+        esac
+      fi
+      builtin command "$@"
+    }
+    cosign_version() { printf '%s' "$STUB_COSIGN"; }
     fetch() { printf '%s' "$STUB_CODE"; }
+    fetch_trusted_root() { :; }
     cosign() {
+      [[ $1 == verify-blob ]] && printf 'COSIGN-ARGS: %s\n' "$*" >&2
+      return "$STUB_VERIFY"
+    }
+    gh() {
       case "$1" in
-        verify-blob) return "$STUB_VERIFY" ;;
-        initialize)  return "$STUB_INIT" ;;
+        auth)        [[ $STUB_GH == pass || $STUB_GH == fail ]] ;;
+        attestation) [[ $STUB_GH == pass ]] ;;
         *)           return 1 ;;
       esac
     }
     tmp="$(mktemp -d)"; : >"$tmp/checksums.txt"
     trap 'rm -rf "$tmp"' EXIT
-    if out="$(verify_with_cosign "$tmp" "$4" https://example/base 2>&1)"; then
+    if out="$(verify_authenticity "$tmp" "$6" https://example/base nic_test.tar.gz 2>&1)"; then
       printf 'install\n%s' "$out"
     else
       printf 'abort\n%s' "$out"
     fi
   )
 }
-expect_verify() { # <desc> <expected> <code> <vrc> <irc> <tag>
+expect_auth() { # <desc> <expected> <auth_case args...>
   local res got
-  res="$(verify_case "$3" "$4" "$5" "$6")"
+  res="$(auth_case "${@:3}")"
   got="${res%%$'\n'*}"
   if [[ $got == "$2" ]]; then ok "$1 -> $got"
   else bad "$1 -> $got, expected $2"; fi
   LAST_MSG="${res#*$'\n'}"
 }
-
-expect_verify "signed release, valid signature"        install 200 0 0 v0.13.0
-expect_verify "pre-signing tag, bundle 404"            install 404 0 0 v0.9.0
-expect_verify "signed tag, bundle 404 (suppression)"   abort   404 0 0 v0.13.0
-suppressed_msg="$LAST_MSG"
-expect_verify "first signed tag, bundle 404"           abort   404 0 0 v0.10.0
-expect_verify "bundle fetch 500"                       abort   500 0 0 v0.13.0
-fetch_failed_msg="$LAST_MSG"
-expect_verify "bundle fetch transport failure"         abort   000 0 0 v0.13.0
-
-expect_verify "invalid signature, trust root reachable" abort 200 1 0 v0.13.0
+#                                                                  cosign  gh        code verify require tag
+expect_auth "cosign, signed release, valid signature"     install 3.1.3  absent    200  0      0       v0.14.0
+valid_msg="$LAST_MSG"
+expect_auth "cosign 2.x at the floor, valid signature"    install 2.6.5  absent    200  0      0       v0.14.0
+valid_v2_msg="$LAST_MSG"
+expect_auth "cosign, signature does not verify"           abort   3.1.3  absent    200  1      0       v0.14.0
 tampered_msg="$LAST_MSG"
-expect_verify "verify fails, trust root unreachable"    abort 200 1 1 v0.13.0
-airgap_msg="$LAST_MSG"
+expect_auth "cosign rejects; a passing gh cannot override" abort  3.1.3  pass      200  1      0       v0.14.0
+expect_auth "cosign, signed tag, bundle 404 (suppression)" abort  3.1.3  absent    404  0      0       v0.14.0
+suppressed_msg="$LAST_MSG"
+expect_auth "cosign, first signed tag, bundle 404"        abort   3.1.3  absent    404  0      0       v0.10.0
+expect_auth "cosign, pre-signing tag, bundle 404"         abort   3.1.3  absent    404  0      0       v0.9.0
+unsigned_msg="$LAST_MSG"
+# A release named below the cutover and marked latest is the default
+# `curl | sh` path; contents: write is enough to publish one.
+expect_auth "cosign, forged pre-signing tag, bundle 404"  abort   3.1.3  absent    404  0      0       v0.9.99
+expect_auth "cosign, bundle fetch 500"                    abort   3.1.3  absent    500  0      0       v0.14.0
+fetch_failed_msg="$LAST_MSG"
+expect_auth "cosign, bundle fetch transport failure"      abort   3.1.3  absent    000  0      0       v0.14.0
 
-# The two failures above are the same cosign exit code and must not produce the
-# same advice: telling a user to re-run with NIC_SKIP_SIGNATURE=1 is correct when
-# the trust root is unreachable and is an invitation to install a tampered binary
-# when it is not.
-if [[ $tampered_msg == "$airgap_msg" ]]; then
-  bad "a tampered signature and an unreachable trust root print an identical message; the user cannot tell them apart"
-else
-  ok "tampered and unreachable-trust-root failures print different messages"
-fi
-if [[ $tampered_msg == *NIC_SKIP_SIGNATURE* ]]; then
-  bad "the invalid-signature message offers NIC_SKIP_SIGNATURE=1; following that advice installs the attacker's binary"
-else
-  ok "the invalid-signature message does not offer NIC_SKIP_SIGNATURE"
-fi
-if [[ $airgap_msg == *NIC_SKIP_SIGNATURE* ]]; then
-  ok "the unreachable-trust-root message keeps the NIC_SKIP_SIGNATURE escape hatch"
-else
-  bad "the unreachable-trust-root message lost its escape hatch; air-gapped users have no documented way through"
-fi
+expect_auth "affected cosign 2.6.4 alone: checksum-only"  install 2.6.4  absent    200  0      0       v0.14.0
+affected_msg="$LAST_MSG"
+expect_auth "affected cosign 3.1.2 alone: checksum-only"  install 3.1.2  absent    200  0      0       v0.14.0
+expect_auth "affected cosign, NIC_REQUIRE_SIGNATURE=1"    abort   3.1.2  absent    200  0      1       v0.14.0
+expect_auth "affected cosign, gh logged in and passing"   install 2.6.4  pass      200  0      0       v0.14.0
 
-# The same rule applied to the two fetch outcomes. A 404 on a release that
-# should be signed is not a network condition -- the server answered -- so the
-# escape hatch has no true premise there and offering it walks the user into
-# installing on a checksums.txt from the same origin the signature is missing
-# from. A 5xx or a transport failure genuinely can be a blocked network, so it
-# keeps the hatch. Asserted because this regressed once already, in the very
-# branch added to make a suppressed signature fatal.
-if [[ $suppressed_msg == *NIC_SKIP_SIGNATURE* ]]; then
-  bad "the suppressed-signature (404 on a signed release) message offers NIC_SKIP_SIGNATURE=1; following that advice installs on an attacker-controlled checksums.txt"
-else
-  ok "the suppressed-signature message does not offer NIC_SKIP_SIGNATURE"
-fi
-if [[ $fetch_failed_msg == *NIC_SKIP_SIGNATURE* ]]; then
-  ok "the bundle-fetch-failure message keeps the NIC_SKIP_SIGNATURE escape hatch"
-else
-  bad "the bundle-fetch-failure message lost its escape hatch; a blocked network has no documented way through"
-fi
+expect_auth "no verifier: checksum-only"                  install absent absent    200  0      0       v0.14.0
+expect_auth "no verifier, pre-signing tag: checksum-only" install absent absent    404  0      0       v0.9.0
+expect_auth "no verifier, NIC_REQUIRE_SIGNATURE=1"        abort   absent absent    200  0      1       v0.14.0
+require_msg="$LAST_MSG"
+expect_auth "gh logged out: checksum-only"                install absent loggedout 200  0      0       v0.14.0
+expect_auth "gh logged out, NIC_REQUIRE_SIGNATURE=1"      abort   absent loggedout 200  0      1       v0.14.0
+expect_auth "gh logged in, attestation verifies"          install absent pass      200  0      0       v0.14.0
+expect_auth "gh logged in, attestation fails"             abort   absent fail      200  0      0       v0.14.0
+gh_failed_msg="$LAST_MSG"
+expect_auth "gh logged in, pre-signing tag"               abort   absent fail      200  0      0       v0.9.0
+gh_unsigned_msg="$LAST_MSG"
+
+# What each message tells the user to do matters as much as the exit code: a
+# pinned digest is offered only where the premise holds (the release cannot
+# prove itself, or the network failed), never where the server answered and the
+# signature is absent or wrong, since a user copying the digest from the same
+# release's checksums.txt would install the attacker's binary.
+expect_msg() { # <desc> <message> <needle> <yes|no>
+  if [[ $2 == *"$3"* ]]; then got=yes; else got=no; fi
+  if [[ $got == "$4" ]]; then ok "$1"
+  else bad "$1 (looked for '$3' in: ${2:0:200})"; fi
+}
+expect_msg "the invalid-signature message does not offer NIC_EXPECTED_SHA256"   "$tampered_msg"     NIC_EXPECTED_SHA256 no
+expect_msg "the suppressed-signature message does not offer NIC_EXPECTED_SHA256" "$suppressed_msg"  NIC_EXPECTED_SHA256 no
+expect_msg "the gh-attestation failure does not offer NIC_EXPECTED_SHA256"      "$gh_failed_msg"    NIC_EXPECTED_SHA256 no
+expect_msg "the pre-signing message names NIC_EXPECTED_SHA256"                  "$unsigned_msg"     NIC_EXPECTED_SHA256 yes
+expect_msg "the pre-signing message warns off this release's checksums.txt"     "$unsigned_msg"     "NOT from this release's checksums.txt" yes
+expect_msg "the gh pre-signing message names NIC_EXPECTED_SHA256"               "$gh_unsigned_msg"  NIC_EXPECTED_SHA256 yes
+expect_msg "the bundle-fetch-failure message names NIC_EXPECTED_SHA256"         "$fetch_failed_msg" NIC_EXPECTED_SHA256 yes
+expect_msg "the NIC_REQUIRE_SIGNATURE message names NIC_EXPECTED_SHA256"        "$require_msg"      NIC_EXPECTED_SHA256 yes
+expect_msg "an affected cosign is named with its advisory"                      "$affected_msg"     GHSA-fx35-mq7g-6g98 yes
+expect_msg "an affected cosign is never asked to verify"                        "$affected_msg"     COSIGN-ARGS no
+
+# The verify-blob invocation itself: offline against the pinned root, with the
+# exact identity at this tag rather than a regexp. cosign 2.x needs --offline and
+# --new-bundle-format spelled out (the latter is what closes the advisory there);
+# 3.x behaves that way by default and warns that both flags are deprecated.
+identity="--certificate-identity https://github.com/${NIC_REPO}/.github/workflows/release.yml@refs/tags/v0.14.0 "
+expect_msg "cosign 2.x verify-blob runs --offline"            "$valid_v2_msg" "--offline"           yes
+expect_msg "cosign 2.x verify-blob requires --new-bundle-format" "$valid_v2_msg" "--new-bundle-format" yes
+expect_msg "cosign 2.x verify-blob uses the pinned --trusted-root" "$valid_v2_msg" "--trusted-root" yes
+expect_msg "cosign 3.x verify-blob omits the deprecated --offline"  "$valid_msg" "--offline"           no
+expect_msg "cosign 3.x verify-blob omits the deprecated --new-bundle-format" "$valid_msg" "--new-bundle-format" no
+expect_msg "verify-blob uses the pinned --trusted-root"     "$valid_msg" "--trusted-root"        yes
+expect_msg "verify-blob pins the exact identity at the tag" "$valid_msg" "$identity"             yes
+expect_msg "verify-blob does not use an identity regexp"    "$valid_msg" "identity-regexp"       no
+
+# --- 6. the pinned trust root -------------------------------------------------
+# The trust root is fetched by digest and checked against it, so a wrong or
+# missing file aborts rather than verifying against something else.
+root_case() { # <good|bad|fail> -> ok|abort, then the messages
+  (
+    STUB_ROOT="$1"
+    fetch() {
+      local out=""
+      while [[ $# -gt 0 ]]; do [[ $1 == -o ]] && { out="$2"; shift; }; shift; done
+      case "$STUB_ROOT" in
+        good) cp "scripts/trusted-roots/${TRUSTED_ROOT_SHA256}.json" "$out" ;;
+        bad)  printf '{}\n' >"$out" ;;
+        *)    return 22 ;;
+      esac
+    }
+    d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+    if out="$(fetch_trusted_root "$d/root.json" 2>&1)"; then printf 'ok\n%s' "$out"
+    else printf 'abort\n%s' "$out"; fi
+  )
+}
+expect_root() { # <stub> <expected>
+  local res got; res="$(root_case "$1")"; got="${res%%$'\n'*}"
+  if [[ $got == "$2" ]]; then ok "trust root fetch '$1' -> $got"
+  else bad "trust root fetch '$1' -> $got, expected $2"; fi
+  LAST_MSG="${res#*$'\n'}"
+}
+expect_root good ok
+expect_root bad  abort
+expect_root fail abort
+expect_msg "the trust-root fetch failure names NIC_EXPECTED_SHA256" "$LAST_MSG" NIC_EXPECTED_SHA256 yes
+
+# --- 7. main() with a pinned digest --------------------------------------------
+# A pinned digest is a verifier of its own: the archive is compared against it
+# and nothing else from the release is fetched, which is what lets a pre-signing
+# tag install while cosign is present. A stand-in archive is served by `fetch`.
+pin_case() { # <right|wrong> -> install|abort, fetched=<non-archive fetches>, installed=yes|no
+  (
+    work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+    mkdir "$work/pkg" "$work/bin"
+    printf '#!/bin/sh\necho stub\n' >"$work/pkg/nic"; chmod +x "$work/pkg/nic"
+    tar -czf "$work/archive.tar.gz" -C "$work/pkg" nic
+    : >"$work/fetched"
+    if [[ $1 == right ]]; then NIC_EXPECTED_SHA256="$(sha256_of "$work/archive.tar.gz")"
+    else NIC_EXPECTED_SHA256="$(printf '0%.0s' {1..64})"; fi
+    NIC_VERSION=v0.9.0
+    INSTALL_DIR="$work/bin"
+    uname() { case "$1" in -s) printf Linux ;; -m) printf x86_64 ;; esac; }
+    fetch() {
+      local out="" url=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in -o) out="$2"; shift ;; https://*) url="$1" ;; esac
+        shift
+      done
+      printf '%s\n' "$url" >>"$work/fetched"
+      [[ $url == *.tar.gz ]] && cp "$work/archive.tar.gz" "$out"
+    }
+    if out="$(main 2>&1)"; then r=install; else r=abort; fi
+    others="$(grep -cv '\.tar\.gz$' "$work/fetched" || true)"
+    if [[ -x $work/bin/nic ]]; then installed=yes; else installed=no; fi
+    printf '%s fetched=%s installed=%s' "$r" "$others" "$installed"
+  )
+}
+expect_pin_install() { # <right|wrong> <expected summary>
+  local got; got="$(pin_case "$1")"
+  if [[ $got == "$2" ]]; then ok "pinned digest ($1) -> $got"
+  else bad "pinned digest ($1) -> $got, expected $2"; fi
+}
+expect_pin_install right "install fetched=0 installed=yes"
+expect_pin_install wrong "abort fetched=0 installed=no"
 
 # --- report ------------------------------------------------------------------
 if [[ $status -eq 0 ]]; then

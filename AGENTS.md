@@ -409,40 +409,53 @@ arbitrary shells.
 It hand-reimplements facts from `.goreleaser.yml` and the release workflow that
 `goreleaser check` does not cross-check: the project name, the archive name
 template and format, the `amd64` -> `x86_64` rename, the checksum filename, the
-signature bundle suffix, the cosign version floor (also stated in
-`docs/operations/verifying-releases.md`), and the release workflow filename baked
-into its cosign identity regexp. Changing either side without the other is caught
-by `scripts/check-installer-contract.sh` in the `workflow-pins` CI job. That job
-is advisory rather than merge-blocking, and the check greps source text, so it
-catches renames and reorderings but not a deletion that leaves the string behind
-in a comment — read the non-coverage list at the top of that script before
-relying on it.
+signature bundle suffix, the per-major cosign floor (also stated in
+`docs/operations/verifying-releases.md` and `README.md`), and the release
+workflow filename baked into its cosign identity. Changing either side without
+the other is caught by `scripts/check-installer-contract.sh`. The check greps
+source text, so it catches renames and reorderings but not a deletion that
+leaves the string behind in a comment — read the non-coverage list at the top of
+that script before relying on it.
 
 `scripts/test-installer.sh` covers the behaviour rather than the contract: it
 sources `install.sh` with `NIC_INSTALL_SH_SOURCE_ONLY=1`, stubs `fetch`/`cosign`/
-`uname`, and asserts the signature decision table — which outcomes install and
-which abort — plus the arch mapping and the `NIC_SKIP_SIGNATURE` parsing. It runs
-in the **`Test`** job specifically because that job is merge-blocking and
-`workflow-pins` is not; a check that cannot stop a merge cannot back the promise
-above. It is offline, so it does not verify a real install or real cosign
-behaviour, and its `-n` parse checks cannot see bashisms (`[[` is a valid command
-name under dash). Add a case there when you change what the installer accepts.
+`gh`/`uname`, and asserts the authenticity decision table — which outcomes
+install and which abort — plus the cosign floor, the arch mapping and the
+parsing of `NIC_REQUIRE_SIGNATURE` and `NIC_EXPECTED_SHA256`. Both scripts run
+in the **`Test`** job because it is merge-blocking; a check that cannot stop a
+merge cannot back the promise above. The suite is offline, so it does not verify
+a real install or real cosign behaviour, and its `-n` parse checks cannot see
+bashisms (`[[` is a valid command name under dash). Add a case there when you
+change what the installer accepts.
 
-Authenticity handling has one rule worth keeping straight: the installer degrades
-to checksum-only when *no tool on the host can verify* or when the release
-predates signing (below `SIGNING_SINCE`), and it is fatal whenever a signature
-that should exist is missing or does not verify. Suppressing the signature is the
-cheapest attack on a piped installer, so "the bundle 404'd" must never become a
-warning for a release that publishes one.
+Authenticity handling has one rule worth keeping straight: the installer
+degrades to checksum-only **only** when no capable verifier is on the host (no
+cosign at the floor, no logged-in `gh`), and `NIC_REQUIRE_SIGNATURE=1` turns even
+that into a stop. Once a verifier is present nothing degrades, for any tag: a
+missing, unfetchable or failing signature is fatal. That includes releases below
+`SIGNING_SINCE`, because "this release predates signing" is exactly what a
+forged release marked latest would claim; those install only against a digest
+the user pins with `NIC_EXPECTED_SHA256`.
 
 The same reasoning governs the failure *messages*, which is subtler and has
-regressed once already. `NIC_SKIP_SIGNATURE=1` is offered only where its premise
-holds — the bundle fetch failed, or cosign could not reach the Sigstore trust
-root — because there the user really may be behind a proxy. It is never offered
-when the server answered and the signature is absent or does not verify: that
-fallback trusts a `checksums.txt` from the same origin as the problem, so the
-advice would walk the user into the attack the check exists to stop.
-`scripts/test-installer.sh` asserts this message by message.
+regressed before. `NIC_EXPECTED_SHA256` is offered only where its premise holds —
+the release predates signing, or a fetch failed — and never where the server
+answered and the signature is absent or does not verify, or where `gh` finds no
+attestation (it cannot tell that apart from a substituted archive). A user
+following the advice there would copy the digest from the same release's
+`checksums.txt` and install the attacker's binary. `scripts/test-installer.sh`
+asserts this message by message.
+
+cosign verifies offline against a Sigstore trust root pinned by digest
+(`TRUSTED_ROOT_SHA256`) and served from `scripts/trusted-roots/<digest>.json` on
+`main`. The files there are **content-addressed: never edit or delete one**, or
+installers already saved by users stop working; to update the root, add a new
+file and move the pin. Update it when Sigstore rotates a key that the release
+workflow's signer uses, since a release signed under a key the pinned root lacks
+fails verification for every cosign user, with a message that reads as tampering.
+Take the new root from cosign's TUF-verified cache (`cosign initialize`, then
+`~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json`), not from
+an unauthenticated download.
 
 ## Testing Strategy
 
