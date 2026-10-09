@@ -34,6 +34,7 @@ type TFVars struct {
 	VPCCIDRBlock                  *string              `json:"vpc_cidr_block,omitempty"`
 	ExistingVPCID                 *string              `json:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs      []string             `json:"existing_private_subnet_ids,omitempty"`
+	ExistingPrivateRouteTableIDs  []string             `json:"existing_private_route_table_ids,omitempty"`
 	CreateSecurityGroup           bool                 `json:"create_security_group"`
 	ExistingSecurityGroupID       *string              `json:"existing_security_group_id,omitempty"`
 	KubernetesVersion             string               `json:"kubernetes_version"`
@@ -52,8 +53,16 @@ type TFVars struct {
 	EFSProvisionedThroughputMibps *int                 `json:"efs_provisioned_throughput_in_mibps,omitempty"`
 	EFSEncrypted                  bool                 `json:"efs_encrypted"`
 	EFSKMSKeyArn                  *string              `json:"efs_kms_key_arn,omitempty"`
-	NodeSGAdditionalRules         map[string]any       `json:"node_security_group_additional_rules,omitempty"`
-	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
+	FSxOpenZFSEnabled             bool                 `json:"fsx_openzfs_enabled"`
+	FSxOpenZFSDeploymentType      string               `json:"fsx_openzfs_deployment_type,omitempty"`
+	FSxOpenZFSStorageCapacity     int                  `json:"fsx_openzfs_storage_capacity,omitempty"`
+	FSxOpenZFSThroughput          int                  `json:"fsx_openzfs_throughput,omitempty"`
+	// Pointer so an explicit 0, which disables automatic backups, is emitted.
+	FSxOpenZFSAutomaticBackupRetentionDays *int           `json:"fsx_openzfs_automatic_backup_retention_days,omitempty"`
+	FSxOpenZFSSkipFinalBackup              bool           `json:"fsx_openzfs_skip_final_backup,omitempty"`
+	FSxOpenZFSDeleteChildVolumesOnDestroy  bool           `json:"fsx_openzfs_delete_child_volumes_on_destroy,omitempty"`
+	NodeSGAdditionalRules                  map[string]any `json:"node_security_group_additional_rules,omitempty"`
+	ExtraCABundle                          *string        `json:"extra_ca_bundle,omitempty"`
 	// No omitempty: a false value must be emitted so it overrides the module's
 	// `true` default when the autoscaler is disabled.
 	EnableClusterAutoscalerPodIdentity bool   `json:"enable_cluster_autoscaler_pod_identity"`
@@ -167,7 +176,7 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 		ProjectName:            projectName,
 		Tags:                   c.Tags,
 		AvailabilityZones:      c.AvailabilityZones,
-		CreateVPC:              c.ExistingVPCID == "" && len(c.ExistingPrivateSubnetIDs) == 0,
+		CreateVPC:              c.CreateVPC(),
 		CreateSecurityGroup:    c.ExistingSecurityGroupID == "",
 		KubernetesVersion:      c.KubernetesVersion,
 		EndpointPrivateAccess:  c.EndpointPrivateAccess,
@@ -190,6 +199,9 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 	}
 	if len(c.ExistingPrivateSubnetIDs) > 0 {
 		vars.ExistingPrivateSubnetIDs = c.ExistingPrivateSubnetIDs
+	}
+	if len(c.ExistingPrivateRouteTableIDs) > 0 {
+		vars.ExistingPrivateRouteTableIDs = c.ExistingPrivateRouteTableIDs
 	}
 	if c.ExistingSecurityGroupID != "" {
 		vars.ExistingSecurityGroupID = &c.ExistingSecurityGroupID
@@ -246,6 +258,18 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 		if c.EFS.KMSKeyArn != "" {
 			vars.EFSKMSKeyArn = &c.EFS.KMSKeyArn
 		}
+	}
+
+	// Unset fields stay empty so omitempty drops them and the shim's
+	// variables.tf defaults, which mirror the module's, apply.
+	if c.FSxOpenZFSEnabled() {
+		vars.FSxOpenZFSEnabled = true
+		vars.FSxOpenZFSDeploymentType = c.FSxOpenZFS.DeploymentType
+		vars.FSxOpenZFSStorageCapacity = c.FSxOpenZFS.StorageCapacityGiB
+		vars.FSxOpenZFSThroughput = c.FSxOpenZFS.ThroughputMiBps
+		vars.FSxOpenZFSAutomaticBackupRetentionDays = c.FSxOpenZFS.AutomaticBackupRetentionDays
+		vars.FSxOpenZFSSkipFinalBackup = c.FSxOpenZFS.SkipFinalBackup
+		vars.FSxOpenZFSDeleteChildVolumesOnDestroy = c.FSxOpenZFS.DeleteChildVolumesOnDestroy
 	}
 
 	if backup != nil {

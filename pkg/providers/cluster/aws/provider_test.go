@@ -166,6 +166,90 @@ func TestValidateTaints(t *testing.T) {
 	}
 }
 
+// TestValidateFSxOpenZFS exercises the helper directly for the same reason as
+// TestValidateTaints: valid configs would otherwise fall through Validate to
+// the AWS credential check.
+func TestValidateFSxOpenZFS(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *Config
+		errSubstr string // "" means no error expected
+	}{
+		{name: "no fsx block is fine", cfg: &Config{}},
+		{
+			name: "disabled skips validation",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_1"}},
+		},
+		{
+			name: "default deployment type in a new VPC",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+		},
+		{
+			name: "SINGLE_AZ_2 is accepted",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, DeploymentType: "SINGLE_AZ_2"}},
+		},
+		{
+			name:      "unsupported deployment type is rejected",
+			cfg:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, DeploymentType: "SINGLE_AZ_1"}},
+			errSubstr: "fsx_openzfs.deployment_type",
+		},
+		{
+			name:      "lowercase deployment type is rejected",
+			cfg:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, DeploymentType: "multi_az_1"}},
+			errSubstr: "fsx_openzfs.deployment_type",
+		},
+		{
+			name: "multi-AZ in an existing VPC requires route tables",
+			cfg: &Config{
+				ExistingVPCID: "vpc-123",
+				FSxOpenZFS:    &FSxOpenZFSConfig{Enabled: true},
+			},
+			errSubstr: "existing_private_route_table_ids",
+		},
+		{
+			name: "multi-AZ with existing subnets only requires route tables",
+			cfg: &Config{
+				ExistingPrivateSubnetIDs: []string{"subnet-a", "subnet-b"},
+				FSxOpenZFS:               &FSxOpenZFSConfig{Enabled: true},
+			},
+			errSubstr: "existing_private_route_table_ids",
+		},
+		{
+			name: "multi-AZ in an existing VPC with route tables is accepted",
+			cfg: &Config{
+				ExistingVPCID:                "vpc-123",
+				ExistingPrivateRouteTableIDs: []string{"rtb-a"},
+				FSxOpenZFS:                   &FSxOpenZFSConfig{Enabled: true},
+			},
+		},
+		{
+			name: "single-AZ in an existing VPC needs no route tables",
+			cfg: &Config{
+				ExistingVPCID: "vpc-123",
+				FSxOpenZFS:    &FSxOpenZFSConfig{Enabled: true, DeploymentType: "SINGLE_AZ_2"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFSxOpenZFS(tt.cfg)
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
 func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 	const schemeKey = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 

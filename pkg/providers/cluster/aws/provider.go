@@ -91,6 +91,24 @@ func validateTaints(nodeGroupName string, taints []Taint) error {
 	return nil
 }
 
+// validateFSxOpenZFS checks the FSx for OpenZFS settings NIC depends on: the
+// deployment type, and the route tables a MULTI_AZ_1 filesystem needs in an
+// existing VPC. Capacity, throughput and backup retention are left to the
+// module's own validation, like the EFS settings.
+func validateFSxOpenZFS(cfg *Config) error {
+	if !cfg.FSxOpenZFSEnabled() {
+		return nil
+	}
+	deploymentType := cfg.FSxOpenZFSDeploymentType()
+	if !contains(validFSxOpenZFSDeploymentTypes, deploymentType) {
+		return fmt.Errorf("invalid fsx_openzfs.deployment_type %q (must be one of: %v)", deploymentType, validFSxOpenZFSDeploymentTypes)
+	}
+	if deploymentType == fsxOpenZFSDeploymentTypeMultiAZ1 && !cfg.CreateVPC() && len(cfg.ExistingPrivateRouteTableIDs) == 0 {
+		return fmt.Errorf("existing_private_route_table_ids is required when using an existing VPC with a %s FSx for OpenZFS filesystem", fsxOpenZFSDeploymentTypeMultiAZ1)
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -185,6 +203,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
 		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
 			awsCfg.LoadBalancerScheme, validLoadBalancerSchemes)
+		span.RecordError(err)
+		return err
+	}
+
+	if err := validateFSxOpenZFS(awsCfg); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -463,6 +486,46 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		if err := installGPUOperator(ctx, kubeconfigBytes); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install GPU Operator: %w", err)
+		}
+	}
+
+	// Install the FSx for OpenZFS CSI driver when FSx is enabled. The module
+	// creates the filesystem and the controller's Pod Identity association,
+	// but leaves the driver itself to NIC.
+	if awsCfg.FSxOpenZFSEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for FSx for OpenZFS CSI driver install: %w", err)
+		}
+
+		if err := installFSxOpenZFSCSIDriver(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install FSx for OpenZFS CSI driver: %w", err)
+		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for FSx for OpenZFS: %w", err)
+		}
+
+		rootVolumeIDOutput, ok := outputs["fsx_openzfs_root_volume_id"]
+		if !ok {
+			err := fmt.Errorf("fsx_openzfs_root_volume_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var rootVolumeID string
+		if err := json.Unmarshal(rootVolumeIDOutput.Value, &rootVolumeID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal fsx_openzfs_root_volume_id: %w", err)
+		}
+
+		if err := createFSxOpenZFSStorageClass(ctx, kubeconfigBytes, awsCfg, rootVolumeID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create FSx for OpenZFS StorageClass: %w", err)
 		}
 	}
 

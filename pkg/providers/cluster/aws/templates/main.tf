@@ -1,6 +1,5 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.7.0"
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=fsx-openzfs-production"
 
 
   project_name                             = var.project_name
@@ -10,6 +9,7 @@ module "eks_cluster" {
   vpc_cidr_block                           = var.vpc_cidr_block
   existing_vpc_id                          = var.existing_vpc_id
   existing_private_subnet_ids              = var.existing_private_subnet_ids
+  existing_private_route_table_ids         = var.existing_private_route_table_ids
   create_security_group                    = var.create_security_group
   existing_security_group_id               = var.existing_security_group_id
   kubernetes_version                       = var.kubernetes_version
@@ -33,6 +33,14 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
+
+  fsx_openzfs_enabled                         = var.fsx_openzfs_enabled
+  fsx_openzfs_deployment_type                 = var.fsx_openzfs_deployment_type
+  fsx_openzfs_storage_capacity                = var.fsx_openzfs_storage_capacity
+  fsx_openzfs_throughput                      = var.fsx_openzfs_throughput
+  fsx_openzfs_automatic_backup_retention_days = var.fsx_openzfs_automatic_backup_retention_days
+  fsx_openzfs_skip_final_backup               = var.fsx_openzfs_skip_final_backup
+  fsx_openzfs_delete_child_volumes_on_destroy = var.fsx_openzfs_delete_child_volumes_on_destroy
 
   longhorn_backup_bucket_create        = var.backup_bucket_create
   longhorn_backup_bucket_name          = var.backup_bucket_name

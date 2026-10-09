@@ -10,6 +10,8 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+func intPtr(i int) *int { return &i }
+
 func durPtr(d time.Duration) *time.Duration { return &d }
 
 func TestLonghornEnabled(t *testing.T) {
@@ -286,6 +288,86 @@ func TestClusterAutoscalerImageTag(t *testing.T) {
 			got := tt.config.ClusterAutoscalerImageTag()
 			if got != tt.expected {
 				t.Errorf("ClusterAutoscalerImageTag() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCreateVPC(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{name: "no existing network creates a VPC", config: Config{}, expected: true},
+		{name: "existing VPC ID", config: Config{ExistingVPCID: "vpc-123"}, expected: false},
+		{name: "existing subnets only", config: Config{ExistingPrivateSubnetIDs: []string{"subnet-a"}}, expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.CreateVPC(); got != tt.expected {
+				t.Errorf("CreateVPC() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFSxOpenZFSEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{name: "nil FSxOpenZFS is disabled", config: Config{}, expected: false},
+		{name: "block without enabled is disabled", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: false},
+		{name: "enabled", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}}, expected: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.FSxOpenZFSEnabled(); got != tt.expected {
+				t.Errorf("FSxOpenZFSEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFSxOpenZFSDeploymentType(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{name: "nil FSxOpenZFS returns default", config: Config{}, expected: fsxOpenZFSDeploymentTypeMultiAZ1},
+		{name: "empty DeploymentType returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: fsxOpenZFSDeploymentTypeMultiAZ1},
+		{name: "custom DeploymentType is used", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_2"}}, expected: "SINGLE_AZ_2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.FSxOpenZFSDeploymentType(); got != tt.expected {
+				t.Errorf("FSxOpenZFSDeploymentType() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFSxOpenZFSStorageClassName(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected string
+	}{
+		{name: "nil FSxOpenZFS returns default", config: Config{}, expected: defaultFSxOpenZFSStorageClassName},
+		{name: "empty StorageClassName returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}}, expected: defaultFSxOpenZFSStorageClassName},
+		{name: "custom StorageClassName is used", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{StorageClassName: "shared"}}, expected: "shared"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.FSxOpenZFSStorageClassName(); got != tt.expected {
+				t.Errorf("FSxOpenZFSStorageClassName() = %q, want %q", got, tt.expected)
 			}
 		})
 	}

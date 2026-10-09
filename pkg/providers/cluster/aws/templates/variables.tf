@@ -35,6 +35,11 @@ variable "existing_private_subnet_ids" {
   default = []
 }
 
+variable "existing_private_route_table_ids" {
+  type    = list(string)
+  default = []
+}
+
 variable "create_security_group" {
   type = bool
 }
@@ -116,6 +121,44 @@ variable "efs_encrypted" {
 variable "efs_kms_key_arn" {
   type    = string
   default = null
+}
+
+# The FSx for OpenZFS defaults mirror the module's. A null passed to a module
+# variable stays null rather than taking the module default, and the module's
+# range validations reject null.
+variable "fsx_openzfs_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "fsx_openzfs_deployment_type" {
+  type    = string
+  default = "MULTI_AZ_1"
+}
+
+variable "fsx_openzfs_storage_capacity" {
+  type    = number
+  default = 64
+}
+
+variable "fsx_openzfs_throughput" {
+  type    = number
+  default = 160
+}
+
+variable "fsx_openzfs_automatic_backup_retention_days" {
+  type    = number
+  default = 7
+}
+
+variable "fsx_openzfs_skip_final_backup" {
+  type    = bool
+  default = false
+}
+
+variable "fsx_openzfs_delete_child_volumes_on_destroy" {
+  type    = bool
+  default = false
 }
 
 variable "node_security_group_additional_rules" {
