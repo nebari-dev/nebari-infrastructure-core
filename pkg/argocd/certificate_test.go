@@ -318,13 +318,13 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			}
 
 			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
-			operatorPatch, err := os.ReadFile(filepath.Join(tmpDir, "manifests", "nebari-operator", "deployment-patch.yaml"))
+			operatorValues, err := os.ReadFile(filepath.Join(tmpDir, "values", "nebari-operator", "base.yaml"))
 			if err != nil {
-				t.Fatalf("read operator deployment patch: %v", err)
+				t.Fatalf("read operator values: %v", err)
 			}
 			wantIssuerValue := `value: "` + tt.wantOperatorName + `"`
-			if !strings.Contains(string(operatorPatch), wantIssuerValue) {
-				t.Errorf("operator deployment patch missing %q", wantIssuerValue)
+			if !strings.Contains(string(operatorValues), wantIssuerValue) {
+				t.Errorf("operator values missing %q", wantIssuerValue)
 			}
 		})
 	}

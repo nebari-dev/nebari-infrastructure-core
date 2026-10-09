@@ -6,7 +6,7 @@ Status legend:
 - 🟡 partially shipped
 - ⏳ planned, not started or in progress
 
-The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`). v1.0.0 has not shipped.
+The repo's current release line is `v0.1.0-alpha.*` (see recent tags and `pkg/argocd/templates/apps/nebari-operator.yaml`). v1.0.0 has not shipped.
 
 ## 13.1 Phase 1: Foundation
 

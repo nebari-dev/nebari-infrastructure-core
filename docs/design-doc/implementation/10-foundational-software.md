@@ -144,6 +144,6 @@ A first-class `nic status` / health-check subcommand does not exist today; that 
 
 ## 10.9 Versions
 
-Component versions are pinned in the individual template YAML files under `pkg/argocd/templates/apps/`. Search those files for `targetRevision:` and `version:` fields. The nebari-operator version is pinned in `pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`.
+Component versions are pinned in the individual template YAML files under `pkg/argocd/templates/apps/`. Search those files for `targetRevision:` and `version:` fields. The nebari-operator version is the chart `targetRevision` in `pkg/argocd/templates/apps/nebari-operator.yaml`.
 
 Bumping a foundational version is a config change inside the template file plus an `argocd app sync` on the deployed cluster.

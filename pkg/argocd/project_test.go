@@ -39,6 +39,9 @@ func TestDeriveProjectScopes(t *testing.T) {
 		"https://github.com/nebari-dev/nebari-landing",
 		"https://open-telemetry.github.io/opentelemetry-helm-charts",
 		"docker.io/envoyproxy",
+		// nebari-operator's chart. Its kustomize install pulled from the GitHub
+		// repo through the GitOps repo, so it never needed an entry of its own.
+		"quay.io/nebari/charts",
 	}
 	for _, r := range wantRepos {
 		if !slices.Contains(repos, r) {

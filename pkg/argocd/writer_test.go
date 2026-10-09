@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -444,9 +445,9 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 		},
 	}
 
-	content, err := templates.ReadFile("templates/manifests/nebari-operator/deployment-patch.yaml")
+	content, err := templates.ReadFile("templates/values/nebari-operator/base.yaml")
 	if err != nil {
-		t.Fatalf("failed to read operator deployment patch: %v", err)
+		t.Fatalf("failed to read operator values: %v", err)
 	}
 
 	for _, tt := range tests {
@@ -460,7 +461,7 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 				KeycloakAdminSecretName: "keycloak-admin-credentials",
 			}
 
-			processed, err := processTemplate("manifests/nebari-operator/deployment-patch.yaml", content, data)
+			processed, err := processTemplate("values/nebari-operator/base.yaml", content, data)
 			if err != nil {
 				t.Fatalf("processTemplate() error: %v", err)
 			}
@@ -1554,6 +1555,7 @@ var helmValueFilesApps = []struct {
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
 	{"nebari-landingpage", "existingSecret: \"nebari-landing-redis\""},
+	{"nebari-operator", "name: KEYCLOAK_EXTERNAL_URL"},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
@@ -1981,7 +1983,7 @@ func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
 // issue #457 so regressions in the embedded templates fail loudly. Each
 // wanted block is matched verbatim, indentation included. Helm-app values
 // live in templates/values/<app>/base.yaml (the #406 overlay seam), so the
-// blocks are pinned there; the nebari-operator entry stays in its manifest.
+// blocks are pinned there, nebari-operator's included.
 func TestFoundationalResourceDefaults(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2022,9 +2024,9 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 		},
 		{
 			name:     "nebari-operator manager",
-			template: "templates/manifests/nebari-operator/deployment-patch.yaml",
+			template: "templates/values/nebari-operator/base.yaml",
 			want: []string{
-				"          resources:\n            requests:\n              cpu: 10m\n              memory: 64Mi\n            limits:\n              cpu: 200m\n              memory: 128Mi",
+				"  resources:\n    requests:\n      cpu: 10m\n      memory: 64Mi\n    limits:\n      cpu: 200m\n      memory: 128Mi",
 			},
 		},
 	}
@@ -2088,6 +2090,58 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 	for _, w := range []string{"parametersRef:", "kind: EnvoyProxy", "name: nebari-proxy-config"} {
 		if !strings.Contains(string(gc), w) {
 			t.Errorf("gatewayclass.yaml missing %q", w)
+		}
+	}
+}
+
+// TestWriteAllToGit_RetiresTheKustomizeOperatorInstall covers a repo
+// bootstrapped by a NIC that installed nebari-operator with kustomize. After
+// a regen, manifests/nebari-operator must hold only the namespace: a leftover
+// kustomization.yaml there would make ArgoCD apply a second, GitHub-sourced
+// operator alongside the Helm chart.
+func TestWriteAllToGit_RetiresTheKustomizeOperatorInstall(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	operatorDir := filepath.Join(tmpDir, "manifests", "nebari-operator")
+	if err := os.MkdirAll(operatorDir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, name := range []string{"kustomization.yaml", "deployment-patch.yaml"} {
+		if err := os.WriteFile(filepath.Join(operatorDir, name), []byte("old\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	entries, err := os.ReadDir(operatorDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", operatorDir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !slices.Equal(names, []string{"namespace.yaml"}) {
+		t.Errorf("manifests/nebari-operator holds %v, want only namespace.yaml", names)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "values", "nebari-operator", "base.yaml")); err != nil {
+		t.Errorf("operator Helm values not written: %v", err)
+	}
+}
+
+// TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated keeps the retired
+// list honest: a path that a template still renders must not be on it, or
+// every regen would write the file and then delete it.
+func TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated(t *testing.T) {
+	for _, rel := range retiredTemplates {
+		if _, err := templates.ReadFile(templateDir + "/" + rel); err == nil {
+			t.Errorf("%s is retired but still exists as a template", rel)
 		}
 	}
 }
