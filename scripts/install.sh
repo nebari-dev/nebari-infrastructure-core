@@ -6,39 +6,51 @@
 #   curl -sfL .../scripts/install.sh | NIC_VERSION=v0.11.0 sh
 #
 # Environment variables:
-#   NIC_VERSION           version to install: "latest" (default) or a tag like v0.11.0
-#   INSTALL_DIR           install location (default: /usr/local/bin; uses sudo if needed)
-#   NIC_REPO              source repo (default: nebari-dev/nebari-infrastructure-core)
-#   NIC_SKIP_SIGNATURE    set to 1 to skip cosign signature verification (for
-#                         air-gapped hosts or networks that block sigstore.dev);
-#                         the checksum is still verified
+#   NIC_VERSION            version to install: "latest" (default) or a tag like v0.14.0
+#   INSTALL_DIR            install location (default: /usr/local/bin; uses sudo if needed)
+#   NIC_REPO               source repo (default: nebari-dev/nebari-infrastructure-core)
+#   NIC_EXPECTED_SHA256    the archive's SHA-256, obtained from a source you trust.
+#                          When set, the archive is compared against it directly and
+#                          the release's checksums.txt and signature are not consulted
+#   NIC_REQUIRE_SIGNATURE  set to 1 to refuse a checksum-only install when nothing on
+#                          this host can verify the release
 #
 # The download is always verified against the release's checksums.txt (integrity).
-# When cosign (>= 2.4.2) is installed, checksums.txt is additionally verified
-# against the release workflow's signing identity (authenticity); if cosign is
-# absent or too old, the GitHub build-provenance attestation is checked instead
-# when `gh` is available. Integrity proves the bytes were not corrupted;
-# authenticity proves who signed them.
+# Authenticity is checked with the first capable verifier on the host: cosign
+# (>= 2.6.5 on 2.x, >= 3.1.3 on 3.x) over checksums.txt, pinned to the release
+# workflow's identity at this exact tag and verified offline against a pinned
+# Sigstore trust root; otherwise a logged-in `gh`, over the archive's
+# build-provenance attestation. Integrity proves the bytes were not corrupted;
+# authenticity proves who produced them.
 #
-# Authenticity is best-effort in one direction only. It degrades, with a plain
-# warning, when no tool on this host can verify, or when the release predates
-# signing (below v0.10.0). It is never skipped because the signature could not
-# be fetched or did not verify for a release that is supposed to have one:
-# suppressing the signature is the cheapest attack on a piped installer, so a
-# missing or failing signature is fatal rather than a warning.
+# Authenticity degrades in exactly one case: no capable verifier on the host. The
+# install then continues on the checksum alone with a warning, or stops if
+# NIC_REQUIRE_SIGNATURE is set. Once a capable verifier is present nothing
+# degrades, for any tag: a missing, unfetchable or failing signature is fatal,
+# because suppressing the signature is the cheapest attack on a piped installer.
 set -eu
 
 NIC_VERSION="${NIC_VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 NIC_REPO="${NIC_REPO:-nebari-dev/nebari-infrastructure-core}"
-NIC_SKIP_SIGNATURE="${NIC_SKIP_SIGNATURE:-0}"
+NIC_EXPECTED_SHA256="${NIC_EXPECTED_SHA256:-}"
+NIC_REQUIRE_SIGNATURE="${NIC_REQUIRE_SIGNATURE:-0}"
 
-# The minimum cosign that can read the sigstore bundle format goreleaser emits.
-COSIGN_MIN="2.4.2"
-# The first release that publishes checksums.txt.sigstore.json. Below this a
-# missing bundle is genuine; at or above it, a missing bundle means something is
-# wrong. Keep in step with when `signs:` was added to .goreleaser.yml.
+# The minimum cosign trusted per major version. Older builds are inside
+# GHSA-fx35-mq7g-6g98, where a legacy bundle carrying an attacker's own public key
+# passes an identity-pinned verify-blob. One floor cannot express this: 3.0.0 is
+# newer than 2.6.5 and still affected.
+COSIGN_MIN_V2="2.6.5"
+COSIGN_MIN_V3="3.1.3"
+# The first release that publishes checksums.txt.sigstore.json and a
+# build-provenance attestation. It only shapes the error message: a release below
+# it can still be installed, but only against a digest the user pins, because
+# "this release predates signing" is exactly what a forged release would claim.
 SIGNING_SINCE="0.10.0"
+# The Sigstore trust root cosign verifies against, offline. Content-addressed:
+# scripts/trusted-roots/<sha256>.json is never edited or deleted, only added to,
+# so an installer saved before a root rotation keeps working.
+TRUSTED_ROOT_SHA256="6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
 # Absolute doc URL: users who ran the one-liner have no local checkout.
 DOCS_URL="https://github.com/${NIC_REPO}/blob/main/docs/operations/verifying-releases.md"
 
@@ -123,111 +135,186 @@ version_lt() {
   }'
 }
 
-# cosign verify-blob over checksums.txt with the pinned release-workflow
-# identity. A 404 on the bundle degrades only for releases that predate signing;
-# on a release that is supposed to have one, a 404 is treated exactly like any
-# other fetch failure, because "the signature is simply missing" is the cheapest
-# way to suppress the check.
-verify_with_cosign() {
-  tmp="$1"; tag="$2"; base="$3"
-  ver="${tag#v}"
+cosign_capable() {
+  # True (0) when cosign version $1 is at or above the floor for its major
+  # version. An empty or unparseable version, or a major newer than 3, counts as
+  # capable, so an unrecognised build still attempts verification rather than
+  # silently downgrading to checksum-only.
+  major="${1%%.*}"
+  case "$major" in
+    '' | *[!0-9]*) return 0 ;;
+    0 | 1) return 1 ;;
+    2) floor="$COSIGN_MIN_V2" ;;
+    3) floor="$COSIGN_MIN_V3" ;;
+    *) return 0 ;;
+  esac
+  if version_lt "$1" "$floor"; then return 1; fi
+  return 0
+}
 
-  # Capture the HTTP status so a pre-signing 404 can degrade while every other
-  # outcome stays fatal. Fetching without -f/-S keeps curl from leaking its own
-  # error. 4xx is not retried by --retry, so the code here is the final one.
+bool_env() { # <name> <value>: 0 for a truthy value, 1 for a falsy one, abort otherwise
+  # Match both spellings explicitly rather than "anything but 0", which would read
+  # NIC_REQUIRE_SIGNATURE=false as true and is the kind of surprise a security
+  # control should not have.
+  case "$2" in
+    1 | true | yes | on) return 0 ;;
+    0 | false | no | off | '') return 1 ;;
+    *) fail "$1 must be one of 0/1, true/false, yes/no, on/off (got '$2')" ;;
+  esac
+}
+
+# Write the pinned Sigstore trust root to $1. A copy next to this script (a
+# checkout) is preferred, otherwise it comes from the repository's main branch.
+# Either way the digest is checked, so the source is a convenience, not a trust
+# decision.
+fetch_trusted_root() {
+  dest="$1"
+  case "$0" in
+    */install.sh) local_root="${0%/*}/trusted-roots/${TRUSTED_ROOT_SHA256}.json" ;;
+    *) local_root="" ;;
+  esac
+  if [ -n "$local_root" ] && [ -f "$local_root" ]; then
+    cp "$local_root" "$dest"
+  else
+    fetch -fsSL -m 60 -o "$dest" \
+      "https://raw.githubusercontent.com/${NIC_REPO}/main/scripts/trusted-roots/${TRUSTED_ROOT_SHA256}.json" ||
+      fail "could not fetch the pinned Sigstore trust root from raw.githubusercontent.com; refusing to install. If your network blocks that host, verify the release on a machine that can reach it (${DOCS_URL}) and re-run with NIC_EXPECTED_SHA256 set to the archive's digest."
+  fi
+  [ "$(sha256_of "$dest")" = "$TRUSTED_ROOT_SHA256" ] ||
+    fail "the Sigstore trust root does not match the digest this installer pins; refusing to install. Please report it at https://github.com/${NIC_REPO}/issues."
+}
+
+# The error for a release below SIGNING_SINCE when a verifier is present. It
+# names NIC_EXPECTED_SHA256 because there the premise is true: nothing about the
+# release can prove it, so the proof has to come from the user.
+fail_unsigned_release() { # <tag> <tarball> <what is missing>
+  fail "$1 predates release signing (first signed release: v${SIGNING_SINCE}), so it has no $3, and this installer will not fall back to checksums.txt while a verifier is installed: 'this release predates signing' is what a forged release would claim too. To install $1 anyway, verify $2 yourself and re-run with NIC_EXPECTED_SHA256 set to its digest, taken from a source you trust and NOT from this release's checksums.txt. See ${DOCS_URL}"
+}
+
+# cosign verify-blob over checksums.txt, offline against the pinned trust root,
+# with the identity pinned to the release workflow at this exact tag. Every
+# outcome other than a clean verify is fatal.
+verify_with_cosign() {
+  tmp="$1"; tag="$2"; base="$3"; tarball="$4"
+
+  # Capture the HTTP status so each failure gets an accurate message. Fetching
+  # without -f/-S keeps curl from leaking its own error. 4xx is not retried by
+  # --retry, so the code here is the final one.
   sig="${tmp}/checksums.txt.sigstore.json"
   code="$(fetch -sL -m 60 -o "$sig" -w '%{http_code}' "${base}/checksums.txt.sigstore.json")" || code=000
   case "$code" in
     200) ;;
     404)
-      if version_lt "$ver" "$SIGNING_SINCE"; then
-        log "warning: ${tag} predates release signing (first signed release: v${SIGNING_SINCE}); authenticity NOT verified."
-        log "         The checksum is still checked. See ${DOCS_URL}"
-        return 0
+      if version_lt "${tag#v}" "$SIGNING_SINCE"; then
+        fail_unsigned_release "$tag" "$tarball" "signature bundle"
       fi
-      fail "no signature bundle for ${tag} (HTTP 404), but every release from v${SIGNING_SINCE} on publishes one; refusing to install. The server answered, so this is not a network problem: a signature is absent from a release that should carry one, which is what removing it to suppress this check looks like. Do not work around it -- falling back to checksums.txt would trust the same origin the signature is missing from. Verify manually (${DOCS_URL}) and please report it at https://github.com/${NIC_REPO}/issues."
+      fail "no signature bundle for ${tag} (HTTP 404), but every release from v${SIGNING_SINCE} on publishes one; refusing to install. The server answered, so this is not a network problem: a signature is absent from a release that should carry one, which is what removing it to suppress this check looks like. Do not work around it: falling back to checksums.txt would trust the same origin the signature is missing from. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
       ;;
     *)
-      fail "could not fetch the signature bundle for ${tag} (HTTP ${code}); refusing to install. If you are offline or on a network that blocks sigstore.dev, verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."
+      fail "could not fetch the signature bundle for ${tag} (HTTP ${code}); refusing to install. If your network blocks this download, verify the release on a machine that can reach it (${DOCS_URL}) and re-run with NIC_EXPECTED_SHA256 set to the archive's digest."
       ;;
   esac
 
-  # Pin the identity to this exact tag (defense in depth over a bare .*), with
-  # the tag's dots escaped so v0.13.0 cannot also match v0x13y0.
-  tag_re="$(printf '%s' "$tag" | sed 's/\./\\./g')"
-  if cosign verify-blob \
+  fetch_trusted_root "${tmp}/trusted_root.json"
+
+  # A bundle plus --trusted-root needs no network and writes nothing to
+  # ~/.sigstore, so a failure below has one meaning: the signature does not
+  # verify. cosign 2.x needs that spelled out: --offline keeps it from the
+  # transparency-log lookup, and --new-bundle-format makes it refuse a
+  # legacy-format bundle outright. 3.x does both already and warns that the
+  # flags are deprecated, so they are passed to 2.x only. The identity is exact,
+  # not a regexp, so nothing in the tag or NIC_REPO can act as a metacharacter.
+  set --
+  case "$(cosign_version)" in
+    2.*) set -- --offline --new-bundle-format ;;
+  esac
+  if cosign verify-blob "$@" \
+    --trusted-root "${tmp}/trusted_root.json" \
     --bundle "$sig" \
-    --certificate-identity-regexp "^https://github.com/${NIC_REPO}/\.github/workflows/release\.yml@refs/tags/${tag_re}\$" \
+    --certificate-identity "https://github.com/${NIC_REPO}/.github/workflows/release.yml@refs/tags/${tag}" \
     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
     "${tmp}/checksums.txt" >/dev/null; then
     log "Authenticity verified (cosign, pinned release-workflow identity)"
     return 0
   fi
-
-  # verify-blob exits 1 both when the signature is invalid and when cosign
-  # cannot reach the Sigstore trust root, and its stderr wording is not stable
-  # enough to match on. `cosign initialize` separates them structurally: it
-  # performs the same TUF refresh and nothing else, so if it succeeds the trust
-  # root is reachable and the only remaining explanation is that the signature
-  # does not verify. That distinction decides whether offering
-  # NIC_SKIP_SIGNATURE is sound advice or an invitation to install a tampered
-  # binary, so the two cases get two messages.
-  if cosign initialize >/dev/null 2>&1; then
-    fail "the signature on checksums.txt for ${tag} did NOT verify (see cosign's error above); refusing to install. The Sigstore trust root is reachable, so this is not a network problem: the release assets do not match a signature from ${NIC_REPO}'s release workflow. Do not bypass this check. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
-  fi
-  fail "cosign could not reach the Sigstore trust root to verify checksums.txt for ${tag} (see cosign's error above); refusing to install. If you are air-gapped or on a network that blocks sigstore.dev, verify manually (${DOCS_URL}) or re-run with NIC_SKIP_SIGNATURE=1."
+  fail "the signature on checksums.txt for ${tag} did NOT verify (see cosign's error above); refusing to install. Verification ran offline against a pinned trust root, so this is not a network problem: the release assets do not match a signature from ${NIC_REPO}'s release workflow at ${tag}. Do not bypass this check. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
 }
 
-# Best-effort authenticity check. Prefers cosign over checksums.txt; if cosign is
-# absent or too old, falls back to the GitHub build-provenance attestation over
-# the tarball for users who have `gh`. The fallback is additive: it can only
-# upgrade a would-be-unverified install to verified, never newly abort, since
-# without it we would already be degrading to checksum-only.
-verify_authenticity() {
-  tmp="$1"; tag="$2"; base="$3"
+# gh attestation verify over the archive. Only reached when gh is logged in, at
+# which point gh is a capable verifier and its failure is fatal. gh answers a
+# substituted archive and a never-attested release the same way (no attestation
+# for that digest), so the two cannot be told apart and neither may degrade.
+verify_with_gh() {
+  tmp="$1"; tag="$2"; tarball="$3"
+  # --signer-workflow pins the attestation to the same release workflow the
+  # cosign branch pins its certificate identity to. Without it this accepts a
+  # provenance statement from any workflow in the repo.
+  if gh attestation verify "${tmp}/nic.tar.gz" --repo "${NIC_REPO}" \
+    --signer-workflow "${NIC_REPO}/.github/workflows/release.yml" >/dev/null; then
+    log "Authenticity verified (gh attestation, build provenance from the release workflow)"
+    return 0
+  fi
+  if version_lt "${tag#v}" "$SIGNING_SINCE"; then
+    fail_unsigned_release "$tag" "$tarball" "build-provenance attestation"
+  fi
+  fail "gh attestation verify found no build provenance from ${NIC_REPO}'s release workflow for ${tarball} (see gh's error above); refusing to install. gh reports a substituted archive the same way it reports a missing attestation, so this cannot be told apart from tampering. Do not bypass this check. If gh cannot reach api.github.com, install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x), which verifies offline. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
+}
 
-  # Match truthy values explicitly rather than "anything but 0". Treating every
-  # non-zero string as "skip" would turn the check off for NIC_SKIP_SIGNATURE=false
-  # and =no, which are the natural spellings of leaving it on.
-  case "$NIC_SKIP_SIGNATURE" in
-    0 | false | no | off | '') ;;
-    1 | true | yes | on)
-      log "note: signature verification skipped (NIC_SKIP_SIGNATURE=${NIC_SKIP_SIGNATURE}); only the checksum is checked."
-      return 0
-      ;;
-    *) fail "NIC_SKIP_SIGNATURE must be one of 0/1, true/false, yes/no, on/off (got '${NIC_SKIP_SIGNATURE}'); refusing to guess whether you meant to disable signature verification." ;;
-  esac
+# Authenticity, from the first capable verifier: cosign at the floor, then a
+# logged-in gh. With neither, the install continues on the checksum alone with a
+# warning, unless NIC_REQUIRE_SIGNATURE asks for it to stop.
+verify_authenticity() {
+  tmp="$1"; tag="$2"; base="$3"; tarball="$4"
 
   if command -v cosign >/dev/null 2>&1; then
     cver="$(cosign_version)"
-    if ! version_lt "$cver" "$COSIGN_MIN"; then
-      verify_with_cosign "$tmp" "$tag" "$base"
+    if cosign_capable "$cver"; then
+      verify_with_cosign "$tmp" "$tag" "$base" "$tarball"
       return 0
     fi
-    cosign_note="cosign ${cver} is older than ${COSIGN_MIN} and cannot read this signature format"
+    cosign_note="cosign ${cver} is below the minimum this installer trusts (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x; older builds are affected by GHSA-fx35-mq7g-6g98)"
   else
     cosign_note="cosign not found"
   fi
 
   if command -v gh >/dev/null 2>&1; then
-    # --signer-workflow pins the attestation to the same release workflow the
-    # cosign branch pins its certificate identity to. Without it this accepts a
-    # provenance statement from any workflow in the repo, which is a weaker
-    # claim than the one the success message advertises.
-    if gh attestation verify "${tmp}/nic.tar.gz" --repo "${NIC_REPO}" \
-      --signer-workflow "${NIC_REPO}/.github/workflows/release.yml" >/dev/null 2>&1; then
-      log "Authenticity verified (gh attestation, build provenance from the release workflow)"
+    if gh auth status --hostname github.com >/dev/null 2>&1; then
+      verify_with_gh "$tmp" "$tag" "$tarball"
       return 0
     fi
-    log "note: authenticity NOT verified: ${cosign_note}, and gh attestation verify did not succeed (not logged in to gh, offline, or no attestation for this release)."
+    gh_note="gh is not logged in"
   else
-    log "note: authenticity NOT verified: ${cosign_note}; only the checksum is checked."
+    gh_note="gh not found"
   fi
-  log "      Install cosign (>= ${COSIGN_MIN}) to verify the signature, or see ${DOCS_URL}"
+
+  if bool_env NIC_REQUIRE_SIGNATURE "$NIC_REQUIRE_SIGNATURE"; then
+    fail "NIC_REQUIRE_SIGNATURE is set, but nothing on this host can verify ${tag} (${cosign_note}; ${gh_note}); refusing to install on the checksum alone. Install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x) or log in to gh, or set NIC_EXPECTED_SHA256 to a digest from a source you trust. See ${DOCS_URL}"
+  fi
+  log "note: authenticity NOT verified (${cosign_note}; ${gh_note}); only the checksum is checked."
+  log "      Install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x) to verify the signature, or see ${DOCS_URL}"
   return 0
 }
 
+# The digest from NIC_EXPECTED_SHA256, lower-cased, or nothing when it is unset.
+# Anything that is not 64 hex characters aborts: a mistyped pin must not be
+# mistaken for no pin.
+expected_sha256() {
+  [ -n "$NIC_EXPECTED_SHA256" ] || return 0
+  want="$(printf '%s' "$NIC_EXPECTED_SHA256" | tr 'ABCDEF' 'abcdef')"
+  case "$want" in
+    *[!0-9a-f]*) fail "NIC_EXPECTED_SHA256 must be a SHA-256 digest of 64 hex characters (got '${NIC_EXPECTED_SHA256}')" ;;
+  esac
+  [ "${#want}" -eq 64 ] ||
+    fail "NIC_EXPECTED_SHA256 must be a SHA-256 digest of 64 hex characters (got ${#want} characters)"
+  printf '%s' "$want"
+}
+
 main() {
+  # Check both inputs before any download, so a typo aborts in a second rather
+  # than after a large archive.
+  pinned="$(expected_sha256)"
+  bool_env NIC_REQUIRE_SIGNATURE "$NIC_REQUIRE_SIGNATURE" || :
+
   tag="$NIC_VERSION"
   if [ "$tag" = "latest" ]; then
     tag="$(resolve_latest)" || fail "could not resolve the latest release tag (set NIC_VERSION=vX.Y.Z)"
@@ -255,18 +342,28 @@ main() {
   # time, which matters for a large archive on a slow link.
   fetch -fsSL --speed-limit 1024 --speed-time 30 "${base}/${tarball}" -o "${tmp}/nic.tar.gz" ||
     fail "download failed: ${base}/${tarball}"
-  fetch -fsSL -m 60 "${base}/checksums.txt" -o "${tmp}/checksums.txt" ||
-    fail "could not fetch checksums.txt for ${tag}"
 
-  # Authenticity first (does the checksum list come from the release workflow?),
-  # then integrity (does the tarball match the list?).
-  verify_authenticity "$tmp" "$tag" "$base"
+  if [ -n "$pinned" ]; then
+    # The user's digest is the verifier. Nothing else from the release is
+    # consulted, so it works offline and for releases that predate signing.
+    actual="$(sha256_of "${tmp}/nic.tar.gz")"
+    [ "$pinned" = "$actual" ] ||
+      fail "${tarball} does not match NIC_EXPECTED_SHA256 (expected ${pinned}, got ${actual}); refusing to install."
+    log "Verified against NIC_EXPECTED_SHA256 (release checksums and signature not consulted)"
+  else
+    fetch -fsSL -m 60 "${base}/checksums.txt" -o "${tmp}/checksums.txt" ||
+      fail "could not fetch checksums.txt for ${tag}"
 
-  expected="$(awk -v n="$tarball" '$2 == n {print $1}' "${tmp}/checksums.txt")"
-  [ -n "$expected" ] || fail "no checksum entry for ${tarball} in checksums.txt"
-  actual="$(sha256_of "${tmp}/nic.tar.gz")"
-  [ "$expected" = "$actual" ] || fail "checksum mismatch (expected ${expected}, got ${actual})"
-  log "Checksum verified"
+    # Authenticity first (does the checksum list come from the release
+    # workflow?), then integrity (does the tarball match the list?).
+    verify_authenticity "$tmp" "$tag" "$base" "$tarball"
+
+    expected="$(awk -v n="$tarball" '$2 == n {print $1}' "${tmp}/checksums.txt")"
+    [ -n "$expected" ] || fail "no checksum entry for ${tarball} in checksums.txt"
+    actual="$(sha256_of "${tmp}/nic.tar.gz")"
+    [ "$expected" = "$actual" ] || fail "checksum mismatch (expected ${expected}, got ${actual})"
+    log "Checksum verified"
+  fi
 
   tar -xzf "${tmp}/nic.tar.gz" -C "${tmp}"
   # Goreleaser places the binary at the archive root. Match the exact name

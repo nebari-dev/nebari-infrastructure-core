@@ -4,9 +4,11 @@
 # GoReleaser config, so it duplicates a handful of things that `goreleaser check`
 # does NOT cross-check: the project name, the release archive name template and
 # format, the amd64 -> x86_64 arch rename, the checksum filename, the signature
-# bundle suffix, and the release workflow filename baked into the cosign identity
-# regexp. A change to either side that is not mirrored in the other would leave
-# CI green while breaking the installer for every user at once.
+# bundle suffix, and the release workflow filename baked into the cosign
+# identity. A change to either side that is not mirrored in the other would leave
+# CI green while breaking the installer for every user at once. It also checks
+# the facts install.sh shares with the docs (the cosign floor) and with the repo
+# (the pinned trust root file).
 #
 # Deliberately NOT covered, so the gaps are visible rather than assumed:
 #   - This greps source text, so it cannot tell a live argument from a commented
@@ -14,12 +16,17 @@
 #     string behind in a comment.
 #   - It does not parse or execute install.sh. `sh -n` and a real install are a
 #     separate concern (see #569 for shell linting).
-#   - It runs in the `workflow-pins` job, which is NOT merge-blocking. It reports
-#     drift; it does not by itself stop a merge.
-#   - COSIGN_MIN in install.sh is also duplicated in
-#     docs/operations/verifying-releases.md; that pair is checked below, but the
-#     cosign-release pin in release.yml (the signer whose bundle format the floor
-#     describes) is not, because a signer bump does not always move the floor.
+#   - The per-major cosign floor in install.sh is also stated in
+#     docs/operations/verifying-releases.md and README.md; those are checked
+#     below, but the cosign-release pin in release.yml (the signer) is not,
+#     because a signer bump does not move the verifier floor.
+#   - The pinned trust root is checked for existence and digest only. Whether a
+#     new release still verifies against it after a Sigstore key rotation needs
+#     the release itself and the network, so it is not checked here.
+#
+# It runs in the merge-blocking `Test` job, next to test-installer.sh: since a
+# missing bundle on a signed release is fatal, a drift here breaks every cosign
+# user's install rather than degrading it.
 set -euo pipefail
 
 # Every path below is repo-relative, so anchor to the repo root rather than
@@ -30,6 +37,7 @@ installer="scripts/install.sh"
 goreleaser=".goreleaser.yml"
 release_wf=".github/workflows/release.yml"
 verifying_doc="docs/operations/verifying-releases.md"
+readme="README.md"
 
 status=0
 fail() {
@@ -37,17 +45,17 @@ fail() {
   status=1
 }
 
-# 1. The cosign identity regexp in install.sh pins the release workflow by
-#    filename. If that workflow is renamed, every signed-install verification
-#    fails with a confusing identity mismatch.
-if ! grep -q 'workflows/release\\\.yml' "$installer"; then
-  fail "$installer no longer pins .github/workflows/release.yml in its cosign identity regexp; did the regexp change?"
+# 1. The cosign identity in install.sh pins the release workflow by filename.
+#    If that workflow is renamed, every signed-install verification fails with a
+#    confusing identity mismatch.
+if ! grep -q 'workflows/release\.yml@refs/tags/' "$installer"; then
+  fail "$installer no longer pins .github/workflows/release.yml@refs/tags/<tag> as its cosign identity; did the identity change?"
 fi
 if [[ ! -f "$release_wf" ]]; then
   fail "$installer pins '$release_wf' but that workflow does not exist; a rename breaks signed installs."
 fi
 # The same identity pin is documented for humans; keep the two in step.
-if ! grep -q 'workflows/release\\\.yml' "$verifying_doc"; then
+if ! grep -q 'workflows/release\.yml@refs/tags/' "$verifying_doc"; then
   fail "$verifying_doc no longer documents the .github/workflows/release.yml identity pin that $installer enforces."
 fi
 
@@ -95,33 +103,69 @@ fi
 if ! grep -Eq '^[[:space:]]*formats:[[:space:]]*\[[[:space:]]*tar\.gz[[:space:]]*\]' "$goreleaser"; then
   fail "$goreleaser no longer produces tar.gz archives; $installer hardcodes the .tar.gz suffix and will 404."
 fi
+#    The default format above only holds where no override replaces it, so the
+#    overrides must name windows and nothing else: an override flipped to
+#    `goos: linux` would ship Linux as zip while the line above still passes.
+override_goos="$(awk '
+  /^[[:space:]]*format_overrides:/ { f = 1; ind = match($0, /[^ ]/); next }
+  f && NF { if (match($0, /[^ ]/) <= ind) exit; if (match($0, /goos:[[:space:]]*[^[:space:]]+/)) print substr($0, RSTART + 5) }
+' "$goreleaser" | tr -d ' "' | sort -u | tr '\n' ' ')"
+if [[ $override_goos != "windows " ]]; then
+  fail "$goreleaser format_overrides applies to '${override_goos% }', not only windows; $installer expects tar.gz on linux and darwin and will 404."
+fi
 if ! grep -Eq "^[[:space:]]*name_template:[[:space:]]*'?checksums\.txt'?[[:space:]]*$" "$goreleaser"; then
   fail "$goreleaser no longer names the checksum file checksums.txt; $installer fetches that exact name and will fail."
 fi
 
 # 5. The signature bundle suffix, and that the checksum file is what gets signed.
-#    This one matters most: install.sh derives the bundle URL as
-#    checksums.txt.sigstore.json, and a 404 on that URL is the one drift that
-#    DEGRADES to checksum-only instead of failing loudly. Renaming the signature
-#    would quietly turn authenticity verification off for everyone.
+#    install.sh derives the bundle URL as checksums.txt.sigstore.json, and a 404
+#    on that URL is fatal for every user with a capable cosign. Renaming the
+#    signature would make every such install fail with a message that reads as
+#    tampering, while users without cosign install unverified as before.
+# shellcheck disable=SC2016  # matching GoReleaser's literal ${artifact} template, not expanding
 if ! grep -q 'signature: "${artifact}.sigstore.json"' "$goreleaser"; then
-  fail "$goreleaser no longer emits \${artifact}.sigstore.json; $installer derives the bundle URL from that suffix, and a missing bundle silently downgrades it to checksum-only."
+  fail "$goreleaser no longer emits \${artifact}.sigstore.json; $installer derives the bundle URL from that suffix, so every install with cosign present would fail as if the signature had been removed."
 fi
 if ! grep -Eq '^[[:space:]]*artifacts:[[:space:]]*checksum[[:space:]]*$' "$goreleaser"; then
   fail "$goreleaser no longer signs the checksum artifact; $installer verifies the signature over checksums.txt, not over the archive."
 fi
 
-# 6. The cosign version floor is the same fact in install.sh and in the operator
-#    docs. Moving one without the other tells users to install a cosign that
-#    cannot read the bundle, or refuses one that can.
-cosign_min="$(sed -n 's/^COSIGN_MIN="\([0-9.]*\)".*/\1/p' "$installer" | head -n1)"
-if [[ -z $cosign_min ]]; then
-  fail "$installer no longer defines COSIGN_MIN; the documented cosign floor can no longer be cross-checked."
-elif ! grep -q "v${cosign_min}+" "$verifying_doc"; then
-  fail "$verifying_doc does not state the cosign floor v${cosign_min}+ that $installer enforces via COSIGN_MIN."
+# 6. The cosign floor, per major version, is the same fact in install.sh, the
+#    operator docs and the README. Moving one without the others tells users to
+#    trust a cosign that GHSA-fx35-mq7g-6g98 affects, or refuses one that is fixed.
+for major in 2 3; do
+  floor="$(sed -n "s/^COSIGN_MIN_V${major}=\"\([0-9.]*\)\".*/\1/p" "$installer" | head -n1)"
+  if [[ -z $floor ]]; then
+    fail "$installer no longer defines COSIGN_MIN_V${major}; the documented cosign floor can no longer be cross-checked."
+    continue
+  fi
+  for doc in "$verifying_doc" "$readme"; do
+    if ! grep -q "v${floor}+" "$doc"; then
+      fail "$doc does not state the cosign ${major}.x floor v${floor}+ that $installer enforces via COSIGN_MIN_V${major}."
+    fi
+  done
+done
+
+# 7. The pinned trust root. install.sh fetches scripts/trusted-roots/<digest>.json
+#    from main and refuses anything that does not hash to <digest>, so the file
+#    must exist and must not have been edited in place: a root is replaced by
+#    adding a new file, never by changing one an older installer pins.
+root_sha="$(sed -n 's/^TRUSTED_ROOT_SHA256="\([0-9a-f]*\)".*/\1/p' "$installer" | head -n1)"
+if [[ -z $root_sha ]]; then
+  fail "$installer no longer defines TRUSTED_ROOT_SHA256."
+elif [[ ! -f scripts/trusted-roots/${root_sha}.json ]]; then
+  fail "$installer pins trust root ${root_sha} but scripts/trusted-roots/${root_sha}.json does not exist; every cosign install would fail."
 fi
+for root in scripts/trusted-roots/*.json; do
+  [[ -e $root ]] || continue
+  name="$(basename "$root" .json)"
+  actual="$(sha256sum "$root" 2>/dev/null || shasum -a 256 "$root")"
+  if [[ ${actual%% *} != "$name" ]]; then
+    fail "$root does not hash to its name; trust roots are content-addressed and must never be edited, add a new file instead."
+  fi
+done
 
 if [[ $status -eq 0 ]]; then
-  echo "installer contract OK: project name, archive naming and format, arch rename, checksum and signature filenames, cosign floor, and release workflow filename are in sync."
+  echo "installer contract OK: project name, archive naming and format, arch rename, checksum and signature filenames, cosign floor, trust root, and release workflow filename are in sync."
 fi
 exit $status
