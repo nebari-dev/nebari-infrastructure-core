@@ -15,8 +15,19 @@ sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
 
 ## 2. Verify the signature (authenticity)
 
-Requires [cosign](https://docs.sigstore.dev/) v3+. Identity pinning is mandatory:
-a bundle-only verify checks the math, not who signed it.
+Requires [cosign](https://docs.sigstore.dev/) v2.6.5+ on 2.x, or v3.1.3+ on
+3.x. Earlier builds are affected by
+[GHSA-fx35-mq7g-6g98](https://github.com/sigstore/cosign/security/advisories/GHSA-fx35-mq7g-6g98),
+where a legacy-format bundle carrying an attacker's own key passes an
+identity-pinned verify. 3.0.0 through 3.1.2 are affected even though they are
+newer than 2.6.5, so check the floor for your major version.
+
+Identity pinning is mandatory: a bundle-only verify checks the math, not who
+signed it.
+
+On cosign 2.x, also pass `--new-bundle-format`: it is what makes 2.x refuse the
+legacy-format bundle the advisory abuses. 3.x reads only the new format, so it
+needs nothing extra and warns that the flag is deprecated.
 
 ```bash
 cosign verify-blob \
