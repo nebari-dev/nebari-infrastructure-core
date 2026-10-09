@@ -22,7 +22,8 @@
 #     because a signer bump does not move the verifier floor.
 #   - The pinned trust root is checked for existence and digest only. Whether a
 #     new release still verifies against it after a Sigstore key rotation needs
-#     the release itself and the network, so it is not checked here.
+#     the release itself and the network; the check-installer job in release.yml
+#     covers that by installing each release with main's installer.
 #
 # It runs in the merge-blocking `Test` job, next to test-installer.sh: since a
 # missing bundle on a signed release is fatal, a drift here breaks every cosign

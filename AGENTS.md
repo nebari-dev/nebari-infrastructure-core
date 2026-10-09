@@ -453,7 +453,9 @@ installers already saved by users stop working; to update the root, add a new
 file and move the pin. Update it when Sigstore rotates a key that the release
 workflow's signer uses, since a release signed under a key the pinned root lacks
 fails verification for every cosign user, with a message that reads as tampering.
-Take the new root from cosign's TUF-verified cache (`cosign initialize`, then
+The `check-installer` job in `release.yml` installs each new release with main's
+installer and a signature required, so a rotation shows up there as a failed
+release run before users report it. Take the new root from cosign's TUF-verified cache (`cosign initialize`, then
 `~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json`), not from
 an unauthenticated download.
 
