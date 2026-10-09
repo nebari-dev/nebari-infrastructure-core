@@ -4,6 +4,8 @@
 
 Proposed (2026-02-13) · Amended (2026-05) — scope expanded beyond AWS; see [Update](#update-2026-05-longhorn-as-shared-package).
 
+[ADR-0019](0019-storage-strategy/) (Proposed) would replace Longhorn with cloud-managed RWX on AWS and keep it for Hetzner and on-premises clusters.
+
 ## Date
 
 2026-02-13
