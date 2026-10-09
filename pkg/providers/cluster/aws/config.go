@@ -8,34 +8,47 @@ import (
 )
 
 type Config struct {
-	Region                    string                           `yaml:"region"`
-	StateBucket               string                           `yaml:"state_bucket,omitempty"`
-	AvailabilityZones         []string                         `yaml:"availability_zones,omitempty"`
-	VPCCIDRBlock              string                           `yaml:"vpc_cidr_block,omitempty"`
-	ExistingVPCID             string                           `yaml:"existing_vpc_id,omitempty"`
-	ExistingPrivateSubnetIDs  []string                         `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID   string                           `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion         string                           `yaml:"kubernetes_version,omitempty"`
-	EndpointPrivateAccess     bool                             `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess      bool                             `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                 string                           `yaml:"eks_kms_arn,omitempty"`
-	EnabledLogTypes           []string                         `yaml:"enabled_log_types,omitempty"`
-	ExistingClusterRoleArn    string                           `yaml:"existing_cluster_role_arn,omitempty"`
-	ExistingNodeRoleArn       string                           `yaml:"existing_node_role_arn,omitempty"`
-	PermissionsBoundary       string                           `yaml:"permissions_boundary,omitempty"`
-	NodeGroups                map[string]NodeGroup             `yaml:"node_groups"`
-	Tags                      map[string]string                `yaml:"tags,omitempty"`
-	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
-	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
-	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
-	ClusterAutoscaler         *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
-	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
+	Region                   string   `yaml:"region"`
+	StateBucket              string   `yaml:"state_bucket,omitempty"`
+	AvailabilityZones        []string `yaml:"availability_zones,omitempty"`
+	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
+	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
+	ExistingPrivateSubnetIDs []string `yaml:"existing_private_subnet_ids,omitempty"`
+	// ExistingPrivateRouteTableIDs lists the route tables of the existing
+	// private subnets. Only used when existing_vpc_id is set. A MULTI_AZ_1 FSx
+	// for OpenZFS filesystem adds routes to its floating endpoint to these, so
+	// it is required in that case. Include the VPC's main route table if any
+	// subnet uses it implicitly.
+	ExistingPrivateRouteTableIDs []string                         `yaml:"existing_private_route_table_ids,omitempty"`
+	ExistingSecurityGroupID      string                           `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion            string                           `yaml:"kubernetes_version,omitempty"`
+	EndpointPrivateAccess        bool                             `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess         bool                             `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                    string                           `yaml:"eks_kms_arn,omitempty"`
+	EnabledLogTypes              []string                         `yaml:"enabled_log_types,omitempty"`
+	ExistingClusterRoleArn       string                           `yaml:"existing_cluster_role_arn,omitempty"`
+	ExistingNodeRoleArn          string                           `yaml:"existing_node_role_arn,omitempty"`
+	PermissionsBoundary          string                           `yaml:"permissions_boundary,omitempty"`
+	NodeGroups                   map[string]NodeGroup             `yaml:"node_groups"`
+	Tags                         map[string]string                `yaml:"tags,omitempty"`
+	EFS                          *EFSConfig                       `yaml:"efs,omitempty"`
+	FSxOpenZFS                   *FSxOpenZFSConfig                `yaml:"fsx_openzfs,omitempty"`
+	Longhorn                     *longhorn.Config                 `yaml:"longhorn,omitempty"`
+	AWSLoadBalancerController    *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
+	ClusterAutoscaler            *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
+	LoadBalancerScheme           string                           `yaml:"load_balancer_scheme,omitempty"`
 	// EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for
 	// Service Accounts. When unset, the upstream module default (true) applies.
 	// Set false when the cluster relies exclusively on EKS Pod Identity, or
 	// when the VPC cannot resolve oidc.eks.<region>.amazonaws.com (a fully
 	// private deployment with no public DNS resolution for AWS hostnames).
 	EnableIRSA *bool `yaml:"enable_irsa,omitempty"`
+}
+
+// CreateVPC reports whether the module should create a new VPC, which it does
+// unless an existing VPC or existing private subnets are configured.
+func (c *Config) CreateVPC() bool {
+	return c.ExistingVPCID == "" && len(c.ExistingPrivateSubnetIDs) == 0
 }
 
 const (
@@ -222,4 +235,63 @@ func (c *Config) EFSStorageClassName() string {
 		return defaultEFSStorageClassName
 	}
 	return c.EFS.StorageClassName
+}
+
+// FSxOpenZFSConfig configures an FSx for OpenZFS filesystem shared by the
+// cluster through the FSx for OpenZFS CSI driver. Fields left unset fall back
+// to the terraform-aws-eks-cluster module defaults, which also validates their
+// ranges.
+type FSxOpenZFSConfig struct {
+	Enabled            bool   `yaml:"enabled,omitempty"`
+	DeploymentType     string `yaml:"deployment_type,omitempty"`      // MULTI_AZ_1 (default) or SINGLE_AZ_2
+	StorageCapacityGiB int    `yaml:"storage_capacity_gib,omitempty"` // default: 64
+	ThroughputMiBps    int    `yaml:"throughput_mibps,omitempty"`     // default: 160
+	// AutomaticBackupRetentionDays is a pointer because 0 is meaningful: it
+	// disables automatic backups. Unset keeps the module default of 7.
+	AutomaticBackupRetentionDays *int `yaml:"automatic_backup_retention_days,omitempty"`
+	// SkipFinalBackup skips the backup FSx takes when the filesystem is
+	// deleted. The final backup outlives the cluster and is billed until it
+	// is deleted separately.
+	SkipFinalBackup bool `yaml:"skip_final_backup,omitempty"`
+	// DeleteChildVolumesOnDestroy deletes the volumes and snapshots the CSI
+	// driver created together with the filesystem. When false, destroy fails
+	// while any remain rather than deleting user data.
+	DeleteChildVolumesOnDestroy bool   `yaml:"delete_child_volumes_on_destroy,omitempty"`
+	StorageClassName            string `yaml:"storage_class_name,omitempty"` // default: fsx-openzfs-sc
+}
+
+const (
+	fsxOpenZFSDeploymentTypeMultiAZ1  = "MULTI_AZ_1"
+	fsxOpenZFSDeploymentTypeSingleAZ2 = "SINGLE_AZ_2"
+
+	defaultFSxOpenZFSStorageClassName = "fsx-openzfs-sc"
+)
+
+var validFSxOpenZFSDeploymentTypes = []string{
+	fsxOpenZFSDeploymentTypeMultiAZ1,
+	fsxOpenZFSDeploymentTypeSingleAZ2,
+}
+
+// FSxOpenZFSEnabled returns whether an FSx for OpenZFS filesystem should be
+// provisioned. Defaults to false.
+func (c *Config) FSxOpenZFSEnabled() bool {
+	return c.FSxOpenZFS != nil && c.FSxOpenZFS.Enabled
+}
+
+// FSxOpenZFSDeploymentType returns the configured deployment type, defaulting
+// to MULTI_AZ_1 to match the module.
+func (c *Config) FSxOpenZFSDeploymentType() string {
+	if c.FSxOpenZFS == nil || c.FSxOpenZFS.DeploymentType == "" {
+		return fsxOpenZFSDeploymentTypeMultiAZ1
+	}
+	return c.FSxOpenZFS.DeploymentType
+}
+
+// FSxOpenZFSStorageClassName returns the StorageClass name for FSx for
+// OpenZFS volumes, defaulting to "fsx-openzfs-sc".
+func (c *Config) FSxOpenZFSStorageClassName() string {
+	if c.FSxOpenZFS == nil || c.FSxOpenZFS.StorageClassName == "" {
+		return defaultFSxOpenZFSStorageClassName
+	}
+	return c.FSxOpenZFS.StorageClassName
 }
