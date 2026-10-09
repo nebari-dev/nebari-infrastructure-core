@@ -1,0 +1,15 @@
+# The operator's namespace. The Helm chart does not create it, and the
+# kustomize install it replaced did, so declaring it here keeps it in the
+# desired state of clusters upgraded from that install instead of letting
+# ArgoCD prune it (and the operator with it). Prune=false guards the same
+# thing if this file ever goes away.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nebari-operator-system
+  labels:
+    app.kubernetes.io/name: nebari-operator
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+    control-plane: controller-manager
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false

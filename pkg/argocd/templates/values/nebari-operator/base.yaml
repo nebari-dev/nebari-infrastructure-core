@@ -1,0 +1,35 @@
+manager:
+  # Helm replaces lists, so an overlay cannot add to this one. Override a
+  # single variable through manager.envOverrides instead (a map, which wins
+  # over the same name here).
+  env:
+    # Keycloak integration configuration
+    - name: KEYCLOAK_ENABLED
+      value: "true"
+    - name: KEYCLOAK_URL
+      value: "{{ .KeycloakServiceURL }}"
+    - name: KEYCLOAK_REALM
+      value: "{{ .KeycloakRealm }}"
+    - name: KEYCLOAK_ADMIN_SECRET_NAME
+      value: "{{ .KeycloakAdminSecretName }}"
+    - name: KEYCLOAK_ADMIN_SECRET_NAMESPACE
+      value: "{{ .KeycloakNamespace }}"
+    - name: TLS_CLUSTER_ISSUER_NAME
+      value: "{{ .CertificateIssuer }}"
+    - name: KEYCLOAK_ISSUER_CONTEXT_PATH
+      value: "{{ .KeycloakBasePath }}"
+    - name: KEYCLOAK_EXTERNAL_URL
+      value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+  # kubebuilder scaffold defaults; idle usage is ~2m/15Mi (#456).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+rbac:
+  # The admin/editor/viewer ClusterRoles for NebariApps, which the kustomize
+  # install shipped; the chart only renders them when asked.
+  helpers:
+    enabled: true

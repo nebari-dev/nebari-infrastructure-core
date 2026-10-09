@@ -127,7 +127,7 @@ A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not part of the foundation
 
 **Context:** Applications integrate with auth and routing via a `NebariApp` CRD.
 
-**Decision:** The Nebari Operator is its own product, developed in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). NIC deploys it as a foundational ArgoCD application via Kustomize (`pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`).
+**Decision:** The Nebari Operator is its own product, developed in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). NIC deploys it as a foundational ArgoCD application from its released Helm chart (`pkg/argocd/templates/apps/nebari-operator.yaml`, values in `pkg/argocd/templates/values/nebari-operator/base.yaml`).
 
 **Rationale:**
 
