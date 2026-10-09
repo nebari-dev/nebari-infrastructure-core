@@ -1,6 +1,5 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.7.0"
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=fsx-openzfs-production"
 
 
   project_name                             = var.project_name
