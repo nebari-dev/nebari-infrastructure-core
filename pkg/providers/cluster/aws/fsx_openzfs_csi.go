@@ -39,8 +39,17 @@ const (
 // to IMDS, which the EKS node hop limit can block from pods. The node
 // DaemonSet tolerates every taint so pods on GPU or dedicated storage nodes can
 // still mount volumes.
+//
+// fsGroupPolicy is File so kubelet applies the pod's fsGroup to ReadWriteMany
+// volumes too. A new child volume's root directory is root:root 755, and the
+// chart default (ReadWriteOnceWithFSType) skips fsGroup for RWX, which leaves
+// it unwritable by non-root pods. This relies on no_root_squash in the
+// StorageClass NFS exports.
 func fsxOpenZFSCSIHelmValues(cfg *Config) map[string]any {
 	return map[string]any{
+		"csidriver": map[string]any{
+			"fsGroupPolicy": "File",
+		},
 		"controller": map[string]any{
 			"region": cfg.Region,
 			"serviceAccount": map[string]any{
