@@ -15,18 +15,36 @@ sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
 
 ## 2. Verify the signature (authenticity)
 
-Requires [cosign](https://docs.sigstore.dev/) v3+. Identity pinning is mandatory:
-a bundle-only verify checks the math, not who signed it.
+Requires [cosign](https://docs.sigstore.dev/) v2.6.5+ on 2.x, or v3.1.3+ on
+3.x. Earlier builds are affected by
+[GHSA-fx35-mq7g-6g98](https://github.com/sigstore/cosign/security/advisories/GHSA-fx35-mq7g-6g98),
+where a legacy-format bundle carrying an attacker's own key passes an
+identity-pinned verify. 3.0.0 through 3.1.2 are affected even though they are
+newer than 2.6.5, so check the floor for your major version.
+
+Identity pinning is mandatory: a bundle-only verify checks the math, not who
+signed it. Pin the exact tag you downloaded (replace `<tag>`, e.g. `v0.14.0`):
 
 ```bash
 cosign verify-blob \
+  --new-bundle-format \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/nebari-dev/nebari-infrastructure-core/\.github/workflows/release\.yml@refs/tags/.*$' \
+  --certificate-identity 'https://github.com/nebari-dev/nebari-infrastructure-core/.github/workflows/release.yml@refs/tags/<tag>' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 ```
 
 Expected: `Verified OK`.
+
+`--new-bundle-format` is what makes cosign 2.x refuse the legacy-format bundle
+the advisory abuses. cosign 3.x reads only the new format, so on 3.x drop the
+flag; it still works there, but cosign warns that it is deprecated.
+
+On a host that cannot reach Sigstore's TUF repository, add `--trusted-root`
+pointing at the root file in
+[`scripts/trusted-roots/`](../../scripts/trusted-roots/) whose name matches
+`TRUSTED_ROOT_SHA256` in `scripts/install.sh` (plus `--offline` on cosign 2.x;
+3.x needs nothing more). That is the root the install script verifies against.
 
 ## 3. Verify build provenance
 
@@ -34,7 +52,8 @@ Requires the GitHub CLI:
 
 ```bash
 gh attestation verify nebari-infrastructure-core_<version>_linux_x86_64.tar.gz \
-  --repo nebari-dev/nebari-infrastructure-core
+  --repo nebari-dev/nebari-infrastructure-core \
+  --signer-workflow nebari-dev/nebari-infrastructure-core/.github/workflows/release.yml
 ```
 
 Expected: a line confirming the attestation was issued by the release workflow.
