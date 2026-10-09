@@ -181,3 +181,82 @@ def test_returned_to_does_not_match_a_suffix_lookalike_host():
     check = returned_to("argocd.nebari.test")
     assert not check("https://argocd.nebari.test.attacker.example/")
     assert not check("https://not-argocd.nebari.test/")
+
+
+def test_follow_login_redirects_tolerates_an_aborted_final_navigation():
+    from playwright.sync_api import Error as PlaywrightError
+
+    from nebari_journeys.ui import follow_login_redirects
+
+    page = MagicMock()
+    page.goto.side_effect = PlaywrightError("Page.goto: net::ERR_ABORTED at https://x")
+    follow_login_redirects(page, "https://hub.nebari.test/services/japps/jhub-login")
+    page.goto.assert_called_once()
+
+
+def test_follow_login_redirects_still_raises_any_other_navigation_error():
+    from playwright.sync_api import Error as PlaywrightError
+
+    from nebari_journeys.ui import follow_login_redirects
+
+    page = MagicMock()
+    page.goto.side_effect = PlaywrightError("net::ERR_CERT_AUTHORITY_INVALID")
+    with pytest.raises(PlaywrightError):
+        follow_login_redirects(page, "https://hub.nebari.test/")
+
+
+def test_wait_for_cookie_finds_a_cookie_already_set():
+    from nebari_journeys.ui import wait_for_cookie
+
+    context = MagicMock()
+    context.cookies.return_value = [{"name": "other"}, {"name": "session"}]
+    assert wait_for_cookie(context, "session", timeout=0)
+
+
+def test_wait_for_cookie_gives_up_after_the_timeout(monkeypatch):
+    from nebari_journeys import ui
+
+    context = MagicMock()
+    context.cookies.return_value = [{"name": "other"}]
+    clock = iter([0.0, 0.0, 5.0])
+    monkeypatch.setattr(ui.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ui.time, "sleep", lambda s: None)
+    assert not ui.wait_for_cookie(context, "session", timeout=1.0)
+
+
+def test_approve_hub_oauth_consent_clicks_authorize_on_the_consent_page():
+    from nebari_journeys.ui import approve_hub_oauth_consent
+
+    page = MagicMock()
+    page.url = (
+        "https://hub.nebari.test/hub/api/oauth2/authorize?client_id=service-japps"
+    )
+    page.context.cookies.return_value = []
+    assert approve_hub_oauth_consent(page, "session", timeout=5)
+    page.get_by_role.assert_called_once_with("button", name="Authorize")
+    page.get_by_role.return_value.click.assert_called_once()
+
+
+def test_approve_hub_oauth_consent_waits_for_the_consent_page_to_appear():
+    from nebari_journeys.ui import approve_hub_oauth_consent
+
+    page = MagicMock()
+    page.url = "https://hub.nebari.test/hub/home"
+    page.context.cookies.return_value = []
+
+    def navigate(_ms):
+        page.url = "https://hub.nebari.test/hub/api/oauth2/authorize?client_id=x"
+
+    page.wait_for_timeout.side_effect = navigate
+    assert approve_hub_oauth_consent(page, "session", timeout=5)
+    page.get_by_role.return_value.click.assert_called_once()
+
+
+def test_approve_hub_oauth_consent_stops_once_the_session_cookie_is_set():
+    from nebari_journeys.ui import approve_hub_oauth_consent
+
+    page = MagicMock()
+    page.url = "https://hub.nebari.test/hub/home"
+    page.context.cookies.return_value = [{"name": "session"}]
+    assert not approve_hub_oauth_consent(page, "session", timeout=5)
+    page.get_by_role.assert_not_called()
