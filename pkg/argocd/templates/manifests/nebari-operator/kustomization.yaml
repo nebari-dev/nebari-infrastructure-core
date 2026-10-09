@@ -4,11 +4,11 @@ kind: Kustomization
 namespace: nebari-operator-system
 
 resources:
-  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=v0.1.2
+  - https://github.com/nebari-dev/nebari-operator.git/config/default?ref=fix/securitypolicy-https-issuer
 images:
   - name: nebari-operator
     newName: quay.io/nebari/nebari-operator
-    newTag: 0.1.2
+    newTag: fix-securitypolicy-https-issuer
 
 patches:
   - path: deployment-patch.yaml
