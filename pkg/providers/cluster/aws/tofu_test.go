@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -506,4 +507,36 @@ func TestToTFVarsBackupBucket(t *testing.T) {
 			t.Fatalf("bad tfvars: %+v", v)
 		}
 	})
+}
+
+// The module only stops following the latest AMI when release_version is left
+// unset, so an unset pin must be absent from the wire format, not sent as "".
+func TestToTFVarsAMIReleaseVersion(t *testing.T) {
+	pinned := "1.34.11-20260923"
+	cfg := Config{
+		Region:            "us-west-2",
+		KubernetesVersion: "1.34",
+		NodeGroups: map[string]NodeGroup{
+			"general": {Instance: "m5.xlarge"},
+			"storage": {Instance: "m7g.large", AMIReleaseVersion: &pinned},
+		},
+	}
+
+	raw, err := json.Marshal(cfg.toTFVars("test", "", nil))
+	if err != nil {
+		t.Fatalf("marshal tfvars: %v", err)
+	}
+	var vars struct {
+		NodeGroups map[string]map[string]any `json:"node_groups"`
+	}
+	if err := json.Unmarshal(raw, &vars); err != nil {
+		t.Fatalf("unmarshal tfvars: %v", err)
+	}
+
+	if v, ok := vars.NodeGroups["general"]["ami_release_version"]; ok {
+		t.Errorf("general: expected ami_release_version to be omitted when unset, got %v", v)
+	}
+	if got := vars.NodeGroups["storage"]["ami_release_version"]; got != pinned {
+		t.Errorf("storage: expected ami_release_version %q, got %v", pinned, got)
+	}
 }
