@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -388,6 +390,111 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 			t.Errorf("expected EnableIRSA=true, got %v", *vars.EnableIRSA)
 		}
 	})
+}
+
+// TestToTFVarsFSxOpenZFS checks the marshalled tfvars, since what matters is
+// which keys reach tofu: an omitted key takes the shim's variables.tf default.
+func TestToTFVarsFSxOpenZFS(t *testing.T) {
+	fsxKeys := []string{
+		"existing_private_route_table_ids",
+		"fsx_openzfs_enabled",
+		"fsx_openzfs_deployment_type",
+		"fsx_openzfs_storage_capacity",
+		"fsx_openzfs_throughput",
+		"fsx_openzfs_automatic_backup_retention_days",
+		"fsx_openzfs_skip_final_backup",
+		"fsx_openzfs_delete_child_volumes_on_destroy",
+	}
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want map[string]any // keys from fsxKeys absent here must be omitted
+	}{
+		{
+			name: "no fsx block only emits enabled=false",
+			cfg:  Config{},
+			want: map[string]any{"fsx_openzfs_enabled": false},
+		},
+		{
+			name: "disabled block with settings emits none of them",
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_2", StorageCapacityGiB: 128}},
+			want: map[string]any{"fsx_openzfs_enabled": false},
+		},
+		{
+			name: "enabled with defaults leaves the rest to variables.tf",
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			want: map[string]any{"fsx_openzfs_enabled": true},
+		},
+		{
+			name: "enabled with every field set",
+			cfg: Config{FSxOpenZFS: &FSxOpenZFSConfig{
+				Enabled:                      true,
+				DeploymentType:               "SINGLE_AZ_2",
+				StorageCapacityGiB:           256,
+				ThroughputMiBps:              320,
+				AutomaticBackupRetentionDays: intPtr(14),
+				SkipFinalBackup:              true,
+				DeleteChildVolumesOnDestroy:  true,
+			}},
+			want: map[string]any{
+				"fsx_openzfs_enabled":                         true,
+				"fsx_openzfs_deployment_type":                 "SINGLE_AZ_2",
+				"fsx_openzfs_storage_capacity":                float64(256),
+				"fsx_openzfs_throughput":                      float64(320),
+				"fsx_openzfs_automatic_backup_retention_days": float64(14),
+				"fsx_openzfs_skip_final_backup":               true,
+				"fsx_openzfs_delete_child_volumes_on_destroy": true,
+			},
+		},
+		{
+			name: "explicit zero retention is emitted to disable backups",
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, AutomaticBackupRetentionDays: intPtr(0)}},
+			want: map[string]any{
+				"fsx_openzfs_enabled":                         true,
+				"fsx_openzfs_automatic_backup_retention_days": float64(0),
+			},
+		},
+		{
+			name: "route tables pass through with an existing VPC",
+			cfg: Config{
+				ExistingVPCID:                "vpc-123",
+				ExistingPrivateRouteTableIDs: []string{"rtb-a", "rtb-b"},
+			},
+			want: map[string]any{
+				"fsx_openzfs_enabled":              false,
+				"existing_private_route_table_ids": []any{"rtb-a", "rtb-b"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.Region = "us-west-2"
+			tt.cfg.NodeGroups = map[string]NodeGroup{"general": {Instance: "m5.xlarge"}}
+
+			raw, err := json.Marshal(tt.cfg.toTFVars("test", "", nil))
+			if err != nil {
+				t.Fatalf("marshal tfvars: %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal tfvars: %v", err)
+			}
+
+			for _, key := range fsxKeys {
+				wantVal, wantPresent := tt.want[key]
+				gotVal, gotPresent := got[key]
+				if gotPresent != wantPresent {
+					t.Errorf("%s present = %v, want %v (value %v)", key, gotPresent, wantPresent, gotVal)
+					continue
+				}
+				if wantPresent && !reflect.DeepEqual(gotVal, wantVal) {
+					t.Errorf("%s = %#v, want %#v", key, gotVal, wantVal)
+				}
+			}
+		})
+	}
 }
 
 func TestToTFVarsLonghornDiskLabel(t *testing.T) {
