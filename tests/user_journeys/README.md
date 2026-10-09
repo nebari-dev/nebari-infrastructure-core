@@ -8,10 +8,11 @@ merely that it deployed. Design and rationale: [ADR-0017](../../docs/adr/0017-us
 ```
 tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
-  conftest.py            # only pytest_addoption for --keep-namespace
-  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, argocd, keycloak, ui
+  conftest.py            # only pytest_addoption for --keep-namespace and --allow-disruption
+  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, argocd, keycloak, ui, apps, disruption
   tests_lib/              # unit tests OF the library, no cluster needed
-  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py
+  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py,
+                          #   test_app_sign_in.py, test_app_sign_in_refusals.py, test_app_sign_in_disruption.py
 ```
 
 `journeys/` and `tests_lib/` each carry an `__init__.py`. Those are load
@@ -38,6 +39,7 @@ Finer control, from `tests/user_journeys/`:
 pixi run test-api               # skip browser journeys, no Chromium download
 pixi run test -k storage        # one slice
 pixi run test --keep-namespace  # leave the scratch namespace for debugging
+pixi run test --allow-disruption  # also run the journeys that restart platform pods
 pixi run install-browsers       # install Chromium for Playwright
 pytest                          # everything, including the library's tests
 pixi run lint                   # ruff check .
@@ -52,6 +54,9 @@ pixi run fmt                    # ruff format .
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
 | `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a self-signed leaf (#447) or a privately issued chain such as Let's Encrypt staging. See "Three kinds of trust anchor" below for why this is split. |
+| `test_app_sign_in.py` | Sign-in to the apps packs install (NebariApps). For every app whose login the gateway enforces: the operator reports `AuthReady`, its SecurityPolicy is accepted, trusts the `https://` issuer Keycloak advertises and sends browsers to Keycloak's public host, an anonymous visitor is redirected to Keycloak, and a new user can sign in in a browser. Requiring `AuthReady`, not just an accepted policy, matters on upgraded clusters: a policy an earlier operator wrote stays accepted while the current one fails to update it. With data-science-pack, a new user can sign in to JupyterHub; with nebi-pack too, the hub exchanges that login for Nebi access (confirmed from the hub's log, since a new user's environment list is legitimately empty). Skips without the relevant apps. |
+| `test_app_sign_in_refusals.py` | What sign-in must refuse: a wrong password or a disabled user never gets a session; forged session cookies and a forged login callback are sent to Keycloak or refused; signing out ends the gateway and Keycloak sessions; cookies copied before sign-out stop working once their access token expires (`slow`, waits out one token lifetime); Nebi refuses a session for a token issued to another client or with a forged audience. Each refusal first checks the matching acceptance where one exists, so an unrelated breakage cannot pass as a security check. |
+| `test_app_sign_in_disruption.py` | Sign-in survives the operator, Keycloak and the Envoy proxy being restarted, and an operator restart does not rewrite reconciled policies. The only journeys that act outside a scratch namespace: marked `disruptive` and run only with `--allow-disruption`, because they briefly interrupt the cluster for every user. |
 
 ## Adding a journey
 
