@@ -91,6 +91,24 @@ func validateTaints(nodeGroupName string, taints []Taint) error {
 	return nil
 }
 
+// validateFSxOpenZFS checks the FSx for OpenZFS settings NIC depends on: the
+// deployment type, and the route tables a MULTI_AZ_1 filesystem needs in an
+// existing VPC. Capacity, throughput and backup retention are left to the
+// module's own validation, like the EFS settings.
+func validateFSxOpenZFS(cfg *Config) error {
+	if !cfg.FSxOpenZFSEnabled() {
+		return nil
+	}
+	deploymentType := cfg.FSxOpenZFSDeploymentType()
+	if !contains(validFSxOpenZFSDeploymentTypes, deploymentType) {
+		return fmt.Errorf("invalid fsx_openzfs.deployment_type %q (must be one of: %v)", deploymentType, validFSxOpenZFSDeploymentTypes)
+	}
+	if deploymentType == fsxOpenZFSDeploymentTypeMultiAZ1 && !cfg.CreateVPC() && len(cfg.ExistingPrivateRouteTableIDs) == 0 {
+		return fmt.Errorf("existing_private_route_table_ids is required when using an existing VPC with a %s FSx for OpenZFS filesystem", fsxOpenZFSDeploymentTypeMultiAZ1)
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -185,6 +203,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
 		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
 			awsCfg.LoadBalancerScheme, validLoadBalancerSchemes)
+		span.RecordError(err)
+		return err
+	}
+
+	if err := validateFSxOpenZFS(awsCfg); err != nil {
 		span.RecordError(err)
 		return err
 	}
