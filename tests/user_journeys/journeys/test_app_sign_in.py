@@ -80,9 +80,21 @@ def test_every_gateway_enforced_app_has_an_accepted_security_policy(
 ):
     """A policy the gateway rejected is invisible to users until they find
     the app open, or unreachable. Every gateway-enforced app needs exactly
-    one policy, accepted by every Gateway it attaches to."""
+    one policy, accepted by every Gateway it attaches to.
+
+    The operator must also report the app's auth as reconciled. An accepted
+    policy alone is not enough: after an upgrade, a policy written by an
+    earlier operator stays in place and stays accepted while the current
+    operator fails to update it, which is exactly how an operator emitting
+    an issuer Envoy Gateway rejects looked on an upgraded cluster."""
     problems = []
     for app in gateway_enforced_apps:
+        auth = app.conditions.get("AuthReady") or {}
+        if auth.get("status") != "True":
+            problems.append(
+                f"{app.ref}: operator reports AuthReady={auth.get('status')} "
+                f"({auth.get('reason')}: {(auth.get('message') or '')[:300]})"
+            )
         policies = apps.security_policies_for(cluster, app)
         if len(policies) != 1:
             problems.append(f"{app.ref}: {len(policies)} SecurityPolicies, expected 1")

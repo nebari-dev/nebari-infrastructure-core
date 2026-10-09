@@ -147,3 +147,83 @@ def test_wait_for_app_ready_gives_up_with_the_last_state(monkeypatch):
     assert (
         apps.wait_for_app_ready(MagicMock(), pending).condition_status("Ready") is None
     )
+
+
+def _jwt(claims: dict) -> str:
+    import base64
+    import json
+
+    def enc(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+    return f"{enc({'alg': 'RS256'})}.{enc(claims)}.c2lnbmF0dXJl"
+
+
+def test_jwt_claims_reads_the_payload():
+    assert apps.jwt_claims(_jwt({"aud": "admin-cli", "exp": 1}))["aud"] == "admin-cli"
+
+
+def test_with_audience_rewrites_the_claim_but_keeps_the_old_signature():
+    token = _jwt({"aud": "admin-cli", "sub": "u"})
+    forged = apps.with_audience(token, "nebi")
+    assert apps.jwt_claims(forged) == {"aud": "nebi", "sub": "u"}
+    assert forged.split(".")[0] == token.split(".")[0]
+    assert forged.split(".")[2] == token.split(".")[2]
+    assert forged != token
+
+
+def test_cookies_for_host_matches_the_exact_host_only():
+    context = MagicMock()
+    context.cookies.return_value = [
+        {"name": "a", "value": "1", "domain": "nebi.example.test"},
+        {"name": "b", "value": "2", "domain": ".nebi.example.test"},
+        {"name": "c", "value": "3", "domain": "keycloak.example.test"},
+    ]
+    assert apps.cookies_for_host(context, "Nebi.Example.Test") == {"a": "1", "b": "2"}
+
+
+def test_session_cookie_names_ignore_the_login_flow_cookies():
+    cookies = [
+        "AccessToken-1",
+        "IdToken-1",
+        "OauthHMAC-1",
+        "RefreshToken-1",
+        "OauthExpires-1",
+        "CodeVerifier-1",
+        "OauthNonce-1",
+    ]
+    assert apps.session_cookie_names(cookies) == [
+        "AccessToken-1",
+        "IdToken-1",
+        "OauthHMAC-1",
+        "RefreshToken-1",
+    ]
+
+
+def test_policy_paths_come_from_the_oidc_spec():
+    policy = {
+        "spec": {
+            "oidc": {
+                "logoutPath": "/logout",
+                "redirectURL": "https://nebi.example.test/oauth2/callback",
+            }
+        }
+    }
+    assert apps.logout_path(policy) == "/logout"
+    assert apps.callback_path(policy) == "/oauth2/callback"
+    assert apps.logout_path({}) is None
+    assert apps.callback_path({}) == "/oauth2/callback"
+
+
+@pytest.mark.parametrize(
+    ("port", "expected"),
+    [
+        (80, "http://svc.nebi.svc.cluster.local"),
+        (0, "http://svc.nebi.svc.cluster.local"),
+        (8460, "http://svc.nebi.svc.cluster.local:8460"),
+    ],
+)
+def test_in_cluster_url_omits_the_default_port(port, expected):
+    obj = nebariapp(auth={"enabled": True})
+    obj["spec"]["service"] = {"name": "svc", "port": port}
+    assert apps.NebariApp.from_object(obj).in_cluster_url == expected

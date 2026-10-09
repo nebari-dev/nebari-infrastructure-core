@@ -260,3 +260,23 @@ def test_approve_hub_oauth_consent_stops_once_the_session_cookie_is_set():
     page.context.cookies.return_value = [{"name": "session"}]
     assert not approve_hub_oauth_consent(page, "session", timeout=5)
     page.get_by_role.assert_not_called()
+
+
+def test_keycloak_refusal_returns_the_error_text():
+    from nebari_journeys.ui import keycloak_refusal
+
+    page = MagicMock()
+    page.wait_for_selector.return_value.inner_text.return_value = " Invalid password. "
+    # The first wait is for the form, the second for the error.
+    assert (
+        keycloak_refusal(page, "https://nebi.test/", "u", "bad") == "Invalid password."
+    )
+    page.click.assert_called_once_with(KEYCLOAK_SUBMIT_SELECTOR)
+
+
+def test_keycloak_refusal_returns_none_when_no_error_appears():
+    from nebari_journeys.ui import keycloak_refusal
+
+    page = MagicMock()
+    page.wait_for_selector.side_effect = [MagicMock(), PlaywrightTimeoutError("none")]
+    assert keycloak_refusal(page, "https://nebi.test/", "u", "p") is None

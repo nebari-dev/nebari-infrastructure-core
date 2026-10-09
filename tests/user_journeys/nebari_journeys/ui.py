@@ -248,3 +248,28 @@ def approve_hub_oauth_consent(
             return False
         page.wait_for_timeout(COOKIE_POLL_INTERVAL_S * 1000)
     return False
+
+
+# Where Keycloak's login theme renders a rejected login ("Invalid username or
+# password.", "Account is disabled, contact your administrator.").
+KEYCLOAK_ERROR_SELECTOR = "#input-error, #kc-error-message, .kc-feedback-text"
+REJECTION_TIMEOUT_MS = 15_000
+
+
+def keycloak_refusal(page, url: str, username: str, password: str) -> str | None:
+    """Try to sign in at `url` and return Keycloak's error text, or None if
+    no error appeared. For journeys that expect the login to FAIL, so unlike
+    `login_via_keycloak` it does not wait for a redirect that should never
+    come."""
+    page.goto(url)
+    page.wait_for_selector(KEYCLOAK_USERNAME_SELECTOR, timeout=FORM_TIMEOUT_MS)
+    page.fill(KEYCLOAK_USERNAME_SELECTOR, username)
+    page.fill(KEYCLOAK_PASSWORD_SELECTOR, password)
+    page.click(KEYCLOAK_SUBMIT_SELECTOR)
+    try:
+        error = page.wait_for_selector(
+            KEYCLOAK_ERROR_SELECTOR, timeout=REJECTION_TIMEOUT_MS
+        )
+    except PlaywrightTimeoutError:
+        return None
+    return error.inner_text().strip()

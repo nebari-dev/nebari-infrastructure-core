@@ -11,6 +11,8 @@ Read-only: journeys check the NebariApps the cluster's packs declared and
 never create one. Verbs only; the assertions live in the journeys.
 """
 
+import base64
+import json
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,7 +38,7 @@ REQUEST_TIMEOUT = 30
 
 # How long a journey waits for the operator to finish wiring up an app that
 # a pack has only just declared.
-APP_READY_TIMEOUT = 300.0
+APP_READY_TIMEOUT = 120.0
 APP_READY_INTERVAL = 5.0
 
 
@@ -48,6 +50,8 @@ class NebariApp:
     auth_enabled: bool
     enforce_at_gateway: bool
     conditions: dict
+    service_name: str = ""
+    service_port: int = 0
 
     @classmethod
     def from_object(cls, obj: dict) -> "NebariApp":
@@ -61,7 +65,16 @@ class NebariApp:
             auth_enabled=bool(auth.get("enabled")),
             enforce_at_gateway=gateway_enforced(auth),
             conditions={c["type"]: c for c in status.get("conditions") or []},
+            service_name=(spec.get("service") or {}).get("name", ""),
+            service_port=int((spec.get("service") or {}).get("port") or 0),
         )
+
+    @property
+    def in_cluster_url(self) -> str:
+        """The app's Service, reached the way in-cluster callers (another
+        pack's backend, say) reach it: plain http, no gateway in between."""
+        port = f":{self.service_port}" if self.service_port not in (0, 80) else ""
+        return f"http://{self.service_name}.{self.namespace}.svc.cluster.local{port}"
 
     @property
     def ref(self) -> str:
@@ -202,3 +215,72 @@ def pod_logs_since(
         )
         for p in pods.items
     )
+
+
+def _b64url_decode(part: str) -> bytes:
+    return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def jwt_claims(token: str) -> dict:
+    """The payload of a JWT, NOT verified. For reading what a token says
+    about itself (audience, expiry), never for trusting it."""
+    return json.loads(_b64url_decode(token.split(".")[1]))
+
+
+def with_audience(token: str, audience: str) -> str:
+    """A copy of `token` claiming `audience`, keeping the original
+    signature, which no longer matches. Any verifier that checks the
+    signature must reject it."""
+    header, payload, signature = token.split(".")
+    claims = json.loads(_b64url_decode(payload))
+    claims["aud"] = audience
+    forged = _b64url_encode(json.dumps(claims, separators=(",", ":")).encode())
+    return f"{header}.{forged}.{signature}"
+
+
+def cookies_for_host(context, host: str) -> dict[str, str]:
+    """Name -> value of the cookies a browser context holds for `host`."""
+    host = host.lower()
+    return {
+        c["name"]: c["value"]
+        for c in context.cookies()
+        if c.get("domain", "").lstrip(".").lower() == host
+    }
+
+
+def visit_with_cookies(
+    url: str, cookies: dict[str, str], verify: str | bool
+) -> requests.Response:
+    """GET `url` carrying exactly `cookies`, without following redirects:
+    what a client replaying (or forging) a session sees."""
+    return requests.get(
+        url,
+        cookies=cookies,
+        allow_redirects=False,
+        verify=verify,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+# Cookie name prefixes Envoy Gateway's OIDC filter uses for an established
+# session. The login flow's own cookies (CodeVerifier-, OauthNonce-) are not
+# a session and are deliberately absent.
+SESSION_COOKIE_PREFIXES = ("AccessToken-", "IdToken-", "OauthHMAC-", "RefreshToken-")
+
+
+def session_cookie_names(cookies) -> list[str]:
+    """The names among `cookies` that make up a gateway session."""
+    return sorted(n for n in cookies if n.startswith(SESSION_COOKIE_PREFIXES))
+
+
+def logout_path(policy: dict) -> str | None:
+    return ((policy.get("spec") or {}).get("oidc") or {}).get("logoutPath")
+
+
+def callback_path(policy: dict) -> str:
+    redirect = ((policy.get("spec") or {}).get("oidc") or {}).get("redirectURL", "")
+    return urlparse(redirect).path or "/oauth2/callback"

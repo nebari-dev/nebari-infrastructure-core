@@ -502,3 +502,36 @@ def test_sweep_never_raises_when_the_realm_cannot_be_listed():
     assert len(result.failed) == 1
     assert "listing failed" in result.failed[0]
     session.delete.assert_not_called()
+
+
+def test_user_tokens_uses_the_password_grant_in_the_nebari_realm():
+    from nebari_journeys.keycloak import Keycloak, user_tokens
+
+    kc = Keycloak(
+        base_url="https://keycloak.nebari.test", password="pw", verify="/ca.pem"
+    )
+    kc._session = MagicMock()
+    kc._session.post.return_value.json.return_value = {"id_token": "t"}
+    assert user_tokens(kc, "alice", "secret") == {"id_token": "t"}
+    url = kc._session.post.call_args.args[0]
+    data = kc._session.post.call_args.kwargs["data"]
+    assert (
+        url
+        == "https://keycloak.nebari.test/realms/nebari/protocol/openid-connect/token"
+    )
+    assert data["grant_type"] == "password"
+    assert data["client_id"] == "admin-cli"
+    assert data["scope"] == "openid"
+    assert kc._session.post.call_args.kwargs["verify"] == "/ca.pem"
+
+
+def test_set_user_enabled_puts_only_the_enabled_flag():
+    from nebari_journeys.keycloak import Keycloak, set_user_enabled
+
+    kc = Keycloak(base_url="https://keycloak.nebari.test", password="pw")
+    kc._send = MagicMock()
+    set_user_enabled(kc, "user-1", False)
+    method, url = kc._send.call_args.args
+    assert method == "put"
+    assert url.endswith("/admin/realms/nebari/users/user-1")
+    assert kc._send.call_args.kwargs["json"] == {"enabled": False}
