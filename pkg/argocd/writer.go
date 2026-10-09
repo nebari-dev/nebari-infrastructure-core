@@ -22,6 +22,7 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/repository"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	longhorn "github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -343,7 +344,7 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 // layer (empty when no bundle is configured); it is not re-read from disk here.
 func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
+	ctx, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
 	data := NewTemplateData(cfg, src, settings)
@@ -351,6 +352,9 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 	if trustBundlePEM != "" {
 		data.TrustManagerEnabled = true
 		data.TrustBundlePEM = trustBundlePEM
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Trust bundle wired into trust-manager Bundle for in-cluster propagation").
+			WithResource("trust-bundle").
+			WithAction("rendering"))
 	}
 
 	span.SetAttributes(
@@ -559,11 +563,12 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 
 // templateFuncs is the single extension point for helpers available to every
 // template; it is consumed only by processTemplate, not a broader public surface.
-// indent and nindent mirror the common Helm helpers for embedding multi-line
-// values (e.g. a PEM bundle) at a fixed YAML indentation.
+// indent mirrors the Helm helper of the same name for embedding multi-line
+// values (e.g. a PEM bundle) at a fixed YAML indentation. Helm's companion
+// nindent is deliberately absent: nothing renders it, and adding it back is a
+// one-liner when a template needs a leading newline.
 var templateFuncs = template.FuncMap{
-	"indent":  indentLines,
-	"nindent": func(spaces int, s string) string { return "\n" + indentLines(spaces, s) },
+	"indent": indentLines,
 }
 
 // indentLines prefixes every non-empty line of s with the given number of spaces.
