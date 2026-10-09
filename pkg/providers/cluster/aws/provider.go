@@ -503,6 +503,30 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			span.RecordError(err)
 			return fmt.Errorf("failed to install FSx for OpenZFS CSI driver: %w", err)
 		}
+
+		outputs, err := tf.Output(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get terraform outputs for FSx for OpenZFS: %w", err)
+		}
+
+		rootVolumeIDOutput, ok := outputs["fsx_openzfs_root_volume_id"]
+		if !ok {
+			err := fmt.Errorf("fsx_openzfs_root_volume_id not found in terraform outputs")
+			span.RecordError(err)
+			return err
+		}
+
+		var rootVolumeID string
+		if err := json.Unmarshal(rootVolumeIDOutput.Value, &rootVolumeID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to unmarshal fsx_openzfs_root_volume_id: %w", err)
+		}
+
+		if err := createFSxOpenZFSStorageClass(ctx, kubeconfigBytes, awsCfg, rootVolumeID); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create FSx for OpenZFS StorageClass: %w", err)
+		}
 	}
 
 	// Create EFS StorageClass if EFS is enabled

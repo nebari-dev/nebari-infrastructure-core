@@ -9,9 +9,10 @@ func TestFSxOpenZFSCSIHelmValues(t *testing.T) {
 		checkValues map[string]any
 	}{
 		{
-			name: "sets region, controller service account, and node tolerations",
+			name: "sets fsGroup policy, region, controller service account, and node tolerations",
 			cfg:  &Config{Region: "us-west-2", FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
 			checkValues: map[string]any{
+				"csidriver.fsGroupPolicy":          "File",
 				"controller.region":                "us-west-2",
 				"controller.serviceAccount.create": true,
 				"controller.serviceAccount.name":   "fsx-openzfs-csi-controller-sa",
