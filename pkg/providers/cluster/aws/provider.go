@@ -489,6 +489,22 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		}
 	}
 
+	// Install the FSx for OpenZFS CSI driver when FSx is enabled. The module
+	// creates the filesystem and the controller's Pod Identity association,
+	// but leaves the driver itself to NIC.
+	if awsCfg.FSxOpenZFSEnabled() {
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for FSx for OpenZFS CSI driver install: %w", err)
+		}
+
+		if err := installFSxOpenZFSCSIDriver(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to install FSx for OpenZFS CSI driver: %w", err)
+		}
+	}
+
 	// Create EFS StorageClass if EFS is enabled
 	if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)

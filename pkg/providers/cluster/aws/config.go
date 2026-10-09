@@ -258,6 +258,7 @@ type FSxOpenZFSConfig struct {
 	// while any remain rather than deleting user data.
 	DeleteChildVolumesOnDestroy bool   `yaml:"delete_child_volumes_on_destroy,omitempty"`
 	StorageClassName            string `yaml:"storage_class_name,omitempty"` // default: fsx-openzfs-sc
+	CSIChartVersion             string `yaml:"csi_chart_version,omitempty"`
 }
 
 const (
@@ -265,6 +266,10 @@ const (
 	fsxOpenZFSDeploymentTypeSingleAZ2 = "SINGLE_AZ_2"
 
 	defaultFSxOpenZFSStorageClassName = "fsx-openzfs-sc"
+
+	// defaultFSxOpenZFSCSIChartVersion pins the aws-fsx-openzfs-csi-driver
+	// Helm chart. Chart 1.3.2 ships driver v1.3.2.
+	defaultFSxOpenZFSCSIChartVersion = "1.3.2"
 )
 
 var validFSxOpenZFSDeploymentTypes = []string{
@@ -294,4 +299,13 @@ func (c *Config) FSxOpenZFSStorageClassName() string {
 		return defaultFSxOpenZFSStorageClassName
 	}
 	return c.FSxOpenZFS.StorageClassName
+}
+
+// FSxOpenZFSCSIChartVersion returns the Helm chart version for the FSx for
+// OpenZFS CSI driver. Returns defaultFSxOpenZFSCSIChartVersion when unset.
+func (c *Config) FSxOpenZFSCSIChartVersion() string {
+	if c.FSxOpenZFS == nil || c.FSxOpenZFS.CSIChartVersion == "" {
+		return defaultFSxOpenZFSCSIChartVersion
+	}
+	return c.FSxOpenZFS.CSIChartVersion
 }
