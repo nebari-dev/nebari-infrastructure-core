@@ -68,7 +68,7 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 │   └── nebari-landingpage.yaml
 └── manifests/                       # Plain-manifest and values content, grouped by concern
     ├── keycloak/                    # Realm-setup job, values
-    ├── nebari-operator/             # Namespace
+    ├── nebari-operator-namespace/   # Namespace
     ├── networking/                  # Gateway, HTTPRoutes, SecurityPolicies, ReferenceGrants
     ├── security/                    # ClusterIssuers, Certificates, trust bundle
     └── storage/                     # Longhorn, longhorn-backup

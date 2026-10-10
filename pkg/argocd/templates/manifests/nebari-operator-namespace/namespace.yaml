@@ -3,6 +3,11 @@
 # desired state of clusters upgraded from that install instead of letting
 # ArgoCD prune it (and the operator with it). Prune=false guards the same
 # thing if this file ever goes away.
+#
+# It is not in manifests/nebari-operator, the directory the kustomize install
+# read: a regen deletes that directory, so an Application still on the old
+# spec when it refreshes fails to compare instead of rendering only this
+# namespace and pruning the operator.
 apiVersion: v1
 kind: Namespace
 metadata:

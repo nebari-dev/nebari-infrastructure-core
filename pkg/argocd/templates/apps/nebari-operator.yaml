@@ -26,15 +26,13 @@ spec:
           - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-operator/base.yaml
           - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-operator/overlays/*.yaml
         ignoreMissingValueFiles: true
+    # NIC's GitOps repo: the $values ref, plus the namespace the chart does
+    # not create. The namespace lives outside manifests/nebari-operator on
+    # purpose; see the comment in namespace.yaml.
     - repoURL: {{ .GitRepoURL }}
       targetRevision: {{ .GitBranch }}
+      path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator-namespace
       ref: values
-    # The namespace, which the chart does not create. Kept as a manifest so a
-    # cluster that ran the kustomize install (which did declare it) still has
-    # it in its desired state, rather than ArgoCD pruning it.
-    - repoURL: {{ .GitRepoURL }}
-      targetRevision: {{ .GitBranch }}
-      path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator
 
   destination:
     server: https://kubernetes.default.svc
