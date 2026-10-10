@@ -115,7 +115,7 @@ See [State Management](05-state-management.md).
    ├── wave 3: cluster-issuers, certificates, httproutes, trust-manager,
    │           cloudnative-pg, securitypolicies, longhorn-backup
    ├── wave 4: postgresql, keycloak, opentelemetry-collector, trust-bundle
-   ├── wave 5: nebari-operator (Kustomized from nebari-dev/nebari-operator)
+   ├── wave 5: nebari-operator
    └── wave 6: nebari-landingpage
 ```
 
@@ -127,7 +127,7 @@ A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not part of the foundation
 
 **Context:** Applications integrate with auth and routing via a `NebariApp` CRD.
 
-**Decision:** The Nebari Operator is its own product, developed in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). NIC deploys it as a foundational ArgoCD application via Kustomize (`pkg/argocd/templates/manifests/nebari-operator/kustomization.yaml`).
+**Decision:** The Nebari Operator is its own product, developed in [`nebari-dev/nebari-operator`](https://github.com/nebari-dev/nebari-operator). NIC deploys it as a foundational ArgoCD application from its released Helm chart (`pkg/argocd/templates/apps/nebari-operator.yaml`, values in `pkg/argocd/templates/values/nebari-operator/base.yaml`).
 
 **Rationale:**
 
@@ -135,7 +135,7 @@ A full LGTM stack (Loki / Grafana / Tempo / Mimir) is not part of the foundation
 - NIC is an infrastructure tool; the operator is an application-integration tool
 - Keeps NIC's surface area focused on cluster provisioning and bootstrap
 
-NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer context path, external URL) and the TLS cluster-issuer name into the operator's Kustomize patch. See [Nebari Operator §11.4](../implementation/11-nebari-operator.md) for the full list. NIC does not implement the reconciliation logic; that lives upstream.
+NIC renders Keycloak integration env vars (URL, realm, admin secret, issuer context path, external URL) and the TLS cluster-issuer name into the operator's Helm values (`values/nebari-operator/base.yaml`). See [Nebari Operator §11.4](../implementation/11-nebari-operator.md) for the full list. NIC does not implement the reconciliation logic; that lives upstream.
 
 ### 4.7 Decision: OpenTelemetry in Library Code, slog in the CLI
 

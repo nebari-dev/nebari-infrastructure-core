@@ -13,10 +13,26 @@ metadata:
 spec:
   project: foundational
 
-  source:
-    repoURL: {{ .GitRepoURL }}
-    targetRevision: {{ .GitBranch }}
-    path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator
+  sources:
+    # The operator's released Helm chart. The release name keeps every object
+    # name identical to the kustomize install this replaced, so an upgraded
+    # cluster updates its operator in place instead of recreating it.
+    - chart: nebari-operator
+      repoURL: quay.io/nebari/charts
+      targetRevision: 0.1.2
+      helm:
+        releaseName: nebari-operator
+        valueFiles:
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-operator/base.yaml
+          - $values/{{ if .GitPath }}{{ .GitPath }}/{{ end }}values/nebari-operator/overlays/*.yaml
+        ignoreMissingValueFiles: true
+    # NIC's GitOps repo: the $values ref, plus the namespace the chart does
+    # not create. The namespace lives outside manifests/nebari-operator on
+    # purpose; see the comment in namespace.yaml.
+    - repoURL: {{ .GitRepoURL }}
+      targetRevision: {{ .GitBranch }}
+      path: {{ if .GitPath }}{{ .GitPath }}/{{ end }}manifests/nebari-operator-namespace
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

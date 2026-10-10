@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -417,11 +418,10 @@ func TestKeycloakTemplate_TrustBundle(t *testing.T) {
 	})
 }
 
-func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
+func TestOperatorValues_ManagerEnv(t *testing.T) {
 	tests := []struct {
 		name             string
 		keycloakBasePath string
-		domain           string
 		wantContextPath  string
 		wantServiceURL   string
 		wantExternalURL  string
@@ -429,58 +429,76 @@ func TestOperatorDeploymentPatch_KeycloakContextPath(t *testing.T) {
 		{
 			name:             "empty base path passes empty context path",
 			keycloakBasePath: "",
-			domain:           "test.example.com",
-			wantContextPath:  `value: ""`,
+			wantContextPath:  "",
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080",
 			wantExternalURL:  "https://keycloak.test.example.com",
 		},
 		{
 			name:             "auth base path passes /auth context path",
 			keycloakBasePath: "/auth",
-			domain:           "test.example.com",
-			wantContextPath:  `value: "/auth"`,
+			wantContextPath:  "/auth",
 			wantServiceURL:   "http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080/auth",
 			wantExternalURL:  "https://keycloak.test.example.com/auth",
 		},
 	}
 
-	content, err := templates.ReadFile("templates/manifests/nebari-operator/deployment-patch.yaml")
+	content, err := templates.ReadFile("templates/values/nebari-operator/base.yaml")
 	if err != nil {
-		t.Fatalf("failed to read operator deployment patch: %v", err)
+		t.Fatalf("failed to read operator values: %v", err)
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := TemplateData{
-				Domain:                  tt.domain,
+				Domain:                  "test.example.com",
 				KeycloakBasePath:        tt.keycloakBasePath,
 				KeycloakServiceURL:      fmt.Sprintf("http://keycloak-keycloakx-http.keycloak.svc.cluster.local:8080%s", tt.keycloakBasePath),
 				KeycloakNamespace:       "keycloak",
 				KeycloakRealm:           "nebari",
 				KeycloakAdminSecretName: "keycloak-admin-credentials",
+				CertificateIssuer:       "selfsigned-issuer",
 			}
 
-			processed, err := processTemplate("manifests/nebari-operator/deployment-patch.yaml", content, data)
+			processed, err := processTemplate("values/nebari-operator/base.yaml", content, data)
 			if err != nil {
 				t.Fatalf("processTemplate() error: %v", err)
 			}
 
-			output := string(processed)
+			var values struct {
+				Manager struct {
+					Env          []any             `yaml:"env"`
+					EnvOverrides map[string]string `yaml:"envOverrides"`
+				} `yaml:"manager"`
+				RBAC struct {
+					Helpers struct {
+						Enabled bool `yaml:"enabled"`
+					} `yaml:"helpers"`
+				} `yaml:"rbac"`
+			}
+			if err := yaml.Unmarshal(processed, &values); err != nil {
+				t.Fatalf("rendered values are not valid YAML: %v\n%s", err, processed)
+			}
 
-			if !strings.Contains(output, "KEYCLOAK_ISSUER_CONTEXT_PATH") {
-				t.Error("expected KEYCLOAK_ISSUER_CONTEXT_PATH env var in rendered template")
+			// The chart appends envOverrides to env without de-duplicating,
+			// so NIC's variables must all be in the map and env must be empty.
+			if len(values.Manager.Env) != 0 {
+				t.Errorf("manager.env = %v, want empty", values.Manager.Env)
 			}
-			if !strings.Contains(output, tt.wantContextPath) {
-				t.Errorf("expected context path %q in rendered template, got:\n%s", tt.wantContextPath, output)
+			want := map[string]string{
+				"KEYCLOAK_ENABLED":                "true",
+				"KEYCLOAK_URL":                    tt.wantServiceURL,
+				"KEYCLOAK_REALM":                  "nebari",
+				"KEYCLOAK_ADMIN_SECRET_NAME":      "keycloak-admin-credentials",
+				"KEYCLOAK_ADMIN_SECRET_NAMESPACE": "keycloak",
+				"TLS_CLUSTER_ISSUER_NAME":         "selfsigned-issuer",
+				"KEYCLOAK_ISSUER_CONTEXT_PATH":    tt.wantContextPath,
+				"KEYCLOAK_EXTERNAL_URL":           tt.wantExternalURL,
 			}
-			if !strings.Contains(output, tt.wantServiceURL) {
-				t.Errorf("expected service URL %q in rendered template, got:\n%s", tt.wantServiceURL, output)
+			if !maps.Equal(values.Manager.EnvOverrides, want) {
+				t.Errorf("manager.envOverrides = %v, want %v", values.Manager.EnvOverrides, want)
 			}
-			if !strings.Contains(output, "KEYCLOAK_EXTERNAL_URL") {
-				t.Error("expected KEYCLOAK_EXTERNAL_URL env var in rendered template")
-			}
-			if !strings.Contains(output, tt.wantExternalURL) {
-				t.Errorf("expected external URL %q in rendered template, got:\n%s", tt.wantExternalURL, output)
+			if !values.RBAC.Helpers.Enabled {
+				t.Error("rbac.helpers.enabled = false, want true")
 			}
 		})
 	}
@@ -1554,6 +1572,7 @@ var helmValueFilesApps = []struct {
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
 	{"nebari-landingpage", "existingSecret: \"nebari-landing-redis\""},
+	{"nebari-operator", "KEYCLOAK_EXTERNAL_URL: \"https://keycloak."},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
@@ -1981,7 +2000,7 @@ func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
 // issue #457 so regressions in the embedded templates fail loudly. Each
 // wanted block is matched verbatim, indentation included. Helm-app values
 // live in templates/values/<app>/base.yaml (the #406 overlay seam), so the
-// blocks are pinned there; the nebari-operator entry stays in its manifest.
+// blocks are pinned there, nebari-operator's included.
 func TestFoundationalResourceDefaults(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2022,9 +2041,9 @@ func TestFoundationalResourceDefaults(t *testing.T) {
 		},
 		{
 			name:     "nebari-operator manager",
-			template: "templates/manifests/nebari-operator/deployment-patch.yaml",
+			template: "templates/values/nebari-operator/base.yaml",
 			want: []string{
-				"          resources:\n            requests:\n              cpu: 10m\n              memory: 64Mi\n            limits:\n              cpu: 200m\n              memory: 128Mi",
+				"  resources:\n    requests:\n      cpu: 10m\n      memory: 64Mi\n    limits:\n      cpu: 200m\n      memory: 128Mi",
 			},
 		},
 	}
@@ -2088,6 +2107,103 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 	for _, w := range []string{"parametersRef:", "kind: EnvoyProxy", "name: nebari-proxy-config"} {
 		if !strings.Contains(string(gc), w) {
 			t.Errorf("gatewayclass.yaml missing %q", w)
+		}
+	}
+}
+
+// TestWriteAllToGit_RetiresTheKustomizeOperatorInstall covers a repo
+// bootstrapped by a NIC that installed nebari-operator with kustomize. After a
+// regen, manifests/nebari-operator must hold no files. A leftover
+// kustomization.yaml would make ArgoCD apply a second, GitHub-sourced operator
+// alongside the Helm chart, and a leftover namespace.yaml would let an
+// Application still on the kustomize spec sync just the namespace and prune
+// the operator.
+func TestWriteAllToGit_RetiresTheKustomizeOperatorInstall(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	operatorDir := filepath.Join(tmpDir, "manifests", "nebari-operator")
+	if err := os.MkdirAll(operatorDir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, name := range []string{"kustomization.yaml", "deployment-patch.yaml", "namespace.yaml"} {
+		if err := os.WriteFile(filepath.Join(operatorDir, name), []byte("old\n"), 0o600); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	cfg := &config.NebariConfig{Domain: "test.example.com"}
+	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	// The emptied directory itself stays on disk; git does not track it, so
+	// it is gone from the pushed commit.
+	entries, err := os.ReadDir(operatorDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", operatorDir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 0 {
+		t.Errorf("manifests/nebari-operator holds %v, want nothing", names)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "manifests", "nebari-operator-namespace", "namespace.yaml")); err != nil {
+		t.Errorf("operator namespace manifest not written: %v", err)
+	}
+}
+
+// TestOperatorApp_NamespaceSource checks the operator Application reads its
+// namespace manifest, alongside the $values ref, from a directory the retired
+// kustomize install never used.
+func TestOperatorApp_NamespaceSource(t *testing.T) {
+	data := seamTemplateData()
+	content, err := templates.ReadFile("templates/apps/nebari-operator.yaml")
+	if err != nil {
+		t.Fatalf("read app template: %v", err)
+	}
+	processed, err := processTemplate("apps/nebari-operator.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate() error: %v", err)
+	}
+
+	var app struct {
+		Spec struct {
+			Sources []struct {
+				RepoURL string `yaml:"repoURL"`
+				Path    string `yaml:"path"`
+				Ref     string `yaml:"ref"`
+			} `yaml:"sources"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(processed, &app); err != nil {
+		t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, processed)
+	}
+
+	found := false
+	for _, src := range app.Spec.Sources {
+		if src.Path == "manifests/nebari-operator" {
+			t.Errorf("source reads manifests/nebari-operator, the retired kustomize directory")
+		}
+		if src.RepoURL == data.GitRepoURL && src.Ref == "values" && src.Path == "manifests/nebari-operator-namespace" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no source with repoURL %s, ref values and path manifests/nebari-operator-namespace:\n%s", data.GitRepoURL, processed)
+	}
+}
+
+// TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated keeps the retired
+// list honest: a path that a template still renders must not be on it, or
+// every regen would write the file and then delete it.
+func TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated(t *testing.T) {
+	for _, rel := range retiredTemplates {
+		if _, err := templates.ReadFile(templateDir + "/" + rel); err == nil {
+			t.Errorf("%s is retired but still exists as a template", rel)
 		}
 	}
 }

@@ -1,0 +1,29 @@
+manager:
+  # NIC's variables go in envOverrides, not env: the chart renders env and
+  # then appends every envOverrides key without de-duplicating, so the same
+  # name in both breaks the server-side apply. As a map, an overlay overrides
+  # one variable by key.
+  env: []
+  envOverrides:
+    # Keycloak integration configuration
+    KEYCLOAK_ENABLED: "true"
+    KEYCLOAK_URL: "{{ .KeycloakServiceURL }}"
+    KEYCLOAK_REALM: "{{ .KeycloakRealm }}"
+    KEYCLOAK_ADMIN_SECRET_NAME: "{{ .KeycloakAdminSecretName }}"
+    KEYCLOAK_ADMIN_SECRET_NAMESPACE: "{{ .KeycloakNamespace }}"
+    TLS_CLUSTER_ISSUER_NAME: "{{ .CertificateIssuer }}"
+    KEYCLOAK_ISSUER_CONTEXT_PATH: "{{ .KeycloakBasePath }}"
+    KEYCLOAK_EXTERNAL_URL: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
+  # kubebuilder scaffold defaults; idle usage is ~2m/15Mi (#456).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+rbac:
+  # The admin/editor/viewer ClusterRoles for NebariApps, which the kustomize
+  # install shipped; the chart only renders them when asked.
+  helpers:
+    enabled: true
