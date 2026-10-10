@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted · Amended (2026-08-31): metallb was removed in [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640) (see [ADR-0018](0018-local-gateway-host-ports.md)), so `isMetalLBPath` no longer exists. trust-manager (`isTrustBundlePath`) remains the worked example of a gated app. References to metallb below are historical.
+Accepted · Amended (2026-08-31): metallb was removed in [#640](https://github.com/nebari-dev/nebari-infrastructure-core/pull/640) (see [ADR-0018](0018-local-gateway-host-ports.md)), so `isMetalLBPath` no longer exists. trust-manager (`isTrustBundlePath`) remains the worked example of a gated app. References to metallb below are historical. Amended (2026-10-09): nebari-operator moved from a Kustomize install to its Helm chart and joined this seam (`values/nebari-operator/`). Like keycloak, it reuses its git source (`manifests/nebari-operator-namespace`) as the `ref: values` source. Its `kustomization.yaml` is gone, so no `kustomization.yaml` remains in the tree, and the app list below predates it.
 
 ## Date
 
