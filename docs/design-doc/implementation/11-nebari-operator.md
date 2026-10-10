@@ -32,7 +32,7 @@ pkg/argocd/templates/
 
 Overrides go in `values/nebari-operator/overlays/*.yaml` in the GitOps repo and survive `--regen-apps`. Since Helm replaces lists, override a single environment variable through the chart's `manager.envOverrides` map rather than `manager.env`.
 
-Before the chart, NIC installed the operator with Kustomize from the upstream repository's `config/default`. The release name keeps every object name identical to that install, so an upgraded cluster updates the operator in place. `namespace.yaml` keeps the namespace (which the Kustomize install declared) in the desired state, and `--regen-apps` deletes the retired `kustomization.yaml` and `deployment-patch.yaml` from the GitOps repo.
+Before the chart, NIC installed the operator with Kustomize from the upstream repository's `config/default`. That predates the chart being published: when NIC first added the operator (#55, February 2026) the chart was only a GitHub release asset, and it reached the Helm repository and quay from `v0.1.0-alpha.14` (March 2026, nebari-operator#60). No decision kept NIC on Kustomize after that. The release name keeps every object name identical to that install, so an upgraded cluster updates the operator in place. `namespace.yaml` keeps the namespace (which the Kustomize install declared) in the desired state, and `--regen-apps` deletes the retired `kustomization.yaml` and `deployment-patch.yaml` from the GitOps repo.
 
 The operator runs in its own namespace and watches for `NebariApp` CRs across the cluster.
 
