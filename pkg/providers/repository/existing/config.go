@@ -41,9 +41,14 @@ type Config struct {
 //	auth:
 //	  ssh:
 //	    env: GIT_SSH_KEY
+//
+//	auth:
+//	  token:
+//	    env: BITBUCKET_TOKEN
+//	    username: x-token-auth
 type AuthConfig struct {
 	// Token authenticates over HTTPS with a token read from Token.Env.
-	Token *EnvRef `yaml:"token,omitempty" json:"token,omitempty"`
+	Token *TokenRef `yaml:"token,omitempty" json:"token,omitempty"`
 
 	// SSH authenticates over SSH with a private key read from SSH.Env.
 	SSH *EnvRef `yaml:"ssh,omitempty" json:"ssh,omitempty"`
@@ -58,6 +63,15 @@ type AuthConfig struct {
 // EnvRef names the environment variable a secret is read from.
 type EnvRef struct {
 	Env string `yaml:"env" json:"env"`
+}
+
+// TokenRef names the environment variable a token is read from, and the
+// HTTPS username sent with it. Username defaults to "git", which GitHub
+// accepts. Bitbucket checks it: "x-token-auth" for access tokens,
+// "x-bitbucket-api-token-auth" for API tokens.
+type TokenRef struct {
+	Env      string `yaml:"env" json:"env"`
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
 }
 
 // Validate checks that the configuration is well-formed.
@@ -114,7 +128,7 @@ func (a *AuthConfig) resolve() (repository.Auth, error) {
 		if v == "" {
 			return nil, fmt.Errorf("environment variable %s is not set or empty", a.Token.Env)
 		}
-		return repository.TokenAuth{Token: v}, nil
+		return repository.TokenAuth{Token: v, Username: a.Token.Username}, nil
 	case a.SSH != nil:
 		v := os.Getenv(a.SSH.Env)
 		if v == "" {

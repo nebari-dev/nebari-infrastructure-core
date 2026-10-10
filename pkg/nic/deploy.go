@@ -375,7 +375,7 @@ func gitAuth(a repository.Auth) (git.Auth, error) {
 	case nil:
 		return git.Auth{}, nil
 	case repository.TokenAuth:
-		return git.NewAuthToken(a.Token), nil
+		return git.NewAuthToken(a.Token, a.UsernameOrDefault()), nil
 	case repository.SSHKeyAuth:
 		return git.NewSSHKeyAuth(a.Key, a.InsecureSkipHostKeyVerification), nil
 	default:
