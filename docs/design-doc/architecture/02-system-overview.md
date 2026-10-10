@@ -68,7 +68,7 @@
 │    │       longhorn-backup                                  │
 │    ├── w4: postgresql, keycloak, opentelemetry-collector,   │
 │    │       trust-bundle                                     │
-│    ├── w5: nebari-operator (Helm chart from quay.io)        │
+│    ├── w5: nebari-operator                     │
 │    └── w6: nebari-landingpage                               │
 │    Conditional apps are omitted when not applicable.        │
 └─────────────────────────────────────────────────────────────┘
