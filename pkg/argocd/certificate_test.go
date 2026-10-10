@@ -322,7 +322,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read operator values: %v", err)
 			}
-			wantIssuerValue := `value: "` + tt.wantOperatorName + `"`
+			wantIssuerValue := `TLS_CLUSTER_ISSUER_NAME: "` + tt.wantOperatorName + `"`
 			if !strings.Contains(string(operatorValues), wantIssuerValue) {
 				t.Errorf("operator values missing %q", wantIssuerValue)
 			}

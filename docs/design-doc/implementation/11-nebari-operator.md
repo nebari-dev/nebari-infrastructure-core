@@ -20,19 +20,19 @@ The operator is deployed as a foundational ArgoCD application from `pkg/argocd/t
 
 ```
 pkg/argocd/templates/
-├── apps/nebari-operator.yaml           # Chart + pinned version, the $values ref,
-│                                       # and the namespace manifest below
-├── values/nebari-operator/base.yaml    # manager.env: Keycloak integration (URL,
-│                                       # realm, admin secret name/namespace, issuer
-│                                       # context path, external URL) and the TLS
-│                                       # cluster-issuer name; resources; RBAC helpers
-└── manifests/nebari-operator/
+├── apps/nebari-operator.yaml           # Chart + pinned version, and the
+│                                       # namespace directory below as the $values ref
+├── values/nebari-operator/base.yaml    # manager.envOverrides: Keycloak integration
+│                                       # (URL, realm, admin secret name/namespace,
+│                                       # issuer context path, external URL) and the
+│                                       # TLS cluster-issuer name; resources; RBAC helpers
+└── manifests/nebari-operator-namespace/
     └── namespace.yaml                  # The chart does not create its namespace
 ```
 
-Overrides go in `values/nebari-operator/overlays/*.yaml` in the GitOps repo and survive `--regen-apps`. Since Helm replaces lists, override a single environment variable through the chart's `manager.envOverrides` map rather than `manager.env`.
+Overrides go in `values/nebari-operator/overlays/*.yaml` in the GitOps repo and survive `--regen-apps`. NIC sets its environment variables in the chart's `manager.envOverrides` map, so an overlay overrides one by key (`manager.envOverrides.KEYCLOAK_REALM: ...`). Don't set one of them in `manager.env`: the chart renders `env` and then appends `envOverrides` without de-duplicating, and server-side apply rejects the duplicate name.
 
-Before the chart, NIC installed the operator with Kustomize from the upstream repository's `config/default`. That predates the chart being published: when NIC first added the operator (#55, February 2026) the chart was only a GitHub release asset, and it reached the Helm repository and quay from `v0.1.0-alpha.14` (March 2026, nebari-operator#60). No decision kept NIC on Kustomize after that. The release name keeps every object name identical to that install, so an upgraded cluster updates the operator in place. `namespace.yaml` keeps the namespace (which the Kustomize install declared) in the desired state, and `--regen-apps` deletes the retired `kustomization.yaml` and `deployment-patch.yaml` from the GitOps repo.
+Before the chart, NIC installed the operator with Kustomize from the upstream repository's `config/default`. That predates the chart being published: when NIC first added the operator (#55, February 2026) the chart was only a GitHub release asset, and it reached the Helm repository and quay from `v0.1.0-alpha.14` (March 2026, nebari-operator#60). No decision kept NIC on Kustomize after that. The release name keeps every object name identical to that install, so an upgraded cluster updates the operator in place. `manifests/nebari-operator-namespace/namespace.yaml` keeps the namespace (which the Kustomize install declared) in the desired state. `--regen-apps` deletes everything under the old `manifests/nebari-operator/` directory, so an Application still on the old spec when it next refreshes fails to compare instead of pruning the operator.
 
 The operator runs in its own namespace and watches for `NebariApp` CRs across the cluster.
 
@@ -101,7 +101,7 @@ That's it. NIC does not reconcile `NebariApp` CRs, does not implement the operat
 Bumping the operator version:
 
 1. Update the chart `targetRevision` in `pkg/argocd/templates/apps/nebari-operator.yaml` to the new release (chart versions drop the `v`, e.g. `0.1.2`). The chart's default image tag is the matching operator release.
-2. Check the chart's `values.yaml` for renamed or new keys that `values/nebari-operator/base.yaml` relies on (`manager.env`, `manager.resources`, `rbac.helpers`).
+2. Check the chart's `values.yaml` for renamed or new keys that `values/nebari-operator/base.yaml` relies on (`manager.envOverrides`, `manager.resources`, `rbac.helpers`).
 3. Land the change; on next `nic deploy` or `argocd app sync`, the new operator version rolls out.
 
 ## 11.7 References
