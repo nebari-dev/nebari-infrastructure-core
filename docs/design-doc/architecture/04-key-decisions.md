@@ -115,7 +115,7 @@ See [State Management](05-state-management.md).
    ├── wave 3: cluster-issuers, certificates, httproutes, trust-manager,
    │           cloudnative-pg, securitypolicies, longhorn-backup
    ├── wave 4: postgresql, keycloak, opentelemetry-collector, trust-bundle
-   ├── wave 5: nebari-operator (Helm chart from quay.io/nebari/charts)
+   ├── wave 5: nebari-operator
    └── wave 6: nebari-landingpage
 ```
 
