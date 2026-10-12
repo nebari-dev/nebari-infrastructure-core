@@ -10,7 +10,7 @@ func TestFSxOpenZFSCSIHelmValues(t *testing.T) {
 	}{
 		{
 			name: "sets fsGroup policy, region, controller service account, and node tolerations",
-			cfg:  &Config{Region: "us-west-2", FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			cfg:  &Config{Region: "us-west-2", FSxOpenZFS: &FSxOpenZFSConfig{}},
 			checkValues: map[string]any{
 				"csidriver.fsGroupPolicy":          "File",
 				"controller.region":                "us-west-2",
@@ -21,7 +21,7 @@ func TestFSxOpenZFSCSIHelmValues(t *testing.T) {
 		},
 		{
 			name: "region follows the cluster config",
-			cfg:  &Config{Region: "eu-central-1", FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			cfg:  &Config{Region: "eu-central-1", FSxOpenZFS: &FSxOpenZFSConfig{}},
 			checkValues: map[string]any{
 				"controller.region": "eu-central-1",
 			},
@@ -53,7 +53,7 @@ func TestFSxOpenZFSCSIChartVersion(t *testing.T) {
 		expected string
 	}{
 		{name: "nil FSxOpenZFS returns default", config: Config{}, expected: defaultFSxOpenZFSCSIChartVersion},
-		{name: "empty CSIChartVersion returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}}, expected: defaultFSxOpenZFSCSIChartVersion},
+		{name: "empty CSIChartVersion returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: defaultFSxOpenZFSCSIChartVersion},
 		{name: "custom CSIChartVersion is used", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{CSIChartVersion: "1.3.0"}}, expected: "1.3.0"},
 	}
 

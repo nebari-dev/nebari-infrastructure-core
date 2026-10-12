@@ -151,7 +151,24 @@ func extractAWSConfig(ctx context.Context, clusterConfig *config.ClusterConfig) 
 		return nil, fmt.Errorf("failed to unmarshal AWS config: %w", err)
 	}
 
+	// A bare `fsx_openzfs:` line is YAML null, which decodes to a nil
+	// pointer and would read as "FSx off". Writing the block turns FSx on,
+	// so an empty block means FSx with every default.
+	if awsCfg.FSxOpenZFS == nil && hasNullKey(rawCfg, "fsx_openzfs") {
+		awsCfg.FSxOpenZFS = &FSxOpenZFSConfig{}
+	}
+
 	return &awsCfg, nil
+}
+
+// hasNullKey reports whether raw is a map holding key with a null value.
+func hasNullKey(raw any, key string) bool {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	value, present := m[key]
+	return present && value == nil
 }
 
 // Validate validates the AWS configuration with pre-flight checks

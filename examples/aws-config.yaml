@@ -204,7 +204,9 @@ cluster:
       # kms_key_id: ""                  # Optional: KMS key ARN for encryption
       # provisioned_mbps: 100           # Required if throughput_mode is provisioned
 
-    # FSx for OpenZFS for shared ReadWriteMany storage (optional, disabled by default).
+    # FSx for OpenZFS for shared ReadWriteMany storage (optional). Writing the
+    # block turns it on, even with nothing under it (`fsx_openzfs: {}` uses
+    # every default). Set `enabled: false` to turn it off and keep the settings.
     # NIC creates the filesystem, installs the FSx for OpenZFS CSI driver, and
     # creates a StorageClass that provisions each PVC as a child volume of the
     # filesystem. Pods writing as non-root must set fsGroup in their securityContext.
@@ -212,7 +214,6 @@ cluster:
     # tables at this level (next to existing_private_subnet_ids):
     #   existing_private_route_table_ids: [rtb-0123456789abcdef0]
     # fsx_openzfs:
-    #   enabled: true
     #   deployment_type: MULTI_AZ_1          # MULTI_AZ_1 (default) or SINGLE_AZ_2 (one AZ, cheaper)
     #   storage_capacity_gib: 64             # 64-524288, default 64
     #   throughput_mibps: 160                # 160, 320, 640, ... 10240, default 160

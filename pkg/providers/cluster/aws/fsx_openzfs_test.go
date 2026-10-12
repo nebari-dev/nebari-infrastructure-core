@@ -24,27 +24,27 @@ func TestCreateFSxOpenZFSStorageClassWithClient(t *testing.T) {
 	}{
 		{
 			name:               "creates StorageClass when it does not exist",
-			config:             &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			config:             &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
 			rootVolumeID:       "fsvol-0123456789abcdef0",
 			wantSCName:         defaultFSxOpenZFSStorageClassName,
 			wantParentVolumeID: `"fsvol-0123456789abcdef0"`,
 		},
 		{
 			name:               "creates StorageClass with custom name",
-			config:             &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, StorageClassName: "shared"}},
+			config:             &Config{FSxOpenZFS: &FSxOpenZFSConfig{StorageClassName: "shared"}},
 			rootVolumeID:       "fsvol-abc",
 			wantSCName:         "shared",
 			wantParentVolumeID: `"fsvol-abc"`,
 		},
 		{
 			name:         "rejects empty root volume ID",
-			config:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			config:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
 			rootVolumeID: "",
 			wantErr:      true,
 		},
 		{
 			name:         "updates StorageClass when it already exists",
-			config:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			config:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
 			rootVolumeID: "fsvol-new",
 			existing: []runtime.Object{
 				&storagev1.StorageClass{

@@ -320,8 +320,9 @@ func TestFSxOpenZFSEnabled(t *testing.T) {
 		expected bool
 	}{
 		{name: "nil FSxOpenZFS is disabled", config: Config{}, expected: false},
-		{name: "block without enabled is disabled", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: false},
-		{name: "enabled", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}}, expected: true},
+		{name: "block without enabled is enabled", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: true},
+		{name: "explicit enabled true", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: boolPtr(true)}}, expected: true},
+		{name: "explicit enabled false", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: boolPtr(false)}}, expected: false},
 	}
 
 	for _, tt := range tests {
@@ -360,7 +361,7 @@ func TestFSxOpenZFSStorageClassName(t *testing.T) {
 		expected string
 	}{
 		{name: "nil FSxOpenZFS returns default", config: Config{}, expected: defaultFSxOpenZFSStorageClassName},
-		{name: "empty StorageClassName returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}}, expected: defaultFSxOpenZFSStorageClassName},
+		{name: "empty StorageClassName returns default", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{}}, expected: defaultFSxOpenZFSStorageClassName},
 		{name: "custom StorageClassName is used", config: Config{FSxOpenZFS: &FSxOpenZFSConfig{StorageClassName: "shared"}}, expected: "shared"},
 	}
 
