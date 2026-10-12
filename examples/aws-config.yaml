@@ -197,6 +197,29 @@ cluster:
       # kms_key_id: ""                  # Optional: KMS key ARN for encryption
       # provisioned_mbps: 100           # Required if throughput_mode is provisioned
 
+    # FSx for OpenZFS for shared ReadWriteMany storage (optional, disabled by default).
+    # NIC creates the filesystem, installs the FSx for OpenZFS CSI driver, and
+    # creates a StorageClass that provisions each PVC as a child volume of the
+    # filesystem. Pods writing as non-root must set fsGroup in their securityContext.
+    # With an existing VPC and MULTI_AZ_1, also list the private subnets' route
+    # tables at this level (next to existing_private_subnet_ids):
+    #   existing_private_route_table_ids: [rtb-0123456789abcdef0]
+    # fsx_openzfs:
+    #   enabled: true
+    #   deployment_type: MULTI_AZ_1          # MULTI_AZ_1 (default) or SINGLE_AZ_2 (one AZ, cheaper)
+    #   storage_capacity_gib: 64             # 64-524288, default 64
+    #   throughput_mibps: 160                # 160, 320, 640, ... 10240, default 160
+    #   automatic_backup_retention_days: 7   # 0-90, 0 disables daily backups, default 7
+    #   storage_class_name: fsx-openzfs-sc   # default fsx-openzfs-sc
+    #   # csi_chart_version: "1.3.2"         # hard-pinned by nic; set this to override
+    #   # On destroy, FSx keeps a final backup of the filesystem, billed until you
+    #   # delete it. Set true to skip it.
+    #   skip_final_backup: false
+    #   # Destroy aborts while PVCs on the StorageClass still have volumes. Set true
+    #   # to delete every child volume and snapshot with the filesystem instead,
+    #   # including volumes whose PVs were set to Retain.
+    #   delete_child_volumes_on_destroy: false
+
     tags:
       Environment: development
       Project: nebari
