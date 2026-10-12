@@ -311,7 +311,7 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 			expected: "longhorn",
 		},
 		{
-			name: "longhorn disabled returns gp2",
+			name: "longhorn disabled returns gp3",
 			config: map[string]any{
 				"region":      "us-west-2",
 				"node_groups": map[string]any{},
@@ -319,7 +319,7 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 					"enabled": false,
 				},
 			},
-			expected: "gp2",
+			expected: "gp3",
 		},
 	}
 

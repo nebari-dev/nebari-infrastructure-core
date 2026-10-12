@@ -58,10 +58,10 @@ func TestEnsureBackupsHaveLonghorn(t *testing.T) {
 			errContains:  "not Longhorn",
 		},
 		{
-			name:         "backups enabled on aws with longhorn disabled (gp2) is rejected",
+			name:         "backups enabled on aws with longhorn disabled (gp3) is rejected",
 			provider:     "aws",
 			backups:      backups(&enabled),
-			storageClass: "gp2",
+			storageClass: "gp3",
 			wantErr:      true,
 			errContains:  "not Longhorn",
 		},

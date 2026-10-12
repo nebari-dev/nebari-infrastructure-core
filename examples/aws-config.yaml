@@ -155,7 +155,7 @@ cluster:
       replica_count: 2 # one replica per storage node / AZ; raise to 3 for 3 AZs
       # node_selector:      # optional; defaults to {node.longhorn.io/storage: "true"}
       #   node.longhorn.io/storage: "true"
-      # enabled: true       # default true on AWS; set false to opt out (falls back to gp2/EBS)
+      # enabled: true       # default true on AWS; set false to opt out (falls back to the NIC-managed gp3 EBS class)
       # instance_manager_cpu_percent: 12 # % of each node's CPU reserved per instance-manager
       #                                  # pod (Longhorn default 12, range 0-40). Maps to
       #                                  # Longhorn's "Guaranteed Instance Manager CPU"

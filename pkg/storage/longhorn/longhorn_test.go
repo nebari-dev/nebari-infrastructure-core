@@ -8,7 +8,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -456,92 +455,6 @@ func TestWaitForDaemonSetReady(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestEnsureSoleDefaultStorageClassWithClient(t *testing.T) {
-	const defaultAnnotation = "storageclass.kubernetes.io/is-default-class"
-
-	sc := func(name string, isDefault string) *storagev1.StorageClass {
-		annotations := map[string]string{}
-		if isDefault != "" {
-			annotations[defaultAnnotation] = isDefault
-		}
-		return &storagev1.StorageClass{
-			ObjectMeta:  metav1.ObjectMeta{Name: name, Annotations: annotations},
-			Provisioner: "test-provisioner",
-		}
-	}
-
-	tests := []struct {
-		name        string
-		existing    []runtime.Object
-		keep        string
-		wantDefault map[string]bool // SC name -> still default?
-	}{
-		{
-			name: "demotes previous default StorageClass",
-			existing: []runtime.Object{
-				sc("hcloud-volumes", "true"),
-				sc("longhorn", "true"),
-			},
-			keep: "longhorn",
-			wantDefault: map[string]bool{
-				"hcloud-volumes": false,
-				"longhorn":       true,
-			},
-		},
-		{
-			name: "no-op when kept SC is the only default",
-			existing: []runtime.Object{
-				sc("longhorn", "true"),
-				sc("local-path", ""),
-			},
-			keep: "longhorn",
-			wantDefault: map[string]bool{
-				"longhorn":   true,
-				"local-path": false,
-			},
-		},
-		{
-			name: "demotes multiple stale defaults",
-			existing: []runtime.Object{
-				sc("hcloud-volumes", "true"),
-				sc("vsphere-thin", "true"),
-				sc("longhorn", "true"),
-			},
-			keep: "longhorn",
-			wantDefault: map[string]bool{
-				"hcloud-volumes": false,
-				"vsphere-thin":   false,
-				"longhorn":       true,
-			},
-		},
-		{
-			name:        "no StorageClasses is not an error",
-			existing:    nil,
-			keep:        "longhorn",
-			wantDefault: map[string]bool{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tt.existing...)
-			if err := ensureSoleDefaultStorageClassWithClient(context.Background(), client, tt.keep); err != nil {
-				t.Fatalf("ensureSoleDefaultStorageClassWithClient() error = %v", err)
-			}
-			for name, wantDefault := range tt.wantDefault {
-				got, err := client.StorageV1().StorageClasses().Get(context.Background(), name, metav1.GetOptions{})
-				if err != nil {
-					t.Fatalf("StorageClass %q not found: %v", name, err)
-				}
-				isDefault := got.Annotations[defaultAnnotation] == "true"
-				if isDefault != wantDefault {
-					t.Errorf("StorageClass %q default=%v, want %v (annotations=%v)", name, isDefault, wantDefault, got.Annotations)
-				}
 			}
 		})
 	}

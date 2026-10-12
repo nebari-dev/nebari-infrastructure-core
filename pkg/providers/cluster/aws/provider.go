@@ -29,9 +29,6 @@ const (
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
 
-	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
-	storageClassGP2 = "gp2"
-
 	// attrKeyRegion is the attribute / Helm value key for AWS region.
 	attrKeyRegion = "region"
 )
@@ -432,6 +429,23 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				span.RecordError(err)
 				return err
 			}
+		}
+	}
+
+	// Create the gp3 EBS StorageClass on every cluster. It becomes the
+	// cluster default only when nothing else is, so it runs after Longhorn
+	// (which claims the default when enabled) and never overrides a default
+	// the admin chose.
+	{
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for gp3 StorageClass: %w", err)
+		}
+
+		if err := ensureGP3StorageClass(ctx, kubeconfigBytes); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to ensure gp3 StorageClass: %w", err)
 		}
 	}
 
@@ -862,7 +876,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
-// StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
+// StorageClass is "longhorn" when Longhorn is enabled (default), otherwise the
+// NIC-managed "gp3" EBS class (see ensureGP3StorageClass).
 // EFSStorageClass is set when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
@@ -882,7 +897,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 			longhornEnabled = awsCfg.LonghornEnabled()
 			if !longhornEnabled {
-				sc = storageClassGP2
+				sc = storageClassGP3
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()
