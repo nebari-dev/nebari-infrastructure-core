@@ -11,7 +11,7 @@ import (
 // test and forces the addresses to be re-verified — a drifted address list is
 // otherwise silent and destroys the backups retain_on_destroy promised to keep
 // (cluster.RetainBackupResources warns but cannot fail the destroy).
-const backupStateModuleVersion = "0.7.0"
+const backupStateModuleVersion = "0.8.0"
 
 // backupStateAddrs returns the Terraform state addresses for a NIC-provisioned
 // Longhorn backup S3 bucket that must be removed from state before `tofu

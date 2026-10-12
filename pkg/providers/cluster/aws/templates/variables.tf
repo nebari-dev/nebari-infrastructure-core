@@ -62,6 +62,11 @@ variable "eks_kms_arn" {
   default = null
 }
 
+variable "ebs_csi_kms_key_arns" {
+  type    = list(string)
+  default = []
+}
+
 variable "cluster_enabled_log_types" {
   type    = list(string)
   default = []

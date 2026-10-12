@@ -55,6 +55,14 @@ cluster:
     endpoint_private_access: true
     endpoint_public_access: true
 
+    # Customer managed KMS keys the EBS CSI driver may use. NIC detects the
+    # account's default EBS encryption key on every deploy and adds it when it is
+    # customer managed, so list only keys a StorageClass sets in kmsKeyId, or a
+    # former default that existing volumes are still encrypted with. Key ARNs
+    # only (no aliases), and the key policy must delegate to IAM.
+    # ebs_kms_key_arns:
+    #   - arn:aws:kms:us-west-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab
+
     node_groups:
       # general:
       #   instance: m7i.2xlarge

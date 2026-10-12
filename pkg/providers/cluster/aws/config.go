@@ -8,17 +8,23 @@ import (
 )
 
 type Config struct {
-	Region                    string                           `yaml:"region"`
-	StateBucket               string                           `yaml:"state_bucket,omitempty"`
-	AvailabilityZones         []string                         `yaml:"availability_zones,omitempty"`
-	VPCCIDRBlock              string                           `yaml:"vpc_cidr_block,omitempty"`
-	ExistingVPCID             string                           `yaml:"existing_vpc_id,omitempty"`
-	ExistingPrivateSubnetIDs  []string                         `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID   string                           `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion         string                           `yaml:"kubernetes_version,omitempty"`
-	EndpointPrivateAccess     bool                             `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess      bool                             `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                 string                           `yaml:"eks_kms_arn,omitempty"`
+	Region                   string   `yaml:"region"`
+	StateBucket              string   `yaml:"state_bucket,omitempty"`
+	AvailabilityZones        []string `yaml:"availability_zones,omitempty"`
+	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
+	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
+	ExistingPrivateSubnetIDs []string `yaml:"existing_private_subnet_ids,omitempty"`
+	ExistingSecurityGroupID  string   `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion        string   `yaml:"kubernetes_version,omitempty"`
+	EndpointPrivateAccess    bool     `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess     bool     `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                string   `yaml:"eks_kms_arn,omitempty"`
+	// EBSKMSKeyARNs lists customer managed KMS key ARNs the EBS CSI driver may
+	// use. NIC already adds the account's default EBS encryption key on every
+	// deploy when it is customer managed, so this is only needed for a key a
+	// StorageClass sets in kmsKeyId, or to keep access to a former default key
+	// that existing volumes are still encrypted with.
+	EBSKMSKeyARNs             []string                         `yaml:"ebs_kms_key_arns,omitempty"`
 	EnabledLogTypes           []string                         `yaml:"enabled_log_types,omitempty"`
 	ExistingClusterRoleArn    string                           `yaml:"existing_cluster_role_arn,omitempty"`
 	ExistingNodeRoleArn       string                           `yaml:"existing_node_role_arn,omitempty"`

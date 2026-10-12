@@ -181,6 +181,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		}
 	}
 
+	if err := validateKMSKeyARNs(awsCfg.EBSKMSKeyARNs); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Validate load_balancer_scheme if specified
 	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
 		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
@@ -314,6 +319,16 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	}
 
 	tfVars := awsCfg.toTFVars(projectName, opts.TrustBundle, opts.BackupBucket)
+
+	// Grant the EBS CSI driver the account's default EBS key when it is
+	// customer managed, or volume creation fails with a KMS error (#699).
+	ec2KeyClient, kmsClient, err := newEBSDefaultKeyClients(ctx, region)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	tfVars.EBSCSIKMSKeyARNs = ebsCSIKMSKeyARNs(ctx, ec2KeyClient, kmsClient, tfVars.EBSCSIKMSKeyARNs)
+
 	tf, err := tofu.Setup(ctx, tofuTemplates, tfVars)
 	if err != nil {
 		span.RecordError(err)

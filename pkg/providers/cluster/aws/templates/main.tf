@@ -1,6 +1,6 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.7.0"
+  version = "0.8.0"
 
 
   project_name                             = var.project_name
@@ -16,6 +16,7 @@ module "eks_cluster" {
   endpoint_private_access                  = var.endpoint_private_access
   endpoint_public_access                   = var.endpoint_public_access
   eks_kms_arn                              = var.eks_kms_arn
+  ebs_csi_kms_key_arns                     = var.ebs_csi_kms_key_arns
   cluster_enabled_log_types                = var.cluster_enabled_log_types
   create_iam_roles                         = var.create_iam_roles
   existing_cluster_iam_role_arn            = var.existing_cluster_iam_role_arn

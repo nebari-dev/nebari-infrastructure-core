@@ -3,6 +3,7 @@ package aws
 import (
 	"embed"
 	"maps"
+	"slices"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
@@ -40,6 +41,7 @@ type TFVars struct {
 	EndpointPrivateAccess         bool                 `json:"endpoint_private_access"`
 	EndpointPublicAccess          bool                 `json:"endpoint_public_access"`
 	EKSKMSArn                     *string              `json:"eks_kms_arn,omitempty"`
+	EBSCSIKMSKeyARNs              []string             `json:"ebs_csi_kms_key_arns,omitempty"`
 	ClusterEnabledLogTypes        []string             `json:"cluster_enabled_log_types,omitempty"`
 	CreateIAMRoles                bool                 `json:"create_iam_roles"`
 	ExistingClusterIAMRoleArn     *string              `json:"existing_cluster_iam_role_arn,omitempty"`
@@ -196,6 +198,9 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 	}
 	if c.EKSKMSArn != "" {
 		vars.EKSKMSArn = &c.EKSKMSArn
+	}
+	if len(c.EBSKMSKeyARNs) > 0 {
+		vars.EBSCSIKMSKeyARNs = slices.Clone(c.EBSKMSKeyARNs)
 	}
 	if c.ExistingClusterRoleArn != "" {
 		vars.ExistingClusterIAMRoleArn = &c.ExistingClusterRoleArn
