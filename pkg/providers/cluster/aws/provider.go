@@ -700,20 +700,40 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return err
 	}
 
+	// Errors that Force downgrades from fatal to warning accumulate here and
+	// are returned joined at the end of the destroy.
+	var forcedErrs []error
+
+	// Check for FSx for OpenZFS child volumes before any teardown, so a
+	// destroy that FSx would refuse aborts with the cluster intact instead of
+	// failing inside tofu destroy. Runs on dry runs too, so they report it.
+	var fsxFilesystem fsxOpenZFSFilesystem
+	if awsCfg.FSxOpenZFSEnabled() {
+		outputs, err := tf.Output(ctx)
+		if err == nil {
+			fsxFilesystem, err = precheckFSxOpenZFSDestroy(ctx, outputs, awsCfg)
+		}
+		if err != nil {
+			span.RecordError(err)
+			if !opts.Force {
+				return fmt.Errorf("FSx for OpenZFS destroy check failed: %w", err)
+			}
+			forcedErrs = append(forcedErrs, fmt.Errorf("FSx for OpenZFS destroy check: %w", err))
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("FSx for OpenZFS destroy check failed, continuing with --force: %v", err)).
+				WithResource("fsx-openzfs").WithAction("checking"))
+		}
+	}
+
 	if opts.DryRun {
 		_, err = tf.Plan(ctx, tfexec.Destroy(true))
 		if err != nil {
 			span.RecordError(err)
-			return err
+			return errors.Join(append(forcedErrs, err)...)
 		}
 
 		// Since this is a dry run, we return earlier to avoid destroying the state bucket
-		return nil
+		return errors.Join(forcedErrs...)
 	}
-
-	// Errors that Force downgrades from fatal to warning accumulate here and
-	// are returned joined at the end of the destroy.
-	var forcedErrs []error
 
 	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
 	// falls through to the Stage 2 SDK sweep below.
@@ -810,6 +830,14 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	if err != nil {
 		span.RecordError(err)
 		return errors.Join(append(forcedErrs, err)...)
+	}
+
+	// FSx keeps a final backup of a deleted filesystem unless told not to.
+	// Report it so the leftover cost is not a surprise. Warn-only: the
+	// backup is expected and nothing about it can fail the destroy.
+	if fsxFilesystem.ID != "" && awsCfg.FSxOpenZFSEnabled() && !awsCfg.FSxOpenZFS.SkipFinalBackup {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("FSx kept a final backup of filesystem %s. It is billed until you delete it in the FSx console or with 'aws fsx delete-backup'", fsxFilesystem.ID)).
+			WithResource("fsx-openzfs").WithAction("destroyed"))
 	}
 
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
