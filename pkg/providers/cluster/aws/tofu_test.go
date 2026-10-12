@@ -418,18 +418,17 @@ func TestToTFVarsFSxOpenZFS(t *testing.T) {
 		},
 		{
 			name: "disabled block with settings emits none of them",
-			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_2", StorageCapacityGiB: 128}},
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: boolPtr(false), DeploymentType: "SINGLE_AZ_2", StorageCapacityGiB: 128}},
 			want: map[string]any{"fsx_openzfs_enabled": false},
 		},
 		{
 			name: "enabled with defaults leaves the rest to variables.tf",
-			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true}},
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
 			want: map[string]any{"fsx_openzfs_enabled": true},
 		},
 		{
 			name: "enabled with every field set",
 			cfg: Config{FSxOpenZFS: &FSxOpenZFSConfig{
-				Enabled:                      true,
 				DeploymentType:               "SINGLE_AZ_2",
 				StorageCapacityGiB:           256,
 				ThroughputMiBps:              320,
@@ -449,7 +448,7 @@ func TestToTFVarsFSxOpenZFS(t *testing.T) {
 		},
 		{
 			name: "explicit zero retention is emitted to disable backups",
-			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: true, AutomaticBackupRetentionDays: intPtr(0)}},
+			cfg:  Config{FSxOpenZFS: &FSxOpenZFSConfig{AutomaticBackupRetentionDays: intPtr(0)}},
 			want: map[string]any{
 				"fsx_openzfs_enabled":                         true,
 				"fsx_openzfs_automatic_backup_retention_days": float64(0),

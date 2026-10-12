@@ -245,8 +245,12 @@ func (c *Config) EFSStorageClassName() string {
 // cluster through the FSx for OpenZFS CSI driver. Fields left unset fall back
 // to the terraform-aws-eks-cluster module defaults, which also validates their
 // ranges.
+//
+// Writing the block turns FSx on, as with the Longhorn block. Enabled exists
+// to turn it off while keeping the settings, so it is a pointer: unset means
+// on.
 type FSxOpenZFSConfig struct {
-	Enabled            bool   `yaml:"enabled,omitempty"`
+	Enabled            *bool  `yaml:"enabled,omitempty"`
 	DeploymentType     string `yaml:"deployment_type,omitempty"`      // MULTI_AZ_1 (default) or SINGLE_AZ_2
 	StorageCapacityGiB int    `yaml:"storage_capacity_gib,omitempty"` // default: 64
 	ThroughputMiBps    int    `yaml:"throughput_mibps,omitempty"`     // default: 160
@@ -282,9 +286,13 @@ var validFSxOpenZFSDeploymentTypes = []string{
 }
 
 // FSxOpenZFSEnabled returns whether an FSx for OpenZFS filesystem should be
-// provisioned. Defaults to false.
+// provisioned: true when the fsx_openzfs block is present and enabled is not
+// set to false. FSx is opt-in, so an omitted block means false.
 func (c *Config) FSxOpenZFSEnabled() bool {
-	return c.FSxOpenZFS != nil && c.FSxOpenZFS.Enabled
+	if c.FSxOpenZFS == nil {
+		return false
+	}
+	return c.FSxOpenZFS.Enabled == nil || *c.FSxOpenZFS.Enabled
 }
 
 // FSxOpenZFSDeploymentType returns the configured deployment type, defaulting
