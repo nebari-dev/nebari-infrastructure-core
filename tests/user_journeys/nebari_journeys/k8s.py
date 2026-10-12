@@ -145,13 +145,19 @@ class ScratchNamespace:
             if exc.status != 404:
                 raise
 
-    def request_volume(self, name: str, size: str, storage_class: str) -> str:
+    def request_volume(
+        self,
+        name: str,
+        size: str,
+        storage_class: str,
+        access_mode: str = "ReadWriteOnce",
+    ) -> str:
         self.cluster.core.create_namespaced_persistent_volume_claim(
             namespace=self.name,
             body={
                 "metadata": {"name": name, "labels": dict(JOURNEY_LABELS)},
                 "spec": {
-                    "accessModes": ["ReadWriteOnce"],
+                    "accessModes": [access_mode],
                     "storageClassName": storage_class,
                     "resources": {"requests": {"storage": size}},
                 },
@@ -175,7 +181,15 @@ class ScratchNamespace:
         name: str,
         pvc_name: str | None = None,
         command: list[str] | None = None,
+        run_as_user: int | None = None,
+        fs_group: int | None = None,
     ) -> str:
+        """Start a utility pod, optionally mounting a PVC at MOUNT_PATH.
+
+        run_as_user and fs_group set the pod securityContext, for journeys
+        that must write as a non-root user the way real workloads do. Both
+        are omitted when unset, so the image default (root) applies.
+        """
         container = {
             "name": "main",
             "image": UTILITY_IMAGE,
@@ -189,15 +203,24 @@ class ScratchNamespace:
             )
             container["volumeMounts"].append({"name": "data", "mountPath": MOUNT_PATH})
 
+        spec: dict = {
+            "restartPolicy": "Never",
+            "containers": [container],
+            "volumes": volumes,
+        }
+        security_context = {}
+        if run_as_user is not None:
+            security_context["runAsUser"] = run_as_user
+        if fs_group is not None:
+            security_context["fsGroup"] = fs_group
+        if security_context:
+            spec["securityContext"] = security_context
+
         self.cluster.core.create_namespaced_pod(
             namespace=self.name,
             body={
                 "metadata": {"name": name, "labels": dict(JOURNEY_LABELS)},
-                "spec": {
-                    "restartPolicy": "Never",
-                    "containers": [container],
-                    "volumes": volumes,
-                },
+                "spec": spec,
             },
         )
         return name
@@ -282,8 +305,9 @@ class ScratchNamespace:
         `if ns.exec(...) != ""` is a false pass, and `assert expected in
         ns.exec(...)` is the only safe shape.
 
-        Both current callers use that safe shape: they assert on a specific
-        canary string, which a shell error message cannot satisfy. A caller
+        Every current caller uses that safe shape: they assert on a specific
+        canary string, which a shell error message cannot satisfy, and only
+        quote any other exec output in a failure message. A caller
         that needs to know whether the command SUCCEEDED must not use this
         method as-is; give it a checked variant built on
         `stream(..., _preload_content=False)`, which exposes `returncode` and
