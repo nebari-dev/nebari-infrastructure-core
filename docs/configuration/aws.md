@@ -12,6 +12,7 @@ Configuration options specific to Amazon Web Services (EKS).
 - [NodeGroup](#nodegroup)
 - [Taint](#taint)
 - [EFSConfig](#efsconfig)
+- [FSxOpenZFSConfig](#fsxopenzfsconfig)
 
 ---
 
@@ -25,6 +26,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | VPCCIDRBlock | `vpc_cidr_block` | string | No |  |
 | ExistingVPCID | `existing_vpc_id` | string | No |  |
 | ExistingPrivateSubnetIDs | `existing_private_subnet_ids` | `[]string` | No |  |
+| ExistingPrivateRouteTableIDs | `existing_private_route_table_ids` | `[]string` | No | ExistingPrivateRouteTableIDs lists the route tables of the existing private subnets. Only used when existing_vpc_id is set. A MULTI_AZ_1 FSx for OpenZFS filesystem adds routes to its floating endpo... |
 | ExistingSecurityGroupID | `existing_security_group_id` | string | No |  |
 | KubernetesVersion | `kubernetes_version` | string | No |  |
 | EndpointPrivateAccess | `endpoint_private_access` | bool | No |  |
@@ -38,6 +40,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | NodeGroups | `node_groups` | `map[string]NodeGroup` | Yes |  |
 | Tags | `tags` | `map[string]string` | No |  |
 | EFS | `efs` | `*EFSConfig` | No |  |
+| FSxOpenZFS | `fsx_openzfs` | `*FSxOpenZFSConfig` | No |  |
 | Longhorn | `longhorn` | `*longhorn.Config` | No |  |
 | AWSLoadBalancerController | `aws_load_balancer_controller` | `*AWSLoadBalancerControllerConfig` | No |  |
 | ClusterAutoscaler | `cluster_autoscaler` | `*ClusterAutoscalerConfig` | No |  |
@@ -104,4 +107,29 @@ Configuration options specific to Amazon Web Services (EKS).
 | Encrypted | `encrypted` | bool | No | default: true |
 | KMSKeyArn | `kms_key_arn` | string | No |  |
 | StorageClassName | `storage_class_name` | string | No | default: efs-sc |
+
+---
+
+## FSxOpenZFSConfig
+
+FSxOpenZFSConfig configures an FSx for OpenZFS filesystem shared by the
+cluster through the FSx for OpenZFS CSI driver. Fields left unset fall back
+to the terraform-aws-eks-cluster module defaults, which also validates their
+ranges.
+
+Writing the block turns FSx on, as with the Longhorn block. Enabled exists
+to turn it off while keeping the settings, so it is a pointer: unset means
+on.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | `*bool` | No |  |
+| DeploymentType | `deployment_type` | string | No | MULTI_AZ_1 (default) or SINGLE_AZ_2 |
+| StorageCapacityGiB | `storage_capacity_gib` | int | No | default: 64 |
+| ThroughputMiBps | `throughput_mibps` | int | No | default: 160 |
+| AutomaticBackupRetentionDays | `automatic_backup_retention_days` | `*int` | No | AutomaticBackupRetentionDays is a pointer because 0 is meaningful: it disables automatic backups. Unset keeps the module default of 7. |
+| SkipFinalBackup | `skip_final_backup` | bool | No | SkipFinalBackup skips the backup FSx takes when the filesystem is deleted. The final backup outlives the cluster and is billed until it is deleted separately. |
+| DeleteChildVolumesOnDestroy | `delete_child_volumes_on_destroy` | bool | No | DeleteChildVolumesOnDestroy deletes the volumes and snapshots the CSI driver created together with the filesystem. When false, destroy fails while any remain rather than deleting user data. |
+| StorageClassName | `storage_class_name` | string | No | default: fsx-openzfs-sc |
+| CSIChartVersion | `csi_chart_version` | string | No |  |
 
