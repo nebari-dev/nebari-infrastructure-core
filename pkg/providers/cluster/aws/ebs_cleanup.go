@@ -350,5 +350,8 @@ func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName
 		span.RecordError(err)
 		return deleted, err
 	}
+
+	status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Orphaned EBS volume cleanup complete: %d deleted", deleted)).
+		WithResource("ebs-volume").WithAction("cleanup"))
 	return deleted, nil
 }
