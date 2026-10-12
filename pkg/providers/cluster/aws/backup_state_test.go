@@ -8,8 +8,10 @@ import (
 )
 
 // eksClusterModulePin extracts the version pinned for the eks_cluster module
-// call. `\s+` spans the newline between the source and version lines.
-var eksClusterModulePin = regexp.MustCompile(`source\s*=\s*"nebari-dev/eks-cluster/aws"\s+version\s*=\s*"([^"]+)"`)
+// call: the registry version (`\s+` spans the newline between the source and
+// version lines), or the ref of a git source pinned while a module change is
+// unreleased.
+var eksClusterModulePin = regexp.MustCompile(`source\s*=\s*(?:"nebari-dev/eks-cluster/aws"\s+version\s*=\s*"([^"]+)"|"git::https://github\.com/nebari-dev/terraform-aws-eks-cluster\.git\?ref=([^"]+)")`)
 
 // TestBackupStateAddrsVerifiedAgainstPinnedModule fails on every
 // terraform-aws-eks-cluster bump, on purpose: backupStateAddrs is a hardcoded
@@ -27,7 +29,11 @@ func TestBackupStateAddrsVerifiedAgainstPinnedModule(t *testing.T) {
 	if m == nil {
 		t.Fatal("templates/main.tf no longer pins nebari-dev/eks-cluster/aws with a literal version; update eksClusterModulePin and re-verify backupStateAddrs")
 	}
-	if got := string(m[1]); got != backupStateModuleVersion {
+	got := string(m[1])
+	if got == "" {
+		got = string(m[2])
+	}
+	if got != backupStateModuleVersion {
 		t.Fatalf("templates/main.tf pins terraform-aws-eks-cluster %s but backupStateAddrs was verified against %s; re-verify the state addresses against %s (tofu graph) and update backupStateModuleVersion",
 			got, backupStateModuleVersion, got)
 	}
