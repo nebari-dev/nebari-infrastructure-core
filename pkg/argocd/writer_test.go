@@ -1554,6 +1554,7 @@ var helmValueFilesApps = []struct {
 	{"opentelemetry-collector", "repository: otel/opentelemetry-collector-k8s"},
 	{"keycloak", "name: KEYCLOAK_ADMIN"},
 	{"nebari-landingpage", "existingSecret: \"nebari-landing-redis\""},
+	{"crossplane", "resourcesCrossplane:"},
 }
 
 // seamTemplateData returns TemplateData populated enough that every Helm
