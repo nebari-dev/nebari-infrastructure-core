@@ -6,7 +6,11 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
 
 from nebari_journeys import constants
-from nebari_journeys.cluster import LONGHORN_STORAGE_CLASS, Cluster
+from nebari_journeys.cluster import (
+    FSX_OPENZFS_PROVISIONER,
+    LONGHORN_STORAGE_CLASS,
+    Cluster,
+)
 from nebari_journeys.waits import wait_for_value
 
 
@@ -235,6 +239,46 @@ def test_require_longhorn_skips_and_names_what_was_missing():
 def test_require_longhorn_does_not_skip_when_longhorn_is_present():
     cluster = _longhorn_cluster([LONGHORN_STORAGE_CLASS])
     assert cluster.require_longhorn() is None
+
+
+def _provisioned_cluster(classes):
+    """A cluster whose StorageClasses are (name, provisioner) pairs."""
+    storage = MagicMock()
+    items = []
+    for name, provisioner in classes:
+        sc = MagicMock()
+        sc.metadata.name = name
+        sc.provisioner = provisioner
+        items.append(sc)
+    storage.list_storage_class.return_value = MagicMock(items=items)
+    return Cluster(core=MagicMock(), custom=MagicMock(), storage=storage)
+
+
+def test_fsx_openzfs_storage_class_is_found_by_provisioner_not_name():
+    """The operator can rename the class, so the name is not the signal."""
+    cluster = _provisioned_cluster(
+        [
+            ("gp2", "kubernetes.io/aws-ebs"),
+            ("renamed-shared", FSX_OPENZFS_PROVISIONER),
+        ]
+    )
+    assert cluster.fsx_openzfs_storage_class() == "renamed-shared"
+
+
+def test_fsx_openzfs_storage_class_is_none_without_the_driver():
+    cluster = _provisioned_cluster([(LONGHORN_STORAGE_CLASS, "driver.longhorn.io")])
+    assert cluster.fsx_openzfs_storage_class() is None
+
+
+def test_require_fsx_openzfs_skips_and_names_the_provisioner():
+    cluster = _provisioned_cluster([("gp2", "kubernetes.io/aws-ebs")])
+    with pytest.raises(pytest.skip.Exception, match=FSX_OPENZFS_PROVISIONER):
+        cluster.require_fsx_openzfs()
+
+
+def test_require_fsx_openzfs_returns_the_class_name():
+    cluster = _provisioned_cluster([("fsx-openzfs-sc", FSX_OPENZFS_PROVISIONER)])
+    assert cluster.require_fsx_openzfs() == "fsx-openzfs-sc"
 
 
 def _longhorn_node(ready=True, allow_scheduling=True):

@@ -51,6 +51,17 @@ def test_request_volume_sets_size_and_storage_class():
     assert body["spec"]["accessModes"] == ["ReadWriteOnce"]
 
 
+def test_request_volume_sets_a_requested_access_mode():
+    cluster = MagicMock()
+    _ns(cluster).request_volume(
+        "shared", "1Gi", "fsx-openzfs-sc", access_mode="ReadWriteMany"
+    )
+    body = cluster.core.create_namespaced_persistent_volume_claim.call_args.kwargs[
+        "body"
+    ]
+    assert body["spec"]["accessModes"] == ["ReadWriteMany"]
+
+
 def test_request_volume_labels_the_pvc():
     cluster = MagicMock()
     _ns(cluster).request_volume("data", "5Gi", "longhorn")
@@ -75,6 +86,29 @@ def test_run_pod_without_a_pvc_declares_no_volumes():
     _ns(cluster).run_pod("plain")
     body = cluster.core.create_namespaced_pod.call_args.kwargs["body"]
     assert body["spec"].get("volumes", []) == []
+
+
+def test_run_pod_sets_the_requested_user_and_fs_group():
+    cluster = MagicMock()
+    _ns(cluster).run_pod("writer", pvc_name="data", run_as_user=1000, fs_group=100)
+    body = cluster.core.create_namespaced_pod.call_args.kwargs["body"]
+    assert body["spec"]["securityContext"] == {"runAsUser": 1000, "fsGroup": 100}
+
+
+def test_run_pod_sets_only_the_fields_given():
+    cluster = MagicMock()
+    _ns(cluster).run_pod("writer", fs_group=100)
+    body = cluster.core.create_namespaced_pod.call_args.kwargs["body"]
+    assert body["spec"]["securityContext"] == {"fsGroup": 100}
+
+
+def test_run_pod_omits_the_security_context_by_default():
+    """Existing journeys run as the image default; an empty securityContext
+    would be harmless but would make that default less obvious."""
+    cluster = MagicMock()
+    _ns(cluster).run_pod("plain")
+    body = cluster.core.create_namespaced_pod.call_args.kwargs["body"]
+    assert "securityContext" not in body["spec"]
 
 
 def _fake_ns(name):
