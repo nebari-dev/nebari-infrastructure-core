@@ -99,7 +99,7 @@ func TestCheckFSxOpenZFSChildVolumes(t *testing.T) {
 			cfg:     &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
 			fs:      fs,
 			client:  &fakeFSxClient{pages: withChildren},
-			wantErr: []string{"fs-123", "2 child volume(s)", "fsvol-a (pvc-a)", "fsvol-b (pvc-b)", `"fsx-openzfs-sc"`, "delete_child_volumes_on_destroy"},
+			wantErr: []string{"fs-123", "2 child volume(s)", "fsvol-a (pvc-a)", "fsvol-b (pvc-b)", `"fsx-openzfs-sc"`, "delete_child_volumes_on_destroy: true and run nic deploy before destroying"},
 		},
 		{
 			name:    "API error is returned",

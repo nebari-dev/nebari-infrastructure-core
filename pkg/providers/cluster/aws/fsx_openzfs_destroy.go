@@ -125,7 +125,8 @@ func checkFSxOpenZFSChildVolumes(ctx context.Context, client FSxClient, cfg *Con
 	err = fmt.Errorf("FSx for OpenZFS filesystem %s still has %d child volume(s): %s. "+
 		"FSx will not delete the filesystem while they exist. "+
 		"Delete the PersistentVolumeClaims that use the %q StorageClass while the cluster is up, "+
-		"or set fsx_openzfs.delete_child_volumes_on_destroy: true to delete them with the filesystem",
+		"or set fsx_openzfs.delete_child_volumes_on_destroy: true and run nic deploy before destroying "+
+		"to delete them with the filesystem (the setting only reaches FSx through an apply)",
 		fs.ID, len(children), strings.Join(children, ", "), cfg.FSxOpenZFSStorageClassName())
 	span.RecordError(err)
 	return err
