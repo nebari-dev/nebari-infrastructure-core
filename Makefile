@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters tofu-lock
 
 # Variables
 BINARY_NAME=nic
@@ -146,5 +146,17 @@ deps-update: ## Update Go dependencies
 	go get -u ./...
 	go mod tidy
 	@echo "Dependencies updated successfully"
+
+CLUSTER_PROVIDERS ?= $(patsubst pkg/providers/cluster/%/templates/main.tf,%,$(wildcard pkg/providers/cluster/*/templates/main.tf))
+TOFU_PLATFORMS := linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64
+
+tofu-lock: ## Regenerate OpenTofu provider lockfiles (UPGRADE=1 to bump provider versions)
+	@for p in $(CLUSTER_PROVIDERS); do \
+		echo "==> $$p"; \
+		( cd pkg/providers/cluster/$$p/templates && \
+			trap 'rm -rf .terraform' EXIT && \
+			tofu init -backend=false -input=false $(if $(UPGRADE),-upgrade) && \
+			tofu providers lock $(addprefix -platform=,$(TOFU_PLATFORMS)) ) || exit 1; \
+	done
 
 .DEFAULT_GOAL := help

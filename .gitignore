@@ -37,10 +37,11 @@ go.work.sum
 .DS_Store
 Thumbs.db
 
-# State files
+# Terraform
 nic-state.json
 *.tfstate
 *.tfstate.*
+.terraform/
 
 # Output files
 outputs.json

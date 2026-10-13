@@ -27,50 +27,12 @@ jobs:
           # lockfile output itself is version-independent, see ADR-0016.
           tofu_version: "1.11.3"
 
-      - name: Regenerate lockfile(s) and fail if drift exists
-        shell: bash
+      - name: Regenerate lockfiles
+        run: make tofu-lock
+
+      - name: Fail if lockfiles changed
         run: |
-          set -euo pipefail
-
-          mapfile -t dirs < <(find pkg/providers/cluster -type f -path "*/templates/main.tf" -print0 | xargs -0 -n1 dirname)
-
-          platforms=(
-            "linux_amd64"
-            "linux_arm64"
-            "darwin_amd64"
-            "darwin_arm64"
-            "windows_amd64"
-          )
-
-          for d in "${dirs[@]}"; do
-            echo "==> $d"
-            pushd "$d" >/dev/null
-
-            tofu init -upgrade -backend=false -input=false
-
-            args=()
-            for p in "${platforms[@]}"; do
-              args+=("-platform=$p")
-            done
-
-            tofu providers lock "${args[@]}"
-
-            # Hygiene: don't leave local state dirs behind
-            rm -rf .terraform
-
-            popd >/dev/null
-          done
-
-          # Check only lockfiles under templates/ (avoid brittle ** globs)
-          mapfile -t lockfiles < <(find pkg/providers/cluster -type f -path "*/templates/.terraform.lock.hcl")
-
-          if [ "${#lockfiles[@]}" -eq 0 ]; then
-            echo "No lockfiles found under pkg/providers/cluster/**/templates/.terraform.lock.hcl"
-            exit 0
-          fi
-
-          if ! git diff --quiet -- "${lockfiles[@]}"; then
-            echo "Lockfile drift detected. Please regenerate .terraform.lock.hcl locally and commit it."
-            git diff -- "${lockfiles[@]}"
+          if ! git diff --exit-code -- 'pkg/providers/cluster/*/templates/.terraform.lock.hcl'; then
+            echo "::error::Lockfiles are stale or missing platform hashes. Run 'make tofu-lock' and commit the result."
             exit 1
           fi

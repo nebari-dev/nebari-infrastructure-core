@@ -341,8 +341,7 @@ func SomeFunction(ctx context.Context, ...) error {
 
 1. Create `pkg/providers/cluster/<name>/`.
 2. Implement the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`).
-3. Choose the right backing tool. Embed templates with `//go:embed` if you need files (see `pkg/providers/cluster/aws/templates/`).
-4. Register the provider with the `registry.Registry` built in `pkg/nic/registry.go`.
+3. Choose the right backing tool. Embed templates with `//go:embed` if you need files (see `pkg/providers/cluster/aws/templates/`).4. Register the provider with the `registry.Registry` built in `pkg/nic/registry.go`.
 5. Populate `InfraSettings` so `pkg/argocd` and the CLI can configure software without knowing about your provider. Add new fields to `InfraSettings` (not provider-name switches) if you need to express a new capability.
 6. Add an `examples/<name>-config.yaml`.
 7. Cover the provider with table-driven unit tests; integration tests gated on credentials.

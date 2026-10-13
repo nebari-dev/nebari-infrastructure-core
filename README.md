@@ -446,5 +446,9 @@ Apache License 2.0 - see [LICENSE](LICENSE) for details.
 If you change provider templates under `pkg/providers/cluster/**/templates/`, regenerate the provider lockfile(s) locally:
 
 ```bash
-./scripts/pre-commit-tofu-lock.sh
+make tofu-lock                      # all providers, keep locked versions, fill in missing platform hashes
+make tofu-lock CLUSTER_PROVIDERS=aws   # a single provider
+make tofu-lock UPGRADE=1            # bump provider versions to the newest allowed by the constraints
 ```
+
+CI runs `make tofu-lock` on pull requests that touch the templates and fails if the lockfiles change. It never upgrades provider versions, so version bumps only happen when someone runs `UPGRADE=1` on purpose.
