@@ -307,3 +307,85 @@ def test_namespace_sweep_treats_an_already_gone_namespace_as_deleted():
 
     assert result.deleted == ["nebari-journey-aaa"]
     assert result.failed == []
+
+
+def _pending_pvc():
+    pvc = MagicMock()
+    pvc.status.phase = "Pending"
+    return pvc
+
+
+def _event(type_, reason, message, count=1):
+    event = MagicMock()
+    event.type = type_
+    event.reason = reason
+    event.message = message
+    event.count = count
+    return event
+
+
+def _ns_with_pending_pvc(events=None, events_error=None):
+    cluster = MagicMock()
+    cluster.core.read_namespaced_persistent_volume_claim.return_value = _pending_pvc()
+    if events_error is not None:
+        cluster.core.list_namespaced_event.side_effect = events_error
+    else:
+        cluster.core.list_namespaced_event.return_value = MagicMock(items=events or [])
+    return ScratchNamespace(cluster, "nebari-journey-abcd1234"), cluster
+
+
+def test_wait_volume_bound_names_the_pvc_events_on_timeout():
+    """CI destroys the cluster after the run, so the events are the only
+    record of why a claim never bound."""
+    ns, _ = _ns_with_pending_pvc(
+        [
+            _event(
+                "Normal",
+                "ExternalProvisioning",
+                "Waiting for a volume to be created by fsx.openzfs.csi.aws.com",
+                count=12,
+            ),
+            _event("Warning", "ProvisioningFailed", "AccessDenied: fsx:CreateVolume"),
+        ]
+    )
+    with pytest.raises(TimeoutError) as excinfo:
+        ns.wait_volume_bound("shared", timeout=0)
+    message = str(excinfo.value)
+    assert "PVC nebari-journey-abcd1234/shared to bind" in message
+    assert "Normal ExternalProvisioning (x12)" in message
+    assert "Warning ProvisioningFailed (x1): AccessDenied: fsx:CreateVolume" in message
+
+
+def test_wait_volume_bound_asks_only_for_this_pvcs_events():
+    ns, cluster = _ns_with_pending_pvc()
+    with pytest.raises(TimeoutError):
+        ns.wait_volume_bound("shared", timeout=0)
+    kwargs = cluster.core.list_namespaced_event.call_args.kwargs
+    assert kwargs["namespace"] == "nebari-journey-abcd1234"
+    assert "involvedObject.kind=PersistentVolumeClaim" in kwargs["field_selector"]
+    assert "involvedObject.name=shared" in kwargs["field_selector"]
+
+
+def test_wait_volume_bound_says_when_there_are_no_events():
+    ns, _ = _ns_with_pending_pvc([])
+    with pytest.raises(TimeoutError, match="the PVC has no events"):
+        ns.wait_volume_bound("shared", timeout=0)
+
+
+def test_wait_volume_bound_keeps_the_timeout_when_events_cannot_be_read():
+    """Reading events only runs on a path that is already failing; an error
+    there must not replace the timeout it is meant to explain."""
+    ns, _ = _ns_with_pending_pvc(
+        events_error=ApiException(status=403, reason="Forbidden")
+    )
+    with pytest.raises(TimeoutError, match="could not read PVC events: 403 Forbidden"):
+        ns.wait_volume_bound("shared", timeout=0)
+
+
+def test_wait_volume_bound_returns_without_reading_events_once_bound():
+    cluster = MagicMock()
+    pvc = MagicMock()
+    pvc.status.phase = "Bound"
+    cluster.core.read_namespaced_persistent_volume_claim.return_value = pvc
+    ScratchNamespace(cluster, "nebari-journey-abcd1234").wait_volume_bound("data")
+    cluster.core.list_namespaced_event.assert_not_called()

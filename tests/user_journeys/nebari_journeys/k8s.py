@@ -166,15 +166,47 @@ class ScratchNamespace:
         return name
 
     def wait_volume_bound(self, name: str, timeout: float = 180) -> None:
+        """Wait for a PVC to bind, naming its events if it never does.
+
+        CI destroys the cluster right after the journeys run, so a bare
+        timeout leaves nothing to inspect. The PVC's events are where
+        Kubernetes says why: ProvisioningFailed with the provisioner's error,
+        or only ExternalProvisioning ("waiting for a volume to be created")
+        when the provisioner never picked the claim up.
+        """
+
         def bound() -> bool:
             pvc = self.cluster.core.read_namespaced_persistent_volume_claim(
                 name=name, namespace=self.name
             )
             return pvc.status.phase == "Bound"
 
-        wait_for_condition(
-            bound, timeout=timeout, description=f"PVC {self.name}/{name} to bind"
-        )
+        try:
+            wait_for_condition(
+                bound, timeout=timeout, description=f"PVC {self.name}/{name} to bind"
+            )
+        except TimeoutError as exc:
+            raise TimeoutError(f"{exc}; {self.volume_events(name)}") from exc
+
+    def volume_events(self, name: str) -> str:
+        """The PVC's events as one line, for an error message.
+
+        Never raises: it only runs on a path that is already failing, and an
+        error here must not replace the timeout it is meant to explain.
+        """
+        try:
+            events = self.cluster.core.list_namespaced_event(
+                namespace=self.name,
+                field_selector=(
+                    f"involvedObject.kind=PersistentVolumeClaim,involvedObject.name={name}"
+                ),
+            ).items
+        except ApiException as exc:
+            return f"could not read PVC events: {exc.status} {exc.reason}"
+        if not events:
+            return "the PVC has no events"
+        lines = [f"{e.type} {e.reason} (x{e.count or 1}): {e.message}" for e in events]
+        return "PVC events: " + " | ".join(lines)
 
     def run_pod(
         self,
