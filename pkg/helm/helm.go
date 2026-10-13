@@ -21,14 +21,23 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // KubeconfigGetter implements the Helm RESTClientGetter interface using a
 // kubeconfig file path.
+//
+// namespace is where Helm creates chart objects that set no
+// metadata.namespace. Helm's kube client takes that fallback from
+// ToRawKubeConfigLoader, not from the namespace passed to
+// action.Configuration.Init, which only places the release record. Without
+// it the fallback is the kubeconfig context's namespace, usually "default",
+// where the `helm -n` CLI would use the release namespace.
 type KubeconfigGetter struct {
-	path string
+	path      string
+	namespace string
 }
 
 func (k *KubeconfigGetter) ToRESTConfig() (*rest.Config, error) {
@@ -59,7 +68,7 @@ func (k *KubeconfigGetter) ToRESTMapper() (meta.RESTMapper, error) {
 func (k *KubeconfigGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		&clientcmd.ClientConfigLoadingRules{ExplicitPath: k.path},
-		&clientcmd.ConfigOverrides{},
+		&clientcmd.ConfigOverrides{Context: clientcmdapi.Context{Namespace: k.namespace}},
 	)
 }
 
@@ -69,7 +78,7 @@ func NewActionConfig(kubeconfigPath string, namespace string) (*action.Configura
 	actionConfig := new(action.Configuration)
 
 	if err := actionConfig.Init(
-		&KubeconfigGetter{path: kubeconfigPath},
+		&KubeconfigGetter{path: kubeconfigPath, namespace: namespace},
 		namespace,
 		os.Getenv("HELM_DRIVER"), // defaults to "secret" if empty
 		func(format string, v ...any) {
