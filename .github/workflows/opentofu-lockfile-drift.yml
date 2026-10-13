@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - "pkg/providers/cluster/**/templates/**/*.tf"
+      - "pkg/providers/cluster/*/templates/.terraform.lock.hcl"
       - ".github/workflows/opentofu-lockfile-drift.yml"
+      - "Makefile"
 
 permissions:
   contents: read
@@ -33,7 +35,12 @@ jobs:
 
       - name: Fail if lockfiles changed
         run: |
-          if ! git diff --exit-code -- 'pkg/providers/cluster/*/templates/.terraform.lock.hcl'; then
-            echo "::error::Lockfiles are stale or missing platform hashes. Run 'make tofu-lock' and commit the result."
+          # git status also reports untracked lockfiles, which git diff misses
+          # when a new provider's lockfile was never committed.
+          lockfiles='pkg/providers/cluster/*/templates/.terraform.lock.hcl'
+          if [ -n "$(git status --porcelain -- "$lockfiles")" ]; then
+            git status --short -- "$lockfiles"
+            git diff -- "$lockfiles"
+            echo "::error::Lockfiles are stale, missing, or missing platform hashes. Run 'make tofu-lock' and commit the result."
             exit 1
           fi

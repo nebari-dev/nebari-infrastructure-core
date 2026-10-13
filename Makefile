@@ -155,7 +155,7 @@ tofu-lock: ## Regenerate OpenTofu provider lockfiles (UPGRADE=1 to bump provider
 		echo "==> $$p"; \
 		( cd pkg/providers/cluster/$$p/templates && \
 			trap 'rm -rf .terraform' EXIT && \
-			tofu init -backend=false -input=false $(if $(UPGRADE),-upgrade) && \
+			tofu init -backend=false -input=false $(if $(filter 1,$(UPGRADE)),-upgrade) && \
 			tofu providers lock $(addprefix -platform=,$(TOFU_PLATFORMS)) ) || exit 1; \
 	done
 
