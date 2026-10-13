@@ -1,15 +1,16 @@
-name: OpenTofu lockfile drift check
+name: OpenTofu lockfile drift
 
 on:
   pull_request:
     paths:
       - "pkg/providers/cluster/**/templates/**/*.tf"
+      - ".github/workflows/opentofu-lockfile-drift.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: opentofu-lockfile-pr-${{ github.event.pull_request.number }}
+  group: opentofu-lockfile-drift-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:

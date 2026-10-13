@@ -88,7 +88,7 @@ Other workflows in `.github/workflows/`:
 - `release.yml` - cuts releases via goreleaser, then fires the starter publish
 - `publish-starters.yml` - publishes the starter workspaces to quay.io once the prefix.dev channel carries the release; fired by `release.yml` and retried hourly
 - `starters.yml` - validates the generated starter workspaces on PRs
-- `opentofu-lockfile-pr.yml` - keeps tofu lockfiles fresh
+- `opentofu-lockfile-drift.yml` - fails PRs whose tofu lockfiles are stale or missing platform hashes
 - `add-to-project.yaml` - GitHub Projects auto-add
 
 ### CI prerequisites (state outside this repository)
