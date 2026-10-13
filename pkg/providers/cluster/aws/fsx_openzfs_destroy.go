@@ -144,7 +144,9 @@ func precheckFSxOpenZFSDestroy(ctx context.Context, outputs map[string]tfexec.Ou
 		span.RecordError(err)
 		return fsxOpenZFSFilesystem{}, err
 	}
-	if !cfg.FSxOpenZFSEnabled() || fs.ID == "" {
+	// Nothing to check when the filesystem is gone or child volumes are
+	// deleted with it. fs is still returned for the final backup notice.
+	if !cfg.FSxOpenZFSEnabled() || fs.ID == "" || cfg.FSxOpenZFS.DeleteChildVolumesOnDestroy {
 		return fs, nil
 	}
 
