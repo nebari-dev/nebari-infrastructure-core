@@ -55,11 +55,25 @@ cluster:
     endpoint_private_access: true
     endpoint_public_access: true
 
-    # Customer managed KMS keys the EBS CSI driver may use. NIC detects the
-    # account's default EBS encryption key on every deploy and adds it when it is
-    # customer managed, so list only keys a StorageClass sets in kmsKeyId, or a
-    # former default that existing volumes are still encrypted with. Key ARNs
-    # only (no aliases), and the key policy must delegate to IAM.
+    # Customer managed KMS keys the EBS CSI driver may use. On every deploy NIC
+    # reads the account's default EBS encryption key for this region and grants
+    # it to the driver when it is customer managed. That needs
+    # ec2:GetEbsDefaultKmsKeyId and kms:DescribeKey on the deploying principal;
+    # without them NIC warns and keeps whatever key the previous deploy granted.
+    #
+    # List a key here when:
+    #   - a StorageClass sets it in kmsKeyId, or
+    #   - it was the account default before a change. Volumes already encrypted
+    #     with it need it to attach, and NIC only tracks the current default.
+    #
+    # Key ARNs only, no aliases (IAM matches KMS permissions on the key ARN).
+    # Each key policy must delegate to IAM (the default "Enable IAM User
+    # Permissions" statement), or no IAM grant takes effect. With EBS
+    # encryption by default on, the default key's policy must also allow the
+    # AWSServiceRoleForAutoScaling service-linked role (Encrypt, Decrypt,
+    # ReEncrypt*, GenerateDataKey*, DescribeKey, and CreateGrant for AWS
+    # resources), or node groups can't launch instances with encrypted root
+    # volumes.
     # ebs_kms_key_arns:
     #   - arn:aws:kms:us-west-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab
 

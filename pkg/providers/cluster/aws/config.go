@@ -19,11 +19,9 @@ type Config struct {
 	EndpointPrivateAccess    bool     `yaml:"endpoint_private_access,omitempty"`
 	EndpointPublicAccess     bool     `yaml:"endpoint_public_access,omitempty"`
 	EKSKMSArn                string   `yaml:"eks_kms_arn,omitempty"`
-	// EBSKMSKeyARNs lists customer managed KMS key ARNs the EBS CSI driver may
-	// use. NIC already adds the account's default EBS encryption key on every
-	// deploy when it is customer managed, so this is only needed for a key a
-	// StorageClass sets in kmsKeyId, or to keep access to a former default key
-	// that existing volumes are still encrypted with.
+	// KMS key ARNs (not aliases) the EBS CSI driver may use; key policies must
+	// delegate to IAM. NIC adds the default EBS key when the deployer has
+	// ec2:GetEbsDefaultKmsKeyId and kms:DescribeKey.
 	EBSKMSKeyARNs             []string                         `yaml:"ebs_kms_key_arns,omitempty"`
 	EnabledLogTypes           []string                         `yaml:"enabled_log_types,omitempty"`
 	ExistingClusterRoleArn    string                           `yaml:"existing_cluster_role_arn,omitempty"`

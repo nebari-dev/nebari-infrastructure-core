@@ -30,7 +30,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | EndpointPrivateAccess | `endpoint_private_access` | bool | No |  |
 | EndpointPublicAccess | `endpoint_public_access` | bool | No |  |
 | EKSKMSArn | `eks_kms_arn` | string | No |  |
-| EBSKMSKeyARNs | `ebs_kms_key_arns` | `[]string` | No | EBSKMSKeyARNs lists customer managed KMS key ARNs the EBS CSI driver may use. NIC already adds the account's default EBS encryption key on every deploy when it is customer managed, so this is only ... |
+| EBSKMSKeyARNs | `ebs_kms_key_arns` | `[]string` | No | KMS key ARNs (not aliases) the EBS CSI driver may use; key policies must delegate to IAM. NIC adds the default EBS key when the deployer has ec2:GetEbsDefaultKmsKeyId and kms:DescribeKey. |
 | EnabledLogTypes | `enabled_log_types` | `[]string` | No |  |
 | ExistingClusterRoleArn | `existing_cluster_role_arn` | string | No |  |
 | ExistingNodeRoleArn | `existing_node_role_arn` | string | No |  |

@@ -48,3 +48,8 @@ output "longhorn_backup_bucket" {
   description = "Name of the Longhorn backup S3 bucket; empty when not created by NIC"
   value       = module.eks_cluster.longhorn_backup_bucket
 }
+
+output "ebs_default_kms_key_arn" {
+  description = "The account's default EBS key this deploy granted the EBS CSI driver; null when none was detected"
+  value       = var.ebs_default_kms_key_arn
+}

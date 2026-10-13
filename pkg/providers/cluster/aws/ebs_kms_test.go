@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/hashicorp/terraform-exec/tfexec"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
@@ -140,44 +142,68 @@ func TestDefaultEBSKMSKeyARN(t *testing.T) {
 	}
 }
 
-func TestEBSCSIKMSKeyARNs(t *testing.T) {
-	cmk := &mockKMSClient{keys: map[string]kmstypes.KeyMetadata{testCMKARN: customerKey(testCMKARN)}}
+func TestMergeKMSKeyARNs(t *testing.T) {
+	tests := []struct {
+		name  string
+		lists [][]string
+		want  []string
+	}{
+		{name: "nothing", lists: [][]string{nil, {""}}, want: nil},
+		{name: "configured only", lists: [][]string{{testCMKARN}, {""}}, want: []string{testCMKARN}},
+		{name: "detected only", lists: [][]string{nil, {testCMKARN}}, want: []string{testCMKARN}},
+		{name: "configured first, detected appended", lists: [][]string{{testOtherARN}, {testCMKARN}}, want: []string{testOtherARN, testCMKARN}},
+		{name: "duplicates dropped", lists: [][]string{{testCMKARN, testCMKARN}, {testCMKARN}}, want: []string{testCMKARN}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mergeKMSKeyARNs(tt.lists...); !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCarryForwardEBSKMSKeyVars covers the deploy whose default-key detection
+// failed: the key the last apply recorded must be kept, never revoked.
+func TestCarryForwardEBSKMSKeyVars(t *testing.T) {
+	detectErr := errors.New("AccessDenied")
+	output := func(v string) map[string]tfexec.OutputMeta {
+		return map[string]tfexec.OutputMeta{ebsDefaultKMSKeyOutput: {Value: json.RawMessage(v)}}
+	}
 
 	tests := []struct {
-		name        string
-		ec2         *mockEBSDefaultKeyClient
-		configured  []string
-		want        []string
-		wantWarning bool
+		name       string
+		outputs    map[string]tfexec.OutputMeta
+		configured []string
+		want       []string
+		wantErr    bool
 	}{
 		{
-			name: "AWS managed default and nothing configured",
-			ec2:  &mockEBSDefaultKeyClient{keyID: "alias/aws/ebs"},
-			want: nil,
+			name:    "no previous key: nothing to keep",
+			outputs: map[string]tfexec.OutputMeta{},
 		},
 		{
-			name: "customer managed default is added",
-			ec2:  &mockEBSDefaultKeyClient{keyID: testCMKARN},
-			want: []string{testCMKARN},
+			name:    "previous key is kept",
+			outputs: output(`"` + testCMKARN + `"`),
+			want: []string{
+				`ebs_csi_kms_key_arns=["` + testCMKARN + `"]`,
+				`ebs_default_kms_key_arn=` + testCMKARN,
+			},
 		},
 		{
-			name:       "configured keys come first and the default is appended",
-			ec2:        &mockEBSDefaultKeyClient{keyID: testCMKARN},
+			name:       "previous key is kept after the configured keys",
+			outputs:    output(`"` + testCMKARN + `"`),
 			configured: []string{testOtherARN},
-			want:       []string{testOtherARN, testCMKARN},
+			want: []string{
+				`ebs_csi_kms_key_arns=["` + testOtherARN + `","` + testCMKARN + `"]`,
+				`ebs_default_kms_key_arn=` + testCMKARN,
+			},
 		},
 		{
-			name:       "default already configured is not duplicated",
-			ec2:        &mockEBSDefaultKeyClient{keyID: testCMKARN},
-			configured: []string{testCMKARN},
-			want:       []string{testCMKARN},
-		},
-		{
-			name:        "detection failure keeps the configured keys and warns",
-			ec2:         &mockEBSDefaultKeyClient{err: errors.New("AccessDenied")},
-			configured:  []string{testOtherARN},
-			want:        []string{testOtherARN},
-			wantWarning: true,
+			name:    "malformed output is an error",
+			outputs: output(`["not","a","string"]`),
+			wantErr: true,
 		},
 	}
 
@@ -185,16 +211,17 @@ func TestEBSCSIKMSKeyARNs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ch := make(chan status.Update, 10)
 			ctx := status.WithChannel(context.Background(), ch)
-			configured := slices.Clone(tt.configured)
 
-			got := ebsCSIKMSKeyARNs(ctx, tt.ec2, cmk, tt.configured)
+			got, err := carryForwardEBSKMSKeyVars(ctx, tt.outputs, tt.configured, detectErr)
 			close(ch)
-
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
-			if !slices.Equal(tt.configured, configured) {
-				t.Errorf("configured keys were mutated: %v", tt.configured)
+			if tt.wantErr {
+				return
 			}
 			var warned bool
 			for u := range ch {
@@ -202,8 +229,8 @@ func TestEBSCSIKMSKeyARNs(t *testing.T) {
 					warned = true
 				}
 			}
-			if warned != tt.wantWarning {
-				t.Errorf("warning sent = %v, want %v", warned, tt.wantWarning)
+			if !warned {
+				t.Error("expected a warning about the failed detection")
 			}
 		})
 	}
@@ -251,25 +278,43 @@ func TestValidate_EBSKMSKeyARNs(t *testing.T) {
 }
 
 func TestToTFVarsEBSCSIKMSKeyARNs(t *testing.T) {
-	cfg := Config{
-		Region:        "us-east-1",
-		NodeGroups:    map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
-		EBSKMSKeyARNs: []string{testCMKARN},
+	tests := []struct {
+		name        string
+		configured  []string
+		detected    string
+		wantKeys    []string
+		wantDefault string
+	}{
+		{name: "nothing configured or detected", wantKeys: nil},
+		{name: "configured only", configured: []string{testOtherARN}, wantKeys: []string{testOtherARN}},
+		{name: "detected only", detected: testCMKARN, wantKeys: []string{testCMKARN}, wantDefault: testCMKARN},
+		{name: "configured and detected", configured: []string{testOtherARN}, detected: testCMKARN, wantKeys: []string{testOtherARN, testCMKARN}, wantDefault: testCMKARN},
+		{name: "detected key already configured", configured: []string{testCMKARN}, detected: testCMKARN, wantKeys: []string{testCMKARN}, wantDefault: testCMKARN},
 	}
 
-	vars := cfg.toTFVars("test", "", nil)
-	if !slices.Equal(vars.EBSCSIKMSKeyARNs, []string{testCMKARN}) {
-		t.Fatalf("EBSCSIKMSKeyARNs = %v, want [%s]", vars.EBSCSIKMSKeyARNs, testCMKARN)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Region:        "us-east-1",
+				NodeGroups:    map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
+				EBSKMSKeyARNs: slices.Clone(tt.configured),
+			}
 
-	// Deploy edits the tfvars list; that must not write through to the config.
-	vars.EBSCSIKMSKeyARNs[0] = testOtherARN
-	if cfg.EBSKMSKeyARNs[0] != testCMKARN {
-		t.Errorf("toTFVars shares its slice with the config: %v", cfg.EBSKMSKeyARNs)
-	}
+			vars := cfg.toTFVars("test", "", nil, tt.detected)
+			if !slices.Equal(vars.EBSCSIKMSKeyARNs, tt.wantKeys) {
+				t.Errorf("EBSCSIKMSKeyARNs = %v, want %v", vars.EBSCSIKMSKeyARNs, tt.wantKeys)
+			}
+			if vars.EBSDefaultKMSKeyARN != tt.wantDefault {
+				t.Errorf("EBSDefaultKMSKeyARN = %q, want %q", vars.EBSDefaultKMSKeyARN, tt.wantDefault)
+			}
 
-	cfg.EBSKMSKeyARNs = nil
-	if vars := cfg.toTFVars("test", "", nil); vars.EBSCSIKMSKeyARNs != nil {
-		t.Errorf("expected nil EBSCSIKMSKeyARNs when unset, got %v", vars.EBSCSIKMSKeyARNs)
+			// The merged list must be a fresh slice, never the config's.
+			if len(vars.EBSCSIKMSKeyARNs) > 0 {
+				vars.EBSCSIKMSKeyARNs[0] = "mutated"
+				if !slices.Equal(cfg.EBSKMSKeyARNs, tt.configured) {
+					t.Errorf("toTFVars shares its slice with the config: %v", cfg.EBSKMSKeyARNs)
+				}
+			}
+		})
 	}
 }

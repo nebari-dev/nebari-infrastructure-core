@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -12,11 +13,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/hashicorp/terraform-exec/tfexec"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
+
+// ebsDefaultKMSKeyOutput is the template variable and output that record the
+// default EBS key a deploy detected, so a later deploy that can't detect it
+// keeps the grant instead of revoking it.
+const ebsDefaultKMSKeyOutput = "ebs_default_kms_key_arn"
 
 // awsManagedEBSKeyAlias is what GetEbsDefaultKmsKeyId returns when the account
 // has never chosen a default EBS key. Its key policy already lets every
@@ -86,10 +93,10 @@ func defaultEBSKMSKeyARN(ctx context.Context, ec2Client EBSDefaultKeyClient, kms
 		// Without DescribeKey we can't tell AWS managed from customer managed,
 		// but a key ARN is usable as is, and granting the driver an AWS managed
 		// key is harmless. An alias or bare key ID can't go in the policy.
+		span.RecordError(err)
 		if kmsKeyARNPattern.MatchString(keyID) {
 			return keyID, nil
 		}
-		span.RecordError(err)
 		return "", fmt.Errorf("failed to resolve default EBS KMS key %s: %w", keyID, err)
 	}
 	if desc.KeyMetadata == nil || desc.KeyMetadata.Arn == nil {
@@ -106,30 +113,86 @@ func defaultEBSKMSKeyARN(ctx context.Context, ec2Client EBSDefaultKeyClient, kms
 	return arn, nil
 }
 
-// ebsCSIKMSKeyARNs returns the KMS keys the EBS CSI driver's role should be
-// allowed to use: the configured ebs_kms_key_arns plus the account's default
-// EBS key when it is customer managed. Detection runs on every deploy so a
-// changed account default is picked up. A detection failure is reported as a
-// warning and the configured keys are returned unchanged, so a deploy
-// principal without ec2:GetEbsDefaultKmsKeyId or kms:DescribeKey can still
-// deploy (and set ebs_kms_key_arns by hand).
-func ebsCSIKMSKeyARNs(ctx context.Context, ec2Client EBSDefaultKeyClient, kmsClient KMSClient, configured []string) []string {
-	keys := slices.Clone(configured)
-
-	detected, err := defaultEBSKMSKeyARN(ctx, ec2Client, kmsClient)
-	if err != nil {
-		status.Send(ctx, status.NewUpdate(status.LevelWarning,
-			fmt.Sprintf("Could not detect the account's default EBS encryption key (%v). If it is a customer managed key, add it to ebs_kms_key_arns or EBS volumes will fail to provision", err)).
-			WithResource("ebs-kms").WithAction("detecting"))
-		return keys
+// reportDefaultEBSKMSKey tells the user NIC is granting the EBS CSI driver the
+// account's default key. Worded neutrally because the key may have been taken
+// as is when DescribeKey was denied, so nobody checked it is customer managed.
+func reportDefaultEBSKMSKey(ctx context.Context, arn string) {
+	if arn == "" {
+		return
 	}
-	if detected == "" || slices.Contains(keys, detected) {
-		return keys
-	}
-
 	status.Send(ctx, status.NewUpdate(status.LevelInfo,
-		"Account's default EBS encryption key is customer managed; granting the EBS CSI driver access to it").
+		"Granting the EBS CSI driver access to the account's default EBS encryption key").
 		WithResource("ebs-kms").WithAction("detected").
-		WithMetadata("kms_key_arn", detected))
-	return append(keys, detected)
+		WithMetadata("kms_key_arn", arn))
+}
+
+// mergeKMSKeyARNs concatenates key lists into a fresh slice, dropping empty
+// entries and duplicates while keeping first-seen order, so the policy the
+// module renders is stable across deploys. It returns nil when nothing is left.
+func mergeKMSKeyARNs(lists ...[]string) []string {
+	var merged []string
+	for _, arn := range slices.Concat(lists...) {
+		if arn != "" && !slices.Contains(merged, arn) {
+			merged = append(merged, arn)
+		}
+	}
+	return merged
+}
+
+// previousDefaultEBSKMSKeyARN returns the default EBS key the last apply
+// granted, read from the ebs_default_kms_key_arn output. It is "" when the
+// output is absent: no prior apply, a cluster deployed before NIC recorded
+// it, or a deploy that detected no customer managed key.
+func previousDefaultEBSKMSKeyARN(outputs map[string]tfexec.OutputMeta) (string, error) {
+	out, ok := outputs[ebsDefaultKMSKeyOutput]
+	if !ok {
+		return "", nil
+	}
+	var arn string
+	if err := json.Unmarshal(out.Value, &arn); err != nil {
+		return "", fmt.Errorf("failed to unmarshal %s output: %w", ebsDefaultKMSKeyOutput, err)
+	}
+	return arn, nil
+}
+
+// carryForwardEBSKMSKeyVars handles a deploy whose default-key detection
+// failed. Applying without the key would revoke a grant an earlier deploy
+// added, and every volume encrypted with it would then fail to attach the
+// next time it moves to another node. So it keeps the key the last apply
+// granted and returns the -var assignments that override the generated
+// tfvars: the merged key list for the module and the default key itself, so
+// the output survives for the next deploy. It returns nil when there is
+// nothing to keep.
+func carryForwardEBSKMSKeyVars(ctx context.Context, outputs map[string]tfexec.OutputMeta, configured []string, detectErr error) ([]string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.carryForwardEBSKMSKeyVars")
+	defer span.End()
+
+	previous, err := previousDefaultEBSKMSKeyARN(outputs)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	span.SetAttributes(attribute.String("ebs.previous_default_kms_key_arn", previous))
+
+	if previous == "" {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			fmt.Sprintf("Could not detect the account's default EBS encryption key (%v). If it is a customer managed key, add it to ebs_kms_key_arns or the EBS CSI driver can't create or attach volumes encrypted with it", detectErr)).
+			WithResource("ebs-kms").WithAction("detecting"))
+		return nil, nil
+	}
+
+	keys, err := json.Marshal(mergeKMSKeyARNs(configured, []string{previous}))
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to marshal EBS CSI KMS key ARNs: %w", err)
+	}
+	status.Send(ctx, status.NewUpdate(status.LevelWarning,
+		fmt.Sprintf("Could not detect the account's default EBS encryption key (%v); keeping the key the previous deploy granted the EBS CSI driver", detectErr)).
+		WithResource("ebs-kms").WithAction("detecting").
+		WithMetadata("kms_key_arn", previous))
+	return []string{
+		"ebs_csi_kms_key_arns=" + string(keys),
+		ebsDefaultKMSKeyOutput + "=" + previous,
+	}, nil
 }
