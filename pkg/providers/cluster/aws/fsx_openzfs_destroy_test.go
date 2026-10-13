@@ -11,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/fsx"
 	fsxtypes "github.com/aws/aws-sdk-go-v2/service/fsx/types"
 	"github.com/hashicorp/terraform-exec/tfexec"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // fakeFSxClient serves DescribeVolumes from pre-built pages, keyed by the
@@ -131,6 +133,60 @@ func TestCheckFSxOpenZFSChildVolumes(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "fsvol-root") {
 				t.Errorf("error %q must not list the root volume", err.Error())
+			}
+		})
+	}
+}
+
+// TestPrecheckFSxOpenZFSDestroySkips covers the paths that never reach the FSx
+// API. They must not announce a check that does not run, and must still return
+// the filesystem, which Destroy uses for the final backup notice.
+func TestPrecheckFSxOpenZFSDestroySkips(t *testing.T) {
+	outputs := map[string]tfexec.OutputMeta{
+		"fsx_openzfs_id":             {Value: json.RawMessage(`"fs-123"`)},
+		"fsx_openzfs_root_volume_id": {Value: json.RawMessage(`"fsvol-root"`)},
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		outputs map[string]tfexec.OutputMeta
+		wantFS  fsxOpenZFSFilesystem
+	}{
+		{
+			name:    "delete_child_volumes_on_destroy",
+			cfg:     &Config{FSxOpenZFS: &FSxOpenZFSConfig{DeleteChildVolumesOnDestroy: true}},
+			outputs: outputs,
+			wantFS:  fsxOpenZFSFilesystem{ID: "fs-123", RootVolumeID: "fsvol-root"},
+		},
+		{
+			name:    "FSx disabled",
+			cfg:     &Config{},
+			outputs: outputs,
+			wantFS:  fsxOpenZFSFilesystem{ID: "fs-123", RootVolumeID: "fsvol-root"},
+		},
+		{
+			name:    "filesystem never created",
+			cfg:     &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
+			outputs: map[string]tfexec.OutputMeta{},
+			wantFS:  fsxOpenZFSFilesystem{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			updates := make(chan status.Update, 10)
+			ctx := status.WithChannel(context.Background(), updates)
+
+			fs, err := precheckFSxOpenZFSDestroy(ctx, tt.outputs, tt.cfg)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if fs != tt.wantFS {
+				t.Errorf("filesystem = %+v, want %+v", fs, tt.wantFS)
+			}
+			if n := len(updates); n != 0 {
+				t.Errorf("sent %d status update(s), want none: %q", n, (<-updates).Message)
 			}
 		})
 	}
