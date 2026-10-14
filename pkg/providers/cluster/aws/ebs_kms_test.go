@@ -281,6 +281,7 @@ func TestToTFVarsEBSCSIKMSKeyARNs(t *testing.T) {
 	tests := []struct {
 		name        string
 		configured  []string
+		classKey    string
 		detected    string
 		wantKeys    []string
 		wantDefault string
@@ -290,6 +291,7 @@ func TestToTFVarsEBSCSIKMSKeyARNs(t *testing.T) {
 		{name: "detected only", detected: testCMKARN, wantKeys: []string{testCMKARN}, wantDefault: testCMKARN},
 		{name: "configured and detected", configured: []string{testOtherARN}, detected: testCMKARN, wantKeys: []string{testOtherARN, testCMKARN}, wantDefault: testCMKARN},
 		{name: "detected key already configured", configured: []string{testCMKARN}, detected: testCMKARN, wantKeys: []string{testCMKARN}, wantDefault: testCMKARN},
+		{name: "storage class key granted", configured: []string{testOtherARN}, classKey: testCMKARN, wantKeys: []string{testOtherARN, testCMKARN}},
 	}
 
 	for _, tt := range tests {
@@ -298,6 +300,9 @@ func TestToTFVarsEBSCSIKMSKeyARNs(t *testing.T) {
 				Region:        "us-east-1",
 				NodeGroups:    map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 				EBSKMSKeyARNs: slices.Clone(tt.configured),
+			}
+			if tt.classKey != "" {
+				cfg.EBS = &EBSConfig{KMSKeyARN: tt.classKey}
 			}
 
 			vars := cfg.toTFVars("test", "", nil, tt.detected)

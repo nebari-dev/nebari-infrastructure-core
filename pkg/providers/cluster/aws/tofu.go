@@ -156,7 +156,7 @@ func nodeGroupMatchesSelector(labels, sel map[string]string) bool {
 // module to provision the Longhorn backup bucket and/or Pod Identity role.
 // defaultEBSKMSKey is the account's customer managed default EBS key, empty
 // when it is AWS managed or wasn't detected; it is granted to the EBS CSI
-// driver alongside the configured ebs_kms_key_arns.
+// driver alongside the configured ebs_kms_key_arns and ebs.kms_key_arn.
 func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBucketSpec, defaultEBSKMSKey string) TFVars {
 	nodeGroups := resolveNodeGroupDefaults(c.NodeGroups)
 	// When Longhorn runs on dedicated nodes, the storage node group(s) must carry
@@ -202,7 +202,7 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 	if c.EKSKMSArn != "" {
 		vars.EKSKMSArn = &c.EKSKMSArn
 	}
-	vars.EBSCSIKMSKeyARNs = mergeKMSKeyARNs(c.EBSKMSKeyARNs, []string{defaultEBSKMSKey})
+	vars.EBSCSIKMSKeyARNs = mergeKMSKeyARNs(c.ebsCSIKMSKeyARNs(), []string{defaultEBSKMSKey})
 	vars.EBSDefaultKMSKeyARN = defaultEBSKMSKey
 	if c.ExistingClusterRoleArn != "" {
 		vars.ExistingClusterIAMRoleArn = &c.ExistingClusterRoleArn

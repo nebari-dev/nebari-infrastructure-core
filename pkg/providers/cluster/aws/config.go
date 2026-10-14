@@ -30,6 +30,7 @@ type Config struct {
 	NodeGroups                map[string]NodeGroup             `yaml:"node_groups"`
 	Tags                      map[string]string                `yaml:"tags,omitempty"`
 	EFS                       *EFSConfig                       `yaml:"efs,omitempty"`
+	EBS                       *EBSConfig                       `yaml:"ebs,omitempty"`
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 	ClusterAutoscaler         *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
@@ -226,4 +227,37 @@ func (c *Config) EFSStorageClassName() string {
 		return defaultEFSStorageClassName
 	}
 	return c.EFS.StorageClassName
+}
+
+// EBSConfig configures the EBS StorageClass NIC creates on every cluster. It
+// is the RWO class (and cluster default) when Longhorn is disabled.
+type EBSConfig struct {
+	Type             string `yaml:"type,omitempty"`               // default: gp3; gp2, gp3, io1, io2, st1 or sc1
+	IOPS             *int   `yaml:"iops,omitempty"`               // gp3, io1 and io2 only; required for io1 and io2
+	Throughput       *int   `yaml:"throughput,omitempty"`         // MiB/s, gp3 only
+	KMSKeyARN        string `yaml:"kms_key_arn,omitempty"`        // default: the account's default EBS key
+	StorageClassName string `yaml:"storage_class_name,omitempty"` // default: the volume type
+}
+
+const defaultEBSVolumeType = "gp3"
+
+var validEBSVolumeTypes = []string{"gp2", "gp3", "io1", "io2", "st1", "sc1"}
+
+// EBSVolumeType returns the EBS volume type for the NIC-managed StorageClass.
+// Returns "gp3" when EBS is not configured or when Type is empty.
+func (c *Config) EBSVolumeType() string {
+	if c.EBS == nil || c.EBS.Type == "" {
+		return defaultEBSVolumeType
+	}
+	return c.EBS.Type
+}
+
+// EBSStorageClassName returns the name of the NIC-managed EBS StorageClass.
+// Defaults to the volume type, so type gp2 resolves to the gp2 class EKS
+// already ships.
+func (c *Config) EBSStorageClassName() string {
+	if c.EBS == nil || c.EBS.StorageClassName == "" {
+		return c.EBSVolumeType()
+	}
+	return c.EBS.StorageClassName
 }
