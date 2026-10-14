@@ -472,7 +472,7 @@ func TestToTFVarsFSxOpenZFS(t *testing.T) {
 			tt.cfg.Region = "us-west-2"
 			tt.cfg.NodeGroups = map[string]NodeGroup{"general": {Instance: "m5.xlarge"}}
 
-			raw, err := json.Marshal(tt.cfg.toTFVars("test", "", nil))
+			raw, err := json.Marshal(tt.cfg.toTFVars("test", "", nil, ""))
 			if err != nil {
 				t.Fatalf("marshal tfvars: %v", err)
 			}
