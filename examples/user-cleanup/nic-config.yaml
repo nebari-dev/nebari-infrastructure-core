@@ -1,0 +1,18 @@
+project_name: nic-user-cleanup
+domain: nebari.lvh.me
+certificate:
+  type: selfsigned
+
+cluster:
+  local:
+    kind: {}
+    node_selectors:
+      general:
+        kubernetes.io/os: linux
+      user:
+        kubernetes.io/os: linux
+      worker:
+        kubernetes.io/os: linux
+
+repository:
+  local: {}
