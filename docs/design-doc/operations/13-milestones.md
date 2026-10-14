@@ -48,7 +48,7 @@ NIC releases on a `v0.x` line, with release candidates (`v0.Y.0-rc.N`) ahead of 
 | Kind-level resource restriction within the AppProjects | ⏳ ([#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480)) |
 | OpenTelemetry Collector | ✅ |
 | Nebari Landing Page | ✅ |
-| Nebari Operator (Kustomized from `nebari-dev/nebari-operator`) | ✅ |
+| Nebari Operator (Helm chart from `quay.io/nebari/charts`) | ✅ |
 | Full LGTM backend (Loki, Grafana, Tempo, Mimir) | ✅ as the [`lgtm-pack`](https://github.com/nebari-dev/lgtm-pack) software pack, not as a foundational app |
 
 ## 13.3 Phase 3: Operator Integration
@@ -59,9 +59,9 @@ The Nebari Operator is developed out-of-tree at [`nebari-dev/nebari-operator`](h
 
 | Deliverable | Status |
 |-------------|--------|
-| Operator deployed by NIC via ArgoCD + Kustomize | ✅ |
-| Operator version pinned in the Kustomize manifest | ✅ |
-| `InfraSettings.KeycloakBasePath` and `HTTPSPort` propagated via Kustomize patches | ✅ |
+| Operator deployed by NIC via ArgoCD + its Helm chart | ✅ |
+| Operator chart version pinned in the ArgoCD Application | ✅ |
+| `InfraSettings.KeycloakBasePath` propagated via Helm values | ✅ |
 | Operator-side reconciliation of `NebariApp` CRs | upstream-owned |
 | Operator-side `SecurityPolicy` and OIDC plumbing | upstream-owned |
 | Grafana dashboard provisioning | ⏳ (Grafana ships in `lgtm-pack`; NIC provisions no dashboards) |

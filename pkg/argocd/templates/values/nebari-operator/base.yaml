@@ -2,7 +2,8 @@ manager:
   # NIC's variables go in envOverrides, not env: the chart renders env and
   # then appends every envOverrides key without de-duplicating, so the same
   # name in both breaks the server-side apply. As a map, an overlay overrides
-  # one variable by key.
+  # one variable by key. The empty env clears the chart's five default
+  # KEYCLOAK_* entries, which would otherwise duplicate the ones below.
   env: []
   envOverrides:
     # Keycloak integration configuration

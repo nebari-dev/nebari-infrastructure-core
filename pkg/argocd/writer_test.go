@@ -480,9 +480,11 @@ func TestOperatorValues_ManagerEnv(t *testing.T) {
 			}
 
 			// The chart appends envOverrides to env without de-duplicating,
-			// so NIC's variables must all be in the map and env must be empty.
-			if len(values.Manager.Env) != 0 {
-				t.Errorf("manager.env = %v, want empty", values.Manager.Env)
+			// so NIC's variables must all be in the map and env must be an
+			// explicit empty list. A missing key decodes to nil, which would
+			// leave the chart's default env in place.
+			if values.Manager.Env == nil || len(values.Manager.Env) != 0 {
+				t.Errorf("manager.env = %#v, want an explicit empty list (it clears the chart's default env)", values.Manager.Env)
 			}
 			want := map[string]string{
 				"KEYCLOAK_ENABLED":                "true",
@@ -2107,103 +2109,6 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 	for _, w := range []string{"parametersRef:", "kind: EnvoyProxy", "name: nebari-proxy-config"} {
 		if !strings.Contains(string(gc), w) {
 			t.Errorf("gatewayclass.yaml missing %q", w)
-		}
-	}
-}
-
-// TestWriteAllToGit_RetiresTheKustomizeOperatorInstall covers a repo
-// bootstrapped by a NIC that installed nebari-operator with kustomize. After a
-// regen, manifests/nebari-operator must hold no files. A leftover
-// kustomization.yaml would make ArgoCD apply a second, GitHub-sourced operator
-// alongside the Helm chart, and a leftover namespace.yaml would let an
-// Application still on the kustomize spec sync just the namespace and prune
-// the operator.
-func TestWriteAllToGit_RetiresTheKustomizeOperatorInstall(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-
-	operatorDir := filepath.Join(tmpDir, "manifests", "nebari-operator")
-	if err := os.MkdirAll(operatorDir, 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	for _, name := range []string{"kustomization.yaml", "deployment-patch.yaml", "namespace.yaml"} {
-		if err := os.WriteFile(filepath.Join(operatorDir, name), []byte("old\n"), 0o600); err != nil {
-			t.Fatalf("seed %s: %v", name, err)
-		}
-	}
-
-	cfg := &config.NebariConfig{Domain: "test.example.com"}
-	if err := WriteAllToGit(ctx, tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
-		t.Fatalf("WriteAllToGit() error: %v", err)
-	}
-
-	// The emptied directory itself stays on disk; git does not track it, so
-	// it is gone from the pushed commit.
-	entries, err := os.ReadDir(operatorDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", operatorDir, err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	if len(names) != 0 {
-		t.Errorf("manifests/nebari-operator holds %v, want nothing", names)
-	}
-
-	if _, err := os.Stat(filepath.Join(tmpDir, "manifests", "nebari-operator-namespace", "namespace.yaml")); err != nil {
-		t.Errorf("operator namespace manifest not written: %v", err)
-	}
-}
-
-// TestOperatorApp_NamespaceSource checks the operator Application reads its
-// namespace manifest, alongside the $values ref, from a directory the retired
-// kustomize install never used.
-func TestOperatorApp_NamespaceSource(t *testing.T) {
-	data := seamTemplateData()
-	content, err := templates.ReadFile("templates/apps/nebari-operator.yaml")
-	if err != nil {
-		t.Fatalf("read app template: %v", err)
-	}
-	processed, err := processTemplate("apps/nebari-operator.yaml", content, data)
-	if err != nil {
-		t.Fatalf("processTemplate() error: %v", err)
-	}
-
-	var app struct {
-		Spec struct {
-			Sources []struct {
-				RepoURL string `yaml:"repoURL"`
-				Path    string `yaml:"path"`
-				Ref     string `yaml:"ref"`
-			} `yaml:"sources"`
-		} `yaml:"spec"`
-	}
-	if err := yaml.Unmarshal(processed, &app); err != nil {
-		t.Fatalf("rendered Application is not valid YAML: %v\n%s", err, processed)
-	}
-
-	found := false
-	for _, src := range app.Spec.Sources {
-		if src.Path == "manifests/nebari-operator" {
-			t.Errorf("source reads manifests/nebari-operator, the retired kustomize directory")
-		}
-		if src.RepoURL == data.GitRepoURL && src.Ref == "values" && src.Path == "manifests/nebari-operator-namespace" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("no source with repoURL %s, ref values and path manifests/nebari-operator-namespace:\n%s", data.GitRepoURL, processed)
-	}
-}
-
-// TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated keeps the retired
-// list honest: a path that a template still renders must not be on it, or
-// every regen would write the file and then delete it.
-func TestWriteAllToGit_RetiredTemplatesAreNotStillTemplated(t *testing.T) {
-	for _, rel := range retiredTemplates {
-		if _, err := templates.ReadFile(templateDir + "/" + rel); err == nil {
-			t.Errorf("%s is retired but still exists as a template", rel)
 		}
 	}
 }
