@@ -62,6 +62,9 @@ Detailed implementation specifications and technical designs.
 11. **[Nebari Operator](implementation/11-nebari-operator.md)**
     How NIC deploys the out-of-tree operator that reconciles the `NebariApp` CRD
 
+19. **[Multi-Tenancy](implementation/19-multi-tenancy.md)**
+    Tenants as a security perimeter: one namespace per Keycloak group, shared or copied packs, and the Kubernetes and IAM controls that hold the boundary
+
 ### Operations
 
 Testing, deployment, and operational procedures.
@@ -113,6 +116,7 @@ Understand the foundational software stack:
 - [Foundational Software Stack](implementation/10-foundational-software.md)
 - [Nebari Kubernetes Operator](implementation/11-nebari-operator.md)
 - [Configuration Design](implementation/07-configuration-design.md)
+- [Multi-Tenancy](implementation/19-multi-tenancy.md)
 
 ### For Architects
 
@@ -121,6 +125,7 @@ Review key technical decisions:
 - [Key Architectural Decisions](architecture/04-key-decisions.md)
 - [State Management](architecture/05-state-management.md)
 - [OpenTofu Module Architecture](implementation/06-opentofu-module-architecture.md)
+- [Multi-Tenancy](implementation/19-multi-tenancy.md)
 
 ### For QA Engineers
 
