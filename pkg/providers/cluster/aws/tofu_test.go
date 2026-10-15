@@ -509,8 +509,8 @@ func TestToTFVarsBackupBucket(t *testing.T) {
 	})
 }
 
-// The module only stops following the latest AMI when release_version is left
-// unset, so an unset pin must be absent from the wire format, not sent as "".
+// Keep an unset pin off the wire so the module's null default applies; only
+// the literal "latest" turns AMI tracking back on.
 func TestToTFVarsAMIReleaseVersion(t *testing.T) {
 	pinned := "1.34.11-20260923"
 	cfg := Config{
