@@ -52,9 +52,9 @@ defer cleanup()
 | `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
 | `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
 
-A deploy on a terminal (`pretty`): a local kind deploy while Argo CD installs, its panel live, and an AWS deploy once it has finished. Both captures replay the status stream of a real run, with names anonymised, through `internal/output`:
+A deploy on a terminal (`pretty`): a local kind deploy as it runs, and an AWS deploy once it has finished. Both replay the status stream of a real run, with names anonymised, through `internal/output`; the animation keeps the real durations but shortens the two long waits:
 
-![nic deploy while the Argo CD phase runs](../assets/cli-output/deploy-live.svg)
+![nic deploy on a local kind cluster, panels filling in as each phase runs](../assets/cli-output/deploy.gif)
 
 ![nic deploy after it finishes, with the post-deploy guidance](../assets/cli-output/deploy-done.svg)
 
