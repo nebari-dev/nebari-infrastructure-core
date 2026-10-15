@@ -58,7 +58,7 @@ func (p *plain) phaseStart(ph *phase) {
 	p.println("[..]    " + ph.name)
 }
 
-func (p *plain) step(ph *phase, s step) {
+func (p *plain) step(ph *phase, s step, _ time.Time) {
 	text := s.text
 	if s.detail != "" {
 		text += ": " + s.detail
@@ -86,7 +86,13 @@ func (p *plain) step(ph *phase, s step) {
 
 func (p *plain) progress(*phase, string, time.Time) {}
 
+func (p *plain) tick(*phase, time.Time) {}
+
 func (p *plain) clearProgress() {}
+
+func (p *plain) pause() {}
+
+func (p *plain) resume(*phase, time.Time) {}
 
 func (p *plain) phaseEnd(ph *phase) {
 	if p.github {

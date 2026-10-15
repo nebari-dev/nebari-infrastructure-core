@@ -15,7 +15,7 @@ type Format string
 const (
 	// FormatAuto picks pretty, plain or json from the terminal (see Resolve).
 	FormatAuto Format = "auto"
-	// FormatPretty draws a panel per phase, with colour and a live progress line.
+	// FormatPretty draws a panel per phase, live while the phase runs, with colour.
 	FormatPretty Format = "pretty"
 	// FormatPlain prints one line per step, without colour or redrawing.
 	FormatPlain Format = "plain"

@@ -35,10 +35,6 @@ const (
 	sgrGreen  = "\x1b[32m"
 	sgrYellow = "\x1b[33m"
 	sgrCyan   = "\x1b[36m"
-
-	// clearLine returns the cursor to column 0 and erases the line, used to
-	// replace the live progress line.
-	clearLine = "\r\x1b[2K"
 )
 
 // outcome is the state of a step or a phase.

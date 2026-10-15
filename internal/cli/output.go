@@ -75,11 +75,18 @@ func stderrIsTerminal() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
 }
 
-func terminalWidth() int {
-	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil {
-		return w
+// terminalSize is stderr's width and height, or zeros when it isn't a
+// terminal (the renderer then picks defaults).
+func terminalSize() (width, height int) {
+	if w, h, err := term.GetSize(int(os.Stderr.Fd())); err == nil {
+		return w, h
 	}
-	return 0
+	return 0, 0
+}
+
+func terminalWidth() int {
+	w, _ := terminalSize()
+	return w
 }
 
 // newRenderer returns the renderer for the resolved, non-JSON format.
@@ -89,6 +96,8 @@ func newRenderer(dryRun bool) *output.Renderer {
 	case output.FormatPretty:
 		opts.Color = true
 		opts.Live = stderrIsTerminal()
+		_, opts.Height = terminalSize()
+		opts.Tick = time.Second
 		return output.NewPretty(os.Stderr, opts)
 	case output.FormatGitHub:
 		return output.NewGitHub(os.Stderr, opts)
@@ -180,7 +189,7 @@ func (o *commandOutput) openLogFile(command, project, path string) string {
 	return path
 }
 
-// pause clears the live progress line and keeps it off while the command
+// pause clears the live panel and keeps it off while the command
 // writes to the terminal itself (the destroy confirmation prompt); resume
 // lets it back.
 func (o *commandOutput) pause() {

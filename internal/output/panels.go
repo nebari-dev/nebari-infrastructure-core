@@ -11,8 +11,15 @@ import (
 const maxPanelWidth = 100
 
 // panels is the pretty format: a header, then a rounded box per phase that
-// has steps to show, or a single line for a phase that has none, and a live
-// progress line for the running phase.
+// has steps to show, or a single line for a phase that has none.
+//
+// On a terminal (live), the running phase's panel is drawn as soon as the
+// phase starts and redrawn in place as updates arrive: its steps fill in,
+// the newest informational message shows as a dimmed activity line, and the
+// header carries a running icon and the elapsed time. When the phase ends the
+// panel is drawn one last time with its outcome and duration, and stays in the
+// scrollback. Without a terminal, each panel is printed once, when its phase
+// ends.
 //
 //	❯ nic deploy
 //	  Deploying acme-nebari
@@ -22,13 +29,22 @@ const maxPanelWidth = 100
 //	  ╭─ ✓ Infrastructure ─────────────────────────────────── 8m41s ─╮
 //	  │ ✓ Infrastructure deployment completed                        │
 //	  ╰──────────────────────────────────────────────────────────────╯
+//	  ╭─ ● Argo CD ──────────────────────────────────────────── 12s ─╮
+//	  │ ✓ Cluster is ready                                           │
+//	  │ ● Installing Argo CD Helm chart                              │
+//	  ╰──────────────────────────────────────────────────────────────╯
 type panels struct {
-	w     io.Writer
-	paint painter
-	live  bool
-	width int
-	// progressShown is true while the live line is on screen.
-	progressShown bool
+	w      io.Writer
+	paint  painter
+	live   bool
+	width  int
+	height int
+
+	// The live panel: how many lines of it are on screen, the newest
+	// informational message, and whether the caller has the terminal.
+	liveLines int
+	activity  string
+	paused    bool
 }
 
 // indent is the left margin of everything but the prompt line.
@@ -39,6 +55,15 @@ func (p *panels) innerWidth() int {
 	return min(p.width, maxPanelWidth) - width(indent)
 }
 
+// maxLiveLines is how many content lines a live panel shows, so that it
+// always fits on screen: redrawing can't reach lines that have scrolled away.
+func (p *panels) maxLiveLines() int {
+	if p.height <= 0 {
+		return 12
+	}
+	return min(max(p.height-12, 3), 20)
+}
+
 func (p *panels) println(s string) {
 	_, _ = fmt.Fprintln(p.w, s)
 }
@@ -47,7 +72,7 @@ func (p *panels) header(h Header) {
 	p.println(p.paint.paint(sgrGreen, glyphPrompt) + " " + h.Command)
 	p.println(indent + p.paint.paint(sgrBold+sgrCyan, h.Title))
 	if len(h.Context) > 0 {
-		p.println(indent + p.paint.paint(sgrDim, strings.Join(h.Context, " \u00b7 ")))
+		p.println(indent + p.paint.paint(sgrDim, strings.Join(h.Context, " · ")))
 	}
 	if h.LogPath != "" {
 		p.println(indent + p.paint.paint(sgrDim, "log "+h.LogPath))
@@ -56,23 +81,31 @@ func (p *panels) header(h Header) {
 }
 
 func (p *panels) phaseStart(ph *phase) {
-	if !p.live {
-		// Without a live line, say what is running, so a long phase isn't
-		// silent until its panel is drawn.
-		p.println(indent + p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrBold, ph.name))
-	}
-}
-
-func (p *panels) step(ph *phase, s step) {
-	// Steps inside a phase are drawn with its panel when it ends. Warnings
-	// and failures also show as they happen, so they aren't held back for
-	// the length of a long phase.
-	if ph != nil && s.outcome != outcomeWarn && s.outcome != outcomeFail {
+	if p.live {
+		p.activity = ""
+		p.drawLive(ph, ph.start)
 		return
 	}
-	p.clearProgress()
-	for _, line := range p.stepLines(s, p.innerWidth()) {
-		p.println(indent + line)
+	// Without a terminal, say what is running, so a long phase isn't silent
+	// until its panel is printed.
+	p.println(indent + p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrBold, ph.name))
+}
+
+func (p *panels) step(ph *phase, s step, at time.Time) {
+	switch {
+	case ph != nil && p.live:
+		if s.outcome != outcomeInfo {
+			// A result ends whatever the activity line was describing.
+			p.activity = ""
+		}
+		p.drawLive(ph, at)
+	case ph != nil && s.outcome != outcomeWarn && s.outcome != outcomeFail:
+		// Printed with the panel when the phase ends. Warnings and failures
+		// also show as they happen, so a long phase doesn't hold them back.
+	default:
+		for _, line := range p.stepLines(s, p.innerWidth()) {
+			p.println(indent + line)
+		}
 	}
 }
 
@@ -80,42 +113,60 @@ func (p *panels) progress(ph *phase, message string, at time.Time) {
 	if !p.live || ph == nil {
 		return
 	}
-	// ● Name  message                 elapsed
-	elapsed := formatDuration(at.Sub(ph.start))
-	room := p.innerWidth() - 2 - 2 - width(elapsed) // icon and space, gap before elapsed
-	message = strings.ReplaceAll(message, "\n", " ")
-	name := truncate(ph.name, room)
-	used := width(name)
-	msg := ""
-	if left := room - used - 2; left > 0 && message != "" {
-		msg = truncate(message, left)
-		used += 2 + width(msg)
-	}
-	line := indent + p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrBold, name)
-	if msg != "" {
-		line += "  " + p.paint.paint(sgrDim, msg)
-	}
-	line += strings.Repeat(" ", max(room-used, 0)+2) + p.paint.paint(sgrDim, elapsed)
-	_, _ = fmt.Fprint(p.w, clearLine+line)
-	p.progressShown = true
+	p.activity = strings.ReplaceAll(message, "\n", " ")
+	p.drawLive(ph, at)
 }
 
-func (p *panels) clearProgress() {
-	if p.progressShown {
-		_, _ = fmt.Fprint(p.w, clearLine)
-		p.progressShown = false
+func (p *panels) tick(ph *phase, now time.Time) {
+	if p.live && ph != nil {
+		p.drawLive(ph, now)
 	}
+}
+
+func (p *panels) pause() {
+	p.paused = true
+	p.clearProgress()
+}
+
+func (p *panels) resume(ph *phase, now time.Time) {
+	p.paused = false
+	p.tick(ph, now)
+}
+
+// clearProgress erases the live panel, before anything else is printed.
+func (p *panels) clearProgress() {
+	if p.liveLines > 0 {
+		// Up to the panel's first line, then clear to the end of the screen.
+		_, _ = fmt.Fprintf(p.w, "\x1b[%dA\r\x1b[J", p.liveLines)
+		p.liveLines = 0
+	}
+}
+
+// drawLive redraws the running phase's panel in place.
+func (p *panels) drawLive(ph *phase, now time.Time) {
+	if p.paused {
+		return
+	}
+	p.clearProgress()
+	var activity []string
+	if p.activity != "" {
+		activity = []string{p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrDim, truncate(p.activity, p.innerWidth()-6))}
+	}
+	lines := p.panelLines(ph.name, p.paint.paint(sgrCyan, glyphRun), sgrCyan, formatDuration(now.Sub(ph.start)), ph.steps, activity, p.maxLiveLines())
+	for _, line := range lines {
+		p.println(line)
+	}
+	p.liveLines = len(lines)
 }
 
 func (p *panels) phaseEnd(ph *phase) {
+	p.clearProgress()
+	p.activity = ""
 	dur := formatDuration(ph.duration())
 	if len(ph.steps) == 0 {
 		p.println(indent + p.row(p.paint.icon(ph.outcome)+" "+p.paint.paint(sgrBold, ph.name), 2+width(ph.name), dur, p.innerWidth()))
 		return
 	}
-
-	boxWidth := p.innerWidth()
-	content := boxWidth - 4 // "│ " and " │"
 	border := sgrDim
 	switch ph.outcome {
 	case outcomeWarn:
@@ -123,29 +174,49 @@ func (p *panels) phaseEnd(ph *phase) {
 	case outcomeFail:
 		border = sgrRed
 	}
+	for _, line := range p.panelLines(ph.name, p.paint.icon(ph.outcome), border, dur, ph.steps, nil, 0) {
+		p.println(line)
+	}
+}
 
-	// ╭─ ✓ Name ──────── 8m41s ─╮
-	title := " " + p.paint.icon(ph.outcome) + " " + p.paint.paint(sgrBold, ph.name) + " "
-	titleWidth := 1 + 1 + 1 + width(ph.name) + 1
-	right := boxHorizontal + boxTopRight
+// panelLines draws a phase panel: a title with icon and duration, a line per
+// step (wrapped warnings and failures take more), then any extra lines. With
+// maxLines > 0 only the newest content lines are kept, behind a count of the
+// ones left out.
+//
+//	╭─ ✓ Name ──────── 8m41s ─╮
+//	│ ✓ step                  │
+//	╰─────────────────────────╯
+func (p *panels) panelLines(name, icon, border, dur string, steps []step, extra []string, maxLines int) []string {
+	boxWidth := p.innerWidth()
+	content := boxWidth - 4 // "│ " and " │"
+
+	title := " " + icon + " " + p.paint.paint(sgrBold, name) + " "
+	titleWidth := 1 + 1 + 1 + width(name) + 1
+	right := p.paint.paint(border, boxHorizontal+boxTopRight)
 	rightWidth := 2
 	if dur != "" {
-		right = " " + p.paint.paint(sgrDim, dur) + " " + p.paint.paint(border, boxHorizontal+boxTopRight)
-		rightWidth = 1 + width(dur) + 1 + 2
-	} else {
-		right = p.paint.paint(border, right)
+		right = " " + p.paint.paint(sgrDim, dur) + " " + right
+		rightWidth += 1 + width(dur) + 1
 	}
 	fill := max(boxWidth-2-titleWidth-rightWidth, 1)
-	p.println(indent + p.paint.paint(border, boxTopLeft+boxHorizontal) + title +
-		p.paint.paint(border, strings.Repeat(boxHorizontal, fill)) + right)
+	lines := []string{indent + p.paint.paint(border, boxTopLeft+boxHorizontal) + title +
+		p.paint.paint(border, strings.Repeat(boxHorizontal, fill)) + right}
 
-	for _, s := range ph.steps {
-		for _, line := range p.stepLines(s, content) {
-			p.println(indent + p.paint.paint(border, boxVertical) + " " + line +
-				strings.Repeat(" ", max(content-p.visible(line), 0)) + " " + p.paint.paint(border, boxVertical))
-		}
+	var body []string
+	for _, s := range steps {
+		body = append(body, p.stepLines(s, content)...)
 	}
-	p.println(indent + p.paint.paint(border, boxBottomLeft+strings.Repeat(boxHorizontal, boxWidth-2)+boxBottomRight))
+	body = append(body, extra...)
+	if maxLines > 0 && len(body) > maxLines {
+		hidden := len(body) - (maxLines - 1)
+		body = append([]string{p.paint.paint(sgrDim, fmt.Sprintf("… %d earlier", hidden))}, body[hidden:]...)
+	}
+	for _, line := range body {
+		lines = append(lines, indent+p.paint.paint(border, boxVertical)+" "+line+
+			strings.Repeat(" ", max(content-p.visible(line), 0))+" "+p.paint.paint(border, boxVertical))
+	}
+	return append(lines, indent+p.paint.paint(border, boxBottomLeft+strings.Repeat(boxHorizontal, boxWidth-2)+boxBottomRight))
 }
 
 func (p *panels) result(o outcome, text string, elapsed time.Duration, logPath string) {
@@ -206,13 +277,14 @@ func (p *panels) visible(s string) int {
 	return width(stripANSI(s))
 }
 
-// stripANSI removes SGR escape sequences.
+// stripANSI removes CSI escape sequences (colours, cursor movement): ESC [,
+// parameter bytes, then one final byte in the range @ to ~.
 func stripANSI(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
 			j := i + 2
-			for j < len(s) && s[j] != 'm' {
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
 				j++
 			}
 			i = j

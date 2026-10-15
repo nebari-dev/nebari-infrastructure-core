@@ -47,14 +47,14 @@ defer cleanup()
 | `--log-format` | Used when | What it prints |
 |---|---|---|
 | `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb`, `json` otherwise |
-| `pretty` | terminals | A panel per phase, a live progress line, coloured results |
+| `pretty` | terminals | A panel per phase, drawn as soon as the phase starts and filled in as it runs, coloured results |
 | `plain` | log files, dumb terminals | One line per step, no colour, nothing redrawn |
 | `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
 | `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
 
-A deploy on a terminal (`pretty`), while OpenTofu applies and once it has finished. Both captures replay the status stream of a real AWS deploy, with names anonymised, through `internal/output`:
+A deploy on a terminal (`pretty`): a local kind deploy while Argo CD installs, its panel live, and an AWS deploy once it has finished. Both captures replay the status stream of a real run, with names anonymised, through `internal/output`:
 
-![nic deploy while the infrastructure phase runs](../assets/cli-output/deploy-live.svg)
+![nic deploy while the Argo CD phase runs](../assets/cli-output/deploy-live.svg)
 
 ![nic deploy after it finishes, with the post-deploy guidance](../assets/cli-output/deploy-done.svg)
 
@@ -136,7 +136,7 @@ status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet gateway already ex
 
 ## When to Use Each Level
 
-On a terminal (`pretty` and `plain`), `Info` and `Progress` updates only flash on the live progress line: they are listed under their phase with `--verbose`, and in dry runs, whose `Would ...` lines are `Info`. Tool output (updates carrying `MetadataKeyDetail`) is listed only with `--verbose`. Everything reaches the JSON output and the log file. So a message a user must see on every run needs `Success`, `Warning` or `Error`.
+On a terminal (`pretty` and `plain`), `Info` and `Progress` updates only show as the running panel's activity line (`pretty`), or not at all (`plain`): they are listed under their phase with `--verbose`, and in dry runs, whose `Would ...` lines are `Info`. Tool output (updates carrying `MetadataKeyDetail`) is listed only with `--verbose`. Everything reaches the JSON output and the log file. So a message a user must see on every run needs `Success`, `Warning` or `Error`.
 
 | Level | Use Case | Example |
 |-------|----------|---------|

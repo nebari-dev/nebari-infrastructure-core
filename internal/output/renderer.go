@@ -33,8 +33,9 @@ type Options struct {
 	// Verbose also shows informational updates and tool output (OpenTofu,
 	// Helm, ...) under the step that produced them.
 	Verbose bool
-	// Live redraws a single progress line in place while a phase runs. Only
-	// set it when the writer is a terminal.
+	// Live draws the running phase's panel as soon as the phase starts and
+	// redraws it in place as updates arrive. Only set it when the writer is a
+	// terminal.
 	Live bool
 	// DryRun shows informational updates (but not tool output) without
 	// Verbose: a dry run's "Would create ..." lines are its whole result.
@@ -43,6 +44,12 @@ type Options struct {
 	Color bool
 	// Width is the terminal width in columns. Zero means 80.
 	Width int
+	// Height is the terminal height in rows, which bounds how tall a live
+	// panel grows. Zero picks a size that fits a common terminal.
+	Height int
+	// Tick redraws the live panel at this interval, so its elapsed time keeps
+	// moving through a long silent wait. Zero disables it. Only used with Live.
+	Tick time.Duration
 	// Now returns the current time. Nil means time.Now.
 	Now func() time.Time
 }
@@ -73,13 +80,18 @@ func (p *phase) duration() time.Duration { return p.end.Sub(p.start) }
 type sink interface {
 	header(h Header)
 	phaseStart(p *phase)
-	// step reports a step as it happens. p is nil for updates sent before
-	// the first phase.
-	step(p *phase, s step)
+	// step reports a step as it happens, after it was added to p's steps.
+	// p is nil for updates sent before the first phase.
+	step(p *phase, s step, at time.Time)
 	// progress shows a transient message for the running phase.
 	progress(p *phase, message string, at time.Time)
-	// clearProgress removes whatever progress shows, before other output.
+	// tick refreshes the running phase's elapsed time.
+	tick(p *phase, now time.Time)
+	// clearProgress removes whatever is drawn live, before other output.
 	clearProgress()
+	// pause removes what is drawn live and keeps it off until resume.
+	pause()
+	resume(p *phase, now time.Time)
 	phaseEnd(p *phase)
 	result(o outcome, text string, elapsed time.Duration, logPath string)
 }
@@ -99,16 +111,42 @@ type Renderer struct {
 	started  time.Time
 	current  *phase
 	finished bool
-	// paused suppresses the live progress line while the caller owns the
-	// terminal (see Pause).
+	// paused suppresses the live panel while the caller owns the terminal
+	// (see Pause).
 	paused bool
+	// stopTick ends the ticker goroutine, if one runs.
+	stopTick chan struct{}
 }
 
 // NewPretty returns a Renderer that draws a panel per phase. Set opts.Live
-// only when w is a terminal.
+// only when w is a terminal. With Live and Tick set it starts a goroutine
+// that refreshes the live panel until Finish.
 func NewPretty(w io.Writer, opts Options) *Renderer {
 	opts = opts.withDefaults()
-	return &Renderer{sink: &panels{w: w, paint: painter(opts.Color), live: opts.Live, width: opts.Width}, opts: opts}
+	r := &Renderer{sink: &panels{w: w, paint: painter(opts.Color), live: opts.Live, width: opts.Width, height: opts.Height}, opts: opts}
+	if opts.Live && opts.Tick > 0 {
+		r.stopTick = make(chan struct{})
+		go r.tickEvery(opts.Tick)
+	}
+	return r
+}
+
+// tickEvery refreshes the live panel until Finish closes stopTick.
+func (r *Renderer) tickEvery(d time.Duration) {
+	t := time.NewTicker(d)
+	defer t.Stop()
+	for {
+		select {
+		case <-r.stopTick:
+			return
+		case <-t.C:
+			r.mu.Lock()
+			if !r.finished && !r.paused && r.current != nil {
+				r.sink.tick(r.current, r.opts.Now())
+			}
+			r.mu.Unlock()
+		}
+	}
 }
 
 // NewPlain returns a Renderer that prints one line per step, without colour.
@@ -186,25 +224,26 @@ func (r *Renderer) Handle(u status.Update) {
 		r.current.steps = append(r.current.steps, s)
 		r.current.outcome = worse(r.current.outcome, s.outcome)
 	}
-	r.sink.step(r.current, s)
+	r.sink.step(r.current, s, at)
 }
 
-// Pause clears the live progress line and keeps it off until Resume, so the
-// caller can write to the terminal, for example to prompt for confirmation.
-// Updates already queued on the status channel are still rendered as steps,
-// but none of them redraws over the prompt.
+// Pause clears the live panel and keeps it off until Resume, so the caller
+// can write to the terminal, for example to prompt for confirmation. Updates
+// already queued on the status channel are still recorded, but none of them
+// redraws over the prompt.
 func (r *Renderer) Pause() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.paused = true
-	r.sink.clearProgress()
+	r.sink.pause()
 }
 
-// Resume lets the live progress line return with the next update.
+// Resume draws the live panel again.
 func (r *Renderer) Resume() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.paused = false
+	r.sink.resume(r.current, r.opts.Now())
 }
 
 // Finish closes the running phase and prints the result line. err is the
@@ -218,6 +257,9 @@ func (r *Renderer) Finish(err error) {
 		return
 	}
 	r.finished = true
+	if r.stopTick != nil {
+		close(r.stopTick)
+	}
 	now := r.opts.Now()
 	if err != nil && r.current != nil {
 		r.current.outcome = outcomeFail

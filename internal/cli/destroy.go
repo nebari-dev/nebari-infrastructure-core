@@ -98,7 +98,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 	if !destroyAutoApprove {
 		opts.Confirm = func(ctx context.Context, s nic.DestroySummary) error {
-			// The prompt shares the terminal with the live progress line.
+			// The prompt shares the terminal with the live panel.
 			out.pause()
 			defer out.resume()
 			return confirmDestruction(ctx, s)

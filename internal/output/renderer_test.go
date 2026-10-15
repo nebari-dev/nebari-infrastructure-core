@@ -235,28 +235,73 @@ func TestPrettyRenderer(t *testing.T) {
 	}
 }
 
-func TestPrettyRendererLiveLine(t *testing.T) {
+// eraseLive is how the live panel erases its n lines before a redraw.
+func eraseLive(n int) string { return fmt.Sprintf("\x1b[%dA\r\x1b[J", n) }
+
+// TestPrettyRendererLivePanel: on a terminal the running phase's panel is on
+// screen from the start, fills with its steps, and is redrawn in place.
+func TestPrettyRendererLivePanel(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewPretty(&buf, Options{Width: 60, Live: true, Now: fixedClock()})
 	r.Begin(testHeader)
+	buf.Reset()
+
 	r.Handle(phaseAt("Infrastructure", 0))
+	opened := buf.String()
+	if !strings.Contains(opened, boxTopLeft+boxHorizontal+" "+glyphRun+" Infrastructure ") {
+		t.Fatalf("the panel should open with the phase, running:\n%s", opened)
+	}
+	if got := strings.Count(opened, "\n"); got != 2 {
+		t.Fatalf("an empty live panel is a title and a bottom border, got %d lines:\n%s", got, opened)
+	}
+
+	buf.Reset()
+	r.Handle(updateAt(status.LevelSuccess, "Kind cluster created", 3*time.Second))
 	r.Handle(updateAt(status.LevelProgress, "Creating node group", 4*time.Second))
-
-	live := buf.String()
-	if !strings.Contains(live, clearLine) || !strings.Contains(live, "Creating node group") || !strings.Contains(live, "4.0s") {
-		t.Fatalf("expected a live progress line, got %q", live)
+	redraw := buf.String()
+	for _, want := range []string{eraseLive(2), glyphOK + " Kind cluster created", glyphRun + " Creating node group", " 4.0s "} {
+		if !strings.Contains(redraw, want) {
+			t.Errorf("redrawn panel lacks %q:\n%q", want, redraw)
+		}
 	}
 
 	buf.Reset()
-	r.Pause()
-	if buf.String() != clearLine {
-		t.Errorf("Pause() wrote %q, want the line cleared", buf.String())
+	r.Handle(phaseAt("GitOps", 10*time.Second))
+	closed := buf.String()
+	if !strings.HasPrefix(closed, eraseLive(4)) {
+		t.Errorf("closing should erase the 4-line live panel first, got %q", closed)
+	}
+	for _, want := range []string{glyphOK + " Infrastructure ", " 10s ", glyphRun + " GitOps "} {
+		if !strings.Contains(closed, want) {
+			t.Errorf("after the phase closes, output lacks %q:\n%s", want, closed)
+		}
+	}
+	if strings.Contains(stripANSI(closed), "Creating node group") {
+		t.Errorf("the activity line belongs to the live panel only:\n%s", closed)
+	}
+}
+
+// TestPrettyRendererLivePanelHeight: a live panel keeps to the newest lines,
+// so it always fits on screen; the closed panel lists every step.
+func TestPrettyRendererLivePanelHeight(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Height: 15, Live: true, Now: fixedClock()})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Foundational services", 0))
+	for i := range 10 {
+		r.Handle(updateAt(status.LevelSuccess, fmt.Sprintf("step %d", i), time.Second))
+	}
+	buf.Reset()
+	r.Handle(updateAt(status.LevelSuccess, "step 10", 2*time.Second))
+	live := stripANSI(buf.String())
+	if !strings.Contains(live, "\u2026 9 earlier") || !strings.Contains(live, "step 10") || strings.Contains(live, "step 0\n") {
+		t.Errorf("live panel should show a count and the newest steps:\n%s", live)
 	}
 
 	buf.Reset()
-	r.Pause()
-	if buf.Len() != 0 {
-		t.Errorf("a second Pause() wrote %q, want nothing", buf.String())
+	r.Finish(nil)
+	if final := stripANSI(buf.String()); strings.Count(final, "step ") != 11 {
+		t.Errorf("the closed panel should list all 11 steps:\n%s", final)
 	}
 }
 
@@ -336,7 +381,7 @@ func TestRendererThroughStatusHandler(t *testing.T) {
 	}
 }
 
-func TestRendererPauseKeepsTheLiveLineOff(t *testing.T) {
+func TestRendererPauseKeepsTheLivePanelOff(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewPretty(&buf, Options{Width: 60, Live: true, Now: fixedClock()})
 	r.Begin(testHeader)
@@ -344,6 +389,9 @@ func TestRendererPauseKeepsTheLiveLineOff(t *testing.T) {
 	r.Handle(updateAt(status.LevelInfo, "Starting destruction", time.Second))
 
 	r.Pause()
+	if !strings.HasSuffix(buf.String(), eraseLive(3)) {
+		t.Fatalf("Pause should erase the live panel, got %q", buf.String())
+	}
 	buf.Reset()
 	buf.WriteString("Type 'yes' to confirm: ")
 	// An update still queued on the channel when the prompt went up.
@@ -355,7 +403,7 @@ func TestRendererPauseKeepsTheLiveLineOff(t *testing.T) {
 	r.Resume()
 	r.Handle(updateAt(status.LevelInfo, "Suspending Argo CD", 3*time.Second))
 	if !strings.Contains(buf.String(), "Suspending Argo CD") {
-		t.Errorf("the live line should return after Resume, got %q", buf.String())
+		t.Errorf("the live panel should return after Resume, got %q", buf.String())
 	}
 }
 
@@ -430,5 +478,49 @@ func TestPrettyRendererWithoutLiveLine(t *testing.T) {
 	}
 	if strings.Contains(out, boxTopLeft) {
 		t.Errorf("the panel should wait for the phase to end:\n%s", out)
+	}
+}
+
+// TestPrettyRendererTicks: during a silent wait the ticker keeps the live
+// panel's elapsed time moving, and it stops at Finish. Run with -race.
+func TestPrettyRendererTicks(t *testing.T) {
+	var mu sync.Mutex
+	elapsed := time.Duration(0)
+	now := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		elapsed += time.Second
+		return t0.Add(elapsed)
+	}
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Live: true, Tick: 5 * time.Millisecond, Now: now})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Infrastructure", 0))
+	time.Sleep(60 * time.Millisecond)
+	r.Finish(nil)
+
+	out := stripANSI(buf.String())
+	if strings.Count(out, glyphRun+" Infrastructure ") < 3 {
+		t.Errorf("the ticker should have redrawn the live panel several times:\n%s", out)
+	}
+	after := buf.Len()
+	time.Sleep(30 * time.Millisecond)
+	if buf.Len() != after {
+		t.Errorf("the ticker kept drawing after Finish")
+	}
+}
+
+// TestPrettyRendererActivityClearsOnResult: the activity line describes work
+// in flight, so a result for it replaces it.
+func TestPrettyRendererActivityClearsOnResult(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Live: true, Now: fixedClock()})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Argo CD", 0))
+	r.Handle(updateAt(status.LevelProgress, "Waiting for cluster to be ready", time.Second))
+	buf.Reset()
+	r.Handle(updateAt(status.LevelSuccess, "Cluster is ready", 2*time.Second))
+	if out := stripANSI(buf.String()); strings.Contains(out, "Waiting for cluster") {
+		t.Errorf("the activity line should clear once its result lands:\n%s", out)
 	}
 }
