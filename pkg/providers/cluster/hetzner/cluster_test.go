@@ -1,9 +1,14 @@
 package hetzner
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 func TestGenerateClusterYAML(t *testing.T) {
@@ -333,5 +338,41 @@ func TestWriteClusterYAML(t *testing.T) {
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0600 {
 		t.Errorf("permissions = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+// TestRunHetznerK3sOutput: hetzner-k3s output goes through the status
+// channel as tool output, colour codes stripped, never to the terminal, and
+// a failure carries its last lines.
+func TestRunHetznerK3sOutput(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "hetzner-k3s")
+	script := "#!/bin/sh\nprintf '\\033[32m[Instance master1]\\033[0m Creating\\n'\necho 'Error: quota exceeded' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil { //nolint:gosec // a fake hetzner-k3s the test runs, so it must be executable
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var got []status.Update
+	ctx, cleanup := status.StartHandler(context.Background(), func(u status.Update) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, u)
+	})
+	err := runHetznerK3s(ctx, bin, "create", filepath.Join(t.TempDir(), "cluster.yaml"))
+	cleanup()
+
+	if err == nil || !strings.Contains(err.Error(), "Error: quota exceeded") {
+		t.Errorf("error should carry the last output, got %v", err)
+	}
+	var messages []string
+	for _, u := range got {
+		if _, ok := u.Metadata[status.MetadataKeyDetail]; !ok {
+			t.Errorf("update %q isn't marked as tool output", u.Message)
+		}
+		messages = append(messages, u.Message)
+	}
+	joined := strings.Join(messages, "|")
+	if strings.Contains(joined, "\x1b") || !strings.Contains(joined, "[Instance master1] Creating") || !strings.Contains(joined, "Error: quota exceeded") {
+		t.Errorf("status updates = %q", messages)
 	}
 }

@@ -7,7 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
 	"text/template"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 // clusterParams holds all parameters needed to generate a hetzner-k3s cluster.yaml.
@@ -154,14 +159,56 @@ func runHetznerK3s(ctx context.Context, binaryPath, subcommand, clusterYAMLPath 
 		args = append(args, "--force")
 	}
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// The output goes through the status channel, never straight to the
+	// terminal, where the CLI's live panel would draw over it. It is tool
+	// output: shown with --verbose and always kept in the run's log file.
+	tail := &outputTail{max: 10}
+	stdout := status.NewWriter(ctx, tail.mapper)
+	stderr := status.NewWriter(ctx, tail.mapper)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Env = minimalEnv()
 
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	stdout.Flush()
+	stderr.Flush()
+	if err != nil {
+		// Its last lines say why, and without --verbose they were never shown.
+		if last := tail.lines(); len(last) > 0 {
+			return fmt.Errorf("hetzner-k3s %s failed: %w; last output:\n%s", subcommand, err, strings.Join(last, "\n"))
+		}
 		return fmt.Errorf("hetzner-k3s %s failed: %w", subcommand, err)
 	}
 	return nil
+}
+
+// outputTail turns hetzner-k3s output lines into status updates and keeps
+// the last few, for the error when the command fails. Its stdout and stderr
+// are copied on separate goroutines, hence the lock.
+type outputTail struct {
+	mu   sync.Mutex
+	max  int
+	last []string
+}
+
+// ansiSequence matches the colour codes hetzner-k3s puts in its output.
+var ansiSequence = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+func (t *outputTail) mapper(line []byte) status.Update {
+	text := ansiSequence.ReplaceAllString(string(line), "")
+	t.mu.Lock()
+	t.last = append(t.last, text)
+	if len(t.last) > t.max {
+		t.last = t.last[len(t.last)-t.max:]
+	}
+	t.mu.Unlock()
+	return status.NewUpdate(status.LevelInfo, text).WithMetadata(status.MetadataKeyDetail, text)
+}
+
+func (t *outputTail) lines() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.last...)
 }
 
 // minimalEnv constructs a minimal set of environment variables for the hetzner-k3s subprocess.
