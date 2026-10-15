@@ -25,6 +25,7 @@ require (
 	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/hashicorp/terraform-json v0.27.2
 	github.com/joho/godotenv v1.5.1
+	github.com/mattn/go-runewidth v0.0.24
 	github.com/opentofu/tofudl v0.0.1
 	github.com/skeema/knownhosts v1.3.2
 	github.com/spf13/afero v1.15.0
@@ -36,6 +37,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/mod v0.41.0
+	golang.org/x/term v0.46.0
 	helm.sh/helm/v3 v3.21.1
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
@@ -141,7 +143,6 @@ require (
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
@@ -184,7 +185,6 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect

@@ -19,12 +19,21 @@ nic destroy [flags]
 ### Options
 
 ```
-      --auto-approve     Skip confirmation prompt and destroy immediately
-      --dry-run          Show what would be destroyed without actually deleting
-  -f, --file string      Path to nebari-config.yaml file (auto-discovered if omitted)
-      --force            Continue destruction even if some resources fail to delete
-  -h, --help             help for destroy
-      --timeout string   Override default timeout (e.g., '45m', '1h')
+      --auto-approve      Skip confirmation prompt and destroy immediately
+      --dry-run           Show what would be destroyed without actually deleting
+  -f, --file string       Path to nebari-config.yaml file (auto-discovered if omitted)
+      --force             Continue destruction even if some resources fail to delete
+  -h, --help              help for destroy
+      --log-file string   Write the run's full JSON log to this file (default ~/.nic/logs/<project>/<time>-<command>.jsonl)
+      --no-log-file       Don't write a log file
+      --timeout string    Override default timeout (e.g., '45m', '1h')
+```
+
+### Options inherited from parent commands
+
+```
+      --log-format string   Output format: auto, pretty, plain, json or github (auto is pretty on a terminal, json otherwise) (default "auto")
+  -v, --verbose             Also show informational messages and OpenTofu output under each step
 ```
 
 ### SEE ALSO

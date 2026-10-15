@@ -1,0 +1,260 @@
+package output
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
+)
+
+// Header describes the command being rendered: what the renderer prints
+// before the first phase, and the words it uses for the result line.
+type Header struct {
+	// Command is the command line as the user would type it, e.g. "nic deploy".
+	Command string
+	// Title is shown while the command runs, e.g. "Deploying acme-nebari".
+	Title string
+	// Context lists short facts shown under the title: provider, config file.
+	Context []string
+	// LogPath is the log file this run writes, if any.
+	LogPath string
+	// Done is the result line on success, e.g. "Deployed acme-nebari".
+	Done string
+	// Failed is the result line on failure, e.g. "Deploy failed".
+	Failed string
+}
+
+// Options tune a Renderer.
+type Options struct {
+	// Verbose also shows informational updates and tool output (OpenTofu,
+	// Helm, ...) under the step that produced them.
+	Verbose bool
+	// Live redraws a single progress line in place while a phase runs. Only
+	// set it when the writer is a terminal.
+	Live bool
+	// DryRun shows informational updates (but not tool output) without
+	// Verbose: a dry run's "Would create ..." lines are its whole result.
+	DryRun bool
+	// Color enables ANSI colour.
+	Color bool
+	// Width is the terminal width in columns. Zero means 80.
+	Width int
+	// Now returns the current time. Nil means time.Now.
+	Now func() time.Time
+}
+
+// step is one line of output inside a phase.
+type step struct {
+	outcome outcome
+	text    string
+	// detail is the error or extra explanation attached to the update.
+	detail string
+	// quiet marks informational updates and tool output, which are shown
+	// only in verbose mode and drawn dimmed.
+	quiet bool
+}
+
+// phase groups the steps between two status.Phase markers.
+type phase struct {
+	name       string
+	start, end time.Time
+	outcome    outcome
+	steps      []step
+}
+
+func (p *phase) duration() time.Duration { return p.end.Sub(p.start) }
+
+// sink draws what the Renderer tracks. Implementations are only ever called
+// with the Renderer's lock held, so they need no locking of their own.
+type sink interface {
+	header(h Header)
+	phaseStart(p *phase)
+	// step reports a step as it happens. p is nil for updates sent before
+	// the first phase.
+	step(p *phase, s step)
+	// progress shows a transient message for the running phase.
+	progress(p *phase, message string, at time.Time)
+	// clearProgress removes whatever progress shows, before other output.
+	clearProgress()
+	phaseEnd(p *phase)
+	result(o outcome, text string, elapsed time.Duration, logPath string)
+}
+
+// Renderer turns status Updates into human-readable output, grouped by the
+// phases pkg/nic announces with status.Phase. Its Handle method is a
+// status.Handler.
+//
+// Handle runs on the status channel's consumer goroutine while Begin, Pause
+// and Finish run on the command's goroutine, so every method takes the same
+// lock: a Renderer is safe for concurrent use.
+type Renderer struct {
+	mu       sync.Mutex
+	sink     sink
+	opts     Options
+	header   Header
+	started  time.Time
+	current  *phase
+	finished bool
+	// paused suppresses the live progress line while the caller owns the
+	// terminal (see Pause).
+	paused bool
+}
+
+// NewPretty returns a Renderer that draws a panel per phase. Set opts.Live
+// only when w is a terminal.
+func NewPretty(w io.Writer, opts Options) *Renderer {
+	opts = opts.withDefaults()
+	return &Renderer{sink: &panels{w: w, paint: painter(opts.Color), live: opts.Live, width: opts.Width}, opts: opts}
+}
+
+// NewPlain returns a Renderer that prints one line per step, without colour.
+func NewPlain(w io.Writer, opts Options) *Renderer {
+	return &Renderer{sink: &plain{w: w}, opts: opts.withDefaults()}
+}
+
+// NewGitHub returns a plain Renderer that also puts each phase in a GitHub
+// Actions log group and raises warnings and failures as annotations. The
+// groups are collapsed, so it shows informational updates as if verbose.
+func NewGitHub(w io.Writer, opts Options) *Renderer {
+	opts.Verbose = true
+	return &Renderer{sink: &plain{w: w, github: true}, opts: opts.withDefaults()}
+}
+
+func (o Options) withDefaults() Options {
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.Width <= 0 {
+		o.Width = 80
+	}
+	return o
+}
+
+// Begin prints the header and starts the clock for the result line.
+func (r *Renderer) Begin(h Header) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.header = h
+	r.started = r.opts.Now()
+	r.sink.header(h)
+}
+
+// Handle renders one status Update. It is a status.Handler.
+func (r *Renderer) Handle(u status.Update) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finished {
+		return
+	}
+	at := u.Timestamp
+	if at.IsZero() {
+		at = r.opts.Now()
+	}
+
+	if name, ok := status.PhaseName(u); ok {
+		r.closePhase(at)
+		r.current = &phase{name: name, start: at}
+		r.sink.phaseStart(r.current)
+		return
+	}
+
+	_, isTool := u.Metadata[status.MetadataKeyDetail]
+	s := step{text: sanitize(u.Message), detail: sanitize(detailOf(u))}
+	switch u.Level {
+	case status.LevelError:
+		s.outcome = outcomeFail
+	case status.LevelWarning:
+		s.outcome = outcomeWarn
+	case status.LevelSuccess:
+		s.outcome = outcomeOK
+		s.quiet = isTool
+	default:
+		s.outcome = outcomeInfo
+		s.quiet = isTool || !r.opts.DryRun
+		if !r.paused {
+			r.sink.progress(r.current, s.text, at)
+		}
+	}
+	if s.quiet && !r.opts.Verbose {
+		return
+	}
+	if r.current != nil {
+		r.current.steps = append(r.current.steps, s)
+		r.current.outcome = worse(r.current.outcome, s.outcome)
+	}
+	r.sink.step(r.current, s)
+}
+
+// Pause clears the live progress line and keeps it off until Resume, so the
+// caller can write to the terminal, for example to prompt for confirmation.
+// Updates already queued on the status channel are still rendered as steps,
+// but none of them redraws over the prompt.
+func (r *Renderer) Pause() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.paused = true
+	r.sink.clearProgress()
+}
+
+// Resume lets the live progress line return with the next update.
+func (r *Renderer) Resume() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.paused = false
+}
+
+// Finish closes the running phase and prints the result line. err is the
+// command's error; the Renderer marks the running phase as failed but does
+// not print err, since the CLI reports a returned error once on its own. Call
+// Finish after the status handler has been flushed. Later calls do nothing.
+func (r *Renderer) Finish(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finished {
+		return
+	}
+	r.finished = true
+	now := r.opts.Now()
+	if err != nil && r.current != nil {
+		r.current.outcome = outcomeFail
+	}
+	r.closePhase(now)
+	r.sink.clearProgress()
+
+	elapsed := now.Sub(r.started)
+	switch {
+	case err == nil:
+		r.sink.result(outcomeOK, r.header.Done, elapsed, r.header.LogPath)
+	case errors.Is(err, context.Canceled):
+		r.sink.result(outcomeWarn, "Interrupted after "+formatDuration(elapsed), 0, r.header.LogPath)
+	default:
+		r.sink.result(outcomeFail, r.header.Failed+" after "+formatDuration(elapsed), 0, r.header.LogPath)
+	}
+}
+
+// closePhase ends the running phase, if any, at the given time.
+func (r *Renderer) closePhase(at time.Time) {
+	if r.current == nil {
+		return
+	}
+	r.current.end = at
+	if r.current.outcome == outcomeInfo {
+		r.current.outcome = outcomeOK
+	}
+	r.sink.clearProgress()
+	r.sink.phaseEnd(r.current)
+	r.current = nil
+}
+
+// detailOf returns the error attached to an update, the convention pkg/
+// producers use for failures and warnings.
+func detailOf(u status.Update) string {
+	if v, ok := u.Metadata["error"]; ok {
+		return fmt.Sprint(v)
+	}
+	return ""
+}

@@ -281,9 +281,14 @@ cluster:
 
 	deployConfigFile = configFile
 	deployDryRun = true
+	// runDeploy opens its log file under $HOME before validation runs; keep
+	// it out of the developer's home.
+	t.Setenv("HOME", t.TempDir())
+	deployLogFile = logFileFlags{disabled: true}
 	t.Cleanup(func() {
 		deployConfigFile = ""
 		deployDryRun = false
+		deployLogFile = logFileFlags{}
 	})
 
 	assertPlaceholderRejected(t, runDeploy(newTestCommand(t), nil), configFile,

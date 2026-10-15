@@ -1,0 +1,22 @@
+
+═══════════════════════════════════════════════════════════════════════════════
+  ARGO CD INSTALLED
+═══════════════════════════════════════════════════════════════════════════════
+
+  Argo CD has been successfully installed on your cluster.
+
+  To access Argo CD:
+
+    kubectl port-forward svc/argocd-server -n argocd 8080:443
+    Then visit: https://localhost:8080
+
+  Get the admin password:
+
+    nic outputs --show-secrets
+
+  Login credentials:
+    Username: admin
+    Password: <from command above>
+
+═══════════════════════════════════════════════════════════════════════════════
+

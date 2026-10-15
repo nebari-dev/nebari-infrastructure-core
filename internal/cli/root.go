@@ -2,17 +2,15 @@ package cli
 
 import (
 	"context"
-	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 )
 
 // reachedRunE reports whether cobra parsed flags and validated args
-// successfully, i.e. PersistentPreRun ran and a command's RunE is about to
+// successfully, i.e. PersistentPreRunE ran and a command's RunE is about to
 // (or did) execute. Execute uses it to distinguish runtime failures (which
 // should be logged) from usage-class errors (bad flag, unknown command,
-// wrong number of args), which surface before PersistentPreRun and are
+// wrong number of args), which surface before PersistentPreRunE and are
 // already printed by cobra.
 var reachedRunE bool
 
@@ -27,13 +25,15 @@ func NewRootCmd() *cobra.Command {
 		Short: "Nebari Infrastructure Core - Cloud infrastructure management for Nebari",
 		Long: `Nebari Infrastructure Core (NIC) is a standalone CLI tool that manages
 cloud infrastructure for Nebari using native cloud SDKs with declarative semantics.`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
-			}))
-			slog.SetDefault(logger)
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// An invalid --log-format is a misuse: return it before marking
+			// reachedRunE, so cobra prints it with the usage block like any
+			// other flag error.
+			if err := configureOutput(); err != nil {
+				return err
+			}
 
-			// PersistentPreRun runs only after cobra has parsed flags and validated
+			// PersistentPreRunE runs only after cobra has parsed flags and validated
 			// args. Any failure from here on is a runtime error and not a misuse,
 			// so silence cobra's own error/usage output and let Execute's caller
 			// report it once via slog. Usage-class errors (bad flag, unknown
@@ -42,8 +42,10 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 			cmd.SilenceErrors = true
 			cmd.SilenceUsage = true
 			reachedRunE = true
+			return nil
 		},
 	}
+	addOutputFlags(root)
 
 	root.AddCommand(deployCmd)
 	root.AddCommand(destroyCmd)
@@ -55,7 +57,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 	return root
 }
 
-// RunError wraps an error that occurred after PersistentPreRun ran - a
+// RunError wraps an error that occurred after PersistentPreRunE ran - a
 // genuine runtime failure, as opposed to a cobra usage error (bad flag,
 // unknown command, wrong number of args) that cobra already printed itself.
 type RunError struct{ Err error }
