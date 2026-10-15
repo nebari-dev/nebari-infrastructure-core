@@ -52,6 +52,12 @@ defer cleanup()
 | `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
 | `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
 
+A deploy on a terminal (`pretty`), while OpenTofu applies and once it has finished. Both captures replay the status stream of a real AWS deploy, with names anonymised, through `internal/output`:
+
+![nic deploy while the infrastructure phase runs](../assets/cli-output/deploy-live.svg)
+
+![nic deploy after it finishes, with the post-deploy guidance](../assets/cli-output/deploy-done.svg)
+
 `--verbose` (`-v`) also shows informational updates and tool output (OpenTofu events) under their phase. Whatever the format, `deploy` and `destroy` write every update as JSON to `~/.nic/logs/<project>/<UTC time>-<command>.jsonl` (`--log-file` to choose the path, `--no-log-file` to skip it).
 
 ## Usage in Library Code
