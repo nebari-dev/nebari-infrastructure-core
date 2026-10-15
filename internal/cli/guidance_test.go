@@ -86,9 +86,12 @@ func TestDNSSection(t *testing.T) {
 	}
 }
 
-// TestGuidanceJSONBanners pins the JSON format's post-deploy banners to the
-// output NIC printed before the guidance became data
-// (testdata/guidance/*.golden), so scripts reading stdout see no change.
+// TestGuidanceJSONBanners pins the JSON format's post-deploy banners
+// (testdata/guidance/*.golden). The goldens were recorded from the print
+// functions this guidance replaced, so the banners read exactly as before,
+// with one deliberate change: dns-hostname and dns-ip list each DNS record as
+// Type/Name/Value lines instead of a fixed-width table that a load balancer
+// hostname overflowed.
 func TestGuidanceJSONBanners(t *testing.T) {
 	example := &config.NebariConfig{Domain: "example.com"}
 	local := &config.NebariConfig{Domain: "nebari.local"}

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/internal/output"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
@@ -51,20 +50,17 @@ func dnsSection(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) out
 		if lb.Hostname != "" {
 			recordType, value = "CNAME", lb.Hostname
 		}
-		rule := strings.Repeat("─", 73)
-		row := func(label, v string) string { return fmt.Sprintf("│ %-6s: %-65s │", label, v) }
-		body = append(body,
-			"Required DNS Records:",
-			"┌"+rule+"┐",
-			row("Type", recordType),
-			row("Name", cfg.Domain),
-			row("Value", value),
-			"├"+rule+"┤",
-			row("Type", recordType),
-			row("Name", "*."+cfg.Domain),
-			row("Value", value),
-			"└"+rule+"┘",
-		)
+		// One record per block rather than a table: a load balancer hostname
+		// is wider than any fixed column, and these values get copied.
+		body = append(body, "Required DNS Records:")
+		for _, name := range []string{cfg.Domain, "*." + cfg.Domain} {
+			body = append(body,
+				"",
+				"  Type:  "+recordType,
+				"  Name:  "+name,
+				"  Value: "+value,
+			)
+		}
 	} else {
 		body = append(body,
 			"The load balancer endpoint is not yet available.",

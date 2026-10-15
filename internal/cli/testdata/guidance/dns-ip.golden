@@ -9,15 +9,14 @@
   Domain: example.com
 
   Required DNS Records:
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │ Type  : A                                                                 │
-  │ Name  : example.com                                                       │
-  │ Value : 34.102.136.180                                                    │
-  ├─────────────────────────────────────────────────────────────────────────┤
-  │ Type  : A                                                                 │
-  │ Name  : *.example.com                                                     │
-  │ Value : 34.102.136.180                                                    │
-  └─────────────────────────────────────────────────────────────────────────┘
+
+    Type:  A
+    Name:  example.com
+    Value: 34.102.136.180
+
+    Type:  A
+    Name:  *.example.com
+    Value: 34.102.136.180
 
   To automate DNS management, add a dns block to your configuration:
 
