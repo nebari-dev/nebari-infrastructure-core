@@ -134,4 +134,7 @@ func TestConventionKeys(t *testing.T) {
 	if MetadataKeyDetail != "detail" {
 		t.Errorf("MetadataKeyDetail = %q, want %q", MetadataKeyDetail, "detail")
 	}
+	if MetadataKeyPhase != "phase" {
+		t.Errorf("MetadataKeyPhase = %q, want %q", MetadataKeyPhase, "phase")
+	}
 }

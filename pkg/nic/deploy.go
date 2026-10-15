@@ -68,6 +68,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	span.SetAttributes(attribute.Bool("dry_run", opts.DryRun))
 
+	status.Phase(ctx, PhaseConfiguration)
 	if opts.DryRun {
 		status.Info(ctx, "Starting deployment (dry-run)")
 	} else {
@@ -200,6 +201,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	// Deploy infrastructure
+	status.Phase(ctx, PhaseInfrastructure)
 	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
 		DryRun:       opts.DryRun,
 		Timeout:      opts.Timeout,
@@ -221,6 +223,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// source is reused by the ArgoCD install below.
 	var repoSource repository.Source
 	if !opts.DryRun {
+		status.Phase(ctx, PhaseGitOps)
 		repoSource, err = c.resolveRepositorySource(ctx, cfg, reg)
 		if err != nil {
 			span.RecordError(err)
@@ -251,6 +254,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 	// Install Argo CD (skip in dry-run mode)
 	if !opts.DryRun {
+		status.Phase(ctx, PhaseArgoCD)
 		status.Progress(ctx, "Installing Argo CD on cluster")
 
 		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
@@ -276,6 +280,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			result.ArgoCDInstalled = true
 
 			// Install foundational services via Argo CD
+			status.Phase(ctx, PhaseFoundational)
 			status.Progress(ctx, "Installing foundational services")
 
 			secrets, err := generateFoundationalSecrets(rand.Reader)
@@ -341,6 +346,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// directly. There are no DNS records to provision on this path:
 	// ensureDNSSupported rejected any dns block up front.
 	if cfg.Domain != "" && !opts.DryRun {
+		status.Phase(ctx, PhaseEndpoint)
 		if addr := infraSettings.GatewayHostAddress; addr != "" {
 			result.LBEndpoint = &endpoint.LoadBalancerEndpoint{IP: addr, Port: infraSettings.HTTPSPort}
 		} else {
@@ -443,6 +449,7 @@ func (c *Client) lookupEndpointAndProvisionDNS(ctx context.Context, cfg *config.
 		return lbEndpoint
 	}
 
+	status.Phase(ctx, PhaseDNS)
 	status.Send(ctx, status.NewUpdate(status.LevelProgress, "Provisioning DNS records").
 		WithResource("dns").
 		WithAction("provisioning").

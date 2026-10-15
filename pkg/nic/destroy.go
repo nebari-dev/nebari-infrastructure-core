@@ -81,6 +81,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 		span.SetAttributes(attribute.String("timeout", opts.Timeout.String()))
 	}
 
+	status.Phase(ctx, PhaseConfiguration)
 	if opts.DryRun {
 		status.Info(ctx, "Starting destruction (dry-run)")
 	} else {
@@ -129,6 +130,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	// because it is the most failure-prone fatal step: aborting here leaves
 	// everything, including DNS records, intact.
 	if !opts.DryRun {
+		status.Phase(ctx, PhaseArgoCD)
 		if kubeconfigBytes, kcErr := clusterProvider.GetKubeconfig(ctx, cfg.ProjectName, cfg.Cluster); kcErr != nil {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Cluster unreachable; skipping Argo CD suspension: %v", kcErr)).
 				WithResource("argocd").WithAction("suspending"))
@@ -143,12 +145,15 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	}
 
 	if cfg.DNS != nil {
+		status.Phase(ctx, PhaseDNS)
 		if err := c.destroyDNS(ctx, cfg, reg, opts.DryRun); err != nil {
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to clean up DNS records").
 				WithMetadata("error", err.Error()))
 			status.Warning(ctx, "You may need to manually remove DNS records from your provider")
 		}
 	}
+
+	status.Phase(ctx, PhaseInfrastructure)
 
 	// Re-resolve the bundle so the destroy plan matches what was deployed. The
 	// applied value already lives in TF state, so a source PEM that was deleted
