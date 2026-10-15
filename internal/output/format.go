@@ -59,3 +59,13 @@ func Resolve(f Format, isTerminal bool, getenv func(string) string) Format {
 	}
 	return FormatPretty
 }
+
+// TrueColor reports whether the terminal advertises 24-bit colour, through
+// the COLORTERM convention.
+func TrueColor(getenv func(string) string) bool {
+	switch getenv("COLORTERM") {
+	case "truecolor", "24bit":
+		return true
+	}
+	return false
+}

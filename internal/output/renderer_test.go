@@ -33,13 +33,21 @@ func updateAt(level status.Level, msg string, d time.Duration) status.Update {
 }
 
 var testHeader = Header{
-	Command: "nic deploy",
-	Title:   "Deploying acme",
-	Context: []string{"aws", "config.yaml"},
-	LogPath: "/logs/acme.jsonl",
-	Done:    "Deployed acme",
-	Failed:  "Deploy failed",
+	Command:    "nic deploy",
+	Title:      "Deploying acme",
+	TargetPrep: "to",
+	Target:     "aws \u00b7 us-west-2",
+	ConfigFile: "config.yaml",
+	Version:    "v0.15.0",
+	LogPath:    "/logs/acme.jsonl",
+	Done:       "Deployed acme",
+	Failed:     "Deploy failed",
+	Retry:      "nic deploy",
+	Inspect:    map[string]string{"Argo CD": "kubectl get pods -n argocd"},
 }
+
+// testLink is what run passes to Finish for the success result line.
+const testLink = "https://acme.example.com"
 
 // deployScript is a short deploy: a quiet phase, a successful one, and one
 // with a warning, plus an informational update and a line of tool output.
@@ -61,7 +69,7 @@ func run(r *Renderer, updates []status.Update, err error) {
 	for _, u := range updates {
 		r.Handle(u)
 	}
-	r.Finish(err)
+	r.Finish(err, testLink)
 }
 
 // fixedClock returns a clock that reads t0 on its first call (Begin) and
@@ -88,96 +96,101 @@ func TestPlainRenderer(t *testing.T) {
 		{
 			name: "plain",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
-			want: `nic deploy: Deploying acme (aws, config.yaml)
+			want: `nic deploy: Deploying acme to aws · us-west-2
+config: config.yaml (nic v0.15.0)
 log: /logs/acme.jsonl
 [..]    Configuration
-[ok]    Configuration (0.1s)
+[ok]    Configuration (<1s)
 [..]    Infrastructure
 [ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9.9s)
+[ok]    Infrastructure (9s)
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
-[warn]  Argo CD (5.0s)
-[ok]    Deployed acme (15s)
-log: /logs/acme.jsonl
+[warn]  Argo CD (5s)
+[ok]    Deployed acme: https://acme.example.com (15s)
 `,
 		},
 		{
 			name:    "plain verbose shows info and tool output",
 			new:     func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			verbose: true,
-			want: `nic deploy: Deploying acme (aws, config.yaml)
+			want: `nic deploy: Deploying acme to aws · us-west-2
+config: config.yaml (nic v0.15.0)
 log: /logs/acme.jsonl
 [..]    Configuration
 [info]  Configuration: Starting deployment
-[ok]    Configuration (0.1s)
+[ok]    Configuration (<1s)
 [..]    Infrastructure
 [info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
 [ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9.9s)
+[ok]    Infrastructure (9s)
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
-[warn]  Argo CD (5.0s)
-[ok]    Deployed acme (15s)
-log: /logs/acme.jsonl
+[warn]  Argo CD (5s)
+[ok]    Deployed acme: https://acme.example.com (15s)
 `,
 		},
 		{
 			name: "failure marks the running phase and the result",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			err:  errors.New("install argo cd: timed out"),
-			want: `nic deploy: Deploying acme (aws, config.yaml)
+			want: `nic deploy: Deploying acme to aws · us-west-2
+config: config.yaml (nic v0.15.0)
 log: /logs/acme.jsonl
 [..]    Configuration
-[ok]    Configuration (0.1s)
+[ok]    Configuration (<1s)
 [..]    Infrastructure
 [ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9.9s)
+[ok]    Infrastructure (9s)
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
-[fail]  Argo CD (5.0s)
-[fail]  Deploy failed after 15s
+[fail]  Argo CD (5s)
+[fail]  Deploy failed: Argo CD (15s)
+inspect: kubectl get pods -n argocd
 log: /logs/acme.jsonl
+retry: nic deploy
 `,
 		},
 		{
 			name: "interrupt",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			err:  context.Canceled,
-			want: `nic deploy: Deploying acme (aws, config.yaml)
+			want: `nic deploy: Deploying acme to aws · us-west-2
+config: config.yaml (nic v0.15.0)
 log: /logs/acme.jsonl
 [..]    Configuration
-[ok]    Configuration (0.1s)
+[ok]    Configuration (<1s)
 [..]    Infrastructure
 [ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9.9s)
+[ok]    Infrastructure (9s)
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
-[fail]  Argo CD (5.0s)
-[warn]  Interrupted after 15s
+[fail]  Argo CD (5s)
+[warn]  Interrupted: Argo CD (15s)
 log: /logs/acme.jsonl
+retry: nic deploy
 `,
 		},
 		{
 			name: "github groups phases and annotates warnings",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewGitHub(b, o) },
-			want: `nic deploy: Deploying acme (aws, config.yaml)
+			want: `nic deploy: Deploying acme to aws · us-west-2
+config: config.yaml (nic v0.15.0)
 log: /logs/acme.jsonl
 ::group::Configuration
 [info]  Configuration: Starting deployment
 ::endgroup::
-[ok]    Configuration (0.1s)
+[ok]    Configuration (<1s)
 ::group::Infrastructure
 [info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
 [ok]    Infrastructure: Infrastructure deployment completed
 ::endgroup::
-[ok]    Infrastructure (9.9s)
+[ok]    Infrastructure (9s)
 ::group::Argo CD
 ::warning title=Argo CD::Failed to install Argo CD: boom
 ::endgroup::
-[warn]  Argo CD (5.0s)
-[ok]    Deployed acme (15s)
-log: /logs/acme.jsonl
+[warn]  Argo CD (5s)
+[ok]    Deployed acme: https://acme.example.com (15s)
 `,
 		},
 	}
@@ -202,15 +215,15 @@ func TestPrettyRenderer(t *testing.T) {
 
 	for _, want := range []string{
 		glyphPrompt + " nic deploy",
-		"  Deploying acme",
-		"  aws \u00b7 config.yaml",
-		"  log /logs/acme.jsonl",
+		"  Deploying acme to aws \u00b7 us-west-2",
+		"  config  config.yaml \u00b7 nic v0.15.0",
+		"  log     /logs/acme.jsonl",
 		"  " + glyphOK + " Configuration",
 		boxTopLeft + boxHorizontal + " " + glyphOK + " Infrastructure ",
 		boxVertical + " " + glyphOK + " Infrastructure deployment completed",
 		boxTopLeft + boxHorizontal + " " + glyphWarn + " Argo CD ",
 		glyphWarn + " Failed to install Argo CD: boom",
-		"  " + glyphOK + " Deployed acme",
+		"  " + glyphOK + " Deployed acme \u00b7 " + testLink,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -248,7 +261,7 @@ func TestPrettyRendererLivePanel(t *testing.T) {
 
 	r.Handle(phaseAt("Infrastructure", 0))
 	opened := buf.String()
-	if !strings.Contains(opened, boxTopLeft+boxHorizontal+" "+glyphRun+" Infrastructure ") {
+	if !strings.Contains(opened, boxTopLeft+boxHorizontal+" "+spinner[0]+" Infrastructure ") {
 		t.Fatalf("the panel should open with the phase, running:\n%s", opened)
 	}
 	if got := strings.Count(opened, "\n"); got != 2 {
@@ -259,7 +272,7 @@ func TestPrettyRendererLivePanel(t *testing.T) {
 	r.Handle(updateAt(status.LevelSuccess, "Kind cluster created", 3*time.Second))
 	r.Handle(updateAt(status.LevelProgress, "Creating node group", 4*time.Second))
 	redraw := buf.String()
-	for _, want := range []string{eraseLive(2), glyphOK + " Kind cluster created", glyphRun + " Creating node group", " 4.0s "} {
+	for _, want := range []string{eraseLive(2), glyphOK + " Kind cluster created", spinner[0] + " Creating node group", " 4s "} {
 		if !strings.Contains(redraw, want) {
 			t.Errorf("redrawn panel lacks %q:\n%q", want, redraw)
 		}
@@ -271,7 +284,7 @@ func TestPrettyRendererLivePanel(t *testing.T) {
 	if !strings.HasPrefix(closed, eraseLive(4)) {
 		t.Errorf("closing should erase the 4-line live panel first, got %q", closed)
 	}
-	for _, want := range []string{glyphOK + " Infrastructure ", " 10s ", glyphRun + " GitOps "} {
+	for _, want := range []string{glyphOK + " Infrastructure ", " 10s ", spinner[0] + " GitOps "} {
 		if !strings.Contains(closed, want) {
 			t.Errorf("after the phase closes, output lacks %q:\n%s", want, closed)
 		}
@@ -299,7 +312,7 @@ func TestPrettyRendererLivePanelHeight(t *testing.T) {
 	}
 
 	buf.Reset()
-	r.Finish(nil)
+	r.Finish(nil, "")
 	if final := stripANSI(buf.String()); strings.Count(final, "step ") != 11 {
 		t.Errorf("the closed panel should list all 11 steps:\n%s", final)
 	}
@@ -312,7 +325,7 @@ func TestRendererFinishIsFinal(t *testing.T) {
 	before := buf.String()
 
 	r.Handle(phaseAt("Late", time.Second))
-	r.Finish(errors.New("late"))
+	r.Finish(errors.New("late"), "")
 	if buf.String() != before {
 		t.Errorf("output after Finish:\n%s", strings.TrimPrefix(buf.String(), before))
 	}
@@ -349,7 +362,7 @@ func TestRendererConcurrentUse(t *testing.T) {
 	}()
 	close(start)
 	wg.Wait()
-	r.Finish(nil)
+	r.Finish(nil, "")
 }
 
 // TestRendererThroughStatusHandler drives a Renderer the way the CLI does:
@@ -374,7 +387,7 @@ func TestRendererThroughStatusHandler(t *testing.T) {
 	}
 	wg.Wait()
 	cleanup()
-	r.Finish(nil)
+	r.Finish(nil, "")
 
 	if got := strings.Count(buf.String(), "[ok]    Infrastructure: producer"); got != 100 {
 		t.Errorf("rendered %d steps, want 100:\n%s", got, buf.String())
@@ -471,7 +484,7 @@ func TestPrettyRendererWithoutLiveLine(t *testing.T) {
 	r.Handle(updateAt(status.LevelWarning, "Failed to install Argo CD", time.Second))
 
 	out := buf.String()
-	for _, want := range []string{glyphRun + " Argo CD", glyphWarn + " Failed to install Argo CD"} {
+	for _, want := range []string{spinner[0] + " Argo CD", glyphWarn + " Failed to install Argo CD"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("before the phase ends, output lacks %q:\n%s", want, out)
 		}
@@ -482,7 +495,7 @@ func TestPrettyRendererWithoutLiveLine(t *testing.T) {
 }
 
 // TestPrettyRendererTicks: during a silent wait the ticker keeps the live
-// panel's elapsed time moving, and it stops at Finish. Run with -race.
+// panel's spinner and elapsed time moving, and it stops at Finish. Run with -race.
 func TestPrettyRendererTicks(t *testing.T) {
 	var mu sync.Mutex
 	elapsed := time.Duration(0)
@@ -497,11 +510,17 @@ func TestPrettyRendererTicks(t *testing.T) {
 	r.Begin(testHeader)
 	r.Handle(phaseAt("Infrastructure", 0))
 	time.Sleep(60 * time.Millisecond)
-	r.Finish(nil)
+	r.Finish(nil, "")
 
 	out := stripANSI(buf.String())
-	if strings.Count(out, glyphRun+" Infrastructure ") < 3 {
-		t.Errorf("the ticker should have redrawn the live panel several times:\n%s", out)
+	frames := map[string]bool{}
+	for _, f := range spinner {
+		if strings.Contains(out, f+" Infrastructure ") {
+			frames[f] = true
+		}
+	}
+	if len(frames) < 3 {
+		t.Errorf("the ticker should have advanced the spinner several times:\n%s", out)
 	}
 	after := buf.Len()
 	time.Sleep(30 * time.Millisecond)
@@ -522,5 +541,78 @@ func TestPrettyRendererActivityClearsOnResult(t *testing.T) {
 	r.Handle(updateAt(status.LevelSuccess, "Cluster is ready", 2*time.Second))
 	if out := stripANSI(buf.String()); strings.Contains(out, "Waiting for cluster") {
 		t.Errorf("the activity line should clear once its result lands:\n%s", out)
+	}
+}
+
+// TestPrettyRendererFailure: a failed run names the failing phase on the
+// result line and says where to look next.
+func TestPrettyRendererFailure(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Now: fixedClock()})
+	run(r, deployScript(), errors.New("install argo cd: timed out"))
+	out := buf.String()
+	for _, want := range []string{
+		boxTopLeft + boxHorizontal + " " + glyphFail + " Argo CD ",
+		"  " + glyphFail + " Deploy failed \u00b7 Argo CD",
+		"    inspect  kubectl get pods -n argocd",
+		"    log      /logs/acme.jsonl",
+		"    retry    nic deploy",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, testLink) {
+		t.Errorf("the link belongs to a successful run only:\n%s", out)
+	}
+}
+
+// TestPrettyRendererHeaderBadge: a badge sits at the right edge of the title
+// line.
+func TestPrettyRendererHeaderBadge(t *testing.T) {
+	const termWidth = 70
+	h := testHeader
+	h.Badge = "DRY RUN"
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: termWidth, Now: fixedClock()})
+	r.Begin(h)
+	title := strings.Split(buf.String(), "\n")[1]
+	if !strings.HasPrefix(title, "  Deploying acme to aws") || !strings.HasSuffix(title, " DRY RUN") || width(title) != termWidth {
+		t.Errorf("title line = %q (%d columns), want the badge right-aligned at %d", title, width(title), termWidth)
+	}
+}
+
+// TestPrettyRendererHeaderLongTarget: a target too long for the title line,
+// such as a kubeconfig context ARN, is cut so the badge stays on the line.
+func TestPrettyRendererHeaderLongTarget(t *testing.T) {
+	const termWidth = 70
+	h := testHeader
+	h.Target = "existing \u00b7 context arn:aws:eks:us-west-2:123456789012:cluster/my-nebari"
+	h.Badge = "DRY RUN"
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: termWidth, Now: fixedClock()})
+	r.Begin(h)
+	title := strings.Split(buf.String(), "\n")[1]
+	if width(title) != termWidth || !strings.HasSuffix(title, " DRY RUN") || !strings.Contains(title, "context arn:aws:eks:") || !strings.Contains(title, "\u2026") {
+		t.Errorf("title line = %q (%d columns), want it cut to %d with the badge kept", title, width(title), termWidth)
+	}
+}
+
+// TestPrettyRendererHeaderDanger: a destructive command's title is drawn in
+// the failure colour, anything else in the active one.
+func TestPrettyRendererHeaderDanger(t *testing.T) {
+	for _, danger := range []bool{false, true} {
+		h := testHeader
+		h.Danger = danger
+		var buf bytes.Buffer
+		r := NewPretty(&buf, Options{Width: 70, Color: true, TrueColor: true, Now: fixedClock()})
+		r.Begin(h)
+		want := truePalette.act
+		if danger {
+			want = truePalette.fail
+		}
+		if title := strings.Split(buf.String(), "\n")[1]; !strings.Contains(title, truePalette.bold+want+"Deploying acme") {
+			t.Errorf("danger=%v: title %q isn't drawn in %q", danger, title, want)
+		}
 	}
 }

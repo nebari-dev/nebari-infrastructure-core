@@ -53,7 +53,7 @@ func TestTextHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			tt.log(slog.New(NewTextHandler(&buf, FormatPlain)))
+			tt.log(slog.New(NewTextHandler(&buf, FormatPlain, false)))
 			if buf.String() != tt.want {
 				t.Errorf("got %q, want %q", buf.String(), tt.want)
 			}
@@ -63,7 +63,7 @@ func TestTextHandler(t *testing.T) {
 
 func TestTextHandlerGitHub(t *testing.T) {
 	var buf bytes.Buffer
-	l := slog.New(NewTextHandler(&buf, FormatGitHub))
+	l := slog.New(NewTextHandler(&buf, FormatGitHub, false))
 	l.Error("Command execution failed", "error", errors.New("tofu apply: exit 1\n::add-mask::x"))
 	l.Warn("Received interrupt signal")
 	l.Info("Shutdown complete")

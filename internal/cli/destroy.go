@@ -89,7 +89,8 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, out := startCommandOutput(ctx, "destroy", cfg, destroyHeader(cfg, configFile), destroyLogFile, destroyDryRun)
+	h := destroyHeader(commandHeader(ctx, client, cfg, configFile), cfg.ProjectName, destroyDryRun)
+	ctx, out := startCommandOutput(ctx, "destroy", cfg, h, destroyLogFile, destroyDryRun)
 
 	opts := nic.DestroyOptions{
 		DryRun:  destroyDryRun,
@@ -106,7 +107,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	err = client.Destroy(ctx, cfg, opts)
-	out.finish(err)
+	out.finish(err, "")
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -114,20 +115,25 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// destroyHeader names the destroy for the renderer's header and result line.
-func destroyHeader(cfg *config.NebariConfig, configFile string) output.Header {
-	h := output.Header{
-		Command: "nic destroy",
-		Title:   "Destroying " + cfg.ProjectName,
-		Context: []string{cfg.Cluster.ProviderName(), configFile},
-		Done:    "Destroyed " + cfg.ProjectName,
-		Failed:  "Destroy failed",
-	}
-	if destroyDryRun {
+// destroyHeader names the destroy for the renderer's header and result line,
+// on top of the fields commandHeader fills. A real destroy's title is drawn
+// in the danger colour.
+func destroyHeader(h output.Header, project string, dryRun bool) output.Header {
+	h.Command = "nic destroy"
+	h.Title = "Destroying " + project
+	h.TargetPrep = "on"
+	h.Danger = true
+	h.Done = "Destroyed " + project
+	h.Failed = "Destroy failed"
+	h.Retry = retryCommand("nic destroy", destroyConfigFile)
+	if dryRun {
 		h.Command += " --dry-run"
-		h.Title = "Planning the destroy of " + cfg.ProjectName
-		h.Done = "Dry run finished for " + cfg.ProjectName
+		h.Title = "Planning the destroy of " + project
+		h.Danger = false
+		h.Badge = dryRunBadge
+		h.Done = "Dry run finished for " + project
 		h.Failed = "Dry run failed"
+		h.Retry = retryCommand("nic destroy --dry-run", destroyConfigFile)
 	}
 	return h
 }

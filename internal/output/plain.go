@@ -10,7 +10,8 @@ import (
 // plain is the plain and github formats: one line per step, nothing
 // redrawn, so it reads the same in a terminal, a log file or a CI job.
 //
-//	nic deploy: Deploying acme-nebari (aws, config.yaml)
+//	nic deploy: Deploying acme-nebari to aws · us-west-2
+//	config: config.yaml (nic v0.15.0)
 //	[..]    Infrastructure
 //	[ok]    Infrastructure: Infrastructure deployment completed
 //	[ok]    Infrastructure (8m41s)
@@ -41,12 +42,21 @@ func tag(o outcome) string {
 
 func (p *plain) header(h Header) {
 	line := h.Command + ": " + h.Title
-	if len(h.Context) > 0 {
-		line += " (" + strings.Join(h.Context, ", ") + ")"
+	if h.Target != "" {
+		line += " " + h.TargetPrep + " " + h.Target
+	}
+	if h.Badge != "" {
+		line += " (" + h.Badge + ")"
 	}
 	p.println(line)
-	if h.LogPath != "" {
-		p.println("log: " + h.LogPath)
+	config := h.ConfigFile
+	if config != "" && h.Version != "" {
+		config += " (nic " + h.Version + ")"
+	}
+	for _, f := range [][2]string{{"domain", h.Domain}, {"config", config}, {"log", h.LogPath}} {
+		if f[1] != "" {
+			p.println(f[0] + ": " + f[1])
+		}
 	}
 }
 
@@ -101,14 +111,17 @@ func (p *plain) phaseEnd(ph *phase) {
 	p.println(tag(ph.outcome) + "  " + ph.name + " (" + formatDuration(ph.duration()) + ")")
 }
 
-func (p *plain) result(o outcome, text string, elapsed time.Duration, logPath string) {
-	line := tag(o) + "  " + text
-	if elapsed > 0 {
-		line += " (" + formatDuration(elapsed) + ")"
+func (p *plain) result(r resultLine) {
+	line := tag(r.outcome) + "  " + r.text
+	if r.detail != "" {
+		line += ": " + r.detail
+	}
+	if r.elapsed > 0 {
+		line += " (" + formatDuration(r.elapsed) + ")"
 	}
 	p.println(line)
-	if logPath != "" {
-		p.println("log: " + logPath)
+	for _, h := range r.hints {
+		p.println(h[0] + ": " + h[1])
 	}
 }
 

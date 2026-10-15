@@ -30,9 +30,10 @@ type TextHandler struct {
 }
 
 // NewTextHandler returns a TextHandler writing to w in the style of format f:
-// coloured for pretty, annotations for github, plain text otherwise.
-func NewTextHandler(w io.Writer, f Format) *TextHandler {
-	return &TextHandler{mu: &sync.Mutex{}, w: w, paint: painter(f == FormatPretty), github: f == FormatGitHub}
+// coloured for pretty (24-bit with trueColor), annotations for github, plain
+// text otherwise.
+func NewTextHandler(w io.Writer, f Format, trueColor bool) *TextHandler {
+	return &TextHandler{mu: &sync.Mutex{}, w: w, paint: newPainter(f == FormatPretty, trueColor), github: f == FormatGitHub}
 }
 
 // Enabled reports whether level is at least Info.
@@ -65,7 +66,7 @@ func (h *TextHandler) Handle(_ context.Context, r slog.Record) error {
 		b.WriteString(": " + errText)
 	}
 	if len(extra) > 0 {
-		b.WriteString(" " + h.paint.paint(sgrDim, strings.Join(extra, " ")))
+		b.WriteString(" " + h.paint.paint(h.paint.pal.dim, strings.Join(extra, " ")))
 	}
 	line := b.String()
 	switch {

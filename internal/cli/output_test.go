@@ -42,7 +42,7 @@ func TestCommandOutputLogFile(t *testing.T) {
 			ctx, out := startCommandOutput(context.Background(), "deploy", cfg, output.Header{}, tt.flags, false)
 			status.Phase(ctx, "Infrastructure")
 			status.Success(ctx, "Infrastructure deployment completed")
-			out.finish(tt.err)
+			out.finish(tt.err, "")
 
 			files, _ := filepath.Glob(filepath.Join(home, ".nic", "logs", "*", "*-deploy.jsonl"))
 			escaped, _ := filepath.Glob(filepath.Join(home, "escaped", "*")) // where ../../escaped would land
@@ -85,5 +85,33 @@ func TestCommandOutputLogFile(t *testing.T) {
 				t.Errorf("log records = %q, want %q", msgs, want)
 			}
 		})
+	}
+}
+
+func TestDisplayVersion(t *testing.T) {
+	for in, want := range map[string]string{"0.15.0": "v0.15.0", "v0.15.0-3-gabc": "v0.15.0-3-gabc", "dev": "dev", "": ""} {
+		if got := displayVersion(in); got != want {
+			t.Errorf("displayVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRetryCommand(t *testing.T) {
+	if got := retryCommand("nic deploy", ""); got != "nic deploy" {
+		t.Errorf("without -f: %q", got)
+	}
+	if got := retryCommand("nic deploy", "prod.yaml"); got != "nic deploy -f prod.yaml" {
+		t.Errorf("with -f: %q", got)
+	}
+}
+
+func TestDestroyHeader(t *testing.T) {
+	h := destroyHeader(output.Header{Target: "local"}, "acme", false)
+	if !h.Danger || h.TargetPrep != "on" || h.Title != "Destroying acme" || h.Badge != "" {
+		t.Errorf("destroy header = %+v", h)
+	}
+	h = destroyHeader(output.Header{Target: "local"}, "acme", true)
+	if h.Danger || h.Badge != dryRunBadge || h.Command != "nic destroy --dry-run" {
+		t.Errorf("dry-run destroy header = %+v", h)
 	}
 }

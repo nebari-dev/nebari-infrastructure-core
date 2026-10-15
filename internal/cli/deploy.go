@@ -82,7 +82,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, out := startCommandOutput(ctx, "deploy", cfg, deployHeader(cfg, configFile), deployLogFile, deployDryRun)
+	h := deployHeader(commandHeader(ctx, client, cfg, configFile), cfg.ProjectName, deployDryRun)
+	ctx, out := startCommandOutput(ctx, "deploy", cfg, h, deployLogFile, deployDryRun)
 
 	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
@@ -91,30 +92,44 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	})
 	// Flush pending status messages and print the result line before the
 	// guidance, so the two never interleave.
-	out.finish(err)
 	if err != nil {
+		out.finish(err, "")
 		span.RecordError(err)
 		return err
 	}
+	out.finish(nil, platformURL(cfg, result, deployDryRun))
 
-	writeGuidance(deployGuidance(cfg, result, deployDryRun))
+	writeGuidance(deployGuidance(cfg, result, deployDryRun), deploySteps(cfg, result, deployDryRun))
 	return nil
 }
 
-// deployHeader names the deploy for the renderer's header and result line.
-func deployHeader(cfg *config.NebariConfig, configFile string) output.Header {
-	h := output.Header{
-		Command: "nic deploy",
-		Title:   "Deploying " + cfg.ProjectName,
-		Context: []string{cfg.Cluster.ProviderName(), configFile},
-		Done:    "Deployed " + cfg.ProjectName,
-		Failed:  "Deploy failed",
-	}
-	if deployDryRun {
+// deployInspect is the command offered after a deploy fails in a phase, to
+// see what went wrong in it. The log file covers the other phases.
+var deployInspect = map[string]string{
+	nic.PhaseArgoCD:       "kubectl get pods -n argocd",
+	nic.PhaseFoundational: "kubectl get applications -n argocd",
+}
+
+// deployHeader names the deploy for the renderer's header and result line,
+// on top of the fields commandHeader fills.
+func deployHeader(h output.Header, project string, dryRun bool) output.Header {
+	h.Command = "nic deploy"
+	h.Title = "Deploying " + project
+	h.TargetPrep = "to"
+	h.Done = "Deployed " + project
+	h.Failed = "Deploy failed"
+	h.Retry = retryCommand("nic deploy", deployConfigFile)
+	h.Inspect = deployInspect
+	if dryRun {
 		h.Command += " --dry-run"
-		h.Title = "Planning the deploy of " + cfg.ProjectName
-		h.Done = "Dry run finished for " + cfg.ProjectName
+		h.Title = "Planning the deploy of " + project
+		h.Badge = dryRunBadge
+		h.Done = "Dry run finished for " + project
 		h.Failed = "Dry run failed"
+		h.Retry = retryCommand("nic deploy --dry-run", deployConfigFile)
 	}
 	return h
 }
+
+// dryRunBadge marks a dry run's header.
+const dryRunBadge = "DRY RUN \u00b7 no changes"

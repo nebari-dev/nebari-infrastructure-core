@@ -65,7 +65,7 @@ func configureOutput() error {
 	if outputFormat == output.FormatJSON {
 		h = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 	} else {
-		h = output.NewTextHandler(os.Stderr, outputFormat)
+		h = output.NewTextHandler(os.Stderr, outputFormat, output.TrueColor(os.Getenv))
 	}
 	slog.SetDefault(slog.New(h))
 	return nil
@@ -89,15 +89,19 @@ func terminalWidth() int {
 	return w
 }
 
+// spinnerInterval is how often the live panel's spinner advances.
+const spinnerInterval = 100 * time.Millisecond
+
 // newRenderer returns the renderer for the resolved, non-JSON format.
 func newRenderer(dryRun bool) *output.Renderer {
 	opts := output.Options{Verbose: verbose, DryRun: dryRun, Width: terminalWidth()}
 	switch outputFormat {
 	case output.FormatPretty:
 		opts.Color = true
+		opts.TrueColor = output.TrueColor(os.Getenv)
 		opts.Live = stderrIsTerminal()
 		_, opts.Height = terminalSize()
-		opts.Tick = time.Second
+		opts.Tick = spinnerInterval
 		return output.NewPretty(os.Stderr, opts)
 	case output.FormatGitHub:
 		return output.NewGitHub(os.Stderr, opts)
@@ -106,15 +110,72 @@ func newRenderer(dryRun bool) *output.Renderer {
 	}
 }
 
-// writeGuidance prints guidance sections to stdout. They follow the resolved
-// format, except that pretty panels need stdout itself to be a terminal: when
-// it is redirected (nic deploy > notes.txt) they are written as plain text.
-func writeGuidance(sections []output.Section) {
+// writeGuidance prints what to do after a command to stdout. The JSON format
+// keeps the framed banners NIC has always printed; the others print the
+// numbered steps. Pretty needs stdout itself to be a terminal: when it is
+// redirected (nic deploy > notes.txt) the steps are written as plain text.
+func writeGuidance(banners []output.Section, steps []output.Step) {
 	f := outputFormat
+	if f == output.FormatJSON {
+		output.WriteBanners(os.Stdout, banners)
+		return
+	}
 	if f == output.FormatPretty && !term.IsTerminal(int(os.Stdout.Fd())) {
 		f = output.FormatPlain
 	}
-	output.WriteSections(os.Stdout, f, sections, output.Options{Color: f == output.FormatPretty, Width: terminalWidth()})
+	output.WriteNextSteps(os.Stdout, f, steps, output.Options{
+		Color:     f == output.FormatPretty,
+		TrueColor: output.TrueColor(os.Getenv),
+		Width:     terminalWidth(),
+	})
+}
+
+// commandHeader fills the header fields deploy and destroy share: where the
+// command runs, the domain, the config file and NIC's version.
+func commandHeader(ctx context.Context, client *nic.Client, cfg *config.NebariConfig, configFile string) output.Header {
+	return output.Header{
+		Target:     clusterTarget(ctx, client, cfg),
+		Domain:     cfg.Domain,
+		ConfigFile: configFile,
+		Version:    displayVersion(version),
+	}
+}
+
+// clusterTarget names where a command runs: the cluster provider, then the
+// region, location or kubeconfig context from its summary, whichever it has.
+func clusterTarget(ctx context.Context, client *nic.Client, cfg *config.NebariConfig) string {
+	target := cfg.Cluster.ProviderName()
+	summary, err := client.ClusterSummary(ctx, cfg)
+	if err != nil {
+		return target
+	}
+	for _, key := range []string{"Region", "Location"} {
+		if v := summary[key]; v != "" {
+			return target + " \u00b7 " + v
+		}
+	}
+	if v := summary["Context"]; v != "" {
+		return target + " \u00b7 context " + v
+	}
+	return target
+}
+
+// displayVersion is the build version as the header shows it: v0.15.0 for a
+// release (goreleaser drops the v), dev for a local build.
+func displayVersion(v string) string {
+	if v != "" && v[0] >= '0' && v[0] <= '9' {
+		return "v" + v
+	}
+	return v
+}
+
+// retryCommand is the command line to run cmd again with the same config:
+// the -f flag only when one was given, since auto-discovery finds it again.
+func retryCommand(cmd, configFlag string) string {
+	if configFlag != "" {
+		return cmd + " -f " + configFlag
+	}
+	return cmd
 }
 
 // commandOutput routes a deploy or destroy run's status updates to the
@@ -204,14 +265,15 @@ func (o *commandOutput) resume() {
 	}
 }
 
-// finish flushes pending updates, prints the result line, and records err in
-// the log file before closing it. It does not print err: the command still
-// returns it, and main reports it once (#326). Later calls do nothing.
-func (o *commandOutput) finish(err error) {
+// finish flushes pending updates, prints the result line (with link on
+// success), and records err in the log file before closing it. It does not
+// print err: the command still returns it, and main reports it once (#326).
+// Later calls do nothing.
+func (o *commandOutput) finish(err error, link string) {
 	o.once.Do(func() {
 		o.cleanup()
 		if o.renderer != nil {
-			o.renderer.Finish(err)
+			o.renderer.Finish(err, link)
 		}
 		if o.logFile == nil {
 			return

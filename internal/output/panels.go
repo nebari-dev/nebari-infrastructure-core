@@ -11,28 +11,16 @@ import (
 const maxPanelWidth = 100
 
 // panels is the pretty format: a header, then a rounded box per phase that
-// has steps to show, or a single line for a phase that has none.
+// has steps to show, or a single line for a phase that has none, then the
+// result line.
 //
 // On a terminal (live), the running phase's panel is drawn as soon as the
 // phase starts and redrawn in place as updates arrive: its steps fill in,
-// the newest informational message shows as a dimmed activity line, and the
-// header carries a running icon and the elapsed time. When the phase ends the
-// panel is drawn one last time with its outcome and duration, and stays in the
+// the newest informational message shows as an activity line, and the title
+// carries a spinner and the elapsed time. When the phase ends the panel is
+// drawn one last time with its outcome and duration, and stays in the
 // scrollback. Without a terminal, each panel is printed once, when its phase
 // ends.
-//
-//	❯ nic deploy
-//	  Deploying acme-nebari
-//	  aws · config.yaml
-//
-//	  ✓ Configuration                                             0.1s
-//	  ╭─ ✓ Infrastructure ─────────────────────────────────── 8m41s ─╮
-//	  │ ✓ Infrastructure deployment completed                        │
-//	  ╰──────────────────────────────────────────────────────────────╯
-//	  ╭─ ● Argo CD ──────────────────────────────────────────── 12s ─╮
-//	  │ ✓ Cluster is ready                                           │
-//	  │ ● Installing Argo CD Helm chart                              │
-//	  ╰──────────────────────────────────────────────────────────────╯
 type panels struct {
 	w      io.Writer
 	paint  painter
@@ -41,10 +29,17 @@ type panels struct {
 	height int
 
 	// The live panel: how many lines of it are on screen, the newest
-	// informational message, and whether the caller has the terminal.
+	// informational message, the spinner frame, and whether the caller has
+	// the terminal.
 	liveLines int
 	activity  string
+	frame     int
 	paused    bool
+
+	// blank is true when the last line printed was empty, so a panel can
+	// keep one empty line above it without doubling it. liveBlank is what
+	// it was before the live panel was drawn, restored when it is cleared.
+	blank, liveBlank bool
 }
 
 // indent is the left margin of everything but the prompt line.
@@ -61,23 +56,77 @@ func (p *panels) maxLiveLines() int {
 	if p.height <= 0 {
 		return 12
 	}
-	return min(max(p.height-12, 3), 20)
+	return min(max(p.height-14, 3), 20)
 }
 
 func (p *panels) println(s string) {
 	_, _ = fmt.Fprintln(p.w, s)
+	p.blank = s == ""
 }
 
+// spaced prints an empty line unless the last line already was one.
+func (p *panels) spaced() []string {
+	if p.blank {
+		return nil
+	}
+	return []string{""}
+}
+
+// header prints:
+//
+//	❱ nic deploy
+//	  Deploying acme-nebari to aws · us-east-1          DRY RUN · no changes
+//	  domain  nebari.example.com
+//	  config  config.yaml · nic v0.15.0
+//	  log     ~/.nic/logs/acme-nebari/20261014T124943Z-deploy.jsonl
 func (p *panels) header(h Header) {
-	p.println(p.paint.paint(sgrGreen, glyphPrompt) + " " + h.Command)
-	p.println(indent + p.paint.paint(sgrBold+sgrCyan, h.Title))
-	if len(h.Context) > 0 {
-		p.println(indent + p.paint.paint(sgrDim, strings.Join(h.Context, " · ")))
+	pal := p.paint.pal
+	p.println(p.paint.paint(pal.ok, glyphPrompt) + " " + h.Command)
+
+	titleColor := pal.act
+	if h.Danger {
+		titleColor = pal.fail
 	}
-	if h.LogPath != "" {
-		p.println(indent + p.paint.paint(sgrDim, "log "+h.LogPath))
+	lineWidth := p.innerWidth() + width(indent)
+	title := indent + p.paint.paint(pal.bold+titleColor, h.Title)
+	titleWidth := width(indent + h.Title)
+	badgeWidth := 0
+	if h.Badge != "" {
+		badgeWidth = 2 + width(h.Badge)
 	}
+	if h.Target != "" {
+		// A long target (a kubeconfig context can be a full ARN) is cut to
+		// keep the title on one line, next to the badge.
+		lead := 1 + width(h.TargetPrep) + 1
+		t := truncate(h.Target, max(lineWidth-titleWidth-lead-badgeWidth, 8))
+		title += " " + p.paint.paint(pal.dim, h.TargetPrep) + " " + p.dimSeparators(t)
+		titleWidth += lead + width(t)
+	}
+	if h.Badge != "" {
+		gap := max(lineWidth-titleWidth-width(h.Badge), 2)
+		title += strings.Repeat(" ", gap) + p.paint.paint(pal.warn, h.Badge)
+	}
+	p.println(title)
+
+	row := func(label, value string) {
+		if value != "" {
+			p.println(indent + p.paint.paint(pal.dim, fmt.Sprintf("%-6s", label)) + "  " + value)
+		}
+	}
+	row("domain", h.Domain)
+	config := h.ConfigFile
+	if h.Version != "" {
+		config += p.paint.paint(pal.dim, " · nic "+h.Version)
+	}
+	row("config", config)
+	row("log", h.LogPath)
 	p.println("")
+}
+
+// dimSeparators dims the " · " separators of a target such as "aws · us-east-1".
+func (p *panels) dimSeparators(s string) string {
+	parts := strings.Split(s, " · ")
+	return strings.Join(parts, " "+p.paint.paint(p.paint.pal.dim, "·")+" ")
 }
 
 func (p *panels) phaseStart(ph *phase) {
@@ -88,7 +137,7 @@ func (p *panels) phaseStart(ph *phase) {
 	}
 	// Without a terminal, say what is running, so a long phase isn't silent
 	// until its panel is printed.
-	p.println(indent + p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrBold, ph.name))
+	p.println(indent + p.paint.paint(p.paint.pal.act, spinner[0]) + " " + p.paint.paint(p.paint.pal.name, ph.name))
 }
 
 func (p *panels) step(ph *phase, s step, at time.Time) {
@@ -119,6 +168,7 @@ func (p *panels) progress(ph *phase, message string, at time.Time) {
 
 func (p *panels) tick(ph *phase, now time.Time) {
 	if p.live && ph != nil {
+		p.frame = (p.frame + 1) % len(spinner)
 		p.drawLive(ph, now)
 	}
 }
@@ -130,7 +180,9 @@ func (p *panels) pause() {
 
 func (p *panels) resume(ph *phase, now time.Time) {
 	p.paused = false
-	p.tick(ph, now)
+	if p.live && ph != nil {
+		p.drawLive(ph, now)
+	}
 }
 
 // clearProgress erases the live panel, before anything else is printed.
@@ -139,6 +191,7 @@ func (p *panels) clearProgress() {
 		// Up to the panel's first line, then clear to the end of the screen.
 		_, _ = fmt.Fprintf(p.w, "\x1b[%dA\r\x1b[J", p.liveLines)
 		p.liveLines = 0
+		p.blank = p.liveBlank
 	}
 }
 
@@ -148,11 +201,14 @@ func (p *panels) drawLive(ph *phase, now time.Time) {
 		return
 	}
 	p.clearProgress()
+	pal := p.paint.pal
+	spin := p.paint.paint(pal.act, spinner[p.frame])
 	var activity []string
 	if p.activity != "" {
-		activity = []string{p.paint.paint(sgrCyan, glyphRun) + " " + p.paint.paint(sgrDim, truncate(p.activity, p.innerWidth()-6))}
+		activity = []string{spin + " " + p.paint.paint(pal.dim, truncate(p.activity, p.innerWidth()-6))}
 	}
-	lines := p.panelLines(ph.name, p.paint.paint(sgrCyan, glyphRun), sgrCyan, formatDuration(now.Sub(ph.start)), ph.steps, activity, p.maxLiveLines())
+	p.liveBlank = p.blank
+	lines := append(p.spaced(), p.panelLines(ph.name, spin, pal.act, formatDuration(now.Sub(ph.start)), ph.steps, activity, p.maxLiveLines())...)
 	for _, line := range lines {
 		p.println(line)
 	}
@@ -162,19 +218,20 @@ func (p *panels) drawLive(ph *phase, now time.Time) {
 func (p *panels) phaseEnd(ph *phase) {
 	p.clearProgress()
 	p.activity = ""
+	pal := p.paint.pal
 	dur := formatDuration(ph.duration())
 	if len(ph.steps) == 0 {
-		p.println(indent + p.row(p.paint.icon(ph.outcome)+" "+p.paint.paint(sgrBold, ph.name), 2+width(ph.name), dur, p.innerWidth()))
+		p.println(indent + p.row(p.paint.icon(ph.outcome)+" "+p.paint.paint(pal.name, ph.name), 2+width(ph.name), dur, p.innerWidth()))
 		return
 	}
-	border := sgrDim
+	border := pal.border
 	switch ph.outcome {
 	case outcomeWarn:
-		border = sgrYellow
+		border = pal.warn
 	case outcomeFail:
-		border = sgrRed
+		border = pal.fail
 	}
-	for _, line := range p.panelLines(ph.name, p.paint.icon(ph.outcome), border, dur, ph.steps, nil, 0) {
+	for _, line := range append(p.spaced(), p.panelLines(ph.name, p.paint.icon(ph.outcome), border, dur, ph.steps, nil, 0)...) {
 		p.println(line)
 	}
 }
@@ -188,30 +245,33 @@ func (p *panels) phaseEnd(ph *phase) {
 //	│ ✓ step                  │
 //	╰─────────────────────────╯
 func (p *panels) panelLines(name, icon, border, dur string, steps []step, extra []string, maxLines int) []string {
-	boxWidth := p.innerWidth()
-	content := boxWidth - 4 // "│ " and " │"
-
-	title := " " + icon + " " + p.paint.paint(sgrBold, name) + " "
-	titleWidth := 1 + 1 + 1 + width(name) + 1
-	right := p.paint.paint(border, boxHorizontal+boxTopRight)
-	rightWidth := 2
-	if dur != "" {
-		right = " " + p.paint.paint(sgrDim, dur) + " " + right
-		rightWidth += 1 + width(dur) + 1
-	}
-	fill := max(boxWidth-2-titleWidth-rightWidth, 1)
-	lines := []string{indent + p.paint.paint(border, boxTopLeft+boxHorizontal) + title +
-		p.paint.paint(border, strings.Repeat(boxHorizontal, fill)) + right}
-
 	var body []string
 	for _, s := range steps {
-		body = append(body, p.stepLines(s, content)...)
+		body = append(body, p.stepLines(s, p.innerWidth()-4)...)
 	}
 	body = append(body, extra...)
 	if maxLines > 0 && len(body) > maxLines {
 		hidden := len(body) - (maxLines - 1)
-		body = append([]string{p.paint.paint(sgrDim, fmt.Sprintf("… %d earlier", hidden))}, body[hidden:]...)
+		body = append([]string{p.paint.paint(p.paint.pal.dim, fmt.Sprintf("… %d earlier", hidden))}, body[hidden:]...)
 	}
+	title := icon + " " + p.paint.paint(p.paint.pal.name, name)
+	return p.box(title, 2+width(name), dur, border, body)
+}
+
+// box draws a rounded box with a title (and optional duration) set into its
+// top border around body lines, which must fit innerWidth-4 columns.
+func (p *panels) box(title string, titleWidth int, dur, border string, body []string) []string {
+	boxWidth := p.innerWidth()
+	content := boxWidth - 4 // "│ " and " │"
+	right := p.paint.paint(border, boxHorizontal+boxTopRight)
+	rightWidth := 2
+	if dur != "" {
+		right = " " + p.paint.paint(p.paint.pal.dim, dur) + " " + right
+		rightWidth += 1 + width(dur) + 1
+	}
+	fill := max(boxWidth-2-(titleWidth+2)-rightWidth, 1)
+	lines := []string{indent + p.paint.paint(border, boxTopLeft+boxHorizontal) + " " + title + " " +
+		p.paint.paint(border, strings.Repeat(boxHorizontal, fill)) + right}
 	for _, line := range body {
 		lines = append(lines, indent+p.paint.paint(border, boxVertical)+" "+line+
 			strings.Repeat(" ", max(content-p.visible(line), 0))+" "+p.paint.paint(border, boxVertical))
@@ -219,15 +279,38 @@ func (p *panels) panelLines(name, icon, border, dur string, steps []step, extra 
 	return append(lines, indent+p.paint.paint(border, boxBottomLeft+strings.Repeat(boxHorizontal, boxWidth-2)+boxBottomRight))
 }
 
-func (p *panels) result(o outcome, text string, elapsed time.Duration, logPath string) {
+// result prints the result line and, after a failure, where to look next:
+//
+//	✓ Deployed nebari-local · https://nebari.local                      58s
+//
+//	✗ Deploy failed · Argo CD                                         5m28s
+//
+//	    inspect  kubectl get pods -n argocd
+//	    log      ~/.nic/logs/nebari-local/20261014T124943Z-deploy.jsonl
+//	    retry    nic deploy
+func (p *panels) result(r resultLine) {
+	pal := p.paint.pal
 	p.println("")
-	dur := ""
-	if elapsed > 0 {
-		dur = formatDuration(elapsed)
+	left := p.paint.icon(r.outcome) + " " + p.paint.paint(pal.name, r.text)
+	leftWidth := 2 + width(r.text)
+	if r.detail != "" {
+		color := pal.act
+		if r.outcome != outcomeOK {
+			color = pal.fail
+		}
+		left += " " + p.paint.paint(pal.dim, "·") + " " + p.paint.paint(color, r.detail)
+		leftWidth += 3 + width(r.detail)
 	}
-	p.println(indent + p.row(p.paint.icon(o)+" "+p.paint.paint(sgrBold, text), 2+width(text), dur, p.innerWidth()))
-	if logPath != "" {
-		p.println(indent + p.paint.paint(sgrDim, "log "+logPath))
+	dur := ""
+	if r.elapsed > 0 {
+		dur = formatDuration(r.elapsed)
+	}
+	p.println(indent + p.row(left, leftWidth, dur, p.innerWidth()))
+	if len(r.hints) > 0 {
+		p.println("")
+		for _, h := range r.hints {
+			p.println(indent + "  " + p.paint.paint(pal.dim, fmt.Sprintf("%-7s", h[0])) + "  " + h[1])
+		}
 	}
 }
 
@@ -238,7 +321,7 @@ func (p *panels) row(left string, leftWidth int, dur string, w int) string {
 		return left
 	}
 	gap := max(w-leftWidth-width(dur), 2)
-	return left + strings.Repeat(" ", gap) + p.paint.paint(sgrDim, dur)
+	return left + strings.Repeat(" ", gap) + p.paint.paint(p.paint.pal.dim, dur)
 }
 
 // stepLines renders a step to lines of at most w visible columns. Warnings
@@ -260,7 +343,7 @@ func (p *panels) stepLines(s step, w int) []string {
 	lines := make([]string, len(parts))
 	for i, part := range parts {
 		if s.quiet {
-			part = p.paint.paint(sgrDim, part)
+			part = p.paint.paint(p.paint.pal.dim, part)
 		}
 		if i == 0 {
 			lines[i] = icon + " " + part

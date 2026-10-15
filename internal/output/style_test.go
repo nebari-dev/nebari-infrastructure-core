@@ -12,12 +12,13 @@ func TestFormatDuration(t *testing.T) {
 		want string
 	}{
 		{in: -time.Second, want: ""},
-		{in: 0, want: "0.0s"},
-		{in: 420 * time.Millisecond, want: "0.4s"},
-		{in: 9900 * time.Millisecond, want: "9.9s"},
+		{in: 0, want: "<1s"},
+		{in: 420 * time.Millisecond, want: "<1s"},
+		{in: 9900 * time.Millisecond, want: "9s"},
 		{in: 28 * time.Second, want: "28s"},
+		{in: 5 * time.Minute, want: "5m0s"},
 		{in: 8*time.Minute + 41*time.Second, want: "8m41s"},
-		{in: 65 * time.Minute, want: "1h05m"},
+		{in: 65 * time.Minute, want: "1h5m"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in.String(), func(t *testing.T) {

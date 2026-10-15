@@ -15,8 +15,7 @@ const (
 	glyphFail   = "\u2717" // ballot x
 	glyphWarn   = "!"
 	glyphInfo   = "\u00b7" // middle dot
-	glyphRun    = "\u25cf" // black circle
-	glyphPrompt = "\u276f" // heavy right-pointing angle
+	glyphPrompt = "\u2771" // heavy right-pointing angle bracket ornament
 
 	boxTopLeft     = "\u256d"
 	boxTopRight    = "\u256e"
@@ -26,15 +25,40 @@ const (
 	boxVertical    = "\u2502"
 )
 
-// ANSI SGR sequences used by the pretty format.
-const (
-	sgrReset  = "\x1b[0m"
-	sgrBold   = "\x1b[1m"
-	sgrDim    = "\x1b[2m"
-	sgrRed    = "\x1b[31m"
-	sgrGreen  = "\x1b[32m"
-	sgrYellow = "\x1b[33m"
-	sgrCyan   = "\x1b[36m"
+// spinner is the running phase's icon, one frame per tick (braille dots).
+var spinner = []string{"\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"}
+
+// sgrReset ends any SGR sequence.
+const sgrReset = "\x1b[0m"
+
+// palette holds the SGR sequence for each role in the pretty format.
+type palette struct {
+	ok, act, warn, fail, dim, border, name, bold string
+}
+
+var (
+	// truePalette is the design palette, for terminals with 24-bit colour.
+	truePalette = palette{
+		ok:     "\x1b[38;2;75;196;72m",
+		act:    "\x1b[38;2;14;206;200m",
+		warn:   "\x1b[38;2;229;192;123m",
+		fail:   "\x1b[38;2;242;109;109m",
+		dim:    "\x1b[38;2;143;143;143m",
+		border: "\x1b[38;2;107;107;107m",
+		name:   "\x1b[1;38;2;237;237;237m",
+		bold:   "\x1b[1m",
+	}
+	// basicPalette is its closest match in the 16 standard colours.
+	basicPalette = palette{
+		ok:     "\x1b[32m",
+		act:    "\x1b[36m",
+		warn:   "\x1b[33m",
+		fail:   "\x1b[31m",
+		dim:    "\x1b[90m",
+		border: "\x1b[90m",
+		name:   "\x1b[1;97m",
+		bold:   "\x1b[1m",
+	}
 )
 
 // outcome is the state of a step or a phase.
@@ -52,11 +76,22 @@ func worse(a, b outcome) outcome {
 	return max(a, b)
 }
 
-// painter applies ANSI colour when enabled and is a no-op otherwise.
-type painter bool
+// painter applies the palette's colours when enabled and is a no-op
+// otherwise.
+type painter struct {
+	on  bool
+	pal palette
+}
+
+func newPainter(color, trueColor bool) painter {
+	if trueColor {
+		return painter{on: color, pal: truePalette}
+	}
+	return painter{on: color, pal: basicPalette}
+}
 
 func (p painter) paint(sgr, s string) string {
-	if !p || s == "" {
+	if !p.on || s == "" {
 		return s
 	}
 	return sgr + s + sgrReset
@@ -65,13 +100,13 @@ func (p painter) paint(sgr, s string) string {
 func (p painter) icon(o outcome) string {
 	switch o {
 	case outcomeOK:
-		return p.paint(sgrGreen, glyphOK)
+		return p.paint(p.pal.ok, glyphOK)
 	case outcomeWarn:
-		return p.paint(sgrYellow, glyphWarn)
+		return p.paint(p.pal.warn, glyphWarn)
 	case outcomeFail:
-		return p.paint(sgrRed, glyphFail)
+		return p.paint(p.pal.fail, glyphFail)
 	default:
-		return p.paint(sgrDim, glyphInfo)
+		return p.paint(p.pal.dim, glyphInfo)
 	}
 }
 
@@ -131,20 +166,20 @@ func wrap(s string, w int) []string {
 	return lines
 }
 
-// formatDuration renders a step or phase duration compactly: 0.4s, 28s,
-// 8m41s, 1h05m.
+// formatDuration renders a step or phase duration compactly: <1s, 27s,
+// 5m28s, 1h5m.
 func formatDuration(d time.Duration) string {
 	switch {
 	case d < 0:
 		return ""
-	case d < 10*time.Second:
-		return fmt.Sprintf("%.1fs", d.Seconds())
+	case d < time.Second:
+		return "<1s"
 	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
-		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 	default:
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 	}
 }
 

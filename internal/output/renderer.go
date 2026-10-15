@@ -18,14 +18,30 @@ type Header struct {
 	Command string
 	// Title is shown while the command runs, e.g. "Deploying acme-nebari".
 	Title string
-	// Context lists short facts shown under the title: provider, config file.
-	Context []string
+	// TargetPrep joins the title to the target, e.g. "to" or "on".
+	TargetPrep string
+	// Target is where the command runs: the cluster provider and, when it
+	// has one, its region, location or kubeconfig context.
+	Target string
+	// Domain, ConfigFile and Version are shown under the title when set.
+	Domain     string
+	ConfigFile string
+	Version    string
 	// LogPath is the log file this run writes, if any.
 	LogPath string
+	// Badge is shown at the right of the title, e.g. a dry run's notice.
+	Badge string
+	// Danger draws the title in the failure colour, for destructive commands.
+	Danger bool
 	// Done is the result line on success, e.g. "Deployed acme-nebari".
 	Done string
 	// Failed is the result line on failure, e.g. "Deploy failed".
 	Failed string
+	// Retry is the command to run again after a failure, e.g. "nic deploy".
+	Retry string
+	// Inspect maps a phase name to a command that shows what went wrong in
+	// it, offered when the command fails in that phase.
+	Inspect map[string]string
 }
 
 // Options tune a Renderer.
@@ -42,13 +58,17 @@ type Options struct {
 	DryRun bool
 	// Color enables ANSI colour.
 	Color bool
+	// TrueColor uses 24-bit colours instead of the 16 standard ones. Only used
+	// with Color.
+	TrueColor bool
 	// Width is the terminal width in columns. Zero means 80.
 	Width int
 	// Height is the terminal height in rows, which bounds how tall a live
 	// panel grows. Zero picks a size that fits a common terminal.
 	Height int
-	// Tick redraws the live panel at this interval, so its elapsed time keeps
-	// moving through a long silent wait. Zero disables it. Only used with Live.
+	// Tick redraws the live panel at this interval, advancing its spinner and
+	// elapsed time through a long silent wait. Zero disables it. Only used
+	// with Live.
 	Tick time.Duration
 	// Now returns the current time. Nil means time.Now.
 	Now func() time.Time
@@ -93,7 +113,18 @@ type sink interface {
 	pause()
 	resume(p *phase, now time.Time)
 	phaseEnd(p *phase)
-	result(o outcome, text string, elapsed time.Duration, logPath string)
+	result(r resultLine)
+}
+
+// resultLine is what a command ends with: its outcome, a detail (the URL on
+// success, the failing phase on failure), and where to look after a failure.
+type resultLine struct {
+	outcome outcome
+	text    string
+	detail  string
+	elapsed time.Duration
+	// hints are label and command pairs, e.g. {"retry", "nic deploy"}.
+	hints [][2]string
 }
 
 // Renderer turns status Updates into human-readable output, grouped by the
@@ -123,7 +154,7 @@ type Renderer struct {
 // that refreshes the live panel until Finish.
 func NewPretty(w io.Writer, opts Options) *Renderer {
 	opts = opts.withDefaults()
-	r := &Renderer{sink: &panels{w: w, paint: painter(opts.Color), live: opts.Live, width: opts.Width, height: opts.Height}, opts: opts}
+	r := &Renderer{sink: &panels{w: w, paint: newPainter(opts.Color, opts.TrueColor), live: opts.Live, width: opts.Width, height: opts.Height}, opts: opts}
 	if opts.Live && opts.Tick > 0 {
 		r.stopTick = make(chan struct{})
 		go r.tickEvery(opts.Tick)
@@ -247,10 +278,12 @@ func (r *Renderer) Resume() {
 }
 
 // Finish closes the running phase and prints the result line. err is the
-// command's error; the Renderer marks the running phase as failed but does
-// not print err, since the CLI reports a returned error once on its own. Call
-// Finish after the status handler has been flushed. Later calls do nothing.
-func (r *Renderer) Finish(err error) {
+// command's error; the Renderer marks the running phase as failed and names
+// it on the result line, but does not print err, since the CLI reports a
+// returned error once on its own. link is shown on the result line of a
+// successful run, e.g. the platform's URL. Call Finish after the status
+// handler has been flushed. Later calls do nothing.
+func (r *Renderer) Finish(err error, link string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.finished {
@@ -261,21 +294,40 @@ func (r *Renderer) Finish(err error) {
 		close(r.stopTick)
 	}
 	now := r.opts.Now()
+	failedIn := ""
 	if err != nil && r.current != nil {
 		r.current.outcome = outcomeFail
+		failedIn = r.current.name
 	}
 	r.closePhase(now)
 	r.sink.clearProgress()
 
-	elapsed := now.Sub(r.started)
+	res := resultLine{elapsed: now.Sub(r.started)}
 	switch {
 	case err == nil:
-		r.sink.result(outcomeOK, r.header.Done, elapsed, r.header.LogPath)
+		res.outcome, res.text, res.detail = outcomeOK, r.header.Done, link
 	case errors.Is(err, context.Canceled):
-		r.sink.result(outcomeWarn, "Interrupted after "+formatDuration(elapsed), 0, r.header.LogPath)
+		res.outcome, res.text = outcomeWarn, "Interrupted"
+		res.detail = failedIn
+		res.hints = r.hints("", r.header.Retry)
 	default:
-		r.sink.result(outcomeFail, r.header.Failed+" after "+formatDuration(elapsed), 0, r.header.LogPath)
+		res.outcome, res.text = outcomeFail, r.header.Failed
+		res.detail = failedIn
+		res.hints = r.hints(r.header.Inspect[failedIn], r.header.Retry)
 	}
+	r.sink.result(res)
+}
+
+// hints lists where to look after a run that didn't finish: a command that
+// shows what went wrong, the log file, and the command to run again.
+func (r *Renderer) hints(inspect, retry string) [][2]string {
+	var hints [][2]string
+	for _, h := range [][2]string{{"inspect", inspect}, {"log", r.header.LogPath}, {"retry", retry}} {
+		if h[1] != "" {
+			hints = append(hints, h)
+		}
+	}
+	return hints
 }
 
 // closePhase ends the running phase, if any, at the given time.
