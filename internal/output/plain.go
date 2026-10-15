@@ -8,22 +8,35 @@ import (
 )
 
 // plain is the plain and github formats: one line per step, nothing
-// redrawn, so it reads the same in a terminal, a log file or a CI job.
+// redrawn, so it reads the same in a terminal, a log file or a CI job. Each
+// line starts with the time of day it reports on, so a saved log shows when
+// things happened and how long the gaps between them were.
 //
-//	nic deploy: Deploying acme-nebari to aws · us-west-2
-//	config: config.yaml (nic v0.15.0)
-//	[..]    Infrastructure
-//	[ok]    Infrastructure: Infrastructure deployment completed
-//	[ok]    Infrastructure (8m41s)
+//	13:00:38 nic deploy: Deploying acme-nebari to aws · us-west-2
+//	13:00:38 config: config.yaml (nic v0.15.0)
+//	13:00:38 [..]    Infrastructure
+//	13:09:19 [ok]    Infrastructure: Infrastructure deployment completed
+//	13:09:19 [ok]    Infrastructure (8m41s)
 //
 // With github set, each phase also becomes a collapsible log group and
-// warnings and failures are raised as workflow annotations.
+// warnings and failures are raised as workflow annotations. Those workflow
+// command lines must start with "::", so they carry no time.
 type plain struct {
 	w      io.Writer
 	github bool
 }
 
-func (p *plain) println(s string) {
+// timeLayout is the time of day each plain line starts with. The time is
+// shown in the zone it was recorded in: local time for a real run.
+const timeLayout = "15:04:05"
+
+// line prints s stamped with the time at.
+func (p *plain) line(at time.Time, s string) {
+	_, _ = fmt.Fprintln(p.w, at.Format(timeLayout)+" "+s)
+}
+
+// command prints a GitHub workflow command, which can't be prefixed.
+func (p *plain) command(s string) {
 	_, _ = fmt.Fprintln(p.w, s)
 }
 
@@ -40,7 +53,7 @@ func tag(o outcome) string {
 	}
 }
 
-func (p *plain) header(h Header) {
+func (p *plain) header(h Header, at time.Time) {
 	line := h.Command + ": " + h.Title
 	if h.Target != "" {
 		line += " " + h.TargetPrep + " " + h.Target
@@ -48,27 +61,27 @@ func (p *plain) header(h Header) {
 	if h.Badge != "" {
 		line += " (" + h.Badge + ")"
 	}
-	p.println(line)
+	p.line(at, line)
 	config := h.ConfigFile
 	if config != "" && h.Version != "" {
 		config += " (nic " + h.Version + ")"
 	}
 	for _, f := range [][2]string{{"domain", h.Domain}, {"config", config}, {"log", h.LogPath}} {
 		if f[1] != "" {
-			p.println(f[0] + ": " + f[1])
+			p.line(at, f[0]+": "+f[1])
 		}
 	}
 }
 
 func (p *plain) phaseStart(ph *phase) {
 	if p.github {
-		p.println("::group::" + escapeData(ph.name))
+		p.command("::group::" + escapeData(ph.name))
 		return
 	}
-	p.println("[..]    " + ph.name)
+	p.line(ph.start, "[..]    "+ph.name)
 }
 
-func (p *plain) step(ph *phase, s step, _ time.Time) {
+func (p *plain) step(ph *phase, s step, at time.Time) {
 	text := s.text
 	if s.detail != "" {
 		text += ": " + s.detail
@@ -82,15 +95,15 @@ func (p *plain) step(ph *phase, s step, _ time.Time) {
 	// it replaces the plain line instead of repeating it.
 	switch {
 	case p.github && s.outcome == outcomeWarn:
-		p.println("::warning title=" + escapeProperty(title) + "::" + escapeData(text))
+		p.command("::warning title=" + escapeProperty(title) + "::" + escapeData(text))
 	case p.github && s.outcome == outcomeFail:
-		p.println("::error title=" + escapeProperty(title) + "::" + escapeData(text))
+		p.command("::error title=" + escapeProperty(title) + "::" + escapeData(text))
 	case p.github:
 		// A line the runner sees starting with "::" is a workflow command,
 		// so keep multi-line text on one line.
-		p.println(tag(s.outcome) + "  " + prefix + strings.ReplaceAll(text, "\n", " "))
+		p.line(at, tag(s.outcome)+"  "+prefix+strings.ReplaceAll(text, "\n", " "))
 	default:
-		p.println(tag(s.outcome) + "  " + prefix + text)
+		p.line(at, tag(s.outcome)+"  "+prefix+text)
 	}
 }
 
@@ -110,9 +123,9 @@ func (p *plain) resume(*phase, time.Time) {}
 
 func (p *plain) phaseEnd(ph *phase) {
 	if p.github {
-		p.println("::endgroup::")
+		p.command("::endgroup::")
 	}
-	p.println(tag(ph.outcome) + "  " + ph.name + " (" + formatDuration(ph.duration()) + ")")
+	p.line(ph.end, tag(ph.outcome)+"  "+ph.name+" ("+formatDuration(ph.duration())+")")
 }
 
 func (p *plain) result(r resultLine) {
@@ -123,9 +136,9 @@ func (p *plain) result(r resultLine) {
 	if r.elapsed > 0 {
 		line += " (" + formatDuration(r.elapsed) + ")"
 	}
-	p.println(line)
+	p.line(r.at, line)
 	for _, h := range r.hints {
-		p.println(h[0] + ": " + h[1])
+		p.line(r.at, h[0]+": "+h[1])
 	}
 }
 

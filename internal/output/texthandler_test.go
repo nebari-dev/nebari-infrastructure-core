@@ -2,11 +2,17 @@ package output
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
+
+// stamps matches the time of day TextHandler starts a plain line with.
+var stamps = regexp.MustCompile(`(?m)^\d\d:\d\d:\d\d `)
 
 func TestTextHandler(t *testing.T) {
 	tests := []struct {
@@ -55,8 +61,8 @@ func TestTextHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			tt.log(slog.New(NewTextHandler(&buf, FormatPlain, false)))
-			if buf.String() != tt.want {
-				t.Errorf("got %q, want %q", buf.String(), tt.want)
+			if got := stamps.ReplaceAllString(buf.String(), ""); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -72,8 +78,8 @@ func TestTextHandlerGitHub(t *testing.T) {
 	want := "::error::Command execution failed: tofu apply: exit 1%0A::add-mask::x\n" +
 		"::warning::Received interrupt signal\n" +
 		"Shutdown complete\n"
-	if buf.String() != want {
-		t.Errorf("got %q, want %q", buf.String(), want)
+	if got := stamps.ReplaceAllString(buf.String(), ""); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -86,5 +92,33 @@ func TestTextHandlerSanitizes(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "push rejected: ]52;c;aGk=") {
 		t.Errorf("the error text should survive sanitizing: %q", buf.String())
+	}
+}
+
+// TestTextHandlerTimestamps: plain and github lines start with the record's
+// time of day; pretty and workflow commands don't.
+func TestTextHandlerTimestamps(t *testing.T) {
+	at := time.Date(2026, 10, 15, 13, 0, 38, 0, time.UTC)
+	tests := []struct {
+		format Format
+		level  slog.Level
+		want   string
+	}{
+		{format: FormatPlain, level: slog.LevelInfo, want: "13:00:38 Shutdown complete\n"},
+		{format: FormatPlain, level: slog.LevelWarn, want: "13:00:38 " + glyphWarn + " Shutdown complete\n"},
+		{format: FormatGitHub, level: slog.LevelInfo, want: "13:00:38 Shutdown complete\n"},
+		{format: FormatGitHub, level: slog.LevelWarn, want: "::warning::Shutdown complete\n"},
+		{format: FormatPretty, level: slog.LevelInfo, want: "Shutdown complete\n"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.format)+"/"+tt.level.String(), func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := NewTextHandler(&buf, tt.format, false).Handle(context.Background(), slog.NewRecord(at, tt.level, "Shutdown complete", 0)); err != nil {
+				t.Fatal(err)
+			}
+			if buf.String() != tt.want {
+				t.Errorf("got %q, want %q", buf.String(), tt.want)
+			}
+		})
 	}
 }

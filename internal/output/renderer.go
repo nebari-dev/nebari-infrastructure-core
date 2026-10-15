@@ -102,7 +102,8 @@ func (p *phase) duration() time.Duration { return p.end.Sub(p.start) }
 // sink draws what the Renderer tracks. Implementations are only ever called
 // with the Renderer's lock held, so they need no locking of their own.
 type sink interface {
-	header(h Header)
+	// header prints h at the start of the run, at.
+	header(h Header, at time.Time)
 	phaseStart(p *phase)
 	// step reports a step as it happens, after it was added to p's steps.
 	// p is nil for updates sent before the first phase.
@@ -129,6 +130,8 @@ type resultLine struct {
 	outcome outcome
 	text    string
 	detail  string
+	// at is when the run ended.
+	at time.Time
 	// link marks detail as a link (the platform's URL) rather than the name
 	// of the phase that failed.
 	link    bool
@@ -224,7 +227,7 @@ func (r *Renderer) Begin(h Header) {
 	h = h.sanitized()
 	r.header = h
 	r.started = r.opts.Now()
-	r.sink.header(h)
+	r.sink.header(h, r.started)
 }
 
 // Handle renders one status Update. It is a status.Handler.
@@ -329,7 +332,7 @@ func (r *Renderer) Finish(err error, link string) {
 	r.closePhase(now)
 	r.sink.clearProgress()
 
-	res := resultLine{elapsed: now.Sub(r.started)}
+	res := resultLine{elapsed: now.Sub(r.started), at: now}
 	switch {
 	case err == nil && r.worst >= outcomeWarn:
 		// Exit codes are the pkg/nic contract's to decide; the result line

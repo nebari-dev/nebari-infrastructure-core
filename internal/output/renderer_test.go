@@ -96,101 +96,101 @@ func TestPlainRenderer(t *testing.T) {
 		{
 			name: "plain",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
-			want: `nic deploy: Deploying acme to aws · us-west-2
-config: config.yaml (nic v0.15.0)
-log: /logs/acme.jsonl
-[..]    Configuration
-[ok]    Configuration (<1s)
-[..]    Infrastructure
-[ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9s)
-[..]    Argo CD
-[warn]  Argo CD: Failed to install Argo CD: boom
-[warn]  Argo CD (5s)
-[warn]  Deployed acme with warnings: https://acme.example.com (15s)
+			want: `13:00:00 nic deploy: Deploying acme to aws · us-west-2
+13:00:00 config: config.yaml (nic v0.15.0)
+13:00:00 log: /logs/acme.jsonl
+13:00:00 [..]    Configuration
+13:00:00 [ok]    Configuration (<1s)
+13:00:00 [..]    Infrastructure
+13:00:09 [ok]    Infrastructure: Infrastructure deployment completed
+13:00:10 [ok]    Infrastructure (9s)
+13:00:10 [..]    Argo CD
+13:00:12 [warn]  Argo CD: Failed to install Argo CD: boom
+13:00:15 [warn]  Argo CD (5s)
+13:00:15 [warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 		{
 			name:    "plain verbose shows info and tool output",
 			new:     func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			verbose: true,
-			want: `nic deploy: Deploying acme to aws · us-west-2
-config: config.yaml (nic v0.15.0)
-log: /logs/acme.jsonl
-[..]    Configuration
-[info]  Configuration: Starting deployment
-[ok]    Configuration (<1s)
-[..]    Infrastructure
-[info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
-[ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9s)
-[..]    Argo CD
-[warn]  Argo CD: Failed to install Argo CD: boom
-[warn]  Argo CD (5s)
-[warn]  Deployed acme with warnings: https://acme.example.com (15s)
+			want: `13:00:00 nic deploy: Deploying acme to aws · us-west-2
+13:00:00 config: config.yaml (nic v0.15.0)
+13:00:00 log: /logs/acme.jsonl
+13:00:00 [..]    Configuration
+13:00:00 [info]  Configuration: Starting deployment
+13:00:00 [ok]    Configuration (<1s)
+13:00:00 [..]    Infrastructure
+13:00:01 [info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
+13:00:09 [ok]    Infrastructure: Infrastructure deployment completed
+13:00:10 [ok]    Infrastructure (9s)
+13:00:10 [..]    Argo CD
+13:00:12 [warn]  Argo CD: Failed to install Argo CD: boom
+13:00:15 [warn]  Argo CD (5s)
+13:00:15 [warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 		{
 			name: "failure marks the running phase and the result",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			err:  errors.New("install argo cd: timed out"),
-			want: `nic deploy: Deploying acme to aws · us-west-2
-config: config.yaml (nic v0.15.0)
-log: /logs/acme.jsonl
-[..]    Configuration
-[ok]    Configuration (<1s)
-[..]    Infrastructure
-[ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9s)
-[..]    Argo CD
-[warn]  Argo CD: Failed to install Argo CD: boom
-[fail]  Argo CD (5s)
-[fail]  Deploy failed: Argo CD (15s)
-inspect: kubectl get pods -n argocd
-log: /logs/acme.jsonl
-retry: nic deploy
+			want: `13:00:00 nic deploy: Deploying acme to aws · us-west-2
+13:00:00 config: config.yaml (nic v0.15.0)
+13:00:00 log: /logs/acme.jsonl
+13:00:00 [..]    Configuration
+13:00:00 [ok]    Configuration (<1s)
+13:00:00 [..]    Infrastructure
+13:00:09 [ok]    Infrastructure: Infrastructure deployment completed
+13:00:10 [ok]    Infrastructure (9s)
+13:00:10 [..]    Argo CD
+13:00:12 [warn]  Argo CD: Failed to install Argo CD: boom
+13:00:15 [fail]  Argo CD (5s)
+13:00:15 [fail]  Deploy failed: Argo CD (15s)
+13:00:15 inspect: kubectl get pods -n argocd
+13:00:15 log: /logs/acme.jsonl
+13:00:15 retry: nic deploy
 `,
 		},
 		{
 			name: "interrupt",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewPlain(b, o) },
 			err:  context.Canceled,
-			want: `nic deploy: Deploying acme to aws · us-west-2
-config: config.yaml (nic v0.15.0)
-log: /logs/acme.jsonl
-[..]    Configuration
-[ok]    Configuration (<1s)
-[..]    Infrastructure
-[ok]    Infrastructure: Infrastructure deployment completed
-[ok]    Infrastructure (9s)
-[..]    Argo CD
-[warn]  Argo CD: Failed to install Argo CD: boom
-[warn]  Argo CD (5s)
-[warn]  Interrupted: Argo CD (15s)
-log: /logs/acme.jsonl
-retry: nic deploy
+			want: `13:00:00 nic deploy: Deploying acme to aws · us-west-2
+13:00:00 config: config.yaml (nic v0.15.0)
+13:00:00 log: /logs/acme.jsonl
+13:00:00 [..]    Configuration
+13:00:00 [ok]    Configuration (<1s)
+13:00:00 [..]    Infrastructure
+13:00:09 [ok]    Infrastructure: Infrastructure deployment completed
+13:00:10 [ok]    Infrastructure (9s)
+13:00:10 [..]    Argo CD
+13:00:12 [warn]  Argo CD: Failed to install Argo CD: boom
+13:00:15 [warn]  Argo CD (5s)
+13:00:15 [warn]  Interrupted: Argo CD (15s)
+13:00:15 log: /logs/acme.jsonl
+13:00:15 retry: nic deploy
 `,
 		},
 		{
 			name: "github groups phases and annotates warnings",
 			new:  func(b *bytes.Buffer, o Options) *Renderer { return NewGitHub(b, o) },
-			want: `nic deploy: Deploying acme to aws · us-west-2
-config: config.yaml (nic v0.15.0)
-log: /logs/acme.jsonl
+			want: `13:00:00 nic deploy: Deploying acme to aws · us-west-2
+13:00:00 config: config.yaml (nic v0.15.0)
+13:00:00 log: /logs/acme.jsonl
 ::group::Configuration
-[info]  Configuration: Starting deployment
+13:00:00 [info]  Configuration: Starting deployment
 ::endgroup::
-[ok]    Configuration (<1s)
+13:00:00 [ok]    Configuration (<1s)
 ::group::Infrastructure
-[info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
-[ok]    Infrastructure: Infrastructure deployment completed
+13:00:01 [info]  Infrastructure: Plan: 1 to add, 0 to change, 1 to destroy.
+13:00:09 [ok]    Infrastructure: Infrastructure deployment completed
 ::endgroup::
-[ok]    Infrastructure (9s)
+13:00:10 [ok]    Infrastructure (9s)
 ::group::Argo CD
 ::warning title=Argo CD::Failed to install Argo CD: boom
 ::endgroup::
-[warn]  Argo CD (5s)
-[warn]  Deployed acme with warnings: https://acme.example.com (15s)
+13:00:15 [warn]  Argo CD (5s)
+13:00:15 [warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 	}

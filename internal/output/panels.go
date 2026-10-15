@@ -87,7 +87,7 @@ func (p *panels) spaced() []string {
 //	  domain  nebari.example.com
 //	  config  config.yaml · nic v0.15.0
 //	  log     ~/.nic/logs/acme-nebari/20261014T124943Z-deploy.jsonl
-func (p *panels) header(h Header) {
+func (p *panels) header(h Header, _ time.Time) {
 	pal := p.paint.pal
 	p.println(p.paint.paint(pal.ok, glyphPrompt) + " " + h.Command)
 

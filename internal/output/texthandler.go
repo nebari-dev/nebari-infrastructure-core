@@ -19,12 +19,14 @@ import (
 //
 // A top-level "error" attribute is joined to the message; other attributes
 // follow as key=value pairs. In the github format, warnings and errors become
-// workflow annotations instead.
+// workflow annotations instead. Outside pretty, lines start with the record's
+// time of day, like the renderer's plain lines.
 type TextHandler struct {
 	mu     *sync.Mutex
 	w      io.Writer
 	paint  painter
 	github bool
+	stamp  bool
 	attrs  []slog.Attr
 	group  string
 }
@@ -33,7 +35,7 @@ type TextHandler struct {
 // coloured for pretty (24-bit with trueColor), annotations for github, plain
 // text otherwise.
 func NewTextHandler(w io.Writer, f Format, trueColor bool) *TextHandler {
-	return &TextHandler{mu: &sync.Mutex{}, w: w, paint: newPainter(f == FormatPretty, trueColor), github: f == FormatGitHub}
+	return &TextHandler{mu: &sync.Mutex{}, w: w, paint: newPainter(f == FormatPretty, trueColor), github: f == FormatGitHub, stamp: f != FormatPretty}
 }
 
 // Enabled reports whether level is at least Info.
@@ -80,6 +82,10 @@ func (h *TextHandler) Handle(_ context.Context, r slog.Record) error {
 		line = h.paint.icon(outcomeFail) + " " + line
 	case r.Level >= slog.LevelWarn:
 		line = h.paint.icon(outcomeWarn) + " " + line
+	}
+	// Workflow commands (the annotations above) must start the line.
+	if h.stamp && !r.Time.IsZero() && !strings.HasPrefix(line, "::") {
+		line = r.Time.Format(timeLayout) + " " + line
 	}
 
 	h.mu.Lock()
