@@ -397,6 +397,68 @@ if err != nil {
 
 Either way, a failure that can leave resources behind must surface in the exit code: `pkg/nic.Destroy` re-wraps the provider error with `%w` and emits `LevelWarning` instead of `LevelSuccess`, so a partial teardown never looks clean (#534).
 
+### Release Installer (`scripts/install.sh`)
+
+`scripts/install.sh` is a **published entry point**, not an internal helper: the
+README documents `curl ... /main/scripts/install.sh | sh`, pinned to `main`. Do
+not rename or move it, and do not merge a `main` that leaves it broken, or every
+in-flight one-liner breaks — there is no release gate between a squash-merge and
+every user running it. It is POSIX `sh` (not `bash`) because it is piped into
+arbitrary shells.
+
+It hand-reimplements facts from `.goreleaser.yml` and the release workflow that
+`goreleaser check` does not cross-check: the project name, the archive name
+template and format, the `amd64` -> `x86_64` rename, the checksum filename, the
+signature bundle suffix, the per-major cosign floor (also stated in
+`docs/operations/verifying-releases.md` and `README.md`), and the release
+workflow filename baked into its cosign identity. Changing either side without
+the other is caught by `scripts/check-installer-contract.sh`. The check greps
+source text, so it catches renames and reorderings but not a deletion that
+leaves the string behind in a comment — read the non-coverage list at the top of
+that script before relying on it.
+
+`scripts/test-installer.sh` covers the behaviour rather than the contract: it
+sources `install.sh` with `NIC_INSTALL_SH_SOURCE_ONLY=1`, stubs `fetch`/`cosign`/
+`gh`/`uname`, and asserts the authenticity decision table — which outcomes
+install and which abort — plus the cosign floor, the arch mapping and the
+parsing of `NIC_REQUIRE_SIGNATURE` and `NIC_EXPECTED_SHA256`. Both scripts run
+in the **`Test`** job because it is merge-blocking; a check that cannot stop a
+merge cannot back the promise above. The suite is offline, so it does not verify
+a real install or real cosign behaviour, and its `-n` parse checks cannot see
+bashisms (`[[` is a valid command name under dash). Add a case there when you
+change what the installer accepts.
+
+Authenticity handling has one rule worth keeping straight: the installer
+degrades to checksum-only **only** when no capable verifier is on the host (no
+cosign at the floor, no logged-in `gh`), and `NIC_REQUIRE_SIGNATURE=1` turns even
+that into a stop. Once a verifier is present nothing degrades, for any tag: a
+missing, unfetchable or failing signature is fatal. That includes releases below
+`SIGNING_SINCE`, because "this release predates signing" is exactly what a
+forged release marked latest would claim; those install only against a digest
+the user pins with `NIC_EXPECTED_SHA256`.
+
+The same reasoning governs the failure *messages*, which is subtler and has
+regressed before. `NIC_EXPECTED_SHA256` is offered only where its premise holds —
+the release predates signing, or a fetch failed — and never where the server
+answered and the signature is absent or does not verify, or where `gh` finds no
+attestation (it cannot tell that apart from a substituted archive). A user
+following the advice there would copy the digest from the same release's
+`checksums.txt` and install the attacker's binary. `scripts/test-installer.sh`
+asserts this message by message.
+
+cosign verifies offline against a Sigstore trust root pinned by digest
+(`TRUSTED_ROOT_SHA256`) and served from `scripts/trusted-roots/<digest>.json` on
+`main`. The files there are **content-addressed: never edit or delete one**, or
+installers already saved by users stop working; to update the root, add a new
+file and move the pin. Update it when Sigstore rotates a key that the release
+workflow's signer uses, since a release signed under a key the pinned root lacks
+fails verification for every cosign user, with a message that reads as tampering.
+The `check-installer` job in `release.yml` installs each new release with main's
+installer and a signature required, so a rotation shows up there as a failed
+release run before users report it. Take the new root from cosign's TUF-verified cache (`cosign initialize`, then
+`~/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json`), not from
+an unauthenticated download.
+
 ## Testing Strategy
 
 ### Unit Tests

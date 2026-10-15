@@ -102,6 +102,54 @@ jobs:
         with:
           subject-path: 'dist/*.tar.gz, dist/*.zip, dist/checksums.txt'
 
+  # Installs the release just published with the installer users actually run,
+  # main's scripts/install.sh, with a signature required. cosign there verifies
+  # offline against the Sigstore trust root pinned in scripts/trusted-roots/, so
+  # if Sigstore has rotated a key this release was signed under, every cosign
+  # user's install now fails with a message that reads as tampering. This job is
+  # where that shows up first: update the root as AGENTS.md describes. It also
+  # catches any drift between the release assets and what the installer fetches.
+  # Runs on main's checkout, not the tag's, because main is what `curl | sh`
+  # serves; the release is already public by now, so a failure here is an alarm
+  # rather than a gate.
+  check-installer:
+    name: Install the release with main's installer
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          persist-credentials: false
+
+      # A cosign at the installer's floor, so the cosign path runs rather than
+      # the gh fallback or the unverified one. This is the verifier, not the
+      # signer pinned in the release job above.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      - name: Install ${{ github.ref_name }} with a signature required
+        env:
+          NIC_VERSION: ${{ github.ref_name }}
+          NIC_REQUIRE_SIGNATURE: '1'
+          INSTALL_DIR: ${{ runner.temp }}/nic-bin
+        # The grep asserts that cosign is what verified it, so this keeps testing
+        # the trust root even if the installer's choice of verifier changes.
+        run: |
+          set -euo pipefail
+          sh scripts/install.sh 2>&1 | tee "$RUNNER_TEMP/install.log"
+          if ! grep -q '^Authenticity verified (cosign' "$RUNNER_TEMP/install.log"; then
+            echo "::error::the install did not verify the release with cosign; see the log above"
+            exit 1
+          fi
+          "$INSTALL_DIR/nic" version
+
   # The hand-off. This costs one short run that usually finds the channel not
   # ready and exits; the cron in publish-starters.yml is what actually lands it.
   # Bundling the trigger here keeps the release the thing that starts the chain,

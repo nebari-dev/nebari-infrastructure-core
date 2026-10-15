@@ -118,6 +118,16 @@ release:
 
     ### Installation
 
+    #### Install script (Linux/macOS)
+    ```bash
+    curl -sfL https://raw.githubusercontent.com/nebari-dev/nebari-infrastructure-core/main/scripts/install.sh | NIC_VERSION={{ .Tag }} sh
+    ```
+    `NIC_VERSION` pins the install to {{ .Tag }}, the release these notes describe.
+    The script itself comes from `main`, so it always carries the latest installer
+    fixes. Change the location with `INSTALL_DIR`; see the
+    [README](https://github.com/nebari-dev/nebari-infrastructure-core#install)
+    for the other options.
+
     #### Homebrew (macOS)
     ```bash
     brew install nebari-dev/tap/nic
