@@ -161,7 +161,7 @@ pkg/
   └── telemetry/        # OpenTelemetry tracer setup
 ```
 
-Output: `internal/cli/output.go` holds the `--log-format`/`--verbose` flags and `startCommandOutput`, the output session `deploy` and `destroy` run through (renderer plus JSON log file), and `internal/cli/guidance.go` builds the post-deploy guidance as data. `internal/output` renders the status stream: pretty panels, plain lines, GitHub Actions groups, and the `TextHandler` slog uses when the format isn't JSON.
+Output: `internal/cli/output.go` holds the `--log-format`/`--verbose` flags and `startCommandOutput`, the output session `deploy` and `destroy` run through (renderer plus JSON log file), and `internal/cli/guidance.go` builds the post-deploy Next steps as data. `internal/output` renders the status stream: pretty panels, plain lines, GitHub Actions groups, and the `TextHandler` slog uses when the format isn't JSON. In `pkg/nic`, `phases.go` names the phases deploy and destroy announce, and `summary.go` (`Client.ClusterSummary`) gives the CLI the cluster provider's summary for the header.
 
 ### The Cluster `Provider` Interface
 

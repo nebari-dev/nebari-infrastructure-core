@@ -47,15 +47,17 @@ defer cleanup()
 
 | `--log-format` | Used when | What it prints |
 |---|---|---|
-| `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb`, `json` otherwise |
+| `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb` and on Windows (legacy consoles don't interpret the escape sequences pretty needs; `--log-format pretty` still works in Windows Terminal), `json` otherwise |
 | `pretty` | terminals | A panel per phase, drawn as soon as the phase starts and filled in as it runs, with a spinner and coloured results (24-bit colour when `COLORTERM` is `truecolor` or `24bit`, the 16 standard colours otherwise) |
 | `plain` | log files, dumb terminals | One line per step, no colour, nothing redrawn |
 | `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
 | `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
 
-The header names the target (the cluster provider, then its region, location or kubeconfig context), the domain, the config file and NIC's version, and the log file. A run ends with a result line: on success it carries the platform's URL, and on failure it names the phase that failed and lists where to look next (a command to inspect that phase, the log file, and the command to run again).
+The header names the target (the cluster provider, then its region, location or kubeconfig context, from the `cluster.SummaryKey*` entries of the provider's `Summary`), the domain, the config file and NIC's version, and the log file. A run ends with a result line: on success it carries the platform's URL, with warnings it says so (the exit code is unchanged: that is `pkg/nic`'s contract), and on failure it names the phase that failed and lists where to look next (a command to inspect that phase, the log file, and the command to run again).
 
-After a deploy, `pretty` and `plain` print the guidance as numbered **Next steps**: the DNS records or `/etc/hosts` line to create when no DNS provider manages them, the services to open, and how to sign in. `json` keeps the framed banners earlier releases printed.
+Anything else written to stderr while a panel is live goes through the renderer, which prints it above the panel: the CLI's own log records (the interrupt notice) and Kubernetes API warnings, which client-go would otherwise print through klog. Subprocesses never write to the terminal; their output is tool output on the status stream (see AGENTS.md).
+
+After a deploy, every format prints the guidance as numbered **Next steps** on stdout (as plain text in all but `pretty`): the DNS records or `/etc/hosts` line to create when no DNS provider manages them, the services to open, and how to sign in. These replace the framed banners earlier releases printed in every format.
 
 A deploy on a terminal (`pretty`): a local kind deploy as it runs, then an AWS deploy that finished and one that failed. All replay the status stream of a real run, with names anonymised, through `internal/output`; the animation keeps the real durations but shortens the two long waits:
 
@@ -65,7 +67,7 @@ A deploy on a terminal (`pretty`): a local kind deploy as it runs, then an AWS d
 
 ![nic deploy failing in the Argo CD phase, with where to look next](../assets/cli-output/deploy-failed.svg)
 
-`--verbose` (`-v`) also shows informational updates and tool output (OpenTofu events) under their phase. Whatever the format, `deploy` and `destroy` write every update as JSON to `~/.nic/logs/<project>/<UTC time>-<command>.jsonl` (`--log-file` to choose the path, `--no-log-file` to skip it).
+`--verbose` (`-v`) also shows informational updates and tool output (OpenTofu events) under their phase. Whatever the format, `deploy` and `destroy` write every update as JSON to `~/.nic/logs/<project>/<UTC time>-<command>.jsonl` (`--log-file` to choose the path, `--no-log-file` to skip it). The file is made readable by its owner only (0600), even when `--log-file` names an existing one; directories NIC creates for it are 0700, while an existing directory keeps its mode.
 
 ## Usage in Library Code
 
@@ -143,7 +145,7 @@ status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet gateway already ex
 
 ## When to Use Each Level
 
-On a terminal (`pretty` and `plain`), `Info` and `Progress` updates only show as the running panel's activity line (`pretty`), or not at all (`plain`): they are listed under their phase with `--verbose`, and in dry runs, whose `Would ...` lines are `Info`. Tool output (updates carrying `MetadataKeyDetail`) is listed only with `--verbose`. Everything reaches the JSON output and the log file. So a message a user must see on every run needs `Success`, `Warning` or `Error`.
+On a terminal (`pretty` and `plain`), `Info` and `Progress` updates only show as the running panel's activity line (`pretty`), or not at all (`plain`): they are listed under their phase with `--verbose`, and in dry runs, whose `Would ...` lines are `Info`. Tool output (updates carrying `MetadataKeyDetail`) at `Info` or `Success` is listed only with `--verbose`; its warnings and errors always show. The `github` format lists everything, since its phases are collapsed groups. Everything reaches the JSON output and the log file. So a message a user must see on every run needs `Success`, `Warning` or `Error`.
 
 | Level | Use Case | Example |
 |-------|----------|---------|

@@ -400,9 +400,9 @@ ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
 defer cleanup()
 
 // or, for deploy and destroy, the renderer plus the log file
-ctx, out := startCommandOutput(ctx, "deploy", cfg, header, logFileFlags)
+ctx, out := startCommandOutput(ctx, "deploy", cfg, header, logFileFlags, dryRun)
 result, err := client.Deploy(ctx, cfg, opts)
-out.finish(err) // flush, print the result line, close the log file
+out.finish(err, link) // flush, print the result line, close the log file
 ```
 
 ## Supporting Files
