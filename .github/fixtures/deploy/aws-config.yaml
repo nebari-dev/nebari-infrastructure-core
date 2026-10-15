@@ -42,6 +42,12 @@ cluster:
         min_nodes: 1
         max_nodes: 3
 
+    # Default MULTI_AZ_1, so CI covers the route-table path users get. Skip the
+    # final backup and delete child volumes so teardown leaves nothing billed.
+    fsx_openzfs:
+      skip_final_backup: true
+      delete_child_volumes_on_destroy: true
+
     tags:
       Environment: ci
       Project: nebari

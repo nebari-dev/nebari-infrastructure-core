@@ -166,6 +166,126 @@ func TestValidateTaints(t *testing.T) {
 	}
 }
 
+// TestExtractAWSConfigFSxOpenZFSBlock parses real YAML, so the raw provider
+// config has the map types the config parser actually produces, and checks
+// that writing the block, even with nothing under it, turns FSx on.
+func TestExtractAWSConfigFSxOpenZFSBlock(t *testing.T) {
+	tests := []struct {
+		name        string
+		fsxBlock    string
+		wantEnabled bool
+	}{
+		{name: "omitted block is off", fsxBlock: "", wantEnabled: false},
+		{name: "bare block is on", fsxBlock: "    fsx_openzfs:\n", wantEnabled: true},
+		{name: "empty map is on", fsxBlock: "    fsx_openzfs: {}\n", wantEnabled: true},
+		{name: "block with settings is on", fsxBlock: "    fsx_openzfs:\n      deployment_type: SINGLE_AZ_2\n", wantEnabled: true},
+		{name: "explicit enabled true is on", fsxBlock: "    fsx_openzfs:\n      enabled: true\n", wantEnabled: true},
+		{name: "explicit enabled false is off", fsxBlock: "    fsx_openzfs:\n      enabled: false\n      deployment_type: SINGLE_AZ_2\n", wantEnabled: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yamlDoc := "project_name: test\ncluster:\n  aws:\n    region: us-west-2\n" + tt.fsxBlock
+			nebariCfg, err := config.ParseConfigBytes([]byte(yamlDoc))
+			if err != nil {
+				t.Fatalf("parse config: %v", err)
+			}
+
+			awsCfg, err := extractAWSConfig(context.Background(), nebariCfg.Cluster)
+			if err != nil {
+				t.Fatalf("extractAWSConfig: %v", err)
+			}
+			if got := awsCfg.FSxOpenZFSEnabled(); got != tt.wantEnabled {
+				t.Errorf("FSxOpenZFSEnabled() = %v, want %v", got, tt.wantEnabled)
+			}
+		})
+	}
+}
+
+// TestValidateFSxOpenZFS exercises the helper directly for the same reason as
+// TestValidateTaints: valid configs would otherwise fall through Validate to
+// the AWS credential check.
+func TestValidateFSxOpenZFS(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *Config
+		errSubstr string // "" means no error expected
+	}{
+		{name: "no fsx block is fine", cfg: &Config{}},
+		{
+			name: "disabled skips validation",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{Enabled: boolPtr(false), DeploymentType: "SINGLE_AZ_1"}},
+		},
+		{
+			name: "default deployment type in a new VPC",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{}},
+		},
+		{
+			name: "SINGLE_AZ_2 is accepted",
+			cfg:  &Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_2"}},
+		},
+		{
+			name:      "unsupported deployment type is rejected",
+			cfg:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_1"}},
+			errSubstr: "fsx_openzfs.deployment_type",
+		},
+		{
+			name:      "lowercase deployment type is rejected",
+			cfg:       &Config{FSxOpenZFS: &FSxOpenZFSConfig{DeploymentType: "multi_az_1"}},
+			errSubstr: "fsx_openzfs.deployment_type",
+		},
+		{
+			name: "multi-AZ in an existing VPC requires route tables",
+			cfg: &Config{
+				ExistingVPCID: "vpc-123",
+				FSxOpenZFS:    &FSxOpenZFSConfig{},
+			},
+			errSubstr: "existing_private_route_table_ids",
+		},
+		{
+			name: "multi-AZ with existing subnets only requires route tables",
+			cfg: &Config{
+				ExistingPrivateSubnetIDs: []string{"subnet-a", "subnet-b"},
+				FSxOpenZFS:               &FSxOpenZFSConfig{},
+			},
+			errSubstr: "existing_private_route_table_ids",
+		},
+		{
+			name: "multi-AZ in an existing VPC with route tables is accepted",
+			cfg: &Config{
+				ExistingVPCID:                "vpc-123",
+				ExistingPrivateRouteTableIDs: []string{"rtb-a"},
+				FSxOpenZFS:                   &FSxOpenZFSConfig{},
+			},
+		},
+		{
+			name: "single-AZ in an existing VPC needs no route tables",
+			cfg: &Config{
+				ExistingVPCID: "vpc-123",
+				FSxOpenZFS:    &FSxOpenZFSConfig{DeploymentType: "SINGLE_AZ_2"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFSxOpenZFS(tt.cfg)
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
 func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 	const schemeKey = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 

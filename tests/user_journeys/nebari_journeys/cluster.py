@@ -43,6 +43,12 @@ LONGHORN_NODE_PLURAL = "nodes"
 LONGHORN_STORAGE_CLASS = "longhorn"
 FALLBACK_STORAGE_CLASS = LONGHORN_STORAGE_CLASS
 
+# The FSx for OpenZFS CSI driver's provisioner name, fixed by the driver
+# rather than by NIC, so it is not a mirrored constant either. The
+# StorageClass is found by provisioner, not by name, because NIC lets the
+# operator rename it (cluster.aws.fsx_openzfs.storage_class_name).
+FSX_OPENZFS_PROVISIONER = "fsx.openzfs.csi.aws.com"
+
 NOT_FOUND_STATUS = 404
 
 # Longhorn's robustness values. `unknown` is what a detached volume
@@ -423,6 +429,27 @@ class Cluster:
                 f"Longhorn is not installed on this cluster: no {LONGHORN_STORAGE_CLASS!r} "
                 "StorageClass exists"
             )
+
+    def fsx_openzfs_storage_class(self) -> str | None:
+        """The name of the FSx for OpenZFS StorageClass, or None without one.
+
+        FSx for OpenZFS is optional and AWS-only: NIC creates the class only
+        when cluster.aws.fsx_openzfs is enabled.
+        """
+        for sc in self.storage.list_storage_class().items:
+            if sc.provisioner == FSX_OPENZFS_PROVISIONER:
+                return sc.metadata.name
+        return None
+
+    def require_fsx_openzfs(self) -> str:
+        """The FSx for OpenZFS StorageClass name; skips the caller without one."""
+        name = self.fsx_openzfs_storage_class()
+        if name is None:
+            pytest.skip(
+                "FSx for OpenZFS is not enabled on this cluster: no StorageClass "
+                f"uses the {FSX_OPENZFS_PROVISIONER!r} provisioner"
+            )
+        return name
 
     def default_storage_class(self) -> str:
         """The class marked default, else Longhorn's."""
