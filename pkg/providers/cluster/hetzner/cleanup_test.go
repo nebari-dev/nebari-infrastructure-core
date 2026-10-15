@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestCleanupVolumes_DeletesUnattachedCSIVolumes(t *testing.T) {
@@ -303,5 +305,112 @@ func TestCleanupLoadBalancers_NoLoadBalancers(t *testing.T) {
 	}
 	if deleted != 0 {
 		t.Errorf("deleted = %d, want 0", deleted)
+	}
+}
+
+func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
+	tests := []struct {
+		name         string
+		deleteStatus int
+		deleteBody   string
+		// actionStatuses are returned by successive GET /actions/42 calls; the last repeats.
+		actionStatuses []string
+		actionError    string
+		wantDeleted    int
+		wantErr        string
+		wantActionGets int
+	}{
+		{name: "204 empty body", deleteStatus: http.StatusNoContent, wantDeleted: 1},
+		{name: "404 already gone", deleteStatus: http.StatusNotFound, wantDeleted: 1},
+		{
+			name:           "200 with action that succeeds",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
+			actionStatuses: []string{"running", "success"},
+			wantDeleted:    1,
+			wantActionGets: 2,
+		},
+		{
+			name:           "201 with action that succeeds",
+			deleteStatus:   http.StatusCreated,
+			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
+			actionStatuses: []string{"success"},
+			wantDeleted:    1,
+			wantActionGets: 1,
+		},
+		{
+			name:           "action fails",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
+			actionStatuses: []string{"error"},
+			actionError:    `{"code":"protected","message":"load balancer is delete protected"}`,
+			wantErr:        "action 42 failed: protected: load balancer is delete protected",
+			wantActionGets: 1,
+		},
+		{
+			name:           "action never finishes",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
+			actionStatuses: []string{"running"},
+			wantErr:        `timed out waiting for action 42 (last status "running")`,
+		},
+		{name: "server error", deleteStatus: http.StatusInternalServerError, wantErr: "hetzner API returned 500 deleting load balancer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HETZNER_TOKEN", "test-token")
+
+			origInterval, origTimeout := actionPollInterval, actionTimeout
+			actionPollInterval, actionTimeout = time.Millisecond, 200*time.Millisecond
+			defer func() { actionPollInterval, actionTimeout = origInterval, origTimeout }()
+
+			lbs := loadBalancerListResponse{
+				LoadBalancers: []hetznerLoadBalancer{
+					{ID: 10, Name: "lb-orphan", Labels: map[string]string{"hcloud-ccm/service-uid": "abc"}, Targets: []any{}},
+				},
+			}
+
+			actionGets := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/load_balancers" && r.Method == http.MethodGet:
+					_ = json.NewEncoder(w).Encode(lbs)
+				case r.URL.Path == "/load_balancers/10" && r.Method == http.MethodDelete:
+					w.WriteHeader(tt.deleteStatus)
+					_, _ = w.Write([]byte(tt.deleteBody))
+				case r.URL.Path == "/actions/42" && r.Method == http.MethodGet:
+					status := tt.actionStatuses[min(actionGets, len(tt.actionStatuses)-1)]
+					actionGets++
+					actionErr := "null"
+					if tt.actionError != "" {
+						actionErr = tt.actionError
+					}
+					_, _ = fmt.Fprintf(w, `{"action":{"id":42,"status":%q,"error":%s}}`, status, actionErr)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+
+			origBase := hetznerAPIBase
+			setHetznerAPIBase(server.URL)
+			defer setHetznerAPIBase(origBase)
+
+			deleted, err := cleanupLoadBalancers(context.Background())
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("cleanupLoadBalancers() error = %v, want it to contain %q", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("cleanupLoadBalancers() error = %v", err)
+			}
+			if deleted != tt.wantDeleted {
+				t.Errorf("deleted = %d, want %d", deleted, tt.wantDeleted)
+			}
+			if tt.wantActionGets != 0 && actionGets != tt.wantActionGets {
+				t.Errorf("action GETs = %d, want %d", actionGets, tt.wantActionGets)
+			}
+		})
 	}
 }

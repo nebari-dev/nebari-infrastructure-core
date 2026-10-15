@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -373,9 +375,120 @@ func deleteLoadBalancer(ctx context.Context, client *http.Client, token string, 
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	// Since 2026-10-05 the API answers with an Action instead of an empty 204
+	// (documented as 201, observed as 200), so accept any 2xx and wait for it.
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("hetzner API returned %d deleting load balancer", resp.StatusCode)
 	}
 
-	return nil
+	var result actionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("failed to decode load balancer delete response: %w", err)
+	}
+	if result.Action == nil {
+		return nil
+	}
+
+	return waitForAction(ctx, client, token, result.Action.ID)
+}
+
+// --- Actions ---
+
+// hetznerAction represents an asynchronous operation from the Hetzner Cloud API.
+type hetznerAction struct {
+	ID     int64  `json:"id"`
+	Status string `json:"status"`
+	Error  *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type actionResponse struct {
+	Action *hetznerAction `json:"action"`
+}
+
+var (
+	actionPollInterval = 2 * time.Second
+	actionTimeout      = 5 * time.Minute
+)
+
+// waitForAction polls an action until it succeeds, fails, or actionTimeout elapses.
+func waitForAction(ctx context.Context, client *http.Client, token string, actionID int64) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "hetzner.waitForAction")
+	defer span.End()
+
+	span.SetAttributes(attribute.Int64("action_id", actionID))
+
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+
+	url := fmt.Sprintf("%s/actions/%d", hetznerAPIBase, actionID)
+	lastStatus := "unknown"
+	timedOut := func() error {
+		err := fmt.Errorf("timed out waiting for action %d (last status %q): %w", actionID, lastStatus, ctx.Err())
+		span.RecordError(err)
+		return err
+	}
+	for {
+		action, err := getAction(ctx, client, token, url)
+		if err != nil {
+			if ctx.Err() != nil {
+				return timedOut()
+			}
+			span.RecordError(err)
+			return fmt.Errorf("failed to get action %d: %w", actionID, err)
+		}
+		lastStatus = action.Status
+
+		switch action.Status {
+		case "success":
+			return nil
+		case "error":
+			err := fmt.Errorf("action %d failed", actionID)
+			if action.Error != nil {
+				err = fmt.Errorf("action %d failed: %s: %s", actionID, action.Error.Code, action.Error.Message)
+			}
+			span.RecordError(err)
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return timedOut()
+		case <-time.After(actionPollInterval):
+		}
+	}
+}
+
+func getAction(ctx context.Context, client *http.Client, token, url string) (*hetznerAction, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("hetzner API returned %d getting action", resp.StatusCode)
+	}
+
+	var result actionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode action: %w", err)
+	}
+	if result.Action == nil {
+		return nil, fmt.Errorf("hetzner API returned no action")
+	}
+
+	return result.Action, nil
 }
