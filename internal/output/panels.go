@@ -28,13 +28,21 @@ type panels struct {
 	width  int
 	height int
 
-	// The live panel: how many lines of it are on screen, the newest
+	// size, when set, reads the terminal's current size, so the live panel
+	// follows a resize.
+	size func() (width, height int)
+	// deferDraw leaves redrawing the live panel to the ticker: an update
+	// then only changes what the next tick draws, which keeps a burst of
+	// updates from flooding a slow terminal.
+	deferDraw bool
+
+	// The live panel: the widths of its lines on screen, the newest
 	// informational message, the spinner frame, and whether the caller has
 	// the terminal.
-	liveLines int
-	activity  string
-	frame     int
-	paused    bool
+	liveWidths []int
+	activity   string
+	frame      int
+	paused     bool
 
 	// blank is true when the last line printed was empty, so a panel can
 	// keep one empty line above it without doubling it. liveBlank is what
@@ -147,7 +155,9 @@ func (p *panels) step(ph *phase, s step, at time.Time) {
 			// A result ends whatever the activity line was describing.
 			p.activity = ""
 		}
-		p.drawLive(ph, at)
+		if !p.deferDraw {
+			p.drawLive(ph, at)
+		}
 	case ph != nil && s.outcome != outcomeWarn && s.outcome != outcomeFail:
 		// Printed with the panel when the phase ends. Warnings and failures
 		// also show as they happen, so a long phase doesn't hold them back.
@@ -163,7 +173,9 @@ func (p *panels) progress(ph *phase, message string, at time.Time) {
 		return
 	}
 	p.activity = strings.ReplaceAll(message, "\n", " ")
-	p.drawLive(ph, at)
+	if !p.deferDraw {
+		p.drawLive(ph, at)
+	}
 }
 
 func (p *panels) tick(ph *phase, now time.Time) {
@@ -187,11 +199,42 @@ func (p *panels) resume(ph *phase, now time.Time) {
 
 // clearProgress erases the live panel, before anything else is printed.
 func (p *panels) clearProgress() {
-	if p.liveLines > 0 {
-		// Up to the panel's first line, then clear to the end of the screen.
-		_, _ = fmt.Fprintf(p.w, "\x1b[%dA\r\x1b[J", p.liveLines)
-		p.liveLines = 0
-		p.blank = p.liveBlank
+	if len(p.liveWidths) == 0 {
+		return
+	}
+	p.resize()
+	// A line wider than the terminal (it was narrowed since the panel was
+	// drawn) wraps onto more rows, and all of them have to go.
+	rows := 0
+	for _, w := range p.liveWidths {
+		rows += max(1, (w+p.width-1)/p.width)
+	}
+	// Up to the panel's first row, then clear to the end of the screen.
+	_, _ = fmt.Fprintf(p.w, "\x1b[%dA\r\x1b[J", rows)
+	p.liveWidths = nil
+	p.blank = p.liveBlank
+}
+
+// resize picks up the terminal's current size, if it can be read.
+func (p *panels) resize() {
+	if p.size == nil {
+		return
+	}
+	if w, h := p.size(); w > 0 {
+		p.width, p.height = w, h
+	}
+}
+
+// external prints b above the live panel and draws the panel again below it.
+func (p *panels) external(b []byte, ph *phase, now time.Time) {
+	p.clearProgress()
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		b = append(b, '\n')
+	}
+	_, _ = p.w.Write(b)
+	p.blank = len(b) == 1 || strings.HasSuffix(string(b), "\n\n")
+	if p.live && ph != nil && !p.paused {
+		p.drawLive(ph, now)
 	}
 }
 
@@ -201,6 +244,7 @@ func (p *panels) drawLive(ph *phase, now time.Time) {
 		return
 	}
 	p.clearProgress()
+	p.resize()
 	pal := p.paint.pal
 	spin := p.paint.paint(pal.act, spinner[p.frame])
 	var activity []string
@@ -209,10 +253,12 @@ func (p *panels) drawLive(ph *phase, now time.Time) {
 	}
 	p.liveBlank = p.blank
 	lines := append(p.spaced(), p.panelLines(ph.name, spin, pal.act, formatDuration(now.Sub(ph.start)), ph.steps, activity, p.maxLiveLines())...)
-	for _, line := range lines {
+	widths := make([]int, len(lines))
+	for i, line := range lines {
 		p.println(line)
+		widths[i] = p.visible(line)
 	}
-	p.liveLines = len(lines)
+	p.liveWidths = widths
 }
 
 func (p *panels) phaseEnd(ph *phase) {
@@ -293,19 +339,37 @@ func (p *panels) result(r resultLine) {
 	p.println("")
 	left := p.paint.icon(r.outcome) + " " + p.paint.paint(pal.name, r.text)
 	leftWidth := 2 + width(r.text)
-	if r.detail != "" {
-		color := pal.act
-		if r.outcome != outcomeOK {
-			color = pal.fail
-		}
-		left += " " + p.paint.paint(pal.dim, "·") + " " + p.paint.paint(color, r.detail)
-		leftWidth += 3 + width(r.detail)
-	}
 	dur := ""
 	if r.elapsed > 0 {
 		dur = formatDuration(r.elapsed)
 	}
-	p.println(indent + p.row(left, leftWidth, dur, p.innerWidth()))
+	var detail string
+	if r.detail != "" {
+		color := pal.act
+		switch {
+		case r.link:
+		case r.outcome == outcomeFail:
+			color = pal.fail
+		case r.outcome == outcomeWarn:
+			color = pal.warn
+		}
+		detail = p.paint.paint(color, r.detail)
+	}
+	switch {
+	case detail == "":
+	case leftWidth+3+width(r.detail)+2+width(dur) <= p.innerWidth():
+		left += " " + p.paint.paint(pal.dim, "\u00b7") + " " + detail
+		leftWidth += 3 + width(r.detail)
+	default:
+		// Too narrow for one line: the detail (a URL to copy) goes below,
+		// whole, rather than being cut.
+		p.println(indent + p.row(left, leftWidth, dur, p.innerWidth()))
+		p.println(indent + "  " + detail)
+		left = ""
+	}
+	if left != "" {
+		p.println(indent + p.row(left, leftWidth, dur, p.innerWidth()))
+	}
 	if len(r.hints) > 0 {
 		p.println("")
 		for _, h := range r.hints {

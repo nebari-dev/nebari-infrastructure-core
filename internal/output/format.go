@@ -6,6 +6,7 @@ package output
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 )
 
@@ -43,10 +44,18 @@ func ParseFormat(s string) (Format, error) {
 	return "", fmt.Errorf("invalid --log-format %q: must be one of %s", s, strings.Join(names, ", "))
 }
 
+// goos is runtime.GOOS, a variable so tests can resolve as another OS.
+var goos = runtime.GOOS
+
 // Resolve turns FormatAuto into a concrete format and returns any other
 // format unchanged. A terminal gets pretty output, or plain when NO_COLOR is
 // set or TERM is dumb. Anything that isn't a terminal (a pipe, a file, CI)
 // keeps JSON, so tooling that parses NIC's output keeps getting slog records.
+//
+// A Windows terminal gets plain: pretty relies on ANSI escape sequences,
+// which legacy consoles (conhost) don't interpret unless a program enables
+// virtual terminal processing, and NIC doesn't. --log-format pretty still
+// works where the terminal supports it, such as Windows Terminal.
 func Resolve(f Format, isTerminal bool, getenv func(string) string) Format {
 	if f != FormatAuto {
 		return f
@@ -54,7 +63,7 @@ func Resolve(f Format, isTerminal bool, getenv func(string) string) Format {
 	if !isTerminal {
 		return FormatJSON
 	}
-	if getenv("NO_COLOR") != "" || getenv("TERM") == "dumb" {
+	if goos == "windows" || getenv("NO_COLOR") != "" || getenv("TERM") == "dumb" {
 		return FormatPlain
 	}
 	return FormatPretty

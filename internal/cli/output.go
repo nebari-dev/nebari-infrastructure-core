@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,10 +12,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"k8s.io/client-go/rest"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/internal/output"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -27,7 +30,51 @@ var (
 	// outputFormat is logFormat resolved against the terminal. It is set by
 	// configureOutput once flags are parsed.
 	outputFormat output.Format
+
+	// logOutput is where the CLI's own log records go (see stderrRouter).
+	logOutput = &stderrRouter{w: os.Stderr}
 )
+
+// stderrRouter is the writer behind the CLI's slog handler. While deploy or
+// destroy draws a live panel it hands records to the renderer, which prints
+// them above the panel; written straight to stderr, the panel's next redraw
+// would erase them.
+type stderrRouter struct {
+	mu sync.Mutex
+	w  io.Writer
+	r  *output.Renderer
+}
+
+func (s *stderrRouter) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	r := s.r
+	s.mu.Unlock()
+	if r != nil {
+		return r.Write(b)
+	}
+	return s.w.Write(b)
+}
+
+// through sends writes to r until it is called again with nil.
+func (s *stderrRouter) through(r *output.Renderer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.r = r
+}
+
+// apiWarnings logs the warnings the Kubernetes API returns (deprecated
+// fields, for instance) through slog, once each, instead of client-go's
+// default of printing them through klog straight to stderr.
+type apiWarnings struct{ seen sync.Map }
+
+func (w *apiWarnings) HandleWarningHeader(code int, _ string, text string) {
+	if code != 299 || text == "" {
+		return
+	}
+	if _, dup := w.seen.LoadOrStore(text, true); !dup {
+		slog.Warn("Kubernetes API warning", "warning", text)
+	}
+}
 
 // addOutputFlags registers the output flags on the root command.
 func addOutputFlags(root *cobra.Command) {
@@ -63,11 +110,12 @@ func configureOutput() error {
 
 	var h slog.Handler
 	if outputFormat == output.FormatJSON {
-		h = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+		h = slog.NewJSONHandler(logOutput, &slog.HandlerOptions{Level: slog.LevelInfo})
 	} else {
-		h = output.NewTextHandler(os.Stderr, outputFormat, output.TrueColor(os.Getenv))
+		h = output.NewTextHandler(logOutput, outputFormat, output.TrueColor(os.Getenv))
 	}
 	slog.SetDefault(slog.New(h))
+	rest.SetDefaultWarningHandler(&apiWarnings{})
 	return nil
 }
 
@@ -101,6 +149,7 @@ func newRenderer(dryRun bool) *output.Renderer {
 		opts.TrueColor = output.TrueColor(os.Getenv)
 		opts.Live = stderrIsTerminal()
 		_, opts.Height = terminalSize()
+		opts.Size = terminalSize
 		opts.Tick = spinnerInterval
 		return output.NewPretty(os.Stderr, opts)
 	case output.FormatGitHub:
@@ -110,16 +159,11 @@ func newRenderer(dryRun bool) *output.Renderer {
 	}
 }
 
-// writeGuidance prints what to do after a command to stdout. The JSON format
-// keeps the framed banners NIC has always printed; the others print the
-// numbered steps. Pretty needs stdout itself to be a terminal: when it is
-// redirected (nic deploy > notes.txt) the steps are written as plain text.
-func writeGuidance(banners []output.Section, steps []output.Step) {
+// writeGuidance prints the steps to take after a command to stdout. Pretty
+// needs stdout itself to be a terminal: when it is redirected (nic deploy >
+// notes.txt) the steps are written as plain text, as in every other format.
+func writeGuidance(steps []output.Step) {
 	f := outputFormat
-	if f == output.FormatJSON {
-		output.WriteBanners(os.Stdout, banners)
-		return
-	}
 	if f == output.FormatPretty && !term.IsTerminal(int(os.Stdout.Fd())) {
 		f = output.FormatPlain
 	}
@@ -149,12 +193,12 @@ func clusterTarget(ctx context.Context, client *nic.Client, cfg *config.NebariCo
 	if err != nil {
 		return target
 	}
-	for _, key := range []string{"Region", "Location"} {
+	for _, key := range []string{cluster.SummaryKeyRegion, cluster.SummaryKeyLocation} {
 		if v := summary[key]; v != "" {
 			return target + " \u00b7 " + v
 		}
 	}
-	if v := summary["Context"]; v != "" {
+	if v := summary[cluster.SummaryKeyContext]; v != "" {
 		return target + " \u00b7 context " + v
 	}
 	return target
@@ -185,12 +229,11 @@ type commandOutput struct {
 	cleanup  status.CleanupFunc
 	logFile  *os.File
 	fileLog  *slog.Logger
-	once     sync.Once
 }
 
 // startCommandOutput attaches a status channel to ctx and starts rendering
 // it. dryRun shows the run's informational updates, which are a dry run's
-// result. Call finish once the command's work returns.
+// result. Call finish exactly once, when the command's work returns.
 func startCommandOutput(ctx context.Context, command string, cfg *config.NebariConfig, h output.Header, lf logFileFlags, dryRun bool) (context.Context, *commandOutput) {
 	o := &commandOutput{}
 	var logPath string
@@ -209,6 +252,7 @@ func startCommandOutput(ctx context.Context, command string, cfg *config.NebariC
 		r := newRenderer(dryRun)
 		r.Begin(h)
 		o.renderer = r
+		logOutput.through(r)
 		handlers = append(handlers, r.Handle)
 	}
 	if o.fileLog != nil {
@@ -240,6 +284,9 @@ func (o *commandOutput) openLogFile(command, project, path string) string {
 		}
 		path = output.LogFilePath(home, project, command, time.Now())
 	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	f, err := output.OpenLogFile(path)
 	if err != nil {
 		slog.Warn("Not writing a log file", "error", err)
@@ -268,25 +315,23 @@ func (o *commandOutput) resume() {
 // finish flushes pending updates, prints the result line (with link on
 // success), and records err in the log file before closing it. It does not
 // print err: the command still returns it, and main reports it once (#326).
-// Later calls do nothing.
 func (o *commandOutput) finish(err error, link string) {
-	o.once.Do(func() {
-		o.cleanup()
-		if o.renderer != nil {
-			o.renderer.Finish(err, link)
-		}
-		if o.logFile == nil {
-			return
-		}
-		if err != nil {
-			o.fileLog.Error("Command execution failed", "error", err)
-		} else {
-			o.fileLog.Info("Command completed")
-		}
-		if cerr := o.logFile.Close(); cerr != nil {
-			slog.Warn("Failed to close log file", "error", cerr)
-		}
-	})
+	o.cleanup()
+	if o.renderer != nil {
+		o.renderer.Finish(err, link)
+		logOutput.through(nil)
+	}
+	if o.logFile == nil {
+		return
+	}
+	if err != nil {
+		o.fileLog.Error("Command execution failed", "error", err)
+	} else {
+		o.fileLog.Info("Command completed")
+	}
+	if cerr := o.logFile.Close(); cerr != nil {
+		slog.Warn("Failed to close log file", "error", cerr)
+	}
 }
 
 // displayPath shortens a path under the home directory to ~/..., which is

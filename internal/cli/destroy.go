@@ -125,7 +125,6 @@ func destroyHeader(h output.Header, project string, dryRun bool) output.Header {
 	h.Danger = true
 	h.Done = "Destroyed " + project
 	h.Failed = "Destroy failed"
-	h.Retry = retryCommand("nic destroy", destroyConfigFile)
 	if dryRun {
 		h.Command += " --dry-run"
 		h.Title = "Planning the destroy of " + project
@@ -133,8 +132,8 @@ func destroyHeader(h output.Header, project string, dryRun bool) output.Header {
 		h.Badge = dryRunBadge
 		h.Done = "Dry run finished for " + project
 		h.Failed = "Dry run failed"
-		h.Retry = retryCommand("nic destroy --dry-run", destroyConfigFile)
 	}
+	h.Retry = retryCommand(h.Command, destroyConfigFile)
 	return h
 }
 

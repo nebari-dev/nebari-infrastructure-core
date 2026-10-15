@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,17 @@ func TestTextHandlerGitHub(t *testing.T) {
 		"Shutdown complete\n"
 	if buf.String() != want {
 		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestTextHandlerSanitizes(t *testing.T) {
+	var buf bytes.Buffer
+	slog.New(NewTextHandler(&buf, FormatPretty, false)).Error("Command execution failed\x1b[2J",
+		"error", errors.New("push rejected: \x1b]52;c;aGk=\x07"), "remote", "\x1b[31morigin")
+	if strings.Contains(buf.String(), "\x1b]") || strings.Contains(buf.String(), "\x1b[2J") || strings.Contains(buf.String(), "\x1b[31morigin") {
+		t.Errorf("control sequences from the record reached the output: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "push rejected: ]52;c;aGk=") {
+		t.Errorf("the error text should survive sanitizing: %q", buf.String())
 	}
 }

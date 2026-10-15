@@ -16,8 +16,10 @@ func LogFilePath(home, project, command string, start time.Time) string {
 	return filepath.Join(home, ".nic", "logs", project, name)
 }
 
-// OpenLogFile creates path for writing, with its parent directories. Logs can
-// hold infrastructure identifiers, so the file is readable by its owner only.
+// OpenLogFile opens path for appending, creating it and its parent
+// directories. Logs can hold infrastructure identifiers, so a regular file is
+// made readable by its owner only, even when it already existed; directories NIC
+// creates are owner-only too, while an existing directory keeps its mode.
 func OpenLogFile(path string) (*os.File, error) {
 	path = filepath.Clean(path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -26,6 +28,14 @@ func OpenLogFile(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	// Only a regular file: --log-file can also name a device such as
+	// /dev/stderr, whose mode isn't ours to change.
+	if info, err := f.Stat(); err == nil && info.Mode().IsRegular() {
+		if err := f.Chmod(0o600); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("restrict log file permissions: %w", err)
+		}
 	}
 	return f, nil
 }

@@ -66,9 +66,13 @@ type Options struct {
 	// Height is the terminal height in rows, which bounds how tall a live
 	// panel grows. Zero picks a size that fits a common terminal.
 	Height int
+	// Size, when set, reads the terminal's current width and height, so the
+	// live panel follows a resize. Only used with Live.
+	Size func() (width, height int)
 	// Tick redraws the live panel at this interval, advancing its spinner and
-	// elapsed time through a long silent wait. Zero disables it. Only used
-	// with Live.
+	// elapsed time through a long silent wait. With a tick, updates are only
+	// drawn by it, at most once per tick. Zero disables it and draws each
+	// update as it arrives. Only used with Live.
 	Tick time.Duration
 	// Now returns the current time. Nil means time.Now.
 	Now func() time.Time
@@ -109,6 +113,9 @@ type sink interface {
 	tick(p *phase, now time.Time)
 	// clearProgress removes whatever is drawn live, before other output.
 	clearProgress()
+	// external writes output that didn't come through the renderer (a log
+	// line, a client-go warning) without the live panel drawing over it.
+	external(b []byte, p *phase, now time.Time)
 	// pause removes what is drawn live and keeps it off until resume.
 	pause()
 	resume(p *phase, now time.Time)
@@ -122,6 +129,9 @@ type resultLine struct {
 	outcome outcome
 	text    string
 	detail  string
+	// link marks detail as a link (the platform's URL) rather than the name
+	// of the phase that failed.
+	link    bool
 	elapsed time.Duration
 	// hints are label and command pairs, e.g. {"retry", "nic deploy"}.
 	hints [][2]string
@@ -142,9 +152,9 @@ type Renderer struct {
 	started  time.Time
 	current  *phase
 	finished bool
-	// paused suppresses the live panel while the caller owns the terminal
-	// (see Pause).
-	paused bool
+	// worst is the most severe outcome of the phases closed so far, so a run
+	// that ends without an error but with warnings doesn't report success.
+	worst outcome
 	// stopTick ends the ticker goroutine, if one runs.
 	stopTick chan struct{}
 }
@@ -154,7 +164,11 @@ type Renderer struct {
 // that refreshes the live panel until Finish.
 func NewPretty(w io.Writer, opts Options) *Renderer {
 	opts = opts.withDefaults()
-	r := &Renderer{sink: &panels{w: w, paint: newPainter(opts.Color, opts.TrueColor), live: opts.Live, width: opts.Width, height: opts.Height}, opts: opts}
+	r := &Renderer{sink: &panels{
+		w: w, paint: newPainter(opts.Color, opts.TrueColor), live: opts.Live,
+		width: opts.Width, height: opts.Height, size: opts.Size,
+		deferDraw: opts.Live && opts.Tick > 0,
+	}, opts: opts}
 	if opts.Live && opts.Tick > 0 {
 		r.stopTick = make(chan struct{})
 		go r.tickEvery(opts.Tick)
@@ -172,7 +186,7 @@ func (r *Renderer) tickEvery(d time.Duration) {
 			return
 		case <-t.C:
 			r.mu.Lock()
-			if !r.finished && !r.paused && r.current != nil {
+			if !r.finished && r.current != nil {
 				r.sink.tick(r.current, r.opts.Now())
 			}
 			r.mu.Unlock()
@@ -207,6 +221,7 @@ func (o Options) withDefaults() Options {
 func (r *Renderer) Begin(h Header) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	h = h.sanitized()
 	r.header = h
 	r.started = r.opts.Now()
 	r.sink.header(h)
@@ -244,9 +259,7 @@ func (r *Renderer) Handle(u status.Update) {
 	default:
 		s.outcome = outcomeInfo
 		s.quiet = isTool || !r.opts.DryRun
-		if !r.paused {
-			r.sink.progress(r.current, s.text, at)
-		}
+		r.sink.progress(r.current, s.text, at)
 	}
 	if s.quiet && !r.opts.Verbose {
 		return
@@ -265,7 +278,6 @@ func (r *Renderer) Handle(u status.Update) {
 func (r *Renderer) Pause() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.paused = true
 	r.sink.pause()
 }
 
@@ -273,8 +285,17 @@ func (r *Renderer) Pause() {
 func (r *Renderer) Resume() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.paused = false
 	r.sink.resume(r.current, r.opts.Now())
+}
+
+// Write prints b, which didn't come through the status stream (a log record,
+// a client-go warning), above the live panel instead of under it, where the
+// next redraw would erase it. It is an io.Writer for the CLI's slog handler.
+func (r *Renderer) Write(b []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sink.external(b, r.current, r.opts.Now())
+	return len(b), nil
 }
 
 // Finish closes the running phase and prints the result line. err is the
@@ -294,9 +315,15 @@ func (r *Renderer) Finish(err error, link string) {
 		close(r.stopTick)
 	}
 	now := r.opts.Now()
+	interrupted := errors.Is(err, context.Canceled)
 	failedIn := ""
 	if err != nil && r.current != nil {
-		r.current.outcome = outcomeFail
+		// An interrupted phase didn't fail; it was stopped.
+		mark := outcomeFail
+		if interrupted {
+			mark = outcomeWarn
+		}
+		r.current.outcome = worse(r.current.outcome, mark)
 		failedIn = r.current.name
 	}
 	r.closePhase(now)
@@ -304,9 +331,13 @@ func (r *Renderer) Finish(err error, link string) {
 
 	res := resultLine{elapsed: now.Sub(r.started)}
 	switch {
+	case err == nil && r.worst >= outcomeWarn:
+		// Exit codes are the pkg/nic contract's to decide; the result line
+		// only has to not call a run with warnings clean.
+		res.outcome, res.text, res.detail, res.link = outcomeWarn, r.header.Done+" with warnings", link, true
 	case err == nil:
-		res.outcome, res.text, res.detail = outcomeOK, r.header.Done, link
-	case errors.Is(err, context.Canceled):
+		res.outcome, res.text, res.detail, res.link = outcomeOK, r.header.Done, link, true
+	case interrupted:
 		res.outcome, res.text = outcomeWarn, "Interrupted"
 		res.detail = failedIn
 		res.hints = r.hints("", r.header.Retry)
@@ -339,6 +370,7 @@ func (r *Renderer) closePhase(at time.Time) {
 	if r.current.outcome == outcomeInfo {
 		r.current.outcome = outcomeOK
 	}
+	r.worst = worse(r.worst, r.current.outcome)
 	r.sink.clearProgress()
 	r.sink.phaseEnd(r.current)
 	r.current = nil
@@ -351,4 +383,20 @@ func detailOf(u status.Update) string {
 		return fmt.Sprint(v)
 	}
 	return ""
+}
+
+// sanitized returns h with its text made safe for the terminal: the fields
+// come from the config (project, domain, kubeconfig context) before it is
+// validated.
+func (h Header) sanitized() Header {
+	for _, f := range []*string{&h.Command, &h.Title, &h.TargetPrep, &h.Target, &h.Domain, &h.ConfigFile,
+		&h.Version, &h.LogPath, &h.Badge, &h.Done, &h.Failed, &h.Retry} {
+		*f = oneLine(*f)
+	}
+	inspect := make(map[string]string, len(h.Inspect))
+	for k, v := range h.Inspect {
+		inspect[k] = oneLine(v)
+	}
+	h.Inspect = inspect
+	return h
 }

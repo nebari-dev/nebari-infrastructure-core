@@ -438,7 +438,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 		return result
 	}
 
-	result["Location"] = hCfg.Location
+	result[cluster.SummaryKeyLocation] = hCfg.Location
 	result["Kubernetes Version"] = hCfg.KubernetesVersion
 
 	masterName, masterGroup := hCfg.MasterGroup()

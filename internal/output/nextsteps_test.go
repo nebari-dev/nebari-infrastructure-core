@@ -12,6 +12,7 @@ var testSteps = []Step{
 		Required: true,
 		Lines: []StepLine{
 			{Value: "127.0.0.1 nebari.local keycloak.nebari.local argocd.nebari.local"},
+			{},
 			{Note: "No wildcards: services added later need their hostname on this same line."},
 		},
 	},
@@ -29,6 +30,7 @@ func TestWriteNextStepsPlain(t *testing.T) {
 Next steps
   1. Add this line to /etc/hosts (required)
        127.0.0.1 nebari.local keycloak.nebari.local argocd.nebari.local
+
        No wildcards: services added later need their hostname on this same line.
 
   2. Open the services
@@ -99,5 +101,16 @@ func TestWriteNextStepsNone(t *testing.T) {
 	WriteNextSteps(&buf, FormatPretty, nil, Options{})
 	if buf.Len() != 0 {
 		t.Errorf("no steps should print nothing, got %q", buf.String())
+	}
+}
+
+func TestWriteNextStepsSanitizes(t *testing.T) {
+	steps := []Step{{Title: "Open", Lines: []StepLine{{Label: "Nebari", Value: "https://x\x1b[2J.example.com"}}}}
+	for _, f := range []Format{FormatPlain, FormatPretty} {
+		var buf bytes.Buffer
+		WriteNextSteps(&buf, f, steps, Options{Width: 80})
+		if strings.Contains(buf.String(), "\x1b[2J") {
+			t.Errorf("%s: control sequence in a value reached the output: %q", f, buf.String())
+		}
 	}
 }

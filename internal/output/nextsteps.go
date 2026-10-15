@@ -17,8 +17,8 @@ type Step struct {
 	Lines []StepLine
 }
 
-// StepLine is one line under a step's title. Set exactly one of Note, a
-// Label with its Value, or a bare Value.
+// StepLine is one line under a step's title. Set one of Note, a Label with
+// its Value, or a bare Value; a StepLine with none of them is a blank line.
 type StepLine struct {
 	// Label names the value, e.g. "Argo CD"; values line up after it.
 	Label string
@@ -39,6 +39,7 @@ func WriteNextSteps(w io.Writer, f Format, steps []Step, opts Options) {
 	if len(steps) == 0 {
 		return
 	}
+	steps = sanitizedSteps(steps)
 	if f == FormatPretty {
 		p := &panels{w: w, paint: newPainter(opts.Color, opts.TrueColor), width: max(opts.Width, 40)}
 		p.nextSteps(steps)
@@ -155,6 +156,20 @@ func (p *panels) stepLine(l StepLine, w int) []string {
 			} else {
 				out = append(out, pad+strings.Repeat(" ", len(label))+p.paint.paint(pal.dim, l.After))
 			}
+		}
+	}
+	return out
+}
+
+// sanitizedSteps returns a copy of steps safe to print: values such as the
+// domain and the load balancer's hostname come from the config and the
+// cluster.
+func sanitizedSteps(steps []Step) []Step {
+	out := make([]Step, len(steps))
+	for i, s := range steps {
+		out[i] = Step{Title: oneLine(s.Title), Required: s.Required, Lines: make([]StepLine, len(s.Lines))}
+		for j, l := range s.Lines {
+			out[i].Lines[j] = StepLine{Label: oneLine(l.Label), Value: oneLine(l.Value), URL: l.URL, After: oneLine(l.After), Note: oneLine(l.Note)}
 		}
 	}
 	return out

@@ -99,7 +99,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	out.finish(nil, platformURL(cfg, result, deployDryRun))
 
-	writeGuidance(deployGuidance(cfg, result, deployDryRun), deploySteps(cfg, result, deployDryRun))
+	writeGuidance(deploySteps(cfg, result, deployDryRun))
 	return nil
 }
 
@@ -118,7 +118,6 @@ func deployHeader(h output.Header, project string, dryRun bool) output.Header {
 	h.TargetPrep = "to"
 	h.Done = "Deployed " + project
 	h.Failed = "Deploy failed"
-	h.Retry = retryCommand("nic deploy", deployConfigFile)
 	h.Inspect = deployInspect
 	if dryRun {
 		h.Command += " --dry-run"
@@ -126,8 +125,8 @@ func deployHeader(h output.Header, project string, dryRun bool) output.Header {
 		h.Badge = dryRunBadge
 		h.Done = "Dry run finished for " + project
 		h.Failed = "Dry run failed"
-		h.Retry = retryCommand("nic deploy --dry-run", deployConfigFile)
 	}
+	h.Retry = retryCommand(h.Command, deployConfigFile)
 	return h
 }
 

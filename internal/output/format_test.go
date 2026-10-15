@@ -36,6 +36,7 @@ func TestResolve(t *testing.T) {
 		format   Format
 		terminal bool
 		env      map[string]string
+		goos     string
 		want     Format
 	}{
 		{name: "auto on a terminal is pretty", format: FormatAuto, terminal: true, want: FormatPretty},
@@ -46,9 +47,17 @@ func TestResolve(t *testing.T) {
 		{name: "explicit pretty on a pipe stays pretty", format: FormatPretty, want: FormatPretty},
 		{name: "explicit json on a terminal stays json", format: FormatJSON, terminal: true, want: FormatJSON},
 		{name: "explicit pretty ignores NO_COLOR", format: FormatPretty, terminal: true, env: map[string]string{"NO_COLOR": "1"}, want: FormatPretty},
+		{name: "auto on a Windows terminal is plain", format: FormatAuto, terminal: true, goos: "windows", want: FormatPlain},
+		{name: "explicit pretty on Windows stays pretty", format: FormatPretty, terminal: true, goos: "windows", want: FormatPretty},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			old := goos
+			t.Cleanup(func() { goos = old })
+			goos = "linux"
+			if tt.goos != "" {
+				goos = tt.goos
+			}
 			getenv := func(k string) string { return tt.env[k] }
 			if got := Resolve(tt.format, tt.terminal, getenv); got != tt.want {
 				t.Errorf("Resolve() = %q, want %q", got, tt.want)

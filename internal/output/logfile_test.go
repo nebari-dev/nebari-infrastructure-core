@@ -47,3 +47,24 @@ func TestOpenLogFile(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenLogFileExisting: a log file that already exists (a --log-file the
+// user picked) is still made readable by its owner only.
+func TestOpenLogFileExisting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil { //nolint:gosec // the world-readable mode is what the test expects OpenLogFile to tighten
+		t.Fatal(err)
+	}
+	f, err := OpenLogFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+	}
+}

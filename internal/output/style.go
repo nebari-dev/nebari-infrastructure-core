@@ -110,10 +110,20 @@ func (p painter) icon(o outcome) string {
 	}
 }
 
+// columns measures text the way the panels are drawn: box drawing, the
+// middle dot and the ellipsis are one column each. go-runewidth would
+// otherwise count them as two under an East Asian locale (LANG=ja_JP...),
+// while the borders are laid out one column per character.
+var columns = func() *runewidth.Condition {
+	c := runewidth.NewCondition()
+	c.EastAsianWidth = false
+	return c
+}()
+
 // width is the number of terminal columns s occupies, ignoring ANSI codes.
 // Callers measure text before painting it.
 func width(s string) int {
-	return runewidth.StringWidth(s)
+	return columns.StringWidth(s)
 }
 
 // truncate shortens s to at most w columns, ending it with an ellipsis when
@@ -122,7 +132,7 @@ func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	return runewidth.Truncate(s, w, "\u2026")
+	return columns.Truncate(s, w, "\u2026")
 }
 
 // wrap breaks s into lines of at most w columns, splitting on spaces and
@@ -140,7 +150,7 @@ func wrap(s string, w int) []string {
 					lines = append(lines, line)
 					line = ""
 				}
-				head := runewidth.Truncate(word, w, "")
+				head := columns.Truncate(word, w, "")
 				if head == "" {
 					// A single character wider than the line; emit it anyway.
 					_, size := utf8.DecodeRuneInString(word)
@@ -181,6 +191,12 @@ func formatDuration(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 	}
+}
+
+// oneLine is sanitize for text that must stay on one line, such as a header
+// field or a value to copy: newlines become spaces too.
+func oneLine(s string) string {
+	return strings.ReplaceAll(sanitize(s), "\n", " ")
 }
 
 // sanitize makes text from producers safe to lay out: tabs and carriage

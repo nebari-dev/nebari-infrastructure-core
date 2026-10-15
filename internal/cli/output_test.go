@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/nebari-dev/nebari-infrastructure-core/internal/output"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
@@ -113,5 +116,116 @@ func TestDestroyHeader(t *testing.T) {
 	h = destroyHeader(output.Header{Target: "local"}, "acme", true)
 	if h.Danger || h.Badge != dryRunBadge || h.Command != "nic destroy --dry-run" {
 		t.Errorf("dry-run destroy header = %+v", h)
+	}
+}
+
+func TestClusterTarget(t *testing.T) {
+	client, err := nic.NewClient(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		provider string
+		block    map[string]any
+		want     string
+	}{
+		{provider: "aws", block: map[string]any{"region": "us-west-2"}, want: "aws · us-west-2"},
+		{provider: "azure", block: map[string]any{"region": "eastus"}, want: "azure · eastus"},
+		{provider: "hetzner", block: map[string]any{"location": "ash"}, want: "hetzner · ash"},
+		{provider: "existing", block: map[string]any{"context": "kind-x"}, want: "existing · context kind-x"},
+		{provider: "local", block: map[string]any{}, want: "local"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			cfg := &config.NebariConfig{Cluster: &config.ClusterConfig{Providers: map[string]any{tt.provider: tt.block}}}
+			if got := clusterTarget(context.Background(), client, cfg); got != tt.want {
+				t.Errorf("clusterTarget() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	// Before validation the cluster block can be missing; the header then
+	// names no target and validation reports the config next.
+	if got := clusterTarget(context.Background(), client, &config.NebariConfig{}); got != "" {
+		t.Errorf("clusterTarget() without a cluster = %q, want empty", got)
+	}
+}
+
+func TestDeployHeader(t *testing.T) {
+	h := deployHeader(output.Header{Target: "local"}, "acme", false)
+	if h.Command != "nic deploy" || h.Title != "Deploying acme" || h.Badge != "" || h.Retry != "nic deploy" || h.Inspect == nil {
+		t.Errorf("deploy header = %+v", h)
+	}
+	h = deployHeader(output.Header{Target: "local"}, "acme", true)
+	if h.Command != "nic deploy --dry-run" || h.Title != "Planning the deploy of acme" || h.Badge != dryRunBadge || h.Retry != "nic deploy --dry-run" {
+		t.Errorf("dry-run deploy header = %+v", h)
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what
+// it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	fn()
+	_ = w.Close()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestWriteGuidance: every format prints the same steps; pretty falls back to
+// plain text when stdout isn't a terminal, as under go test.
+func TestWriteGuidance(t *testing.T) {
+	steps := []output.Step{{Title: "Sign in as admin", Lines: []output.StepLine{{Label: "password", Value: "nic outputs --show-secrets"}}}}
+	want := "\nNext steps\n  1. Sign in as admin\n       password   nic outputs --show-secrets\n"
+	for _, f := range []output.Format{output.FormatPretty, output.FormatPlain, output.FormatJSON, output.FormatGitHub} {
+		t.Run(string(f), func(t *testing.T) {
+			outputFormat = f
+			t.Cleanup(func() { outputFormat = "" })
+			if got := captureStdout(t, func() { writeGuidance(steps) }); got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestStderrRouter: while a renderer is attached, log records are handed to
+// it (which prints them above the live panel); otherwise they go to stderr.
+func TestStderrRouter(t *testing.T) {
+	var direct, rendered strings.Builder
+	router := &stderrRouter{w: &direct}
+	_, _ = router.Write([]byte("before\n"))
+
+	r := output.NewPlain(&rendered, output.Options{})
+	router.through(r)
+	_, _ = router.Write([]byte("during\n"))
+	router.through(nil)
+	_, _ = router.Write([]byte("after\n"))
+
+	if direct.String() != "before\nafter\n" || rendered.String() != "during\n" {
+		t.Errorf("direct = %q, rendered = %q", direct.String(), rendered.String())
+	}
+}
+
+func TestAPIWarnings(t *testing.T) {
+	var buf strings.Builder
+	old := slog.Default()
+	slog.SetDefault(slog.New(output.NewTextHandler(&buf, output.FormatPlain, false)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	w := &apiWarnings{}
+	w.HandleWarningHeader(299, "", "v1 Endpoints is deprecated")
+	w.HandleWarningHeader(299, "", "v1 Endpoints is deprecated")
+	w.HandleWarningHeader(199, "", "not a warning header")
+	if got := strings.Count(buf.String(), "Kubernetes API warning"); got != 1 {
+		t.Errorf("logged %d warnings, want 1 (deduplicated, 299 only):\n%s", got, buf.String())
 	}
 }

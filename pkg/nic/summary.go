@@ -19,11 +19,7 @@ func (c *Client) ClusterSummary(ctx context.Context, cfg *config.NebariConfig) (
 	ctx, span := tracer.Start(ctx, "nic.ClusterSummary")
 	defer span.End()
 
-	if cfg.Cluster == nil {
-		err := fmt.Errorf("no cluster configured")
-		span.RecordError(err)
-		return nil, err
-	}
+	// ProviderName is "" without a cluster block, which the registry rejects.
 	name := cfg.Cluster.ProviderName()
 	span.SetAttributes(attribute.String("provider", name))
 

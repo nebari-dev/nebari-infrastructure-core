@@ -100,6 +100,10 @@ func (p *plain) tick(*phase, time.Time) {}
 
 func (p *plain) clearProgress() {}
 
+func (p *plain) external(b []byte, _ *phase, _ time.Time) {
+	_, _ = p.w.Write(b)
+}
+
 func (p *plain) pause() {}
 
 func (p *plain) resume(*phase, time.Time) {}

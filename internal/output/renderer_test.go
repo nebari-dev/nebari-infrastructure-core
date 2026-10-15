@@ -107,7 +107,7 @@ log: /logs/acme.jsonl
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
 [warn]  Argo CD (5s)
-[ok]    Deployed acme: https://acme.example.com (15s)
+[warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 		{
@@ -127,7 +127,7 @@ log: /logs/acme.jsonl
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
 [warn]  Argo CD (5s)
-[ok]    Deployed acme: https://acme.example.com (15s)
+[warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 		{
@@ -165,7 +165,7 @@ log: /logs/acme.jsonl
 [ok]    Infrastructure (9s)
 [..]    Argo CD
 [warn]  Argo CD: Failed to install Argo CD: boom
-[fail]  Argo CD (5s)
+[warn]  Argo CD (5s)
 [warn]  Interrupted: Argo CD (15s)
 log: /logs/acme.jsonl
 retry: nic deploy
@@ -190,7 +190,7 @@ log: /logs/acme.jsonl
 ::warning title=Argo CD::Failed to install Argo CD: boom
 ::endgroup::
 [warn]  Argo CD (5s)
-[ok]    Deployed acme: https://acme.example.com (15s)
+[warn]  Deployed acme with warnings: https://acme.example.com (15s)
 `,
 		},
 	}
@@ -223,7 +223,9 @@ func TestPrettyRenderer(t *testing.T) {
 		boxVertical + " " + glyphOK + " Infrastructure deployment completed",
 		boxTopLeft + boxHorizontal + " " + glyphWarn + " Argo CD ",
 		glyphWarn + " Failed to install Argo CD: boom",
-		"  " + glyphOK + " Deployed acme \u00b7 " + testLink,
+		// The script has a warning, and at 60 columns the link goes below.
+		"  " + glyphWarn + " Deployed acme with warnings ",
+		"\n    " + testLink + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -473,10 +475,10 @@ func TestRendererSanitizesText(t *testing.T) {
 	}
 }
 
-// TestPrettyRendererWithoutLiveLine: off a terminal there is no live line,
+// TestPrettyRendererWithoutLivePanel: off a terminal there is no live panel,
 // so the running phase is named when it starts, and warnings show as they
 // happen instead of only in the panel at the end of the phase.
-func TestPrettyRendererWithoutLiveLine(t *testing.T) {
+func TestPrettyRendererWithoutLivePanel(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewPretty(&buf, Options{Width: 60, Now: fixedClock()})
 	r.Begin(testHeader)
@@ -614,5 +616,129 @@ func TestPrettyRendererHeaderDanger(t *testing.T) {
 		if title := strings.Split(buf.String(), "\n")[1]; !strings.Contains(title, truePalette.bold+want+"Deploying acme") {
 			t.Errorf("danger=%v: title %q isn't drawn in %q", danger, title, want)
 		}
+	}
+}
+
+// TestRendererResultOutcome: the result line follows the worst phase, so a
+// run that returns no error but had warnings doesn't end on a clean check.
+func TestRendererResultOutcome(t *testing.T) {
+	tests := []struct {
+		name  string
+		level status.Level
+		want  string
+	}{
+		{name: "clean run", level: status.LevelSuccess, want: "[ok]    Deployed acme: https://acme.example.com (15s)\n"},
+		{name: "warning", level: status.LevelWarning, want: "[warn]  Deployed acme with warnings: https://acme.example.com (15s)\n"},
+		{name: "error step without a returned error", level: status.LevelError, want: "[warn]  Deployed acme with warnings: https://acme.example.com (15s)\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			run(NewPlain(&buf, Options{Now: fixedClock()}), []status.Update{
+				phaseAt("DNS", 0),
+				updateAt(tt.level, "DNS records", time.Second),
+			}, nil)
+			if !strings.HasSuffix(buf.String(), tt.want) {
+				t.Errorf("output ends\n%s\nwant it to end with\n%s", buf.String(), tt.want)
+			}
+		})
+	}
+}
+
+// TestPrettyRendererInterrupt: an interrupt stops the running phase rather
+// than failing it, and offers the log and a retry but nothing to inspect.
+func TestPrettyRendererInterrupt(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 80, Now: fixedClock()})
+	run(r, []status.Update{phaseAt("Argo CD", 0), updateAt(status.LevelSuccess, "Cluster is ready", time.Second)}, context.Canceled)
+	out := buf.String()
+	for _, want := range []string{
+		boxTopLeft + boxHorizontal + " " + glyphWarn + " Argo CD ",
+		"  " + glyphWarn + " Interrupted \u00b7 Argo CD",
+		"    log      /logs/acme.jsonl",
+		"    retry    nic deploy",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "inspect") {
+		t.Errorf("an interrupt has nothing to inspect:\n%s", out)
+	}
+}
+
+// TestRendererWrite: output that doesn't come through the status stream is
+// printed above the live panel, which is drawn again below it, instead of
+// being erased by the next redraw.
+func TestRendererWrite(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Live: true, Now: fixedClock()})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Infrastructure", 0))
+	buf.Reset()
+
+	_, _ = r.Write([]byte("! Received interrupt signal"))
+	out := buf.String()
+	erase, line, panel := strings.Index(out, eraseLive(2)), strings.Index(out, "! Received interrupt signal\n"), strings.LastIndex(out, boxTopLeft)
+	if erase != 0 || line < 0 || panel < line {
+		t.Errorf("want: erase the panel, the line, then the panel again; got %q", out)
+	}
+}
+
+// TestPrettyRendererDeferredDraw: with a ticker, updates only change what the
+// next tick draws, so a burst of them doesn't redraw the panel each time.
+func TestPrettyRendererDeferredDraw(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: 60, Live: true, Tick: time.Hour, Now: fixedClock()})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Infrastructure", 0))
+	buf.Reset()
+	for range 50 {
+		r.Handle(updateAt(status.LevelInfo, "tofu event", time.Second))
+	}
+	r.Handle(updateAt(status.LevelSuccess, "Kind cluster created", time.Second))
+	if buf.Len() != 0 {
+		t.Errorf("updates were drawn before the tick:\n%q", buf.String())
+	}
+	r.mu.Lock()
+	r.sink.tick(r.current, at(2*time.Second))
+	r.mu.Unlock()
+	if !strings.Contains(buf.String(), "Kind cluster created") {
+		t.Errorf("the tick should draw the pending step:\n%s", buf.String())
+	}
+	r.Finish(nil, "")
+}
+
+// TestPrettyRendererResize: after the terminal is narrowed, the live panel's
+// lines wrap onto more rows, and erasing it has to count those rows.
+func TestPrettyRendererResize(t *testing.T) {
+	cols := 60
+	var buf bytes.Buffer
+	r := NewPretty(&buf, Options{Width: cols, Live: true, Size: func() (int, int) { return cols, 40 }, Now: fixedClock()})
+	r.Begin(testHeader)
+	r.Handle(phaseAt("Infrastructure", 0)) // a title and a bottom border, 60 columns wide
+	cols = 30
+	buf.Reset()
+	r.Handle(updateAt(status.LevelSuccess, "Kind cluster created", time.Second))
+	// Each 60-column line now wraps onto two rows.
+	if !strings.HasPrefix(buf.String(), eraseLive(2+2)) {
+		t.Errorf("want the erase to cover 4 rows, got %q", buf.String())
+	}
+	for _, line := range strings.Split(stripANSI(buf.String()), "\n") {
+		if width(line) > 30 {
+			t.Errorf("redrawn line wider than the new width: %q", line)
+		}
+	}
+}
+
+// TestRendererSanitizesHeader: header fields come from the config before it
+// is validated, so they can't drive the terminal either.
+func TestRendererSanitizesHeader(t *testing.T) {
+	h := testHeader
+	h.Domain = "a\x1b[2Jb\nc"
+	var buf bytes.Buffer
+	NewPlain(&buf, Options{Now: fixedClock()}).Begin(h)
+	if strings.Contains(buf.String(), "\x1b") || !strings.Contains(buf.String(), "domain: a[2Jb c\n") {
+		t.Errorf("header not sanitized: %q", buf.String())
 	}
 }

@@ -44,16 +44,18 @@ func (h *TextHandler) Enabled(_ context.Context, level slog.Level) bool {
 // Handle writes r as one line.
 func (h *TextHandler) Handle(_ context.Context, r slog.Record) error {
 	var b strings.Builder
-	b.WriteString(r.Message)
+	// The message and attributes can carry text from outside NIC (an API's
+	// error message), so drop control sequences as for status updates.
+	b.WriteString(sanitize(r.Message))
 
 	var errText string
 	var extra []string
 	add := func(a slog.Attr) {
 		if a.Key == "error" && errText == "" {
-			errText = a.Value.String()
+			errText = sanitize(a.Value.String())
 			return
 		}
-		extra = append(extra, a.Key+"="+a.Value.String())
+		extra = append(extra, a.Key+"="+sanitize(a.Value.String()))
 	}
 	for _, a := range h.attrs {
 		add(a)
