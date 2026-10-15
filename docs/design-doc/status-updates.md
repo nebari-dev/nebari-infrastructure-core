@@ -26,9 +26,10 @@ The handler the CLI installs depends on `--log-format`: the `internal/output` re
 `deploy` and `destroy` start the handler through `startCommandOutput` in `internal/cli/output.go`, which picks the renderer for the resolved `--log-format` and opens the log file:
 
 ```go
-ctx, out := startCommandOutput(ctx, "deploy", cfg, deployHeader(cfg, configFile), deployLogFile)
+h := deployHeader(commandHeader(ctx, client, cfg, configFile), cfg.ProjectName, deployDryRun)
+ctx, out := startCommandOutput(ctx, "deploy", cfg, h, deployLogFile, deployDryRun)
 result, err := client.Deploy(ctx, cfg, opts)
-out.finish(err) // flush, print the result line, close the log file
+out.finish(err, link) // flush, print the result line, close the log file
 ```
 
 Commands that only need structured logs keep the simpler form, where `SlogHandler` in `pkg/nic/status.go` converts status updates to `slog` calls at the appropriate log level:
@@ -47,16 +48,22 @@ defer cleanup()
 | `--log-format` | Used when | What it prints |
 |---|---|---|
 | `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb`, `json` otherwise |
-| `pretty` | terminals | A panel per phase, drawn as soon as the phase starts and filled in as it runs, coloured results |
+| `pretty` | terminals | A panel per phase, drawn as soon as the phase starts and filled in as it runs, with a spinner and coloured results (24-bit colour when `COLORTERM` is `truecolor` or `24bit`, the 16 standard colours otherwise) |
 | `plain` | log files, dumb terminals | One line per step, no colour, nothing redrawn |
 | `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
 | `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
 
-A deploy on a terminal (`pretty`): a local kind deploy as it runs, and an AWS deploy once it has finished. Both replay the status stream of a real run, with names anonymised, through `internal/output`; the animation keeps the real durations but shortens the two long waits:
+The header names the target (the cluster provider, then its region, location or kubeconfig context), the domain, the config file and NIC's version, and the log file. A run ends with a result line: on success it carries the platform's URL, and on failure it names the phase that failed and lists where to look next (a command to inspect that phase, the log file, and the command to run again).
+
+After a deploy, `pretty` and `plain` print the guidance as numbered **Next steps**: the DNS records or `/etc/hosts` line to create when no DNS provider manages them, the services to open, and how to sign in. `json` keeps the framed banners earlier releases printed.
+
+A deploy on a terminal (`pretty`): a local kind deploy as it runs, then an AWS deploy that finished and one that failed. All replay the status stream of a real run, with names anonymised, through `internal/output`; the animation keeps the real durations but shortens the two long waits:
 
 ![nic deploy on a local kind cluster, panels filling in as each phase runs](../assets/cli-output/deploy.gif)
 
-![nic deploy after it finishes, with the post-deploy guidance](../assets/cli-output/deploy-done.svg)
+![nic deploy after it finishes, with the next steps](../assets/cli-output/deploy-done.svg)
+
+![nic deploy failing in the Argo CD phase, with where to look next](../assets/cli-output/deploy-failed.svg)
 
 `--verbose` (`-v`) also shows informational updates and tool output (OpenTofu events) under their phase. Whatever the format, `deploy` and `destroy` write every update as JSON to `~/.nic/logs/<project>/<UTC time>-<command>.jsonl` (`--log-file` to choose the path, `--no-log-file` to skip it).
 
