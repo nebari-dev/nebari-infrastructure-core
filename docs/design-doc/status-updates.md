@@ -1,28 +1,17 @@
 # Status Update Mechanism
 
-The status package (`pkg/status/status.go`) provides a **context-based, non-blocking channel system** for sending progress updates from library code (`pkg/`) to the application layer (`cmd/nic/`) without introducing logging dependencies in the library code.
+The status package (`pkg/status/status.go`) provides a **context-based, non-blocking channel system** for sending progress updates from library code (`pkg/`) to the application layer (`internal/cli`) without introducing logging dependencies in the library code.
 
 ## Architecture
 
+```mermaid
+flowchart BT
+    L["Library code (pkg/nic, pkg/providers/*, pkg/argocd, ...)<br/>status.Send, status.Info/Progress/Success/Warning/Error, status.Phase"]
+    A["Application layer (internal/cli)<br/>status.StartHandler: creates the channel, attaches it to the context,<br/>and runs one goroutine that hands each update to the handler"]
+    L -->|"updates via the channel"| A
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Application Layer (cmd/nic/)                                   │
-│                                                                 │
-│  1. StartHandler() → creates channel, attaches to context       │
-│  2. Handler function receives updates and logs via slog         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↑
-                              │ Updates via channel
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│  Library Code (pkg/providers/cluster/*, pkg/providers/dns/*)    │
-│                                                                 │
-│  status.Send(ctx, update) → sends to channel in context         │
-│  status.Info(ctx, "message")                                    │
-│  status.Progress(ctx, "message")                                │
-│  status.Success(ctx, "message")                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+The handler the CLI installs depends on `--log-format`: the `internal/output` renderer for `pretty`, `plain` and `github`, or `pkg/nic`'s `SlogHandler` for `json`. For `deploy` and `destroy` it also feeds a second `SlogHandler` that writes the run's JSON log file (see "Output" below).
 
 ## Status Levels
 
@@ -34,15 +23,36 @@ The status package (`pkg/status/status.go`) provides a **context-based, non-bloc
 
 ## Setup (Application Layer)
 
-In `cmd/nic/deploy.go:63-64`:
+`deploy` and `destroy` start the handler through `startCommandOutput` in `internal/cli/output.go`, which picks the renderer for the resolved `--log-format` and opens the log file:
 
 ```go
-// Setup status handler for progress updates
+ctx, out := startCommandOutput(ctx, "deploy", cfg, deployHeader(cfg, configFile), deployLogFile)
+result, err := client.Deploy(ctx, cfg, opts)
+out.finish(err) // flush, print the result line, close the log file
+```
+
+Commands that only need structured logs keep the simpler form, where `SlogHandler` in `pkg/nic/status.go` converts status updates to `slog` calls at the appropriate log level:
+
+```go
 ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
 defer cleanup()
 ```
 
-`SlogHandler` in `pkg/nic/status.go` converts status updates to `slog` calls at the appropriate log level; `cmd/nic` wires it up via `nic.StartSlogHandler(ctx, slog.Default())`.
+## Phases
+
+`pkg/nic` marks each stage of a deploy or destroy with `status.Phase(ctx, name)` (names in `pkg/nic/phases.go`). Every update until the next marker belongs to that phase: the renderer draws one panel per phase, and `SlogHandler` adds a `phase` attribute to each JSON record. Library code below `pkg/nic` doesn't announce phases; its updates land in whichever phase is open.
+
+## Output
+
+| `--log-format` | Used when | What it prints |
+|---|---|---|
+| `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb`, `json` otherwise |
+| `pretty` | terminals | A panel per phase, a live progress line, coloured results |
+| `plain` | log files, dumb terminals | One line per step, no colour, nothing redrawn |
+| `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
+| `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations |
+
+`--verbose` (`-v`) also shows informational updates and tool output (OpenTofu events) under their phase. Whatever the format, `deploy` and `destroy` write every update as JSON to `~/.nic/logs/<project>/<UTC time>-<command>.jsonl` (`--log-file` to choose the path, `--no-log-file` to skip it).
 
 ## Usage in Library Code
 
@@ -113,12 +123,14 @@ status.Send(ctx, status.NewUpdate(status.LevelInfo, "Internet gateway already ex
 
 ## Key Properties
 
-1. **Non-blocking** - If the channel is full, messages are dropped (line 103-110)
+1. **Non-blocking** - If the channel is full, messages are dropped (see `Send` in `pkg/status/status.go`), so handlers must stay fast
 2. **Context-based** - Channel is stored in context, so no global state
 3. **Safe to call without handler** - If no channel in context, `Send()` is a no-op
 4. **Graceful shutdown** - `cleanup()` function closes channel and waits for handler to drain
 
 ## When to Use Each Level
+
+On a terminal (`pretty` and `plain`), `Info` and `Progress` updates only flash on the live progress line: they are listed under their phase with `--verbose`, and in dry runs, whose `Would ...` lines are `Info`. Tool output (updates carrying `MetadataKeyDetail`) is listed only with `--verbose`. Everything reaches the JSON output and the log file. So a message a user must see on every run needs `Success`, `Warning` or `Error`.
 
 | Level | Use Case | Example |
 |-------|----------|---------|

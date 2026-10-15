@@ -54,7 +54,7 @@ nebari-infrastructure-core/
 
 - **Provider Registration:** `defaultRegistry` in `pkg/nic/registry.go` explicitly registers all cluster, DNS, and repository providers using registry pattern
 - **Telemetry Setup:** OpenTelemetry initialized in `main.go` based on environment variables
-- **Logging:** Structured JSON logging via `slog` - only at this application layer
+- **Output:** `--log-format` picks pretty panels on a terminal (`internal/output`) or structured JSON via `slog` otherwise; `deploy` and `destroy` also write a JSON log file to `~/.nic/logs/`. Only this application layer produces output
 - **Signal Handling:** Context cancellation for graceful shutdown on SIGINT/SIGTERM
 - **Status Display:** Uses `status.StartHandler()` to display progress updates to user
 
@@ -395,9 +395,14 @@ status.Send(ctx, status.NewUpdate(status.LevelProgress, "Creating VPC").
     WithResource("vpc").
     WithAction("creating"))
 
-// In CLI code (cmd/)
-ctx, cleanup := status.StartHandler(ctx, statusLogHandler())
+// In CLI code (internal/cli), for structured logs
+ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
 defer cleanup()
+
+// or, for deploy and destroy, the renderer plus the log file
+ctx, out := startCommandOutput(ctx, "deploy", cfg, header, logFileFlags)
+result, err := client.Deploy(ctx, cfg, opts)
+out.finish(err) // flush, print the result line, close the log file
 ```
 
 ## Supporting Files
