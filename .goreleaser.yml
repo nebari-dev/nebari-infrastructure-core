@@ -22,9 +22,14 @@ builds:
       - -s -w
       - -X github.com/nebari-dev/nebari-infrastructure-core/internal/cli.version={{.Version}}
       - -X github.com/nebari-dev/nebari-infrastructure-core/internal/cli.commit={{.Commit}}
-      - -X github.com/nebari-dev/nebari-infrastructure-core/internal/cli.date={{.Date}}
+      # .CommitDate, not .Date: .Date is the wall clock at build time, which
+      # makes every build of the same commit a different binary. See the
+      # reproducibility check in ci.yml.
+      - -X github.com/nebari-dev/nebari-infrastructure-core/internal/cli.date={{ .CommitDate }}
     flags:
       - -trimpath
+    # Empty means "compilation time", which is the same problem as .Date above.
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - id: nic-archive
@@ -40,11 +45,23 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # Each file records whatever mtime actions/checkout wrote, so without a
+    # pinned mtime a deterministic binary still lands in a non-deterministic
+    # archive. The binary itself needs no entry here: builds.mod_timestamp
+    # above already stamps it before it is archived.
     files:
-      - README.md
-      - LICENSE*
-      - docs/**/*
-      - examples/**/*
+      - src: README.md
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE*
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: docs/**/*
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: examples/**/*
+        info:
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: 'checksums.txt'
