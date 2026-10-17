@@ -77,7 +77,7 @@ type DestroyOptions struct {
 // without importing provider packages or switching on provider names.
 type InfraSettings struct {
 	// StorageClass is the default Kubernetes StorageClass for persistent volumes.
-	// Examples: "gp2" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
+	// Examples: "gp3" (AWS), "hcloud-volumes" (Hetzner), "standard" (local)
 	StorageClass string
 
 	// GatewayHostAddress is the address the platform is reached at when the

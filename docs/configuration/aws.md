@@ -12,6 +12,7 @@ Configuration options specific to Amazon Web Services (EKS).
 - [NodeGroup](#nodegroup)
 - [Taint](#taint)
 - [EFSConfig](#efsconfig)
+- [EBSConfig](#ebsconfig)
 
 ---
 
@@ -38,6 +39,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | NodeGroups | `node_groups` | `map[string]NodeGroup` | Yes |  |
 | Tags | `tags` | `map[string]string` | No |  |
 | EFS | `efs` | `*EFSConfig` | No |  |
+| EBS | `ebs` | `*EBSConfig` | No |  |
 | Longhorn | `longhorn` | `*longhorn.Config` | No |  |
 | AWSLoadBalancerController | `aws_load_balancer_controller` | `*AWSLoadBalancerControllerConfig` | No |  |
 | ClusterAutoscaler | `cluster_autoscaler` | `*ClusterAutoscalerConfig` | No |  |
@@ -104,4 +106,19 @@ Configuration options specific to Amazon Web Services (EKS).
 | Encrypted | `encrypted` | bool | No | default: true |
 | KMSKeyArn | `kms_key_arn` | string | No |  |
 | StorageClassName | `storage_class_name` | string | No | default: efs-sc |
+
+---
+
+## EBSConfig
+
+EBSConfig configures the EBS StorageClass NIC creates on every cluster. It
+is the RWO class (and cluster default) when Longhorn is disabled.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Type | `type` | string | No | default: gp3; gp2, gp3, io1, io2, st1 or sc1 |
+| IOPS | `iops` | `*int` | No | gp3, io1 and io2 only; required for io1 and io2 |
+| Throughput | `throughput` | `*int` | No | MiB/s, gp3 only |
+| KMSKeyARN | `kms_key_arn` | string | No | default: the account's default EBS key |
+| StorageClassName | `storage_class_name` | string | No | default: the volume type |
 

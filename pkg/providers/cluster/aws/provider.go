@@ -29,9 +29,6 @@ const (
 	ReconcileTimeout = 30 * time.Minute
 	AWS              = "aws"
 
-	// storageClassGP2 is the default EBS StorageClass name when Longhorn is disabled.
-	storageClassGP2 = "gp2"
-
 	// attrKeyRegion is the attribute / Helm value key for AWS region.
 	attrKeyRegion = "region"
 )
@@ -186,6 +183,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
+	if err := validateEBSConfig(awsCfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Validate load_balancer_scheme if specified
 	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
 		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",
@@ -276,6 +278,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	// Extract AWS configuration
 	awsCfg, err := extractAWSConfig(ctx, clusterConfig)
 	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// The ebs block is only read after the cluster is up, so check it before
+	// anything is created.
+	if err := validateEBSConfig(awsCfg); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -371,7 +380,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			span.RecordError(err)
 			return fmt.Errorf("could not detect the default EBS KMS key (%v) or read the key the previous deploy granted: %w", detectErr, err)
 		}
-		assignments, err := carryForwardEBSKMSKeyVars(ctx, outputs, awsCfg.EBSKMSKeyARNs, detectErr)
+		assignments, err := carryForwardEBSKMSKeyVars(ctx, outputs, awsCfg.ebsCSIKMSKeyARNs(), detectErr)
 		if err != nil {
 			span.RecordError(err)
 			return err
@@ -432,6 +441,23 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 				span.RecordError(err)
 				return err
 			}
+		}
+	}
+
+	// Create the EBS StorageClass (gp3 unless the ebs block says otherwise)
+	// on every cluster. It becomes the cluster default only when nothing else
+	// is, so it runs after Longhorn (which claims the default when enabled)
+	// and never overrides a default the admin chose.
+	{
+		kubeconfigBytes, err := p.GetKubeconfig(ctx, projectName, clusterConfig)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to get kubeconfig for EBS StorageClass: %w", err)
+		}
+
+		if err := ensureEBSStorageClass(ctx, kubeconfigBytes, awsCfg); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to ensure EBS StorageClass: %w", err)
 		}
 	}
 
@@ -862,7 +888,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
-// StorageClass is "longhorn" when Longhorn is enabled (default), "gp2" otherwise.
+// StorageClass is "longhorn" when Longhorn is enabled (default), otherwise the
+// NIC-managed EBS class, "gp3" unless the ebs block overrides it (see
+// ensureEBSStorageClass).
 // EFSStorageClass is set when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
@@ -882,7 +910,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 			longhornEnabled = awsCfg.LonghornEnabled()
 			if !longhornEnabled {
-				sc = storageClassGP2
+				sc = awsCfg.EBSStorageClassName()
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()

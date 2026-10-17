@@ -311,7 +311,7 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 			expected: "longhorn",
 		},
 		{
-			name: "longhorn disabled returns gp2",
+			name: "longhorn disabled returns gp3",
 			config: map[string]any{
 				"region":      "us-west-2",
 				"node_groups": map[string]any{},
@@ -319,7 +319,44 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 					"enabled": false,
 				},
 			},
+			expected: "gp3",
+		},
+		{
+			name: "longhorn disabled returns the configured ebs class",
+			config: map[string]any{
+				"region":      "us-west-2",
+				"node_groups": map[string]any{},
+				"longhorn": map[string]any{
+					"enabled": false,
+				},
+				"ebs": map[string]any{
+					"type":               "io2",
+					"iops":               10000,
+					"storage_class_name": "fast-ssd",
+				},
+			},
+			expected: "fast-ssd",
+		},
+		{
+			name: "longhorn disabled with ebs type gp2 returns gp2",
+			config: map[string]any{
+				"region":      "us-west-2",
+				"node_groups": map[string]any{},
+				"longhorn": map[string]any{
+					"enabled": false,
+				},
+				"ebs": map[string]any{"type": "gp2"},
+			},
 			expected: "gp2",
+		},
+		{
+			name: "longhorn enabled ignores the ebs class",
+			config: map[string]any{
+				"region":      "us-west-2",
+				"node_groups": map[string]any{},
+				"ebs":         map[string]any{"storage_class_name": "fast-ssd"},
+			},
+			expected: "longhorn",
 		},
 	}
 
