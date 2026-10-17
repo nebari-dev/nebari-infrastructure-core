@@ -379,7 +379,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	if err != nil {
 		return out
 	}
-	out["Region"] = cfg.Region
+	out[cluster.SummaryKeyRegion] = cfg.Region
 	if cfg.ResourceGroupName != "" {
 		out["ResourceGroup"] = cfg.ResourceGroupName
 	}

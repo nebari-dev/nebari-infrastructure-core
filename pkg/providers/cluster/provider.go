@@ -127,6 +127,14 @@ type InfraSettings struct {
 	LonghornEnabled bool
 }
 
+// Summary keys naming where a cluster lives. A provider sets the one that
+// fits; the CLI shows its value next to the provider's name.
+const (
+	SummaryKeyRegion   = "Region"
+	SummaryKeyLocation = "Location"
+	SummaryKeyContext  = "Context"
+)
+
 // Provider defines the interface that all cloud providers must implement.
 //
 // This interface establishes the abstraction boundary between CLI commands and
@@ -169,7 +177,9 @@ type Provider interface {
 	// or project in confirmation prompts without importing provider packages.
 	// Used in destructive operations to help users confirm they're targeting
 	// the correct infrastructure (e.g., distinguishing clusters with the same
-	// name in different regions).
+	// name in different regions). Where the cluster lives goes under one of the
+	// SummaryKey constants, which the CLI reads to name the target of a deploy
+	// or destroy; the other keys are free-form.
 	Summary(clusterConfig *config.ClusterConfig) map[string]string
 
 	// InfraSettings returns provider-specific Kubernetes infrastructure settings.

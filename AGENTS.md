@@ -41,7 +41,7 @@ More categories (certificate issuers, software installers) are planned. See **[A
 1. **Provider abstractions first.** Each pluggable category lives behind a small Go interface; CLI code depends only on interfaces.
 2. **Each provider picks the right tool.** No assumption that everything goes through OpenTofu.
 3. **OpenTelemetry instrumented.** Every Go function in `pkg/` (with documented exemptions below) is wrapped in trace spans.
-4. **Structured logging at the app layer only.** `slog` JSON logs live in `cmd/nic`; `pkg/` libraries surface progress via the status channel, never via direct logging.
+4. **Output at the app layer only.** The CLI (`cmd/nic`, `internal/cli`) renders progress, as panels on a terminal (`internal/output`), log groups in GitHub Actions, or `slog` JSON otherwise; `pkg/` libraries surface progress via the status channel, never via direct logging.
 5. **GitOps for software.** ArgoCD manages everything that runs on the cluster after the cluster itself is provisioned.
 
 ## Common Development Commands
@@ -160,6 +160,8 @@ pkg/
   ├── status/           # In-process status channel (pkg -> cmd seam)
   └── telemetry/        # OpenTelemetry tracer setup
 ```
+
+Output: `internal/cli/output.go` holds the `--log-format`/`--verbose` flags and `startCommandOutput`, the output session `deploy` and `destroy` run through (renderer plus JSON log file), and `internal/cli/guidance.go` builds the post-deploy Next steps as data. `internal/output` renders the status stream: pretty panels, plain lines, GitHub Actions groups, and the `TextHandler` slog uses when the format isn't JSON. In `pkg/nic`, `phases.go` names the phases deploy and destroy announce, and `summary.go` (`Client.ClusterSummary`) gives the CLI the cluster provider's summary for the header.
 
 ### The Cluster `Provider` Interface
 
@@ -328,12 +330,12 @@ func SomeFunction(ctx context.Context, ...) error {
 ### Logging Convention
 
 **Application layer only:**
-- Use `slog.Info()` / `slog.Error()` in `cmd/nic/` commands.
+- Use `slog.Info()` / `slog.Error()` in `cmd/nic/` and `internal/cli` commands. The default slog handler follows `--log-format`: JSON, or one readable line per record (`output.TextHandler`).
 - Do **not** log in `pkg/` library code; emit spans and status updates instead.
 
 **Inside a `RunE`, do not `slog.Error` an error you also return**. Record it on the span (`span.RecordError(err)`) and return it (wrapped where useful); `main()` logs returned errors exactly once, so logging *and* returning duplicates the report (see #326).
 
-**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). Translation of updates into slog records lives in `pkg/nic/status.go` (`SlogHandler` / `StartSlogHandler`); `cmd/nic` wires it up via `nic.StartSlogHandler`, and the application layer (`cmd/nic` and the `internal/cli` handlers) is the only place that emits logs, never `pkg/`. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyPayload]` so handlers can decode any sub-field without the producer enumerating them.
+**The status channel is the seam.** `pkg/` code surfaces user-visible progress by sending `status.Update`s through the channel attached to ctx (see `pkg/status`). The application layer (`cmd/nic` and the `internal/cli` handlers) is the only place that turns them into output, never `pkg/`: `deploy` and `destroy` go through `startCommandOutput` (`internal/cli/output.go`), which renders with `internal/output` (or, for `--log-format json`, with `pkg/nic`'s `SlogHandler`) and also writes the run's JSON log file; other commands use `nic.StartSlogHandler`. `pkg/nic` marks each stage of a deploy or destroy with `status.Phase`; keep phase names in `pkg/nic/phases.go`. When wrapping a subprocess that emits structured output (e.g. `tofu -json`, `hetzner-k3s`), use `status.NewWriter` with a `LineMapper` that produces one `Update` per line; the full structured event should ride through as `Update.Metadata[status.MetadataKeyDetail]` so handlers can decode any sub-field without the producer enumerating them. Never write to `os.Stdout`/`os.Stderr` from `pkg/`: it lands in the middle of the rendered panels.
 
 ## Key Development Patterns
 

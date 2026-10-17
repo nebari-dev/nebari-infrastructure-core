@@ -2,16 +2,14 @@ package cli
 
 import (
 	"fmt"
-	"log/slog"
-	"net"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/internal/output"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
-	"github.com/nebari-dev/nebari-infrastructure-core/pkg/endpoint"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
 
@@ -20,10 +18,12 @@ var (
 	deployDryRun     bool
 	deployTimeout    string
 	deployRegenApps  bool
+	deployLogFile    logFileFlags
 
 	deployCmd = &cobra.Command{
-		Use:   "deploy",
-		Short: "Deploy infrastructure based on configuration file",
+		Use:         "deploy",
+		Annotations: map[string]string{progressAnnotation: "true"},
+		Short:       "Deploy infrastructure based on configuration file",
 		Long: `Deploy cloud infrastructure and Kubernetes resources based on the
 provided nebari-config.yaml file. This command will create all necessary
 resources to establish a fully functional Nebari cluster.
@@ -41,6 +41,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
 	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	deployCmd.Flags().BoolVar(&deployRegenApps, "regen-apps", false, "Regenerate ArgoCD application manifests even if already bootstrapped")
+	addLogFileFlags(deployCmd, &deployLogFile)
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -82,193 +83,53 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
-	defer cleanup()
+	h := deployHeader(commandHeader(ctx, client, cfg, configFile), cfg.ProjectName, deployDryRun)
+	ctx, out := startCommandOutput(ctx, "deploy", cfg, h, deployLogFile, deployDryRun)
 
 	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
 	})
+	// Flush pending status messages and print the result line before the
+	// guidance, so the two never interleave.
 	if err != nil {
+		out.finish(err, "")
 		span.RecordError(err)
 		return err
 	}
+	out.finish(nil, platformURL(cfg, result, deployDryRun))
 
-	// Flush pending status messages before printing the panels so they don't
-	// interleave into the middle of the instructions (the deferred cleanup
-	// stays as a safety net; cleanup is idempotent).
-	cleanup()
-
-	if result.ArgoCDInstalled {
-		printArgoCDInstructions(cfg)
-	}
-	if result.KeycloakInstalled {
-		printKeycloakInstructions(cfg)
-	}
-	if cfg.DNS == nil && cfg.Domain != "" && !deployDryRun {
-		printDNSGuidance(cfg, result.LBEndpoint)
-	}
-
+	writeGuidance(deploySteps(cfg, result, deployDryRun))
 	return nil
 }
 
-// printDNSGuidance prints instructions for manual DNS configuration. When the
-// endpoint is loopback (local kind clusters publish the gateway on host ports
-// of 127.0.0.1), it prints /etc/hosts guidance instead: public DNS records
-// pointing at loopback make no sense, and /etc/hosts is the whole setup.
-func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
-	if lb != nil && net.ParseIP(lb.IP).IsLoopback() {
-		printHostsFileGuidance(cfg, lb)
-		return
-	}
-
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  DNS CONFIGURATION REQUIRED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  No DNS provider is configured. To access your services, you must manually")
-	fmt.Println("  configure the following DNS records with your DNS provider:")
-	fmt.Println()
-	fmt.Printf("  Domain: %s\n", cfg.Domain)
-	fmt.Println()
-
-	if lb != nil {
-		var recordType, value string
-		if lb.Hostname != "" {
-			recordType = "CNAME"
-			value = lb.Hostname
-		} else {
-			recordType = "A"
-			value = lb.IP
-		}
-
-		fmt.Println("  Required DNS Records:")
-		fmt.Println("  ┌─────────────────────────────────────────────────────────────────────────┐")
-		fmt.Printf("  │ Type  : %-65s │\n", recordType)
-		fmt.Printf("  │ Name  : %-65s │\n", cfg.Domain)
-		fmt.Printf("  │ Value : %-65s │\n", value)
-		fmt.Println("  ├─────────────────────────────────────────────────────────────────────────┤")
-		fmt.Printf("  │ Type  : %-65s │\n", recordType)
-		fmt.Printf("  │ Name  : %-65s │\n", "*."+cfg.Domain)
-		fmt.Printf("  │ Value : %-65s │\n", value)
-		fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
-	} else {
-		fmt.Println("  The load balancer endpoint is not yet available.")
-		fmt.Println("  Run the following command to check when it's ready:")
-		fmt.Println()
-		fmt.Println("    nic status -f <config-file>")
-		fmt.Println()
-		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
-		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)
-	}
-
-	fmt.Println()
-	fmt.Println("  To automate DNS management, add a dns block to your configuration:")
-	fmt.Println()
-	fmt.Println("    dns:")
-	fmt.Println("      cloudflare:")
-	fmt.Println("        zone_name: example.com")
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
+// deployInspect is the command offered after a deploy fails in a phase, to
+// see what went wrong in it. The log file covers the other phases.
+var deployInspect = map[string]string{
+	nic.PhaseArgoCD:       "kubectl get pods -n argocd",
+	nic.PhaseFoundational: "kubectl get applications -n argocd",
 }
 
-// printHostsFileGuidance prints /etc/hosts instructions for clusters whose
-// gateway is published on loopback host ports (local kind clusters). The URL
-// carries the HTTPS port when it is non-standard; the /etc/hosts line never
-// does (hosts files map names to addresses, not ports).
-func printHostsFileGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoint) {
-	url := "https://" + cfg.Domain
-	if lb.Port != 0 && lb.Port != 443 {
-		url = fmt.Sprintf("https://%s:%d", cfg.Domain, lb.Port)
+// deployHeader names the deploy for the renderer's header and result line,
+// on top of the fields commandHeader fills.
+func deployHeader(h output.Header, project string, dryRun bool) output.Header {
+	h.Command = "nic deploy"
+	h.Title = "Deploying " + project
+	h.TargetPrep = "to"
+	h.Done = "Deployed " + project
+	h.Failed = "Deploy failed"
+	h.Inspect = deployInspect
+	if dryRun {
+		h.Command += " --dry-run"
+		h.Title = "Planning the deploy of " + project
+		h.Badge = dryRunBadge
+		h.Done = "Dry run finished for " + project
+		h.Failed = "Dry run failed"
 	}
-
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  HOSTS FILE CONFIGURATION REQUIRED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Printf("  The platform is published on host ports of %s.\n", lb.IP)
-	fmt.Println("  Point the platform hostnames at it by adding this line to /etc/hosts:")
-	fmt.Println()
-	fmt.Printf("    %s %s keycloak.%s argocd.%s\n", lb.IP, cfg.Domain, cfg.Domain, cfg.Domain)
-	fmt.Println()
-	fmt.Printf("  Then open %s in your browser.\n", url)
-	fmt.Println()
-	fmt.Println("  /etc/hosts has no wildcard support: services exposed later on other")
-	fmt.Println("  subdomains need their hostname appended to the same line.")
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
+	h.Retry = retryCommand(h.Command, deployConfigFile)
+	return h
 }
 
-// printArgoCDInstructions prints instructions for accessing Argo CD
-func printArgoCDInstructions(cfg *config.NebariConfig) {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  ARGO CD INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  Argo CD has been successfully installed on your cluster.")
-	fmt.Println()
-	fmt.Println("  To access Argo CD:")
-	fmt.Println()
-	if cfg.Domain != "" {
-		fmt.Printf("    UI: https://argocd.%s (after DNS configuration)\n", cfg.Domain)
-		fmt.Println()
-		fmt.Println("  Or use port-forwarding:")
-		fmt.Println()
-	}
-	fmt.Println("    kubectl port-forward svc/argocd-server -n argocd 8080:443")
-	fmt.Println("    Then visit: https://localhost:8080")
-	fmt.Println()
-	fmt.Println("  Get the admin password:")
-	fmt.Println()
-	fmt.Println("    nic outputs --show-secrets")
-	fmt.Println()
-	fmt.Println("  Login credentials:")
-	fmt.Println("    Username: admin")
-	fmt.Println("    Password: <from command above>")
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-}
-
-// printKeycloakInstructions prints instructions for accessing Keycloak
-func printKeycloakInstructions(cfg *config.NebariConfig) {
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  KEYCLOAK INSTALLED")
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  Keycloak has been configured for installation via Argo CD.")
-	fmt.Println("  It may take several minutes for Keycloak to be fully deployed and ready.")
-	fmt.Println()
-	fmt.Println("  Check deployment status:")
-	fmt.Println("    kubectl get pods -n keycloak")
-	fmt.Println()
-	fmt.Println("  To access Keycloak after deployment:")
-	fmt.Println()
-	if cfg.Domain != "" {
-		fmt.Printf("    UI: https://keycloak.%s (after DNS configuration)\n", cfg.Domain)
-		fmt.Println()
-		fmt.Println("  Or use port-forwarding:")
-		fmt.Println()
-	}
-	fmt.Println("    kubectl port-forward svc/keycloak -n keycloak 8080:80")
-	fmt.Println("    Then visit: http://localhost:8080")
-	fmt.Println()
-	fmt.Println("  Get the admin password:")
-	fmt.Println()
-	fmt.Println("    nic outputs --show-secrets")
-	fmt.Println()
-	fmt.Println("  Login credentials:")
-	fmt.Println("    Username: admin")
-	fmt.Println("    Password: <from command above>")
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println()
-}
+// dryRunBadge marks a dry run's header.
+const dryRunBadge = "DRY RUN \u00b7 no changes"

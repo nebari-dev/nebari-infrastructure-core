@@ -431,6 +431,13 @@ type ACMEConfig struct {
 // Used to validate ProjectName before it is used as a filesystem path component.
 var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+// IsSafeProjectName reports whether name passes Validate's project_name check,
+// for callers that use the name as a path component before the config has
+// been validated.
+func IsSafeProjectName(name string) bool {
+	return safeProjectName.MatchString(name)
+}
+
 // Validate checks that the configuration is valid.
 // The opts parameter provides the set of valid provider names, injected by the caller.
 // Returns an error describing the first validation failure encountered.

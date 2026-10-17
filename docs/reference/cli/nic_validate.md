@@ -22,6 +22,13 @@ nic validate [flags]
   -h, --help          help for validate
 ```
 
+### Options inherited from parent commands
+
+```
+      --log-format string   Output format: auto, pretty, plain, json or github (auto is pretty on a terminal, github for deploy and destroy in GitHub Actions, json otherwise) (default "auto")
+  -v, --verbose             Also show informational messages and OpenTofu output under each step
+```
+
 ### SEE ALSO
 
 * [nic](nic.md)	 - Nebari Infrastructure Core - Cloud infrastructure management for Nebari

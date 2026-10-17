@@ -11,14 +11,25 @@ import (
 // It returns the handler function itself, so callers can wrap it (e.g., to
 // filter, add fields, or fan out to a second sink) before passing the result
 // to status.StartHandler. For plain slog-only integration, use StartSlogHandler.
+//
+// Every record after a status.Phase marker carries a "phase" attribute naming
+// the phase it belongs to. The handler keeps that as state, so it must be
+// called from a single goroutine, which is how status.StartHandler calls it.
 func SlogHandler(logger *slog.Logger) status.Handler {
+	var phase string
 	return func(update status.Update) {
-		attrs := make([]slog.Attr, 0, 2+len(update.Metadata))
+		if name, ok := status.PhaseName(update); ok {
+			phase = name
+		}
+		attrs := make([]slog.Attr, 0, 3+len(update.Metadata))
 		if update.Resource != "" {
 			attrs = append(attrs, slog.String("resource", update.Resource))
 		}
 		if update.Action != "" {
 			attrs = append(attrs, slog.String("action", update.Action))
+		}
+		if _, ok := update.Metadata[status.MetadataKeyPhase]; !ok && phase != "" {
+			attrs = append(attrs, slog.String(status.MetadataKeyPhase, phase))
 		}
 		for key, value := range update.Metadata {
 			attrs = append(attrs, slog.Any(key, value))

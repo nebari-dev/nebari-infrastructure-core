@@ -54,11 +54,11 @@ func (te *TerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption
 
 ### Why JSON streaming?
 
-OpenTofu's `-json` mode emits one structured event per line, with `@level`, `@message`, plus structured fields per event type (apply progress, plan summary, diagnostics, etc.). Streaming those through the status channel lets the CLI render live progress without parsing OpenTofu's human-readable output. The full event payload is attached to each `status.Update` via `Update.Metadata[status.MetadataKeyPayload]` so downstream handlers can pick out any field they want.
+OpenTofu's `-json` mode emits one structured event per line, with `@level`, `@message`, plus structured fields per event type (apply progress, plan summary, diagnostics, etc.). Streaming those through the status channel lets the CLI render live progress without parsing OpenTofu's human-readable output. The full event payload is attached to each `status.Update` via `Update.Metadata[status.MetadataKeyDetail]` so downstream handlers can pick out any field they want. The CLI renderer uses it to tell tool output apart, and shows it only with `--verbose`.
 
 ### Logging policy
 
-`pkg/tofu` does not call `slog`. That's intentional and required: per [`AGENTS.md`](../../../AGENTS.md), library code never logs. Translation into log records happens in `cmd/nic`, via `pkg/nic`'s `SlogHandler`.
+`pkg/tofu` does not call `slog`. That's intentional and required: per [`AGENTS.md`](../../../AGENTS.md), library code never logs. Translation into output happens in the CLI: the `internal/output` renderer on a terminal, or log records via `pkg/nic`'s `SlogHandler` with `--log-format json`.
 
 ## 8.4 Setup
 

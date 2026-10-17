@@ -29,7 +29,8 @@ When a command needs OpenTofu, NIC resolves the binary in this order:
 A binary is *compatible* when its version is at or above the minimum supported
 version (`pkg/tofu.MinVersion`, currently the same as the pinned version) and below
 `2.0.0`. When the resolved version differs from the pinned version NIC is tested
-against, NIC notes the version in use in its status output.
+against, NIC notes the version in use in its status output (shown on a terminal with
+`--verbose`, and always in the JSON output and the run's log file).
 
 ## The NIC cache directory
 

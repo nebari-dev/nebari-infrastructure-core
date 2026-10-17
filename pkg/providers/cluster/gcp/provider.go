@@ -135,7 +135,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 	}
 
 	result["Project"] = gcpCfg.Project
-	result["Region"] = gcpCfg.Region
+	result[cluster.SummaryKeyRegion] = gcpCfg.Region
 	return result
 }
 

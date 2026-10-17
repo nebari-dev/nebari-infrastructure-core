@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/internal/output"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
@@ -23,10 +23,12 @@ var (
 	destroyForce       bool
 	destroyTimeout     string
 	destroyDryRun      bool
+	destroyLogFile     logFileFlags
 
 	destroyCmd = &cobra.Command{
-		Use:   "destroy",
-		Short: "Destroy cloud infrastructure",
+		Use:         "destroy",
+		Annotations: map[string]string{progressAnnotation: "true"},
+		Short:       "Destroy cloud infrastructure",
 		Long: `Destroys all infrastructure resources in reverse order of creation.
 This includes node groups, EKS cluster, VPC, and IAM roles.
 
@@ -44,6 +46,7 @@ func init() {
 	destroyCmd.Flags().BoolVar(&destroyForce, "force", false, "Continue destruction even if some resources fail to delete")
 	destroyCmd.Flags().StringVar(&destroyTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	destroyCmd.Flags().BoolVar(&destroyDryRun, "dry-run", false, "Show what would be destroyed without actually deleting")
+	addLogFileFlags(destroyCmd, &destroyLogFile)
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
@@ -87,8 +90,8 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cleanup := nic.StartSlogHandler(ctx, slog.Default())
-	defer cleanup()
+	h := destroyHeader(commandHeader(ctx, client, cfg, configFile), cfg.ProjectName, destroyDryRun)
+	ctx, out := startCommandOutput(ctx, "destroy", cfg, h, destroyLogFile, destroyDryRun)
 
 	opts := nic.DestroyOptions{
 		DryRun:  destroyDryRun,
@@ -96,15 +99,43 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		Timeout: timeout,
 	}
 	if !destroyAutoApprove {
-		opts.Confirm = confirmDestruction
+		opts.Confirm = func(ctx context.Context, s nic.DestroySummary) error {
+			// The prompt shares the terminal with the live panel.
+			out.pause()
+			defer out.resume()
+			return confirmDestruction(ctx, s)
+		}
 	}
 
-	if err := client.Destroy(ctx, cfg, opts); err != nil {
+	err = client.Destroy(ctx, cfg, opts)
+	out.finish(err, "")
+	if err != nil {
 		span.RecordError(err)
 		return err
 	}
-
 	return nil
+}
+
+// destroyHeader names the destroy for the renderer's header and result line,
+// on top of the fields commandHeader fills. A real destroy's title is drawn
+// in the danger colour.
+func destroyHeader(h output.Header, project string, dryRun bool) output.Header {
+	h.Command = "nic destroy"
+	h.Title = "Destroying " + project
+	h.TargetPrep = "on"
+	h.Danger = true
+	h.Done = "Destroyed " + project
+	h.Failed = "Destroy failed"
+	if dryRun {
+		h.Command += " --dry-run"
+		h.Title = "Planning the destroy of " + project
+		h.Danger = false
+		h.Badge = dryRunBadge
+		h.Done = "Dry run finished for " + project
+		h.Failed = "Dry run failed"
+	}
+	h.Retry = retryCommand(h.Command, destroyConfigFile)
+	return h
 }
 
 // confirmDestruction renders the destroy warning panel and reads a yes/no

@@ -107,7 +107,7 @@ Terraform state files contain sensitive material (cluster credentials, certifica
 5. Marshals provider-supplied tfvars to `terraform.tfvars.json` in the working dir
 6. Returns a `TerraformExecutor` whose `Cleanup()` method removes the working dir
 
-There is no `.nic/` directory in the user's home or project root; everything is ephemeral except the binary and plugin caches.
+NIC keeps no OpenTofu state on disk; the working directory is ephemeral except the binary and plugin caches. The `~/.nic/` directory in the user's home holds other things: local GitOps repositories (`~/.nic/gitops/<project>/`) and the JSON log of each `deploy` and `destroy` run (`~/.nic/logs/<project>/`).
 
 For dry-run scenarios where the remote state bucket might not yet exist, `WriteBackendOverride()` writes a `backend_override.tf.json` that overrides the backend with a local backend for that single run.
 

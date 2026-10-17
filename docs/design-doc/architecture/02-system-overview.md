@@ -99,8 +99,8 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 - Cobra-based commands: `deploy`, `destroy`, `validate`, `kubeconfig`, `outputs`, `version`. There is no `status` or `plan` subcommand today.
 - Reads `.env` via `godotenv` and initializes OpenTelemetry via `pkg/telemetry`.
-- Owns the `slog` JSON logger. Library code (under `pkg/`) does not log.
-- Wires the status channel to `slog` via `pkg/nic`'s `StartSlogHandler` (which builds the `SlogHandler` defined in `pkg/nic/status.go`); see Section 2.4.
+- Owns the output. `--log-format` picks it: `pretty` panels on a terminal, `json` slog records otherwise (the `auto` default), or explicitly `plain` or `github`. Library code (under `pkg/`) does not log.
+- Wires the status channel to the renderer in `internal/output` or, for JSON, to `pkg/nic`'s `SlogHandler` (defined in `pkg/nic/status.go`), and for `deploy`/`destroy` also to a JSON log file under `~/.nic/logs/`; see Section 2.4.
 
 **`pkg/providers/cluster/` (Cluster providers)**
 
@@ -160,19 +160,16 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 Library code under `pkg/` is forbidden from calling `slog`. User-visible progress instead flows through the status channel attached to `ctx`:
 
+```mermaid
+flowchart TD
+    P["pkg/* (pkg/nic, pkg/tofu, pkg/argocd, ...)"] -->|"status.Update via status.Send or status.NewWriter"| C["ctx-attached chan status.Update"]
+    C --> H["one handler goroutine (status.StartHandler)"]
+    H -->|"--log-format pretty, plain, github"| R["internal/output Renderer: panels or lines on stderr"]
+    H -->|"--log-format json"| S["pkg/nic SlogHandler: JSON records on stderr"]
+    H -->|"deploy and destroy"| F["pkg/nic SlogHandler: JSON log file in ~/.nic/logs/project/"]
 ```
-pkg/* (e.g., pkg/tofu, pkg/argocd)
-   │
-   │  status.Update via status.NewWriter or status.Send
-   ▼
-ctx-attached chan status.Update
-   │
-   ▼
-pkg/nic SlogHandler (wired by cmd/nic via nic.StartSlogHandler)
-   │  translates each Update into slog records
-   ▼
-JSON logs on stderr
-```
+
+`pkg/nic` brackets each stage of a deploy or destroy with `status.Phase` ("Infrastructure", "Argo CD", ...). The renderer groups the updates between two markers into one panel, and the JSON records carry the phase as a `phase` attribute.
 
 This decouples library code from any specific logging backend and keeps long-running subprocesses (e.g., `tofu apply -json`) streaming live progress without requiring the producer to enumerate every interesting field.
 

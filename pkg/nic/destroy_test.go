@@ -14,6 +14,7 @@ import (
 // configurable error, for exercising Client.Destroy error handling.
 type fakeClusterProvider struct {
 	destroyErr error
+	summary    map[string]string
 }
 
 func (f *fakeClusterProvider) Name() string { return "fake" }
@@ -35,7 +36,7 @@ func (f *fakeClusterProvider) GetKubeconfig(context.Context, string, *config.Clu
 }
 
 func (f *fakeClusterProvider) Summary(*config.ClusterConfig) map[string]string {
-	return nil
+	return f.summary
 }
 
 func (f *fakeClusterProvider) InfraSettings(*config.ClusterConfig) cluster.InfraSettings {

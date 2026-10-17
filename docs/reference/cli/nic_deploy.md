@@ -20,11 +20,20 @@ nic deploy [flags]
 ### Options
 
 ```
-      --dry-run          Show what would be deployed without making changes
-  -f, --file string      Path to nebari-config.yaml file (auto-discovered if omitted)
-  -h, --help             help for deploy
-      --regen-apps       Regenerate ArgoCD application manifests even if already bootstrapped
-      --timeout string   Override default timeout (e.g., '45m', '1h')
+      --dry-run           Show what would be deployed without making changes
+  -f, --file string       Path to nebari-config.yaml file (auto-discovered if omitted)
+  -h, --help              help for deploy
+      --log-file string   Write the run's full JSON log to this file (default ~/.nic/logs/<project>/<time>-<command>.jsonl)
+      --no-log-file       Don't write a log file
+      --regen-apps        Regenerate ArgoCD application manifests even if already bootstrapped
+      --timeout string    Override default timeout (e.g., '45m', '1h')
+```
+
+### Options inherited from parent commands
+
+```
+      --log-format string   Output format: auto, pretty, plain, json or github (auto is pretty on a terminal, github for deploy and destroy in GitHub Actions, json otherwise) (default "auto")
+  -v, --verbose             Also show informational messages and OpenTofu output under each step
 ```
 
 ### SEE ALSO

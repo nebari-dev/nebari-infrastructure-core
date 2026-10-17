@@ -857,7 +857,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 		return result
 	}
 
-	result["Region"] = awsCfg.Region
+	result[cluster.SummaryKeyRegion] = awsCfg.Region
 	return result
 }
 

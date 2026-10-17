@@ -238,7 +238,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 		result["Kubeconfig"] = path
 	}
 
-	result["Context"] = existingCfg.Context
+	result[cluster.SummaryKeyContext] = existingCfg.Context
 
 	if existingCfg.StorageClass != "" {
 		result["Storage Class"] = existingCfg.StorageClass
