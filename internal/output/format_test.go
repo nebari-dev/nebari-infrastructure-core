@@ -35,13 +35,18 @@ func TestResolve(t *testing.T) {
 		name     string
 		format   Format
 		terminal bool
+		progress bool
 		env      map[string]string
 		goos     string
 		want     Format
 	}{
 		{name: "auto on a terminal is pretty", format: FormatAuto, terminal: true, want: FormatPretty},
 		{name: "auto on a pipe keeps json", format: FormatAuto, terminal: false, want: FormatJSON},
-		{name: "auto in CI keeps json even in GitHub Actions", format: FormatAuto, env: map[string]string{"GITHUB_ACTIONS": "true"}, want: FormatJSON},
+		{name: "auto in GitHub Actions keeps json for a command without progress", format: FormatAuto, env: map[string]string{"GITHUB_ACTIONS": "true"}, want: FormatJSON},
+		{name: "auto in GitHub Actions is github for deploy and destroy", format: FormatAuto, progress: true, env: map[string]string{"GITHUB_ACTIONS": "true"}, want: FormatGitHub},
+		{name: "a GitHub Actions debug re-run keeps json", format: FormatAuto, progress: true, env: map[string]string{"GITHUB_ACTIONS": "true", "RUNNER_DEBUG": "1"}, want: FormatJSON},
+		{name: "auto in other CI keeps json for deploy", format: FormatAuto, progress: true, env: map[string]string{"CI": "true"}, want: FormatJSON},
+		{name: "explicit json in GitHub Actions stays json", format: FormatJSON, progress: true, env: map[string]string{"GITHUB_ACTIONS": "true"}, want: FormatJSON},
 		{name: "NO_COLOR on a terminal is plain", format: FormatAuto, terminal: true, env: map[string]string{"NO_COLOR": "1"}, want: FormatPlain},
 		{name: "dumb terminal is plain", format: FormatAuto, terminal: true, env: map[string]string{"TERM": "dumb"}, want: FormatPlain},
 		{name: "explicit pretty on a pipe stays pretty", format: FormatPretty, want: FormatPretty},
@@ -59,7 +64,7 @@ func TestResolve(t *testing.T) {
 				goos = tt.goos
 			}
 			getenv := func(k string) string { return tt.env[k] }
-			if got := Resolve(tt.format, tt.terminal, getenv); got != tt.want {
+			if got := Resolve(tt.format, tt.terminal, tt.progress, getenv); got != tt.want {
 				t.Errorf("Resolve() = %q, want %q", got, tt.want)
 			}
 		})

@@ -80,7 +80,7 @@ func (w *apiWarnings) HandleWarningHeader(code int, _ string, text string) {
 func addOutputFlags(root *cobra.Command) {
 	flags := root.PersistentFlags()
 	flags.StringVar(&logFormat, "log-format", string(output.FormatAuto),
-		"Output format: auto, pretty, plain, json or github (auto is pretty on a terminal, json otherwise)")
+		"Output format: auto, pretty, plain, json or github (auto is pretty on a terminal, github for deploy and destroy in GitHub Actions, json otherwise)")
 	flags.BoolVarP(&verbose, "verbose", "v", false,
 		"Also show informational messages and OpenTofu output under each step")
 }
@@ -98,15 +98,21 @@ func addLogFileFlags(cmd *cobra.Command, f *logFileFlags) {
 	cmd.Flags().BoolVar(&f.disabled, "no-log-file", false, "Don't write a log file")
 }
 
-// configureOutput resolves --log-format and installs the matching slog
-// default. Messages the CLI logs directly, including the final error main
-// reports, go through it, so they match the format of everything else.
-func configureOutput() error {
+// progressAnnotation marks the commands that render a status stream (deploy
+// and destroy). Off a terminal, auto then picks the github format in GitHub
+// Actions instead of JSON (see output.Resolve).
+const progressAnnotation = "nic.dev/progress"
+
+// configureOutput resolves --log-format for cmd and installs the matching
+// slog default. Messages the CLI logs directly, including the final error
+// main reports, go through it, so they match the format of everything else.
+func configureOutput(cmd *cobra.Command) error {
 	f, err := output.ParseFormat(logFormat)
 	if err != nil {
 		return err
 	}
-	outputFormat = output.Resolve(f, stderrIsTerminal(), os.Getenv)
+	progress := cmd.Annotations[progressAnnotation] == "true"
+	outputFormat = output.Resolve(f, stderrIsTerminal(), progress, os.Getenv)
 
 	var h slog.Handler
 	if outputFormat == output.FormatJSON {

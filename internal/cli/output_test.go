@@ -229,3 +229,18 @@ func TestAPIWarnings(t *testing.T) {
 		t.Errorf("logged %d warnings, want 1 (deduplicated, 299 only):\n%s", got, buf.String())
 	}
 }
+
+// TestProgressCommands: only deploy and destroy render a status stream, so
+// only they switch to the github format in GitHub Actions. nic outputs in
+// particular must keep JSON there: deploy-nebari-action parses its stderr.
+func TestProgressCommands(t *testing.T) {
+	var progress []string
+	for _, c := range NewRootCmd().Commands() {
+		if c.Annotations[progressAnnotation] == "true" {
+			progress = append(progress, c.Name())
+		}
+	}
+	if strings.Join(progress, ",") != "deploy,destroy" {
+		t.Errorf("commands marked as rendering progress = %v, want [deploy destroy]", progress)
+	}
+}

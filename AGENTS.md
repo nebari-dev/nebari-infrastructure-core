@@ -41,7 +41,7 @@ More categories (certificate issuers, software installers) are planned. See **[A
 1. **Provider abstractions first.** Each pluggable category lives behind a small Go interface; CLI code depends only on interfaces.
 2. **Each provider picks the right tool.** No assumption that everything goes through OpenTofu.
 3. **OpenTelemetry instrumented.** Every Go function in `pkg/` (with documented exemptions below) is wrapped in trace spans.
-4. **Output at the app layer only.** The CLI (`cmd/nic`, `internal/cli`) renders progress, as panels on a terminal (`internal/output`) or `slog` JSON otherwise; `pkg/` libraries surface progress via the status channel, never via direct logging.
+4. **Output at the app layer only.** The CLI (`cmd/nic`, `internal/cli`) renders progress, as panels on a terminal (`internal/output`), log groups in GitHub Actions, or `slog` JSON otherwise; `pkg/` libraries surface progress via the status channel, never via direct logging.
 5. **GitOps for software.** ArgoCD manages everything that runs on the cluster after the cluster itself is provisioned.
 
 ## Common Development Commands

@@ -26,8 +26,9 @@ var (
 	destroyLogFile     logFileFlags
 
 	destroyCmd = &cobra.Command{
-		Use:   "destroy",
-		Short: "Destroy cloud infrastructure",
+		Use:         "destroy",
+		Annotations: map[string]string{progressAnnotation: "true"},
+		Short:       "Destroy cloud infrastructure",
 		Long: `Destroys all infrastructure resources in reverse order of creation.
 This includes node groups, EKS cluster, VPC, and IAM roles.
 

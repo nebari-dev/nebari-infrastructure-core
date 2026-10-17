@@ -29,7 +29,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 			// An invalid --log-format is a misuse: return it before marking
 			// reachedRunE, so cobra prints it with the usage block like any
 			// other flag error.
-			if err := configureOutput(); err != nil {
+			if err := configureOutput(cmd); err != nil {
 				return err
 			}
 

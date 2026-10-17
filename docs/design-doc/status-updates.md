@@ -47,11 +47,11 @@ defer cleanup()
 
 | `--log-format` | Used when | What it prints |
 |---|---|---|
-| `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb` and on Windows (legacy consoles don't interpret the escape sequences pretty needs; `--log-format pretty` still works in Windows Terminal), `json` otherwise |
+| `auto` (default) | always | `pretty` on a terminal, `plain` on a terminal with `NO_COLOR` or `TERM=dumb` and on Windows (legacy consoles don't interpret the escape sequences pretty needs; `--log-format pretty` still works in Windows Terminal), `github` for `deploy` and `destroy` in GitHub Actions (except debug re-runs, `RUNNER_DEBUG=1`), `json` otherwise |
 | `pretty` | terminals | A panel per phase, drawn as soon as the phase starts and filled in as it runs, with a spinner and coloured results (24-bit colour when `COLORTERM` is `truecolor` or `24bit`, the 16 standard colours otherwise) |
 | `plain` | log files, dumb terminals | One line per step, starting with its time of day (`13:00:38`), no colour, nothing redrawn |
-| `json` | pipes, CI, scripts | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
-| `github` | GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations (workflow commands carry no time: they must start the line) |
+| `json` | pipes, scripts, other CI, every command but `deploy`/`destroy` in GitHub Actions | The `slog` JSON records. Compared with earlier releases, each phase adds a marker record (`resource: phase`), every record after it carries a `phase` attribute, and `deploy`/`destroy` log the log file's path |
+| `github` | `deploy`/`destroy` in GitHub Actions | `plain`, with each phase in a log group and warnings and errors as annotations (workflow commands carry no time: they must start the line) |
 
 The header names the target (the cluster provider, then its region, location or kubeconfig context, from the `cluster.SummaryKey*` entries of the provider's `Summary`), the domain, the config file and NIC's version, and the log file. A run ends with a result line: on success it carries the platform's URL, with warnings it says so (the exit code is unchanged: that is `pkg/nic`'s contract), and on failure it names the phase that failed and lists where to look next (a command to inspect that phase, the log file, and the command to run again).
 

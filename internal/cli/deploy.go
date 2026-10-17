@@ -21,8 +21,9 @@ var (
 	deployLogFile    logFileFlags
 
 	deployCmd = &cobra.Command{
-		Use:   "deploy",
-		Short: "Deploy infrastructure based on configuration file",
+		Use:         "deploy",
+		Annotations: map[string]string{progressAnnotation: "true"},
+		Short:       "Deploy infrastructure based on configuration file",
 		Long: `Deploy cloud infrastructure and Kubernetes resources based on the
 provided nebari-config.yaml file. This command will create all necessary
 resources to establish a fully functional Nebari cluster.

@@ -52,15 +52,25 @@ var goos = runtime.GOOS
 // set or TERM is dumb. Anything that isn't a terminal (a pipe, a file, CI)
 // keeps JSON, so tooling that parses NIC's output keeps getting slog records.
 //
+// The exception is a command that renders a status stream (progress: deploy
+// and destroy) running in GitHub Actions, which gets the github format: its
+// log groups and annotations are what that runner shows best, and nothing
+// parses a deploy's stderr there (deploy-nebari-action reads only the JSON of
+// nic outputs, which stays JSON). A debug re-run (RUNNER_DEBUG=1) keeps JSON,
+// whose records carry every attribute.
+//
 // A Windows terminal gets plain: pretty relies on ANSI escape sequences,
 // which legacy consoles (conhost) don't interpret unless a program enables
 // virtual terminal processing, and NIC doesn't. --log-format pretty still
 // works where the terminal supports it, such as Windows Terminal.
-func Resolve(f Format, isTerminal bool, getenv func(string) string) Format {
+func Resolve(f Format, isTerminal, progress bool, getenv func(string) string) Format {
 	if f != FormatAuto {
 		return f
 	}
 	if !isTerminal {
+		if progress && getenv("GITHUB_ACTIONS") == "true" && getenv("RUNNER_DEBUG") != "1" {
+			return FormatGitHub
+		}
 		return FormatJSON
 	}
 	if goos == "windows" || getenv("NO_COLOR") != "" || getenv("TERM") == "dumb" {
