@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -211,13 +212,17 @@ func clusterTarget(ctx context.Context, client *nic.Client, cfg *config.NebariCo
 }
 
 // displayVersion is the build version as the header shows it: v0.15.0 for a
-// release (goreleaser drops the v), dev for a local build.
+// release (goreleaser drops the v), and anything else as built, such as dev
+// for a local build or a commit hash for a CI build.
 func displayVersion(v string) string {
-	if v != "" && v[0] >= '0' && v[0] <= '9' {
+	if releaseVersion.MatchString(v) {
 		return "v" + v
 	}
 	return v
 }
+
+// releaseVersion matches a release version without its v: 0.15.0, 0.15.0-rc.1.
+var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 
 // retryCommand is the command line to run cmd again with the same config:
 // the -f flag only when one was given, since auto-discovery finds it again.

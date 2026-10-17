@@ -24,6 +24,10 @@ import (
 type plain struct {
 	w      io.Writer
 	github bool
+	// grouped is true once the running phase's log group is open. It opens
+	// at the phase's first step, so a phase with none (Endpoint, often)
+	// leaves no empty group behind.
+	grouped bool
 }
 
 // timeLayout is the time of day each plain line starts with. The time is
@@ -75,7 +79,7 @@ func (p *plain) header(h Header, at time.Time) {
 
 func (p *plain) phaseStart(ph *phase) {
 	if p.github {
-		p.command("::group::" + escapeData(ph.name))
+		p.grouped = false
 		return
 	}
 	p.line(ph.start, "[..]    "+ph.name)
@@ -89,6 +93,10 @@ func (p *plain) step(ph *phase, s step, at time.Time) {
 	prefix, title := "", "nic"
 	if ph != nil {
 		prefix, title = ph.name+": ", ph.name
+		if p.github && !p.grouped {
+			p.command("::group::" + escapeData(ph.name))
+			p.grouped = true
+		}
 	}
 
 	// In GitHub Actions an annotation also shows in the log, highlighted, so
@@ -122,8 +130,9 @@ func (p *plain) pause() {}
 func (p *plain) resume(*phase, time.Time) {}
 
 func (p *plain) phaseEnd(ph *phase) {
-	if p.github {
+	if p.github && p.grouped {
 		p.command("::endgroup::")
+		p.grouped = false
 	}
 	p.line(ph.end, tag(ph.outcome)+"  "+ph.name+" ("+formatDuration(ph.duration())+")")
 }

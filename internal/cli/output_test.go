@@ -92,7 +92,10 @@ func TestCommandOutputLogFile(t *testing.T) {
 }
 
 func TestDisplayVersion(t *testing.T) {
-	for in, want := range map[string]string{"0.15.0": "v0.15.0", "v0.15.0-3-gabc": "v0.15.0-3-gabc", "dev": "dev", "": ""} {
+	for in, want := range map[string]string{
+		"0.15.0": "v0.15.0", "0.15.0-rc.1": "v0.15.0-rc.1", "v0.15.0-3-gabc": "v0.15.0-3-gabc",
+		"719ea58": "719ea58", "dev": "dev", "": "",
+	} {
 		if got := displayVersion(in); got != want {
 			t.Errorf("displayVersion(%q) = %q, want %q", in, got, want)
 		}

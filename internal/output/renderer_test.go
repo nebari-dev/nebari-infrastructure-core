@@ -742,3 +742,21 @@ func TestRendererSanitizesHeader(t *testing.T) {
 		t.Errorf("header not sanitized: %q", buf.String())
 	}
 }
+
+// TestGitHubRendererEmptyPhase: a phase with no steps to show leaves no
+// empty log group, only its result line.
+func TestGitHubRendererEmptyPhase(t *testing.T) {
+	var buf bytes.Buffer
+	run(NewGitHub(&buf, Options{Now: fixedClock()}), []status.Update{
+		phaseAt("Foundational services", 0),
+		updateAt(status.LevelSuccess, "Root App-of-Apps applied", time.Second),
+		phaseAt("Endpoint", 2*time.Second),
+	}, nil)
+	out := buf.String()
+	if strings.Contains(out, "::group::Endpoint") || strings.Count(out, "::endgroup::") != 1 {
+		t.Errorf("want one group, for Foundational services only:\n%s", out)
+	}
+	if !strings.Contains(out, "13:00:15 [ok]    Endpoint (13s)") {
+		t.Errorf("the empty phase should still report its result:\n%s", out)
+	}
+}
