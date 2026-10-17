@@ -648,8 +648,9 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	// Errors that Force downgrades from fatal to warning accumulate here and
-	// are returned joined at the end of the destroy.
+	// Errors that Force downgrades from fatal to warning, and post-destroy
+	// cleanup failures that never stop the teardown, accumulate here and are
+	// returned joined at the end of the destroy.
 	var forcedErrs []error
 
 	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
@@ -743,10 +744,46 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Delete EBS-backed PVCs so the EBS CSI driver removes their volumes while
+	// the cluster is still up (#246). This cordons every node, so it runs after
+	// every step above that schedules pods. Best-effort: the inventory it
+	// returns drives the post-destroy sweep below, which catches stragglers.
+	ebsInv := newEBSInventory()
+	switch {
+	case kcErr != nil:
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping EBS volume release: kubeconfig unavailable: %v", kcErr)).
+			WithResource("ebs-volume").WithAction("cleanup"))
+	default:
+		k8sClient, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping EBS volume release: %v", err)).
+				WithResource("ebs-volume").WithAction("cleanup"))
+			break
+		}
+		ebsInv, err = releaseEBSVolumes(ctx, k8sClient, ebsReleaseTimeout)
+		if err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("EBS volume release incomplete, will sweep after destroy: %v", err)).
+				WithResource("ebs-volume").WithAction("cleanup"))
+		}
+	}
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return errors.Join(append(forcedErrs, err)...)
+	}
+
+	// Sweep EBS volumes the CSI driver didn't delete. A failure here doesn't
+	// stop the teardown, but it is returned so the leak isn't silent.
+	ebsClient, err := newEBSClient(ctx, region)
+	if err == nil {
+		_, err = deleteOrphanedEBSVolumes(ctx, ebsClient, projectName, ebsInv)
+	}
+	if err != nil {
+		span.RecordError(err)
+		forcedErrs = append(forcedErrs, fmt.Errorf("clean up orphaned EBS volumes: %w", err))
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Orphaned EBS volume cleanup failed: %v", err)).
+			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
