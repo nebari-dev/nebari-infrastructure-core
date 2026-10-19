@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-06-03) · Amended (2026-07-15) — config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434) · Accepted (2026-09-28).
+Proposed (2026-06-03) · Amended (2026-07-15) — config-reference generation pipeline resolved; see [Update](#update-2026-07-config-reference-pipeline-resolved-434) · Accepted (2026-09-28) · Amended (2026-10-19) — the deferred distribution decision is recorded in [ADR-0020](0020-nic-distribution-and-packaging.md).
 
 The discussion this ADR was opened for did not happen as a discussion. It was settled by [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) shipping its outcomes instead: the starter workspaces ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)) and placeholder rejection ([#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561)) now cover the onboarding need that Options 1 and 2 were reaching for. The outcome was recorded and accepted in [#653](https://github.com/nebari-dev/nebari-infrastructure-core/pull/653).
 
@@ -119,8 +119,9 @@ bootstrap. The packaging concerns proper, including whether to move to the share
 ([#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620)), have different
 drivers and would be unfindable under a title about the config CLI surface.
 
-**Decision: distribution gets its own ADR, written separately.** Tracked in
-[#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652).
+**Decision: distribution gets its own ADR, written separately.** Recorded in
+[ADR-0020: nic Distribution and Packaging](0020-nic-distribution-and-packaging.md)
+([#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652)).
 
 ## Options Detail
 
@@ -269,12 +270,13 @@ limitation.
 ## Links
 
 - [ADR-0004: Out-of-Tree Provider Plugin Architecture](0004-out-of-tree-provider-plugins.md) - related; if external providers can register, the schema and flag-gen mechanisms need to accommodate them.
+- [ADR-0020: nic Distribution and Packaging](0020-nic-distribution-and-packaging.md) - the distribution and packaging decision this ADR defers
 - [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552) Epic: distribute NIC via pixi/prefix.dev and ship Nebari deployments as Nebi workspaces - the epic this decision serves
 - [#565](https://github.com/nebari-dev/nebari-infrastructure-core/issues/565) The issue asking for this decision to be recorded
 - [#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560) Publish per-provider Nebi starter workspaces - the config-bootstrap mechanism chosen here
 - [#561](https://github.com/nebari-dev/nebari-infrastructure-core/issues/561) `nic validate` must reject placeholder config values - answers open question 5
 - [#562](https://github.com/nebari-dev/nebari-infrastructure-core/issues/562) Version-pinned `$schema` modeline in starter configs - answers open question 4, in flight
-- [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) Distribute nic via a prefix.dev channel - the distribution decision deferred to its own ADR
+- [#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579) Distribute nic via a prefix.dev channel - the distribution decision, recorded in ADR-0020
 - [#556](https://github.com/nebari-dev/nebari-infrastructure-core/issues/556) Conda package name for nic
 - [#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620) Move to the shared prefix.dev github-releases channel
-- [#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652) Write the distribution and packaging ADR
+- [#652](https://github.com/nebari-dev/nebari-infrastructure-core/issues/652) Write the distribution and packaging ADR - resolved by ADR-0020

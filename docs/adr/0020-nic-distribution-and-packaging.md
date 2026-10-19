@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed (2026-09-23)
+Proposed (2026-09-23) · Accepted (2026-10-09), when #671 merged and the move to the shared channel took effect.
 
-Records how `nic` reaches users as settled by the pixi/prefix.dev distribution epic [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552): a conda package on prefix.dev repackaged from the GitHub release archives ([#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579)), per-provider starter workspaces on `quay.io/nebari` ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)), and the move from our own channel to prefix.dev's shared `github-releases` channel ([#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620), implemented by [#671](https://github.com/nebari-dev/nebari-infrastructure-core/pull/671)). [ADR-0005](0005-nic-config-cli-surface.md) records only the part of this that bears on config bootstrap (as amended by [#653](https://github.com/nebari-dev/nebari-infrastructure-core/pull/653)), and defers the packaging concerns here. Where this ADR describes the repository after the move (the bridge deleted, one channel, starter publishing as its own retrying workflow), it describes the end state of #671.
+Records how `nic` reaches users as settled by the pixi/prefix.dev distribution epic [#552](https://github.com/nebari-dev/nebari-infrastructure-core/issues/552): a conda package on prefix.dev repackaged from the GitHub release archives ([#579](https://github.com/nebari-dev/nebari-infrastructure-core/issues/579)), per-provider starter workspaces on `quay.io/nebari` ([#560](https://github.com/nebari-dev/nebari-infrastructure-core/issues/560)), and the move from our own channel to prefix.dev's shared `github-releases` channel ([#620](https://github.com/nebari-dev/nebari-infrastructure-core/issues/620), implemented by [#671](https://github.com/nebari-dev/nebari-infrastructure-core/pull/671)). [ADR-0005](0005-nic-config-cli-surface.md) records only the part of this that bears on config bootstrap (as amended by [#653](https://github.com/nebari-dev/nebari-infrastructure-core/pull/653)), and defers the packaging concerns here. Where this ADR describes the repository after the move (the bridge deleted, one channel, starter publishing as its own retrying workflow), it describes the repository as #671 left it.
 
 ## Date
 
@@ -78,10 +78,10 @@ The bridge's one extra link was cosign verification before repackaging, done in 
 
 **Good:**
 
-- No recipe, feedstock, license bundle, build matrix or publish credentials in this repository. #671 deletes `packaging/conda/` and the `publish-prefix-dev` job, and the old trusted-publisher binding is revoked as a one-time cleanup.
+- No recipe, feedstock, license bundle, build matrix or publish credentials in this repository. #671 deleted `packaging/conda/` and the `publish-prefix-dev` job, and the repository's trusted-publisher access to the `nebari-dev/nebari` channel was revoked afterwards as a one-time cleanup.
 - Every release from 0.4.0 onward resolves, on all six platforms, and new releases arrive without anything done by hand.
 - A deployment is a lock-pinned workspace, and a Nebari upgrade is a diff of it.
-- One channel once #671 lands, so the starters, install docs and packaging docs have a single answer to "where does `nic` come from".
+- One channel since #671 landed, so the starters, install docs and packaging docs have a single answer to "where does `nic` come from".
 
 **Bad:**
 
