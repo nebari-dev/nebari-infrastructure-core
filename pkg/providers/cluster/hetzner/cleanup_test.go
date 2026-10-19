@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 )
 
 func TestCleanupVolumes_DeletesUnattachedCSIVolumes(t *testing.T) {
@@ -308,14 +311,27 @@ func TestCleanupLoadBalancers_NoLoadBalancers(t *testing.T) {
 	}
 }
 
+// actionReply is one response to GET /actions/42: an HTTP code and, for 200,
+// the action status.
+type actionReply struct {
+	code   int
+	status string
+}
+
 func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
+	const deleteAccepted = `{"action":{"id":42,"status":"running"}}`
+
 	tests := []struct {
 		name         string
 		deleteStatus int
 		deleteBody   string
-		// actionStatuses are returned by successive GET /actions/42 calls; the last repeats.
-		actionStatuses []string
-		actionError    string
+		// actionReplies answer successive GET /actions/42 calls; the last repeats.
+		actionReplies []actionReply
+		actionError   string
+		pollInterval  time.Duration
+		timeout       time.Duration
+		// cancelParent cancels the caller's context shortly after the first action GET.
+		cancelParent   bool
 		wantDeleted    int
 		wantErr        string
 		wantActionGets int
@@ -325,34 +341,78 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 		{
 			name:           "200 with action that succeeds",
 			deleteStatus:   http.StatusOK,
-			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
-			actionStatuses: []string{"running", "success"},
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{200, "running"}, {200, "success"}},
 			wantDeleted:    1,
 			wantActionGets: 2,
 		},
 		{
 			name:           "201 with action that succeeds",
 			deleteStatus:   http.StatusCreated,
-			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
-			actionStatuses: []string{"success"},
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{200, "success"}},
 			wantDeleted:    1,
 			wantActionGets: 1,
 		},
 		{
 			name:           "action fails",
 			deleteStatus:   http.StatusOK,
-			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
-			actionStatuses: []string{"error"},
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{200, "error"}},
 			actionError:    `{"code":"protected","message":"load balancer is delete protected"}`,
 			wantErr:        "action 42 failed: protected: load balancer is delete protected",
 			wantActionGets: 1,
 		},
 		{
-			name:           "action never finishes",
+			name:           "poll retries 429 and 5xx",
 			deleteStatus:   http.StatusOK,
-			deleteBody:     `{"action":{"id":42,"status":"running"}}`,
-			actionStatuses: []string{"running"},
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{http.StatusTooManyRequests, ""}, {http.StatusBadGateway, ""}, {http.StatusGatewayTimeout, ""}, {200, "success"}},
+			wantDeleted:    1,
+			wantActionGets: 4,
+		},
+		{
+			name:           "poll stops on other 4xx",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{http.StatusForbidden, ""}},
+			wantErr:        "failed to get action 42: hetzner API returned 403 getting action",
+			wantActionGets: 1,
+		},
+		{
+			name:          "poll keeps failing until the deadline",
+			deleteStatus:  http.StatusOK,
+			deleteBody:    deleteAccepted,
+			actionReplies: []actionReply{{http.StatusServiceUnavailable, ""}},
+			wantErr:       "hetzner API returned 503 getting action",
+		},
+		{
+			name:          "action never finishes, deadline hit mid-poll",
+			deleteStatus:  http.StatusOK,
+			deleteBody:    deleteAccepted,
+			actionReplies: []actionReply{{200, "running"}},
+			wantErr:       `timed out waiting for action 42 (last status "running")`,
+		},
+		{
+			name:           "action never finishes, deadline hit between polls",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{200, "running"}},
+			pollInterval:   time.Hour,
+			timeout:        50 * time.Millisecond,
 			wantErr:        `timed out waiting for action 42 (last status "running")`,
+			wantActionGets: 1,
+		},
+		{
+			name:           "caller cancels while waiting",
+			deleteStatus:   http.StatusOK,
+			deleteBody:     deleteAccepted,
+			actionReplies:  []actionReply{{200, "running"}},
+			pollInterval:   time.Hour,
+			timeout:        time.Hour,
+			cancelParent:   true,
+			wantErr:        `stopped waiting for action 42 (last status "running"), the deletion may still be in progress: context canceled`,
+			wantActionGets: 1,
 		},
 		{name: "server error", deleteStatus: http.StatusInternalServerError, wantErr: "hetzner API returned 500 deleting load balancer"},
 	}
@@ -363,7 +423,17 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 
 			origInterval, origTimeout := actionPollInterval, actionTimeout
 			actionPollInterval, actionTimeout = time.Millisecond, 200*time.Millisecond
+			if tt.pollInterval != 0 {
+				actionPollInterval = tt.pollInterval
+			}
+			if tt.timeout != 0 {
+				actionTimeout = tt.timeout
+			}
 			defer func() { actionPollInterval, actionTimeout = origInterval, origTimeout }()
+
+			updates := make(chan status.Update, 16)
+			ctx, cancel := context.WithCancel(status.WithChannel(context.Background(), updates))
+			defer cancel()
 
 			lbs := loadBalancerListResponse{
 				LoadBalancers: []hetznerLoadBalancer{
@@ -371,7 +441,7 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 				},
 			}
 
-			actionGets := 0
+			var actionGets atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/load_balancers" && r.Method == http.MethodGet:
@@ -380,13 +450,22 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 					w.WriteHeader(tt.deleteStatus)
 					_, _ = w.Write([]byte(tt.deleteBody))
 				case r.URL.Path == "/actions/42" && r.Method == http.MethodGet:
-					status := tt.actionStatuses[min(actionGets, len(tt.actionStatuses)-1)]
-					actionGets++
+					n := int(actionGets.Add(1))
+					if tt.cancelParent && n == 1 {
+						// Cancel once this poll has been answered, so the wait is
+						// interrupted between polls rather than mid-request.
+						time.AfterFunc(20*time.Millisecond, cancel)
+					}
+					reply := tt.actionReplies[min(n-1, len(tt.actionReplies)-1)]
+					if reply.code != http.StatusOK {
+						w.WriteHeader(reply.code)
+						return
+					}
 					actionErr := "null"
 					if tt.actionError != "" {
 						actionErr = tt.actionError
 					}
-					_, _ = fmt.Fprintf(w, `{"action":{"id":42,"status":%q,"error":%s}}`, status, actionErr)
+					_, _ = fmt.Fprintf(w, `{"action":{"id":42,"status":%q,"error":%s}}`, reply.status, actionErr)
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -397,7 +476,7 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 			setHetznerAPIBase(server.URL)
 			defer setHetznerAPIBase(origBase)
 
-			deleted, err := cleanupLoadBalancers(context.Background())
+			deleted, err := cleanupLoadBalancers(ctx)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("cleanupLoadBalancers() error = %v, want it to contain %q", err, tt.wantErr)
@@ -408,8 +487,19 @@ func TestCleanupLoadBalancers_DeleteResponses(t *testing.T) {
 			if deleted != tt.wantDeleted {
 				t.Errorf("deleted = %d, want %d", deleted, tt.wantDeleted)
 			}
-			if tt.wantActionGets != 0 && actionGets != tt.wantActionGets {
-				t.Errorf("action GETs = %d, want %d", actionGets, tt.wantActionGets)
+			if got := int(actionGets.Load()); tt.wantActionGets != 0 && got != tt.wantActionGets {
+				t.Errorf("action GETs = %d, want %d", got, tt.wantActionGets)
+			}
+
+			waited := false
+			close(updates)
+			for u := range updates {
+				if strings.Contains(u.Message, "Waiting for Hetzner to delete load balancer 10") {
+					waited = true
+				}
+			}
+			if wantWait := tt.deleteBody != ""; waited != wantWait {
+				t.Errorf("sent wait status update = %v, want %v", waited, wantWait)
 			}
 		})
 	}
