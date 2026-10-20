@@ -127,16 +127,24 @@ func deletePVOnClaimDelete(client *fake.Clientset) {
 func TestReleaseEBSVolumes(t *testing.T) {
 	ctx := context.Background()
 
+	cordonedByUser := node("node-c")
+	cordonedByUser.Spec.Unschedulable = true
+
 	objects := []runtime.Object{
 		node("node-a"),
 		node("node-b"),
+		cordonedByUser,
 		csiPV("pv-db", "vol-db", "keycloak", "keycloak-db-1", corev1.PersistentVolumeReclaimDelete),
+		csiPV("pv-kc-keep", "vol-kc-keep", "keycloak", "keycloak-backup", corev1.PersistentVolumeReclaimRetain),
 		csiPV("pv-keep", "vol-keep", "apps", "important", corev1.PersistentVolumeReclaimRetain),
 		longhornPV("pv-longhorn", "apps", "lh"),
 		pvc("keycloak", "keycloak-db-1"),
+		pvc("keycloak", "keycloak-backup"),
 		pvc("apps", "important"),
 		pvc("apps", "lh"),
 		podWithClaim("keycloak", "keycloak-db-1", "keycloak-db-1"),
+		// Same namespace as a released claim, but mounts only a Retain claim.
+		podWithClaim("keycloak", "keycloak-backup", "keycloak-backup"),
 		podWithClaim("apps", "keeper", "important"),
 		podWithClaim("apps", "lh-user", "lh"),
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "keycloak", Name: "keycloak-0"}},
@@ -144,7 +152,7 @@ func TestReleaseEBSVolumes(t *testing.T) {
 	client := fake.NewSimpleClientset(objects...)
 	deletePVOnClaimDelete(client)
 
-	inv, err := releaseEBSVolumes(ctx, client, ebsReleaseTimeout)
+	inv, cordoned, err := releaseEBSVolumes(ctx, client, ebsReleaseTimeout)
 	if err != nil {
 		t.Fatalf("releaseEBSVolumes() error = %v", err)
 	}
@@ -155,8 +163,8 @@ func TestReleaseEBSVolumes(t *testing.T) {
 	if !inv.deleteVolumeIDs["vol-db"] || len(inv.deleteVolumeIDs) != 1 {
 		t.Errorf("deleteVolumeIDs = %v, want only vol-db", inv.deleteVolumeIDs)
 	}
-	if !inv.retainVolumeIDs["vol-keep"] || len(inv.retainVolumeIDs) != 1 {
-		t.Errorf("retainVolumeIDs = %v, want only vol-keep", inv.retainVolumeIDs)
+	if !inv.retainVolumeIDs["vol-keep"] || !inv.retainVolumeIDs["vol-kc-keep"] || len(inv.retainVolumeIDs) != 2 {
+		t.Errorf("retainVolumeIDs = %v, want vol-keep and vol-kc-keep", inv.retainVolumeIDs)
 	}
 
 	exists := func(err error) bool { return !k8serrors.IsNotFound(err) }
@@ -168,9 +176,15 @@ func TestReleaseEBSVolumes(t *testing.T) {
 	if _, err := client.CoreV1().Pods("keycloak").Get(ctx, "keycloak-db-1", metav1.GetOptions{}); exists(err) {
 		t.Error("pod keycloak/keycloak-db-1 should be deleted")
 	}
-	// Pods that don't mount a released claim stay.
-	if _, err := client.CoreV1().Pods("keycloak").Get(ctx, "keycloak-0", metav1.GetOptions{}); err != nil {
-		t.Errorf("pod keycloak/keycloak-0 should be untouched: %v", err)
+	// Pods in the same namespace that don't mount a released claim stay,
+	// including one that mounts a Retain claim.
+	for _, name := range []string{"keycloak-0", "keycloak-backup"} {
+		if _, err := client.CoreV1().Pods("keycloak").Get(ctx, name, metav1.GetOptions{}); err != nil {
+			t.Errorf("pod keycloak/%s should be untouched: %v", name, err)
+		}
+	}
+	if _, err := client.CoreV1().PersistentVolumeClaims("keycloak").Get(ctx, "keycloak-backup", metav1.GetOptions{}); err != nil {
+		t.Errorf("PVC keycloak/keycloak-backup should be untouched: %v", err)
 	}
 	// Retain and non-EBS claims, and their pods, are untouched.
 	for _, name := range []string{"important", "lh"} {
@@ -183,12 +197,16 @@ func TestReleaseEBSVolumes(t *testing.T) {
 			t.Errorf("pod apps/%s should be untouched: %v", name, err)
 		}
 	}
-	// Every node is cordoned.
+	// Every node is cordoned, but only the ones NIC cordoned are returned.
 	nodes, _ := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	for _, n := range nodes.Items {
 		if !n.Spec.Unschedulable {
 			t.Errorf("node %s should be cordoned", n.Name)
 		}
+	}
+	sort.Strings(cordoned)
+	if strings.Join(cordoned, ",") != "node-a,node-b" {
+		t.Errorf("cordoned = %v, want [node-a node-b] (node-c was already cordoned)", cordoned)
 	}
 }
 
@@ -199,16 +217,43 @@ func TestReleaseEBSVolumesNothingToRelease(t *testing.T) {
 		csiPV("pv-keep", "vol-keep", "apps", "important", corev1.PersistentVolumeReclaimRetain),
 	)
 
-	inv, err := releaseEBSVolumes(ctx, client, ebsReleaseTimeout)
+	inv, cordoned, err := releaseEBSVolumes(ctx, client, ebsReleaseTimeout)
 	if err != nil {
 		t.Fatalf("releaseEBSVolumes() error = %v", err)
 	}
 	if !inv.complete || len(inv.deleteVolumeIDs) != 0 || !inv.retainVolumeIDs["vol-keep"] {
 		t.Errorf("unexpected inventory %+v", inv)
 	}
+	if len(cordoned) != 0 {
+		t.Errorf("cordoned = %v, want none", cordoned)
+	}
 	n, _ := client.CoreV1().Nodes().Get(ctx, "node-a", metav1.GetOptions{})
 	if n.Spec.Unschedulable {
 		t.Error("nodes should not be cordoned when there is nothing to release")
+	}
+}
+
+func TestReleaseEBSVolumesUnclaimedPVNotAwaited(t *testing.T) {
+	ctx := context.Background()
+	unclaimed := csiPV("pv-free", "vol-free", "", "", corev1.PersistentVolumeReclaimDelete)
+	unclaimed.Spec.ClaimRef = nil
+	client := fake.NewSimpleClientset(
+		node("node-a"),
+		unclaimed,
+		csiPV("pv-db", "vol-db", "keycloak", "keycloak-db-1", corev1.PersistentVolumeReclaimDelete),
+		pvc("keycloak", "keycloak-db-1"),
+	)
+	deletePVOnClaimDelete(client)
+
+	// Zero timeout: the first poll must already find nothing to wait for, so
+	// this fails if the claimless PV is waited on.
+	inv, _, err := releaseEBSVolumes(ctx, client, 0)
+	if err != nil {
+		t.Fatalf("releaseEBSVolumes() error = %v, want no wait on the unclaimed PV", err)
+	}
+	// The unclaimed PV's volume is still recorded for the post-destroy sweep.
+	if !inv.deleteVolumeIDs["vol-free"] || !inv.deleteVolumeIDs["vol-db"] {
+		t.Errorf("deleteVolumeIDs = %v, want vol-free and vol-db", inv.deleteVolumeIDs)
 	}
 }
 
@@ -220,13 +265,17 @@ func TestReleaseEBSVolumesTimeout(t *testing.T) {
 		pvc("keycloak", "keycloak-db-1"),
 	)
 
-	inv, err := releaseEBSVolumes(context.Background(), client, 0)
+	inv, cordoned, err := releaseEBSVolumes(context.Background(), client, 0)
 	if err == nil || !strings.Contains(err.Error(), "pv-db") {
 		t.Fatalf("releaseEBSVolumes() error = %v, want timeout naming pv-db", err)
 	}
 	// The inventory still drives the post-destroy fallback.
 	if !inv.complete || !inv.deleteVolumeIDs["vol-db"] {
 		t.Errorf("inventory should still record vol-db, got %+v", inv)
+	}
+	// The cordoned nodes are still reported so a failed teardown can undo them.
+	if len(cordoned) != 1 || cordoned[0] != "node-a" {
+		t.Errorf("cordoned = %v, want [node-a]", cordoned)
 	}
 }
 
@@ -236,7 +285,7 @@ func TestReleaseEBSVolumesListFailure(t *testing.T) {
 		return true, nil, errors.New("api down")
 	})
 
-	inv, err := releaseEBSVolumes(context.Background(), client, ebsReleaseTimeout)
+	inv, _, err := releaseEBSVolumes(context.Background(), client, ebsReleaseTimeout)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -245,16 +294,70 @@ func TestReleaseEBSVolumesListFailure(t *testing.T) {
 	}
 }
 
+func TestUncordonNodes(t *testing.T) {
+	ctx := context.Background()
+	a, b, c := node("node-a"), node("node-b"), node("node-c")
+	a.Spec.Unschedulable = true
+	b.Spec.Unschedulable = true
+	c.Spec.Unschedulable = true
+	client := fake.NewSimpleClientset(a, b, c)
+
+	// node-gone no longer exists; node-c was cordoned by someone else.
+	if err := uncordonNodes(ctx, client, []string{"node-a", "node-b", "node-gone"}); err != nil {
+		t.Fatalf("uncordonNodes() error = %v", err)
+	}
+	want := map[string]bool{"node-a": false, "node-b": false, "node-c": true}
+	for name, unschedulable := range want {
+		n, err := client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get node %s: %v", name, err)
+		}
+		if n.Spec.Unschedulable != unschedulable {
+			t.Errorf("node %s unschedulable = %v, want %v", name, n.Spec.Unschedulable, unschedulable)
+		}
+	}
+}
+
+// mockEBSClient evaluates the single filter deleteOrphanedEBSVolumes sends
+// (volume-id or tag:<key>) against volumes.
 type mockEBSClient struct {
 	volumes   []ec2types.Volume
 	deleted   []string
 	deleteErr map[string]error
-	filters   []ec2types.Filter
+	filters   []string
 }
 
 func (m *mockEBSClient) DescribeVolumes(_ context.Context, params *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	m.filters = params.Filters
-	return &ec2.DescribeVolumesOutput{Volumes: m.volumes}, nil
+	if len(params.Filters) != 1 || len(params.VolumeIds) != 0 {
+		return nil, errors.New("mock expects exactly one filter and no VolumeIds")
+	}
+	f := params.Filters[0]
+	name := aws.ToString(f.Name)
+	m.filters = append(m.filters, name)
+	values := map[string]bool{}
+	for _, v := range f.Values {
+		values[v] = true
+	}
+	var out []ec2types.Volume
+	for _, v := range m.volumes {
+		switch {
+		case name == "volume-id":
+			if values[aws.ToString(v.VolumeId)] {
+				out = append(out, v)
+			}
+		case strings.HasPrefix(name, "tag:"):
+			key := strings.TrimPrefix(name, "tag:")
+			for _, tag := range v.Tags {
+				if aws.ToString(tag.Key) == key && values[aws.ToString(tag.Value)] {
+					out = append(out, v)
+					break
+				}
+			}
+		default:
+			return nil, errors.New("unexpected filter " + name)
+		}
+	}
+	return &ec2.DescribeVolumesOutput{Volumes: out}, nil
 }
 
 func (m *mockEBSClient) DeleteVolume(_ context.Context, params *ec2.DeleteVolumeInput, _ ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error) {
@@ -266,19 +369,34 @@ func (m *mockEBSClient) DeleteVolume(_ context.Context, params *ec2.DeleteVolume
 	return &ec2.DeleteVolumeOutput{}, nil
 }
 
-func vol(id string, state ec2types.VolumeState) ec2types.Volume {
+// vol is an EBS volume tagged by the CSI driver for the named cluster.
+func vol(id string, state ec2types.VolumeState, cluster string) ec2types.Volume {
+	return ec2types.Volume{
+		VolumeId: aws.String(id),
+		State:    state,
+		Tags:     []ec2types.Tag{{Key: aws.String(ebsClusterTag), Value: aws.String(cluster)}},
+	}
+}
+
+// untaggedVol is an EBS volume with no cluster tag.
+func untaggedVol(id string, state ec2types.VolumeState) ec2types.Volume {
 	return ec2types.Volume{VolumeId: aws.String(id), State: state}
 }
 
 func TestDeleteOrphanedEBSVolumes(t *testing.T) {
+	const cluster = "tylergp3"
+
 	inv := newEBSInventory()
 	inv.complete = true
 	inv.deleteVolumeIDs["vol-db"] = true
 	inv.deleteVolumeIDs["vol-redis"] = true
 	inv.deleteVolumeIDs["vol-gone"] = true
+	inv.deleteVolumeIDs["vol-vanished"] = true
 	inv.retainVolumeIDs["vol-keep"] = true
 
+	// The !inv.complete guard is the only thing keeping vol-db here.
 	incomplete := newEBSInventory()
+	incomplete.deleteVolumeIDs["vol-db"] = true
 
 	tests := []struct {
 		name        string
@@ -286,43 +404,60 @@ func TestDeleteOrphanedEBSVolumes(t *testing.T) {
 		volumes     []ec2types.Volume
 		deleteErr   map[string]error
 		wantDeleted []string
-		wantErr     bool
+		wantErr     string
 	}{
 		{
 			name: "deletes recorded Delete-policy volumes only",
 			inv:  inv,
 			volumes: []ec2types.Volume{
-				vol("vol-db", ec2types.VolumeStateAvailable),
-				vol("vol-redis", ec2types.VolumeStateAvailable),
-				vol("vol-keep", ec2types.VolumeStateAvailable),        // Retain
-				vol("vol-old-cluster", ec2types.VolumeStateAvailable), // never seen
-				vol("vol-gone", ec2types.VolumeStateDeleting),         // driver got it
+				vol("vol-db", ec2types.VolumeStateAvailable, cluster),
+				vol("vol-keep", ec2types.VolumeStateAvailable, cluster),        // Retain
+				vol("vol-old-cluster", ec2types.VolumeStateAvailable, cluster), // never seen
+				vol("vol-gone", ec2types.VolumeStateDeleting, cluster),         // driver got it
+				vol("vol-other", ec2types.VolumeStateAvailable, "other"),       // another cluster
+				// vol-vanished was already deleted by the driver: absent.
 			},
-			wantDeleted: []string{"vol-db", "vol-redis"},
+			wantDeleted: []string{"vol-db"},
 		},
 		{
-			name:        "incomplete inventory deletes nothing",
+			name: "recorded volume without the cluster tag is still deleted",
+			inv:  inv,
+			volumes: []ec2types.Volume{
+				untaggedVol("vol-redis", ec2types.VolumeStateAvailable), // older driver
+				untaggedVol("vol-stranger", ec2types.VolumeStateAvailable),
+			},
+			wantDeleted: []string{"vol-redis"},
+		},
+		{
+			name:        "incomplete inventory deletes nothing and errors on tagged volumes",
 			inv:         incomplete,
-			volumes:     []ec2types.Volume{vol("vol-db", ec2types.VolumeStateAvailable)},
+			volumes:     []ec2types.Volume{vol("vol-db", ec2types.VolumeStateAvailable, cluster)},
+			wantDeleted: nil,
+			wantErr:     "vol-db",
+		},
+		{
+			name:        "incomplete inventory with nothing tagged is clean",
+			inv:         incomplete,
+			volumes:     []ec2types.Volume{vol("vol-other", ec2types.VolumeStateAvailable, "other")},
 			wantDeleted: nil,
 		},
 		{
 			name:        "volume still attached is an error, not a delete",
 			inv:         inv,
-			volumes:     []ec2types.Volume{vol("vol-db", ec2types.VolumeStateInUse)},
+			volumes:     []ec2types.Volume{vol("vol-db", ec2types.VolumeStateInUse, cluster)},
 			wantDeleted: nil,
-			wantErr:     true,
+			wantErr:     "vol-db is in-use",
 		},
 		{
 			name: "delete failure is returned and other volumes still go",
 			inv:  inv,
 			volumes: []ec2types.Volume{
-				vol("vol-db", ec2types.VolumeStateAvailable),
-				vol("vol-redis", ec2types.VolumeStateAvailable),
+				vol("vol-db", ec2types.VolumeStateAvailable, cluster),
+				vol("vol-redis", ec2types.VolumeStateAvailable, cluster),
 			},
 			deleteErr:   map[string]error{"vol-db": errors.New("boom")},
 			wantDeleted: []string{"vol-redis"},
-			wantErr:     true,
+			wantErr:     "delete volume vol-db",
 		},
 		{
 			name:        "no volumes is a no-op",
@@ -335,9 +470,12 @@ func TestDeleteOrphanedEBSVolumes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &mockEBSClient{volumes: tt.volumes, deleteErr: tt.deleteErr}
-			n, err := deleteOrphanedEBSVolumes(context.Background(), client, "tylergp3", tt.inv)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("deleteOrphanedEBSVolumes() error = %v, wantErr %v", err, tt.wantErr)
+			n, err := deleteOrphanedEBSVolumes(context.Background(), client, cluster, tt.inv)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("deleteOrphanedEBSVolumes() error = %v, want nil", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Fatalf("deleteOrphanedEBSVolumes() error = %v, want one containing %q", err, tt.wantErr)
 			}
 			sort.Strings(client.deleted)
 			if strings.Join(client.deleted, ",") != strings.Join(tt.wantDeleted, ",") {
@@ -346,9 +484,9 @@ func TestDeleteOrphanedEBSVolumes(t *testing.T) {
 			if n != len(tt.wantDeleted) {
 				t.Errorf("returned count = %d, want %d", n, len(tt.wantDeleted))
 			}
-			if len(client.filters) != 1 || aws.ToString(client.filters[0].Name) != "tag:"+ebsClusterNameTag ||
-				len(client.filters[0].Values) != 1 || client.filters[0].Values[0] != "tylergp3" {
-				t.Errorf("unexpected DescribeVolumes filters %+v", client.filters)
+			// The cluster-tag listing always runs, for the report.
+			if last := client.filters[len(client.filters)-1]; last != "tag:"+ebsClusterTag {
+				t.Errorf("last DescribeVolumes filter = %q, want tag:%s", last, ebsClusterTag)
 			}
 		})
 	}

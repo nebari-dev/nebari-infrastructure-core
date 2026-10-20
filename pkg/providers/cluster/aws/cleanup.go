@@ -28,7 +28,9 @@ func newELBClient(ctx context.Context, region string) (ELBClient, error) {
 	return elb.NewFromConfig(cfg), nil
 }
 
-func newEC2Client(ctx context.Context, region string) (EC2Client, error) {
+// newEC2Client returns the concrete client, which satisfies both EC2Client
+// (load balancer security group cleanup) and EBSClient (EBS volume sweep).
+func newEC2Client(ctx context.Context, region string) (*ec2.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)

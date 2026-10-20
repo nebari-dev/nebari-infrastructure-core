@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"go.opentelemetry.io/otel"
@@ -24,34 +23,34 @@ import (
 )
 
 const (
-	// ebsCSIDriver is the CSI driver name for EBS volumes, used both as the
-	// PV's spec.csi.driver and as the prefix of the tags the driver puts on
-	// the volumes it creates.
+	// ebsCSIDriver is the CSI driver name for EBS volumes, used as the PV's
+	// spec.csi.driver.
 	ebsCSIDriver = "ebs.csi.aws.com"
 
-	// ebsClusterNameTag is set by the EBS CSI driver on every volume it
-	// creates, with the EKS cluster name (NIC's project name) as the value.
-	ebsClusterNameTag = "ebs.csi.aws.com/cluster-name"
+	// ebsClusterTag is set by the EBS CSI driver on every volume it creates
+	// when it runs with --k8s-tag-cluster-id, which the EKS add-on sets to the
+	// cluster name (NIC's project name). The driver has set this tag across
+	// all the versions NIC can get from the add-on, unlike
+	// ebs.csi.aws.com/cluster-name, which only appears from v1.58.0. It is
+	// only used to report leftover volumes; deletion is driven by volume ID.
+	ebsClusterTag = "KubernetesCluster"
 
 	// ebsReleaseTimeout bounds how long destroy waits for the EBS CSI driver
 	// to delete the volumes behind deleted PVCs. Anything still present
 	// afterwards is handled by deleteOrphanedEBSVolumes once the cluster is gone.
 	ebsReleaseTimeout = 5 * time.Minute
+
+	// ebsDescribeChunk caps how many volume IDs go into one DescribeVolumes
+	// volume-id filter.
+	ebsDescribeChunk = 100
 )
 
 // EBSClient is the subset of the EC2 API used to find and delete the EBS
-// volumes left behind after the cluster is destroyed.
+// volumes left behind after the cluster is destroyed. *ec2.Client from
+// newEC2Client satisfies it.
 type EBSClient interface {
 	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
 	DeleteVolume(ctx context.Context, params *ec2.DeleteVolumeInput, optFns ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error)
-}
-
-func newEBSClient(ctx context.Context, region string) (EBSClient, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
-	}
-	return ec2.NewFromConfig(cfg), nil
 }
 
 // ebsInventory records the EBS-backed PersistentVolumes seen before teardown.
@@ -59,7 +58,7 @@ func newEBSClient(ctx context.Context, region string) (EBSClient, error) {
 // a volume NIC never saw (or one whose PV said Retain) is never deleted.
 type ebsInventory struct {
 	// complete is false when the PV list could not be read; the fallback
-	// then reports leftover volumes but deletes none.
+	// then deletes nothing and returns an error for any tagged volume left.
 	complete bool
 	// deleteVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Delete.
 	deleteVolumeIDs map[string]bool
@@ -99,8 +98,10 @@ func ebsVolumeID(pv *corev1.PersistentVolume) string {
 // getting a volume.
 //
 // The returned inventory is valid whenever the PV list succeeded, even if a
-// later step failed; callers pass it to deleteOrphanedEBSVolumes.
-func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout time.Duration) (ebsInventory, error) {
+// later step failed; callers pass it to deleteOrphanedEBSVolumes. The returned
+// node names are the nodes this call cordoned (also on error), so a caller
+// whose teardown then fails can hand them to uncordonNodes.
+func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout time.Duration) (ebsInventory, []string, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.releaseEBSVolumes")
 	defer span.End()
@@ -110,11 +111,11 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 	pvs, err := client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		span.RecordError(err)
-		return inv, fmt.Errorf("failed to list PersistentVolumes: %w", err)
+		return inv, nil, fmt.Errorf("failed to list PersistentVolumes: %w", err)
 	}
 	inv.complete = true
 
-	// PVs to release, and the claims bound to them, keyed by namespace.
+	// PVs to wait for, and the claims bound to them, keyed by namespace.
 	pending := map[string]bool{}
 	claims := map[string]map[string]bool{}
 	for i := range pvs.Items {
@@ -128,13 +129,17 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 			continue
 		}
 		inv.deleteVolumeIDs[volumeID] = true
-		pending[pv.Name] = true
-		if ref := pv.Spec.ClaimRef; ref != nil {
-			if claims[ref.Namespace] == nil {
-				claims[ref.Namespace] = map[string]bool{}
-			}
-			claims[ref.Namespace][ref.Name] = true
+		// A PV with no claim can't be released by deleting a PVC, so there is
+		// nothing to wait for; the post-destroy sweep deletes its volume.
+		ref := pv.Spec.ClaimRef
+		if ref == nil {
+			continue
 		}
+		pending[pv.Name] = true
+		if claims[ref.Namespace] == nil {
+			claims[ref.Namespace] = map[string]bool{}
+		}
+		claims[ref.Namespace][ref.Name] = true
 	}
 
 	span.SetAttributes(
@@ -147,16 +152,17 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 	if len(pending) == 0 {
-		return inv, nil
+		return inv, nil, nil
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelInfo,
 		fmt.Sprintf("Deleting %d EBS-backed PersistentVolumeClaim(s) so the EBS CSI driver removes their volumes", len(pending))).
 		WithResource("ebs-volume").WithAction("cleanup"))
 
-	if err := cordonAllNodes(ctx, client); err != nil {
+	cordoned, err := cordonAllNodes(ctx, client)
+	if err != nil {
 		span.RecordError(err)
-		return inv, err
+		return inv, cordoned, err
 	}
 
 	var errs []error
@@ -175,43 +181,85 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 	if len(errs) > 0 {
 		err := errors.Join(errs...)
 		span.RecordError(err)
-		return inv, err
+		return inv, cordoned, err
 	}
 
 	if err := waitForPVsGone(ctx, client, pending, timeout); err != nil {
 		span.RecordError(err)
-		return inv, err
+		return inv, cordoned, err
 	}
 
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess,
 		fmt.Sprintf("EBS CSI driver deleted %d volume(s)", len(pending))).
 		WithResource("ebs-volume").WithAction("cleanup"))
-	return inv, nil
+	return inv, cordoned, nil
 }
 
-// cordonAllNodes marks every node unschedulable.
-func cordonAllNodes(ctx context.Context, client kubernetes.Interface) error {
+// cordonAllNodes marks every node unschedulable and returns the names of the
+// nodes it cordoned. Nodes that were already unschedulable are skipped and
+// not returned, so uncordonNodes never undoes a cordon NIC didn't make. On
+// error the nodes cordoned so far are still returned.
+func cordonAllNodes(ctx context.Context, client kubernetes.Interface) ([]string, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.cordonAllNodes")
+	defer span.End()
+
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list nodes: %w", err)
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 	patch := []byte(`{"spec":{"unschedulable":true}}`)
+	var cordoned []string
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		if node.Spec.Unschedulable {
 			continue
 		}
 		if _, err := client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
-			return fmt.Errorf("failed to cordon node %s: %w", node.Name, err)
+			err = fmt.Errorf("failed to cordon node %s: %w", node.Name, err)
+			span.RecordError(err)
+			return cordoned, err
 		}
+		cordoned = append(cordoned, node.Name)
+	}
+	span.SetAttributes(attribute.Int("nodes_cordoned", len(cordoned)))
+	return cordoned, nil
+}
+
+// uncordonNodes marks the named nodes schedulable again. Nodes that no longer
+// exist are skipped.
+func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.uncordonNodes")
+	defer span.End()
+	span.SetAttributes(attribute.Int("nodes", len(names)))
+
+	patch := []byte(`{"spec":{"unschedulable":false}}`)
+	var errs []error
+	for _, name := range names {
+		_, err := client.CoreV1().Nodes().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		if err != nil && !k8serrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("uncordon node %s: %w", name, err))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		span.RecordError(err)
+		return err
 	}
 	return nil
 }
 
 // deletePodsUsingClaims deletes the pods in ns that mount any of claims.
 func deletePodsUsingClaims(ctx context.Context, client kubernetes.Interface, ns string, claims map[string]bool) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.deletePodsUsingClaims")
+	defer span.End()
+	span.SetAttributes(attribute.String("namespace", ns))
+
 	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("failed to list pods in %s: %w", ns, err)
 	}
 	var errs []error
@@ -228,18 +276,32 @@ func deletePodsUsingClaims(ctx context.Context, client kubernetes.Interface, ns 
 			break
 		}
 	}
-	return errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
 
 // waitForPVsGone polls until none of the named PVs exist, or timeout elapses.
 func waitForPVsGone(ctx context.Context, client kubernetes.Interface, names map[string]bool, timeout time.Duration) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.waitForPVsGone")
+	defer span.End()
+	span.SetAttributes(
+		attribute.Int("pvs", len(names)),
+		attribute.String("timeout", timeout.String()),
+	)
+
 	deadline := time.Now().Add(timeout)
 	const pollInterval = 5 * time.Second
 
 	for {
 		pvs, err := client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to list PersistentVolumes while polling: %w", err)
+			err = fmt.Errorf("failed to list PersistentVolumes while polling: %w", err)
+			span.RecordError(err)
+			return err
 		}
 		var remaining []string
 		for i := range pvs.Items {
@@ -252,23 +314,56 @@ func waitForPVsGone(ctx context.Context, client kubernetes.Interface, names map[
 		}
 		if time.Now().After(deadline) {
 			sort.Strings(remaining)
-			return fmt.Errorf("%d EBS PersistentVolume(s) still present after %s: %s",
+			err := fmt.Errorf("%d EBS PersistentVolume(s) still present after %s: %s",
 				len(remaining), timeout, strings.Join(remaining, ", "))
+			span.RecordError(err)
+			return err
 		}
 
 		select {
 		case <-ctx.Done():
+			span.RecordError(ctx.Err())
 			return ctx.Err()
 		case <-time.After(pollInterval):
 		}
 	}
 }
 
+// describeVolumes returns every volume matching filter, following pagination.
+func describeVolumes(ctx context.Context, client EBSClient, filter ec2types.Filter) ([]ec2types.Volume, error) {
+	var volumes []ec2types.Volume
+	paginator := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{
+		Filters: []ec2types.Filter{filter},
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		volumes = append(volumes, page.Volumes...)
+	}
+	return volumes, nil
+}
+
+// volumeGone reports whether vol is already on its way out.
+func volumeGone(vol ec2types.Volume) bool {
+	return vol.State == ec2types.VolumeStateDeleting || vol.State == ec2types.VolumeStateDeleted
+}
+
 // deleteOrphanedEBSVolumes runs after the cluster is destroyed and deletes the
-// detached EBS volumes the CSI driver did not get to. Only volumes recorded in
-// inv.deleteVolumeIDs are deleted; any other volume tagged with this cluster's
-// name (a Retain PV, or a volume left by an earlier cluster with the same
-// name) is reported, never deleted.
+// detached EBS volumes the CSI driver did not get to.
+//
+// Deletion is driven by volume ID: the volumes recorded in inv.deleteVolumeIDs
+// are looked up by ID (not by tag, so it works whatever tags the driver
+// version wrote), and any that still exist are deleted. One that can't be
+// deleted (still attached, or the delete call fails) is returned as an error.
+//
+// Volumes tagged KubernetesCluster=<clusterName> are then listed for the
+// report and never deleted. With a complete inventory, a Retain volume is
+// reported as kept and a volume NIC never saw (e.g. left by an earlier
+// cluster with the same name) as a warning. With an incomplete inventory NIC
+// can't tell Delete volumes from Retain ones, so any tagged volume left is
+// returned as an error for the user to review.
 func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName string, inv ebsInventory) (int, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.deleteOrphanedEBSVolumes")
@@ -278,72 +373,92 @@ func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName
 		attribute.Bool("inventory_complete", inv.complete),
 	)
 
-	var volumes []ec2types.Volume
-	paginator := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{
-		Filters: []ec2types.Filter{
-			{Name: aws.String("tag:" + ebsClusterNameTag), Values: []string{clusterName}},
-		},
-	})
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			span.RecordError(err)
-			return 0, fmt.Errorf("failed to describe EBS volumes: %w", err)
+	var deleted int
+	var errs []error
+
+	// Pass 1: delete the recorded Delete-policy volumes that still exist.
+	if inv.complete && len(inv.deleteVolumeIDs) > 0 {
+		ids := make([]string, 0, len(inv.deleteVolumeIDs))
+		for id := range inv.deleteVolumeIDs {
+			ids = append(ids, id)
 		}
-		volumes = append(volumes, page.Volumes...)
+		sort.Strings(ids)
+		// A volume-id filter, unlike the VolumeIds parameter, doesn't fail
+		// the whole call when some IDs (the ones the driver already deleted)
+		// no longer exist.
+		var found []ec2types.Volume
+		for start := 0; start < len(ids); start += ebsDescribeChunk {
+			end := min(start+ebsDescribeChunk, len(ids))
+			vols, err := describeVolumes(ctx, client, ec2types.Filter{Name: aws.String("volume-id"), Values: ids[start:end]})
+			if err != nil {
+				err = fmt.Errorf("failed to describe recorded EBS volumes: %w", err)
+				span.RecordError(err)
+				return 0, err
+			}
+			found = append(found, vols...)
+		}
+		for _, vol := range found {
+			id := aws.ToString(vol.VolumeId)
+			if volumeGone(vol) || !inv.deleteVolumeIDs[id] {
+				continue
+			}
+			if vol.State != ec2types.VolumeStateAvailable {
+				errs = append(errs, fmt.Errorf("volume %s is %s, not available", id, vol.State))
+				continue
+			}
+			if _, err := client.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(id)}); err != nil {
+				errs = append(errs, fmt.Errorf("delete volume %s: %w", id, err))
+				continue
+			}
+			deleted++
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted orphaned EBS volume %s", id)).
+				WithResource("ebs-volume").WithAction("deleted"))
+		}
 	}
 
-	var deleted int
-	var kept, retained []string
-	var errs []error
-	for _, vol := range volumes {
+	// Pass 2: report the other volumes tagged with this cluster's name.
+	tagged, err := describeVolumes(ctx, client, ec2types.Filter{Name: aws.String("tag:" + ebsClusterTag), Values: []string{clusterName}})
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to list EBS volumes tagged %s=%s: %w", ebsClusterTag, clusterName, err))
+	}
+	var unknown, retained []string
+	for _, vol := range tagged {
 		id := aws.ToString(vol.VolumeId)
 		switch {
-		case vol.State == ec2types.VolumeStateDeleting || vol.State == ec2types.VolumeStateDeleted:
-			continue
+		case volumeGone(vol):
+		case inv.complete && inv.deleteVolumeIDs[id]:
+			// Handled (and, on failure, reported) in pass 1.
 		case inv.retainVolumeIDs[id]:
 			retained = append(retained, id)
-			continue
-		case !inv.complete || !inv.deleteVolumeIDs[id]:
-			kept = append(kept, id)
-			continue
+		default:
+			unknown = append(unknown, id)
 		}
-		if vol.State != ec2types.VolumeStateAvailable {
-			errs = append(errs, fmt.Errorf("volume %s is %s, not available", id, vol.State))
-			continue
-		}
-		if _, err := client.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(id)}); err != nil {
-			errs = append(errs, fmt.Errorf("delete volume %s: %w", id, err))
-			continue
-		}
-		deleted++
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Deleted orphaned EBS volume %s", id)).
-			WithResource("ebs-volume").WithAction("deleted"))
 	}
+	sort.Strings(retained)
+	sort.Strings(unknown)
 
 	span.SetAttributes(
 		attribute.Int("ebs_volumes_deleted", deleted),
-		attribute.Int("ebs_volumes_kept", len(kept)),
+		attribute.Int("ebs_volumes_unknown", len(unknown)),
 		attribute.Int("ebs_volumes_retained", len(retained)),
 	)
 
 	if len(retained) > 0 {
-		sort.Strings(retained)
 		status.Send(ctx, status.NewUpdate(status.LevelInfo,
 			fmt.Sprintf("Kept %d EBS volume(s) whose PersistentVolume reclaim policy was Retain: %s",
 				len(retained), strings.Join(retained, ", "))).
 			WithResource("ebs-volume").WithAction("cleanup"))
 	}
-	if len(kept) > 0 {
-		sort.Strings(kept)
-		reason := "not recorded with reclaim policy Delete before teardown"
-		if !inv.complete {
-			reason = "the cluster's PersistentVolumes could not be read before teardown"
+	if len(unknown) > 0 {
+		if inv.complete {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning,
+				fmt.Sprintf("Left %d EBS volume(s) tagged %s=%s in place (not recorded with reclaim policy Delete before teardown): %s",
+					len(unknown), ebsClusterTag, clusterName, strings.Join(unknown, ", "))).
+				WithResource("ebs-volume").WithAction("cleanup"))
+		} else {
+			errs = append(errs, fmt.Errorf("%d EBS volume(s) tagged %s=%s remain and were not deleted because the cluster's PersistentVolumes could not be read before teardown; review and delete any you don't need: %s",
+				len(unknown), ebsClusterTag, clusterName, strings.Join(unknown, ", ")))
 		}
-		status.Send(ctx, status.NewUpdate(status.LevelWarning,
-			fmt.Sprintf("Left %d EBS volume(s) tagged %s=%s in place (%s): %s",
-				len(kept), ebsClusterNameTag, clusterName, reason, strings.Join(kept, ", "))).
-			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 
 	if err := errors.Join(errs...); err != nil {
