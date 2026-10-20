@@ -326,3 +326,26 @@ storage pool themselves (the installer now warns when no node carries the label)
 Switching an existing cluster between `dedicated_nodes` modes is a manual
 replica migration (Longhorn does not move existing replicas on a flag change).
 See [Migrating Longhorn dedicated_nodes modes](../operations/longhorn-dedicated-nodes-migration.md).
+
+## Update (2026-10): NIC-managed EBS StorageClass
+
+[PR #712](https://github.com/nebari-dev/nebari-infrastructure-core/pull/712)
+replaces the `gp2` fallback described under "Storage Class Selection". When
+Longhorn is disabled, the RWO class is no longer the in-tree `gp2` class EKS
+ships but an EBS CSI class that NIC manages.
+
+- **Created on every AWS cluster.** NIC creates the class whether or not
+  Longhorn is enabled. It is `gp3`, encrypted, `WaitForFirstConsumer` by
+  default, and the optional `cluster.aws.ebs` block configures its type, IOPS,
+  throughput, KMS key and name.
+- **Default only when nothing else is.** The class becomes the cluster default
+  only when no other StorageClass is the default. With Longhorn enabled,
+  Longhorn keeps the default and the EBS class is used by name only. A default
+  the admin chose is never overridden.
+- **`InfraSettings().StorageClass`** returns `longhorn` when Longhorn is
+  enabled, otherwise the EBS class name (`gp3` unless `ebs.storage_class_name`
+  or `ebs.type` says otherwise).
+
+The EFS-default item under "Follow-up Work" is superseded: EBS, not EFS, is the
+default RWO class, and the EFS class stays opt-in by name
+([#98](https://github.com/nebari-dev/nebari-infrastructure-core/issues/98)).

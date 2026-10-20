@@ -28,14 +28,23 @@ const (
 	// EKS routes it to the CSI driver through CSI migration.
 	ebsInTreeProvisioner = "kubernetes.io/aws-ebs"
 
+	// ebsEKSDefaultClassName is the name of the in-tree gp2 class EKS ships.
+	ebsEKSDefaultClassName = "gp2"
+
 	// managedByLabel marks the StorageClass as NIC's, which lets NIC replace
-	// it when the ebs config changes. Classes without it are never touched.
+	// it when the ebs config changes. NIC never replaces a class without it,
+	// but may still mark one as the cluster default when no default exists.
 	managedByLabel = "app.kubernetes.io/managed-by"
 	managedByValue = "nebari-infrastructure-core"
 
 	// gp3 baseline performance. AWS rejects lower values.
 	gp3MinIOPS       = 3000
 	gp3MinThroughput = 125
+
+	// ioMinIOPS is the EBS CSI driver's minimum IOPS for io1 and io2. Unless
+	// allowAutoIOPSPerGBIncrease is set, the driver passes lower values to
+	// AWS, which rejects them when a PVC is provisioned.
+	ioMinIOPS = 100
 )
 
 // validateEBSConfig checks the ebs block. Upper limits on IOPS and throughput
@@ -58,8 +67,8 @@ func validateEBSConfig(c *Config) error {
 				return fmt.Errorf("ebs.iops: %d is below the gp3 baseline of %d", *e.IOPS, gp3MinIOPS)
 			}
 		case "io1", "io2":
-			if *e.IOPS <= 0 {
-				return fmt.Errorf("ebs.iops: must be positive, got %d", *e.IOPS)
+			if *e.IOPS < ioMinIOPS {
+				return fmt.Errorf("ebs.iops: %d is below the %s minimum of %d", *e.IOPS, volumeType, ioMinIOPS)
 			}
 		default:
 			return fmt.Errorf("ebs.iops: not supported for volume type %q (only gp3, io1 and io2)", volumeType)
@@ -147,11 +156,20 @@ func ebsStorageClass(c *Config) *storagev1.StorageClass {
 // default. This requires the EBS CSI driver, which the Terraform EKS module
 // installs as an EKS addon.
 func ensureEBSStorageClass(ctx context.Context, kubeconfigBytes []byte, c *Config) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.ensureEBSStorageClass")
+	defer span.End()
+
 	client, err := newK8sClient(kubeconfigBytes)
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
-	return ensureEBSStorageClassWithClient(ctx, client, c)
+	if err := ensureEBSStorageClassWithClient(ctx, client, c); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	return nil
 }
 
 // ensureEBSStorageClassWithClient is the testable inner form of
@@ -164,7 +182,7 @@ func ensureEBSStorageClass(ctx context.Context, kubeconfigBytes []byte, c *Confi
 // as-is so it isn't replaced out from under the PVCs that use it.
 func ensureEBSStorageClassWithClient(ctx context.Context, client kubernetes.Interface, c *Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	ctx, span := tracer.Start(ctx, "aws.ensureEBSStorageClass")
+	ctx, span := tracer.Start(ctx, "aws.ensureEBSStorageClassWithClient")
 	defer span.End()
 
 	desired := ebsStorageClass(c)
@@ -195,6 +213,12 @@ func ensureEBSStorageClassWithClient(ctx context.Context, client kubernetes.Inte
 			span.RecordError(err)
 			return err
 		}
+	case isEKSDefaultGP2Reuse(c, existing):
+		status.Send(ctx, status.NewUpdate(status.LevelInfo,
+			fmt.Sprintf("Using the %s StorageClass EKS ships as-is. It does not set encrypted, so its volumes are encrypted only if EBS encryption by default is enabled in the account; set ebs.storage_class_name to have NIC create its own encrypted gp2 class", name)).
+			WithResource("storageclass").
+			WithAction("skipped").
+			WithMetadata("name", name))
 	default:
 		status.Send(ctx, status.NewUpdate(status.LevelWarning,
 			fmt.Sprintf("Existing StorageClass %q was not created by NIC and does not match the ebs config (provisioner %q, parameters %v; want %q, %v). Leaving it unchanged; set ebs.storage_class_name to a new name to have NIC create its own class",
@@ -229,11 +253,31 @@ func ebsStorageClassMatches(existing, desired *storagev1.StorageClass) bool {
 	return maps.Equal(existing.Parameters, desired.Parameters)
 }
 
+// isEKSDefaultGP2Reuse reports whether the config deliberately resolves to
+// the gp2 class EKS ships: type gp2 under the default name, with no KMS key
+// (which the in-tree class can't provide). The parameter mismatch is then
+// expected (EKS's gp2 sets fsType and not encrypted), so NIC reuses the
+// class without warning about it.
+func isEKSDefaultGP2Reuse(c *Config, existing *storagev1.StorageClass) bool {
+	if c.EBSVolumeType() != "gp2" || c.EBSStorageClassName() != ebsEKSDefaultClassName {
+		return false
+	}
+	if c.EBS != nil && c.EBS.KMSKeyARN != "" {
+		return false
+	}
+	return existing.Provisioner == ebsInTreeProvisioner && existing.Parameters["type"] == "gp2"
+}
+
 // replaceStorageClass deletes existing and creates desired in its place,
 // carrying over the default-class annotation so the cluster default doesn't
 // move.
 func replaceStorageClass(ctx context.Context, client kubernetes.Interface, existing, desired *storagev1.StorageClass) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.replaceStorageClass")
+	defer span.End()
+
 	name := desired.Name
+	span.SetAttributes(attribute.String("storage_class_name", name))
 	status.Send(ctx, status.NewUpdate(status.LevelProgress,
 		fmt.Sprintf("Recreating %s StorageClass to apply the ebs config (existing volumes keep their current settings)", name)).
 		WithResource("storageclass").
@@ -246,10 +290,12 @@ func replaceStorageClass(ctx context.Context, client kubernetes.Interface, exist
 	}
 
 	if err := client.StorageV1().StorageClasses().Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+		span.RecordError(err)
 		return fmt.Errorf("failed to delete %s StorageClass for replacement: %w", name, err)
 	}
 	if _, err := client.StorageV1().StorageClasses().Create(ctx, replacement, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("failed to recreate %s StorageClass: %w", name, err)
+		span.RecordError(err)
+		return fmt.Errorf("deleted the %s StorageClass but failed to recreate it, so the cluster has no %s class (and may have no default class) until deploy is rerun, which recreates it: %w", name, name, err)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -9,10 +10,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/storageclass"
 )
 
@@ -61,7 +65,9 @@ func TestValidateEBSConfig(t *testing.T) {
 		{name: "gp3 throughput below baseline", cfg: &Config{EBS: &EBSConfig{Throughput: intPtr(100)}}, wantErr: "baseline"},
 		{name: "iops on gp2", cfg: &Config{EBS: &EBSConfig{Type: "gp2", IOPS: intPtr(3000)}}, wantErr: "ebs.iops: not supported"},
 		{name: "io1 without iops", cfg: &Config{EBS: &EBSConfig{Type: "io1"}}, wantErr: "ebs.iops: required"},
-		{name: "io2 zero iops", cfg: &Config{EBS: &EBSConfig{Type: "io2", IOPS: intPtr(0)}}, wantErr: "must be positive"},
+		{name: "io2 zero iops", cfg: &Config{EBS: &EBSConfig{Type: "io2", IOPS: intPtr(0)}}, wantErr: "below the io2 minimum"},
+		{name: "io1 iops below driver minimum", cfg: &Config{EBS: &EBSConfig{Type: "io1", IOPS: intPtr(99)}}, wantErr: "below the io1 minimum of 100"},
+		{name: "io2 iops at driver minimum", cfg: &Config{EBS: &EBSConfig{Type: "io2", IOPS: intPtr(100)}}},
 		{name: "throughput on io2", cfg: &Config{EBS: &EBSConfig{Type: "io2", IOPS: intPtr(1000), Throughput: intPtr(500)}}, wantErr: "ebs.throughput: not supported"},
 		{name: "kms alias", cfg: &Config{EBS: &EBSConfig{KMSKeyARN: "arn:aws:kms:us-west-2:123456789012:alias/ebs"}}, wantErr: "ebs.kms_key_arn"},
 		{name: "invalid class name", cfg: &Config{EBS: &EBSConfig{StorageClassName: "Fast_SSD"}}, wantErr: "not a valid StorageClass name"},
@@ -208,6 +214,8 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 		wantProvisioner  string
 		wantParams       map[string]string
 		wantLabel        bool
+		wantWarning      bool   // a LevelWarning status update is sent
+		wantInfo         string // substring of a LevelInfo status update, if set
 	}{
 		{
 			name:             "creates gp3 and marks it default on a fresh EKS cluster",
@@ -271,6 +279,26 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 			wantLabel:        true,
 		},
 		{
+			// MarkDefaultIfNone would not re-mark gp3 here because another
+			// class is also a default, so this pins the annotation carry-over
+			// in replaceStorageClass.
+			name: "recreated class keeps its default annotation when another class is also default",
+			cfg:  gp3Fast,
+			existing: []runtime.Object{
+				withDefault(&storagev1.StorageClass{
+					ObjectMeta:  metav1.ObjectMeta{Name: "admin-class"},
+					Provisioner: "example.com/provisioner",
+				}, "true"),
+				withDefault(ebsStorageClass(&Config{}), "true"),
+			},
+			wantClass:        "gp3",
+			wantDefault:      true,
+			wantOtherDefault: map[string]bool{"admin-class": true},
+			wantProvisioner:  ebsCSIProvisioner,
+			wantParams:       map[string]string{"type": "gp3", "encrypted": "true", "iops": "6000"},
+			wantLabel:        true,
+		},
+		{
 			name: "leaves a hand-made gp3 class unchanged and marks it default",
 			cfg:  gp3Fast,
 			existing: []runtime.Object{
@@ -287,9 +315,10 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 			wantProvisioner:  ebsInTreeProvisioner,
 			wantParams:       map[string]string{"type": "gp3"},
 			wantLabel:        false,
+			wantWarning:      true,
 		},
 		{
-			name:            "type gp2 reuses the EKS gp2 class and marks it default",
+			name:            "type gp2 reuses the EKS gp2 class without a warning and marks it default",
 			cfg:             &Config{EBS: &EBSConfig{Type: "gp2"}},
 			existing:        []runtime.Object{gp2()},
 			wantClass:       "gp2",
@@ -297,6 +326,19 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 			wantProvisioner: ebsInTreeProvisioner,
 			wantParams:      map[string]string{"type": "gp2", "fsType": "ext4"},
 			wantLabel:       false,
+			wantWarning:     false,
+			wantInfo:        "encrypted only if EBS encryption by default is enabled",
+		},
+		{
+			name:            "type gp2 with a KMS key still warns that the EKS gp2 class can't use it",
+			cfg:             &Config{EBS: &EBSConfig{Type: "gp2", KMSKeyARN: testCMKARN}},
+			existing:        []runtime.Object{gp2()},
+			wantClass:       "gp2",
+			wantDefault:     true,
+			wantProvisioner: ebsInTreeProvisioner,
+			wantParams:      map[string]string{"type": "gp2", "fsType": "ext4"},
+			wantLabel:       false,
+			wantWarning:     true,
 		},
 		{
 			name:             "custom name creates a separate class",
@@ -313,10 +355,31 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ch := make(chan status.Update, 32)
+			ctx := status.WithChannel(context.Background(), ch)
 			client := fake.NewSimpleClientset(tt.existing...)
-			if err := ensureEBSStorageClassWithClient(ctx, client, tt.cfg); err != nil {
+			err := ensureEBSStorageClassWithClient(ctx, client, tt.cfg)
+			close(ch)
+			if err != nil {
 				t.Fatalf("ensureEBSStorageClassWithClient() error = %v", err)
+			}
+
+			var warned, gotInfo bool
+			for u := range ch {
+				switch u.Level {
+				case status.LevelWarning:
+					warned = true
+				case status.LevelInfo:
+					if tt.wantInfo != "" && strings.Contains(u.Message, tt.wantInfo) {
+						gotInfo = true
+					}
+				}
+			}
+			if warned != tt.wantWarning {
+				t.Errorf("warning sent = %v, want %v", warned, tt.wantWarning)
+			}
+			if tt.wantInfo != "" && !gotInfo {
+				t.Errorf("no info status update containing %q", tt.wantInfo)
 			}
 
 			got, err := client.StorageV1().StorageClasses().Get(ctx, tt.wantClass, metav1.GetOptions{})
@@ -346,5 +409,28 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEnsureEBSStorageClassRecreateFailure(t *testing.T) {
+	ctx := context.Background()
+	existing := ebsStorageClass(&Config{})
+	existing.Annotations = map[string]string{storageclass.DefaultAnnotation: "true"}
+	client := fake.NewSimpleClientset(existing)
+	client.PrependReactor("create", "storageclasses", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("apiserver unavailable")
+	})
+
+	err := ensureEBSStorageClassWithClient(ctx, client, &Config{EBS: &EBSConfig{IOPS: intPtr(6000)}})
+	if err == nil {
+		t.Fatal("ensureEBSStorageClassWithClient() error = nil, want the recreate failure")
+	}
+	for _, want := range []string{"deleted the gp3 StorageClass", "rerun", "apiserver unavailable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if _, getErr := client.StorageV1().StorageClasses().Get(ctx, "gp3", metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+		t.Errorf("gp3 StorageClass Get error = %v, want NotFound after a failed recreate", getErr)
 	}
 }

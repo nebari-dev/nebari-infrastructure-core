@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -20,6 +21,16 @@ import (
 // as undefined behavior: the DefaultStorageClass admission controller picks
 // the newest and emits a warning.
 const DefaultAnnotation = "storageclass.kubernetes.io/is-default-class"
+
+// BetaDefaultAnnotation is the older key for DefaultAnnotation. Kubernetes
+// still treats a class as the default when either key is "true".
+const BetaDefaultAnnotation = "storageclass.beta.kubernetes.io/is-default-class"
+
+// IsDefault reports whether sc is marked as a default StorageClass under
+// either the GA or the beta annotation, matching how Kubernetes decides.
+func IsDefault(sc *storagev1.StorageClass) bool {
+	return sc.Annotations[DefaultAnnotation] == "true" || sc.Annotations[BetaDefaultAnnotation] == "true"
+}
 
 // EnsureSoleDefault demotes any StorageClass other than keep that still
 // carries the default-class annotation, leaving keep as the cluster's only
@@ -86,7 +97,7 @@ func MarkDefaultIfNone(ctx context.Context, client kubernetes.Interface, name st
 		if sc.Name == name {
 			found = true
 		}
-		if sc.Annotations[DefaultAnnotation] != "true" {
+		if !IsDefault(sc) {
 			continue
 		}
 		if sc.Name == name {

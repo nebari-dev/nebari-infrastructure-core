@@ -149,7 +149,8 @@ pkg/
   │       └── local/    # Directory on disk for local/dev clusters
   ├── registry/         # Unified registry holding cluster, DNS, and repository providers
   ├── storage/          # Cluster-agnostic storage installers
-  │   └── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
+  │   ├── longhorn/     # Helm-based Longhorn install/uninstall, shared across providers
+  │   └── storageclass/ # Provider-agnostic default-StorageClass helpers (EnsureSoleDefault, MarkDefaultIfNone)
   ├── tofu/             # terraform-exec wrapper (used by the AWS and Azure cluster providers)
   ├── argocd/           # ArgoCD bootstrap and foundational-apps templating
   ├── config/           # YAML config parsing/validation

@@ -283,7 +283,9 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	}
 
 	// The ebs block is only read after the cluster is up, so check it before
-	// anything is created.
+	// anything is created. This duplicates the check in Validate because
+	// Validate never runs on deploy; drop it once that is fixed in
+	// https://github.com/nebari-dev/nebari-infrastructure-core/issues/520.
 	if err := validateEBSConfig(awsCfg); err != nil {
 		span.RecordError(err)
 		return err

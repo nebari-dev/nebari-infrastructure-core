@@ -171,9 +171,14 @@ cluster:
     # when this block changes NIC recreates its own class. Existing volumes keep
     # their current settings. A class with the same name that NIC didn't create
     # (for example the gp2 class EKS ships) is used as-is.
+    #
+    # type: gp2 with no storage_class_name reuses the gp2 class EKS ships. That
+    # class does not set encrypted, so its volumes are encrypted only if EBS
+    # encryption by default is enabled in the account. Set storage_class_name
+    # (e.g. gp2-encrypted) to have NIC create its own encrypted gp2 class.
     # ebs:
     #   type: gp3                 # default gp3; gp2, gp3, io1, io2, st1 or sc1
-    #   iops: 3000                # gp3 (min 3000), io1 and io2 (required) only
+    #   iops: 3000                # gp3 (min 3000), io1 and io2 (required, min 100) only
     #   throughput: 125           # MiB/s, gp3 only (min 125)
     #   kms_key_arn: arn:aws:kms:us-west-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab
     #                             # default: the account's default EBS key; NIC

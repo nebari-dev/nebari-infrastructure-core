@@ -22,6 +22,11 @@ func sc(name string, isDefault string) *storagev1.StorageClass {
 	}
 }
 
+func betaDefault(s *storagev1.StorageClass) *storagev1.StorageClass {
+	s.Annotations[BetaDefaultAnnotation] = "true"
+	return s
+}
+
 func assertDefaults(t *testing.T, client kubernetes.Interface, want map[string]bool) {
 	t.Helper()
 	for name, wantDefault := range want {
@@ -29,7 +34,7 @@ func assertDefaults(t *testing.T, client kubernetes.Interface, want map[string]b
 		if err != nil {
 			t.Fatalf("StorageClass %q not found: %v", name, err)
 		}
-		isDefault := got.Annotations[DefaultAnnotation] == "true"
+		isDefault := IsDefault(got)
 		if isDefault != wantDefault {
 			t.Errorf("StorageClass %q default=%v, want %v (annotations=%v)", name, isDefault, wantDefault, got.Annotations)
 		}
@@ -146,6 +151,32 @@ func TestMarkDefaultIfNone(t *testing.T) {
 			wantDefault: map[string]bool{
 				"admin-class": true,
 				"gp3":         false,
+			},
+		},
+		{
+			name: "leaves an existing default set only by the beta annotation alone",
+			existing: []runtime.Object{
+				betaDefault(sc("legacy-class", "")),
+				sc("gp3", ""),
+			},
+			target: "gp3",
+			want:   false,
+			wantDefault: map[string]bool{
+				"legacy-class": true,
+				"gp3":          false,
+			},
+		},
+		{
+			name: "no-op when target is already the default under the beta annotation",
+			existing: []runtime.Object{
+				sc("gp2", ""),
+				betaDefault(sc("gp3", "")),
+			},
+			target: "gp3",
+			want:   true,
+			wantDefault: map[string]bool{
+				"gp2": false,
+				"gp3": true,
 			},
 		},
 		{
