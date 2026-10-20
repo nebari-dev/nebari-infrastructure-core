@@ -540,3 +540,33 @@ func TestToTFVarsAMIReleaseVersion(t *testing.T) {
 		t.Errorf("storage: expected ami_release_version %q, got %v", pinned, got)
 	}
 }
+
+func TestToTFVarsNodeGroupAvailabilityZones(t *testing.T) {
+	cfg := Config{
+		Region:            "us-west-2",
+		AvailabilityZones: []string{"us-west-2a", "us-west-2b"},
+		NodeGroups: map[string]NodeGroup{
+			"general": {Instance: "m5.xlarge"},
+			"user-a":  {Instance: "m5.xlarge", AvailabilityZones: []string{"us-west-2a"}},
+		},
+	}
+
+	raw, err := json.Marshal(cfg.toTFVars("test", "", nil, ""))
+	if err != nil {
+		t.Fatalf("marshal tfvars: %v", err)
+	}
+	var vars struct {
+		NodeGroups map[string]map[string]any `json:"node_groups"`
+	}
+	if err := json.Unmarshal(raw, &vars); err != nil {
+		t.Fatalf("unmarshal tfvars: %v", err)
+	}
+
+	if v, ok := vars.NodeGroups["general"]["availability_zones"]; ok {
+		t.Errorf("general: expected availability_zones to be omitted when unset, got %v", v)
+	}
+	got, _ := vars.NodeGroups["user-a"]["availability_zones"].([]any)
+	if len(got) != 1 || got[0] != "us-west-2a" {
+		t.Errorf("user-a: expected availability_zones [us-west-2a], got %v", vars.NodeGroups["user-a"]["availability_zones"])
+	}
+}

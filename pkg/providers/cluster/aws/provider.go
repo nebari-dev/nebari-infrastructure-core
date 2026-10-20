@@ -91,6 +91,25 @@ func validateTaints(nodeGroupName string, taints []Taint) error {
 	return nil
 }
 
+// validateNodeGroupAvailabilityZones checks that a node group's AZs are among
+// the cluster's availability_zones when NIC creates the VPC. With existing
+// subnets NIC can't see their AZs, so the module checks them at plan instead.
+func validateNodeGroupAvailabilityZones(nodeGroupName string, nodeGroup NodeGroup, cfg *Config) error {
+	createVPC := cfg.ExistingVPCID == "" && len(cfg.ExistingPrivateSubnetIDs) == 0
+	if len(nodeGroup.AvailabilityZones) == 0 || !createVPC {
+		return nil
+	}
+	if len(cfg.AvailabilityZones) == 0 {
+		return fmt.Errorf("node group %s: availability_zones requires the cluster's availability_zones to be set", nodeGroupName)
+	}
+	for _, az := range nodeGroup.AvailabilityZones {
+		if !contains(cfg.AvailabilityZones, az) {
+			return fmt.Errorf("node group %s: availability zone %s is not one of the cluster's availability_zones %v", nodeGroupName, az, cfg.AvailabilityZones)
+		}
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -230,6 +249,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 
 		// Validate taints
 		if err := validateTaints(nodeGroupName, nodeGroup.Taints); err != nil {
+			span.RecordError(err)
+			return err
+		}
+
+		if err := validateNodeGroupAvailabilityZones(nodeGroupName, nodeGroup, awsCfg); err != nil {
 			span.RecordError(err)
 			return err
 		}

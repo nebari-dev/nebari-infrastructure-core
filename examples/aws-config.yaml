@@ -126,6 +126,27 @@ cluster:
       #   min_nodes: 0
       #   max_nodes: 5
       #
+      # # Example: one user group per AZ, for EBS-backed home directories.
+      # # An EBS volume lives in one AZ, so a pod using it can only run there.
+      # # A group pinned to one AZ lets the cluster autoscaler add a node in
+      # # that AZ. Give the groups the same instance type and labels, and select
+      # # on the label, so the volume's AZ picks the group. AZs must come from
+      # # availability_zones above. Changing a group's AZs replaces the group.
+      # user-a:
+      #   instance: m7i.xlarge
+      #   min_nodes: 0
+      #   max_nodes: 5
+      #   availability_zones: [us-west-2a]
+      #   labels:
+      #     nebari.dev/node-group: user
+      # user-b:
+      #   instance: m7i.xlarge
+      #   min_nodes: 0
+      #   max_nodes: 5
+      #   availability_zones: [us-west-2b]
+      #   labels:
+      #     nebari.dev/node-group: user
+      #
       # # Example: GPU node group with AL2023 NVIDIA AMI
       # gpu:
       #   instance: g5.xlarge

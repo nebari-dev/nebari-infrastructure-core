@@ -166,6 +166,40 @@ func TestValidateTaints(t *testing.T) {
 	}
 }
 
+func TestValidateNodeGroupAvailabilityZones(t *testing.T) {
+	clusterAZs := []string{"us-west-2a", "us-west-2b"}
+	tests := []struct {
+		name      string
+		groupAZs  []string
+		cfg       Config
+		errSubstr string // "" means no error expected
+	}{
+		{name: "unset is fine", cfg: Config{}},
+		{name: "cluster AZ is accepted", groupAZs: []string{"us-west-2a"}, cfg: Config{AvailabilityZones: clusterAZs}},
+		{name: "AZ outside the cluster is rejected", groupAZs: []string{"us-west-2a", "us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs}, errSubstr: "us-west-2c is not one of"},
+		{name: "cluster AZs are required for a created VPC", groupAZs: []string{"us-west-2a"}, cfg: Config{}, errSubstr: "requires the cluster's availability_zones"},
+		{name: "existing subnets are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{ExistingVPCID: "vpc-1", ExistingPrivateSubnetIDs: []string{"subnet-1"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNodeGroupAvailabilityZones("user", NodeGroup{Instance: "m5.xlarge", AvailabilityZones: tt.groupAZs}, &tt.cfg)
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
 func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 	const schemeKey = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 

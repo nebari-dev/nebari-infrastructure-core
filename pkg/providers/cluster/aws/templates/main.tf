@@ -1,6 +1,6 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.9.0"
+  # TODO: switch back to the registry once node group availability_zones is released
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=3f2837efe308bc6db3343bdd33738cbb2c0791c1"
 
 
   project_name                             = var.project_name
