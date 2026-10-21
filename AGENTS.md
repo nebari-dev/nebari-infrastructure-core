@@ -323,6 +323,7 @@ func SomeFunction(ctx context.Context, ...) error {
 - `pkg/status` is the in-process status channel. Per-line writers and helpers there are intentionally not span-instrumented; spans at that granularity would dwarf the operations they describe.
 - Inside `pkg/config`, the ctx-less validation helpers (e.g. `CheckPlaceholders` and its YAML-node walk, the `Validate` family, the trust-bundle readers) take no `context.Context`; wrapping them in spans would add a tracing dependency to leaf validation for no observability gain, and the few that touch disk do so on a local file already named in the surrounding span. The instrumented parse entrypoints (`ParseConfig`, `UnmarshalProviderConfig`) already carry the config-loading spans.
 - Inside `pkg/tofu`, the byte/line-level helpers (`streamThroughStatus`, `jsonLineMapper`, `mapStatusLevel`, the `status.Writer` methods) are similarly exempt. Operation-granularity wrapper methods on `TerraformExecutor` (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) should still be span-instrumented; this is tracked as outstanding work.
+- Inside `pkg/providers`, the ctx-less config validators a provider's `Validate` calls (e.g. `validateTaints`, `validateKMSKeyARNs` and `validateNodeGroupAvailabilityZones` in the AWS provider) are exempt for the same reason. They do no I/O, and `Validate` records the error they return on its own span.
 - New code in any other `pkg/` package must be instrumented as described above.
 
 ### Logging Convention
