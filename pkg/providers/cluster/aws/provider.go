@@ -96,8 +96,7 @@ func validateTaints(nodeGroupName string, taints []Taint) error {
 // Otherwise NIC can't see the AZs: the module picks them when they are unset,
 // and existing subnets carry their own. The module checks those at plan.
 func validateNodeGroupAvailabilityZones(nodeGroupName string, nodeGroup NodeGroup, cfg *Config) error {
-	createVPC := cfg.ExistingVPCID == "" && len(cfg.ExistingPrivateSubnetIDs) == 0
-	if len(nodeGroup.AvailabilityZones) == 0 || !createVPC || len(cfg.AvailabilityZones) == 0 {
+	if len(nodeGroup.AvailabilityZones) == 0 || !cfg.createsVPC() || len(cfg.AvailabilityZones) == 0 {
 		return nil
 	}
 	for _, az := range nodeGroup.AvailabilityZones {

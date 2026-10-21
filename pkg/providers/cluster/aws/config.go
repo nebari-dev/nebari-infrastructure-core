@@ -190,6 +190,12 @@ func (c *Config) HasGPUNodeGroups() bool {
 	return false
 }
 
+// createsVPC reports whether NIC creates the VPC and its subnets, which it does
+// unless an existing VPC or existing private subnets are configured.
+func (c *Config) createsVPC() bool {
+	return c.ExistingVPCID == "" && len(c.ExistingPrivateSubnetIDs) == 0
+}
+
 // LonghornEnabled returns whether Longhorn distributed block storage should
 // be deployed on this AWS cluster. Defaults to true when the Longhorn block
 // is omitted entirely — Longhorn is the AWS storage default. The shared
