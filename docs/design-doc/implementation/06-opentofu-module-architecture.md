@@ -49,7 +49,7 @@ The AWS root module is intentionally thin. It is a single Terraform file that ca
 # pkg/providers/cluster/aws/templates/main.tf
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.6.0"
+  version = "0.10.0"
 
   project_name                  = var.project_name
   tags                          = var.tags
