@@ -20,11 +20,12 @@ nic deploy [flags]
 ### Options
 
 ```
-      --dry-run          Show what would be deployed without making changes
-  -f, --file string      Path to nebari-config.yaml file (auto-discovered if omitted)
-  -h, --help             help for deploy
-      --regen-apps       Regenerate ArgoCD application manifests even if already bootstrapped
-      --timeout string   Override default timeout (e.g., '45m', '1h')
+      --dry-run           Show what would be deployed without making changes
+  -f, --file string       Path to nebari-config.yaml file (auto-discovered if omitted)
+  -h, --help              help for deploy
+      --plan-out string   Save the tofu plan file to the given path. Requires --dry-run.
+      --regen-apps        Regenerate ArgoCD application manifests even if already bootstrapped
+      --timeout string    Override default timeout (e.g., '45m', '1h')
 ```
 
 ### SEE ALSO

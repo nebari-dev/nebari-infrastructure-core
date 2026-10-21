@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,6 +22,7 @@ var (
 	deployDryRun     bool
 	deployTimeout    string
 	deployRegenApps  bool
+	deployPlanOut    string
 
 	deployCmd = &cobra.Command{
 		Use:   "deploy",
@@ -41,6 +44,36 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
 	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	deployCmd.Flags().BoolVar(&deployRegenApps, "regen-apps", false, "Regenerate ArgoCD application manifests even if already bootstrapped")
+	deployCmd.Flags().StringVar(&deployPlanOut, "plan-out", "", "Save the tofu plan file to the given path. Requires --dry-run.")
+}
+
+// resolvePlanOut validates the --plan-out flag and resolves it to an absolute
+// path. An empty value means the flag was not set and is returned as-is.
+// --plan-out is only valid with --dry-run; setting it without --dry-run is
+// rejected before any provider API call. The parent directory must already
+// exist so we fail here rather than deep inside the tofu plan with a confusing
+// error. Relative paths are resolved against the operator's working directory,
+// not the tofu workdir (which is a temp directory the operator does not see).
+func resolvePlanOut(planOut string, dryRun bool) (string, error) {
+	if planOut == "" {
+		return "", nil
+	}
+	if !dryRun {
+		return "", fmt.Errorf("--plan-out requires --dry-run")
+	}
+	abs, err := filepath.Abs(planOut)
+	if err != nil {
+		return "", fmt.Errorf("resolve --plan-out path %q: %w", planOut, err)
+	}
+	parent := filepath.Dir(abs)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return "", fmt.Errorf("--plan-out parent directory %q is not accessible: %w", parent, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("--plan-out parent %q is not a directory", parent)
+	}
+	return abs, nil
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
@@ -59,6 +92,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		attribute.String("config.file", configFile),
 		attribute.Bool("dry_run", deployDryRun),
 	)
+
+	planOut, err := resolvePlanOut(deployPlanOut, deployDryRun)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if planOut != "" {
+		span.SetAttributes(attribute.String("plan_out", planOut))
+	}
 
 	var timeout time.Duration
 	if deployTimeout != "" {
@@ -89,6 +131,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		DryRun:    deployDryRun,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
+		PlanOut:   planOut,
 	})
 	if err != nil {
 		span.RecordError(err)

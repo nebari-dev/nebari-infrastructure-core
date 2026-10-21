@@ -383,10 +383,18 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	}
 
 	if opts.DryRun {
+		planOpts = appendPlanOutOpt(planOpts, opts.PlanOut)
 		_, err = tf.Plan(ctx, planOpts...)
 		if err != nil {
 			span.RecordError(err)
 			return err
+		}
+		if opts.PlanOut != "" {
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Saved tofu plan file; inspect with 'tofu -chdir=<workdir> show <path>'").
+				WithResource("tofu").
+				WithAction("plan-saved").
+				WithMetadata("plan_out", opts.PlanOut).
+				WithMetadata("workdir", tf.WorkingDir()))
 		}
 		return nil
 	}

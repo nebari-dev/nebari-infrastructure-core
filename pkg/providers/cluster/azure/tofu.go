@@ -3,8 +3,21 @@ package azure
 import (
 	"embed"
 
+	"github.com/hashicorp/terraform-exec/tfexec"
+
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 )
+
+// appendPlanOutOpt appends a tfexec.Out option to opts when path is non-empty,
+// so Deploy can honor cluster.DeployOptions.PlanOut without inline branching.
+// Returns opts unchanged when path is empty. Kept as a package-level helper so
+// the behavior is unit-testable without standing up a real tofu executor.
+func appendPlanOutOpt(opts []tfexec.PlanOption, path string) []tfexec.PlanOption {
+	if path == "" {
+		return opts
+	}
+	return append(opts, tfexec.Out(path))
+}
 
 // tofuTemplates contains the OpenTofu shim that calls the external AKS module.
 // The embedded files are extracted to the working directory at deploy time

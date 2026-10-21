@@ -53,6 +53,15 @@ type DeployOptions struct {
 	// BackupBucket, when non-nil, asks the provider to provision a Longhorn
 	// backup bucket/container in its Terraform module.
 	BackupBucket *BackupBucketSpec
+
+	// PlanOut, when non-empty, asks a tofu-backed provider to save the plan
+	// file to this absolute path during a dry run. Resolved against the
+	// operator's working directory by the CLI before it reaches the provider.
+	// Only meaningful with DryRun: a non-dry-run deploy ignores it (the CLI
+	// rejects the combination before calling the provider). Providers that do
+	// not use OpenTofu (local, existing, hetzner, gcp) ignore this field; they
+	// have no plan to emit.
+	PlanOut string
 }
 
 // DestroyOptions holds runtime flags for infrastructure destruction.

@@ -4,9 +4,23 @@ import (
 	"embed"
 	"maps"
 
+	"github.com/hashicorp/terraform-exec/tfexec"
+
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
+
+// appendPlanOutOpt appends a tfexec.Out option to opts when path is non-empty,
+// so the tofu-backed providers can honor cluster.DeployOptions.PlanOut
+// uniformly. When path is empty the slice is returned unchanged. Kept as a
+// package-level helper so the behavior is directly unit-testable without
+// standing up a real tofu executor.
+func appendPlanOutOpt(opts []tfexec.PlanOption, path string) []tfexec.PlanOption {
+	if path == "" {
+		return opts
+	}
+	return append(opts, tfexec.Out(path))
+}
 
 // Embed all files in the templates directory, including dotfiles (i.e. .terraform.lock.hcl)
 //

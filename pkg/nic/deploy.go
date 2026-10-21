@@ -38,6 +38,12 @@ type DeployOptions struct {
 	// RegenApps forces regeneration of ArgoCD application manifests even
 	// when the GitOps repository is already bootstrapped.
 	RegenApps bool
+
+	// PlanOut, when non-empty and DryRun is true, asks a tofu-backed cluster
+	// provider to save the plan file to this absolute path. Non-tofu providers
+	// ignore it. The CLI resolves the path to absolute and validates its parent
+	// directory exists before this reaches the library layer.
+	PlanOut string
 }
 
 // DeployResult contains useful information from the deploy process that
@@ -205,6 +211,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		Timeout:      opts.Timeout,
 		TrustBundle:  caBundle,
 		BackupBucket: backupBucketSpec(cfg),
+		PlanOut:      opts.PlanOut,
 	}); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Deployment failed").

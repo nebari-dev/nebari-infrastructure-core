@@ -192,9 +192,17 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("tofu").
 			WithAction("plan").
 			WithMetadata("cluster_name", projectName))
-		if _, err := tf.Plan(ctx); err != nil {
+		planOpts := appendPlanOutOpt(nil, opts.PlanOut)
+		if _, err := tf.Plan(ctx, planOpts...); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("tofu plan: %w", err)
+		}
+		if opts.PlanOut != "" {
+			status.Send(ctx, status.NewUpdate(status.LevelInfo, "Saved tofu plan file; inspect with 'tofu -chdir=<workdir> show <path>'").
+				WithResource("tofu").
+				WithAction("plan-saved").
+				WithMetadata("plan_out", opts.PlanOut).
+				WithMetadata("workdir", tf.WorkingDir()))
 		}
 		return nil
 	}
