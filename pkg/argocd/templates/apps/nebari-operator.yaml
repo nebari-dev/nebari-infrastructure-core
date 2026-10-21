@@ -16,7 +16,7 @@ spec:
   sources:
     - chart: nebari-operator
       repoURL: quay.io/nebari/charts
-      targetRevision: 0.1.2
+      targetRevision: 0.2.0
       helm:
         releaseName: nebari-operator
         valueFiles:
