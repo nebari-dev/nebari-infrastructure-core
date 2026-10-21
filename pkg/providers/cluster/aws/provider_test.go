@@ -177,7 +177,8 @@ func TestValidateNodeGroupAvailabilityZones(t *testing.T) {
 		{name: "unset is fine", cfg: Config{}},
 		{name: "cluster AZ is accepted", groupAZs: []string{"us-west-2a"}, cfg: Config{AvailabilityZones: clusterAZs}},
 		{name: "AZ outside the cluster is rejected", groupAZs: []string{"us-west-2a", "us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs}, errSubstr: "us-west-2c is not one of"},
-		{name: "cluster AZs are required for a created VPC", groupAZs: []string{"us-west-2a"}, cfg: Config{}, errSubstr: "requires the cluster's availability_zones"},
+		// Requiring them would make existing clusters set a list that can replace their subnets.
+		{name: "unset cluster AZs are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{}},
 		{name: "existing subnets are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{ExistingVPCID: "vpc-1", ExistingPrivateSubnetIDs: []string{"subnet-1"}}},
 	}
 

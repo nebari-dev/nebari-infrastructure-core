@@ -80,7 +80,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | Labels | `labels` | `map[string]string` | No |  |
 | Taints | `taints` | `[]Taint` | No |  |
 | AMIReleaseVersion | `ami_release_version` | `*string` | No | AMI release to pin, e.g. 1.34.11-20260923; must match kubernetes_version. "latest" follows each new release. Unset: a deploy that changes nothing keeps the group on its current release. |
-| AvailabilityZones | `availability_zones` | `[]string` | No | AZs to restrict the group to, from the cluster's availability_zones, which must be set unless using existing subnets. Changing it replaces the group. Unset: the group spans every AZ. |
+| AvailabilityZones | `availability_zones` | `[]string` | No | AZs to restrict the group to. Each must be an AZ the cluster has a private subnet in (with a created VPC: from availability_zones, or the region's first three when unset). Changing it replaces the ... |
 
 ---
 

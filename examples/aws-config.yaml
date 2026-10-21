@@ -130,8 +130,10 @@ cluster:
       # # An EBS volume lives in one AZ, so a pod using it can only run there.
       # # A group pinned to one AZ lets the cluster autoscaler add a node in
       # # that AZ. Give the groups the same instance type and labels, and select
-      # # on the label, so the volume's AZ picks the group. AZs must come from
-      # # availability_zones above. Changing a group's AZs replaces the group.
+      # # on the label, so the volume's AZ picks the group. Each AZ needs a
+      # # private subnet in the cluster: one of availability_zones above, or of
+      # # the region's first three when that is unset. Changing a group's AZs
+      # # replaces the group.
       # user-a:
       #   instance: m7i.xlarge
       #   min_nodes: 0

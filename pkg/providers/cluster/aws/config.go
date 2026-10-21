@@ -166,7 +166,7 @@ type NodeGroup struct {
 	Taints   []Taint           `yaml:"taints,omitempty" json:"taints,omitempty"`
 	// AMI release to pin, e.g. 1.34.11-20260923; must match kubernetes_version. "latest" follows each new release. Unset: a deploy that changes nothing keeps the group on its current release.
 	AMIReleaseVersion *string `yaml:"ami_release_version,omitempty" json:"ami_release_version,omitempty"`
-	// AZs to restrict the group to, from the cluster's availability_zones, which must be set unless using existing subnets. Changing it replaces the group. Unset: the group spans every AZ.
+	// AZs to restrict the group to. Each must be an AZ the cluster has a private subnet in (with a created VPC: from availability_zones, or the region's first three when unset). Changing it replaces the group. Unset: the group spans every AZ.
 	AvailabilityZones []string `yaml:"availability_zones,omitempty" json:"availability_zones,omitempty"`
 }
 
