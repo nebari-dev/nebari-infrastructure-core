@@ -3,8 +3,12 @@ package aws
 import (
 	"context"
 	"errors"
+	"net"
+	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -233,7 +237,7 @@ func TestReleaseEBSVolumesNothingToRelease(t *testing.T) {
 	}
 }
 
-func TestReleaseEBSVolumesUnclaimedPVNotAwaited(t *testing.T) {
+func TestReleaseEBSVolumesUnboundPVIsReportedNotDeleted(t *testing.T) {
 	ctx := context.Background()
 	unclaimed := csiPV("pv-free", "vol-free", "", "", corev1.PersistentVolumeReclaimDelete)
 	unclaimed.Spec.ClaimRef = nil
@@ -251,9 +255,13 @@ func TestReleaseEBSVolumesUnclaimedPVNotAwaited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("releaseEBSVolumes() error = %v, want no wait on the unclaimed PV", err)
 	}
-	// The unclaimed PV's volume is still recorded for the post-destroy sweep.
-	if !inv.deleteVolumeIDs["vol-free"] || !inv.deleteVolumeIDs["vol-db"] {
-		t.Errorf("deleteVolumeIDs = %v, want vol-free and vol-db", inv.deleteVolumeIDs)
+	// An unbound PV is a hand-made static PV that can point at any volume, so
+	// its volume is reported, never queued for the post-destroy delete.
+	if inv.deleteVolumeIDs["vol-free"] || !inv.deleteVolumeIDs["vol-db"] || len(inv.deleteVolumeIDs) != 1 {
+		t.Errorf("deleteVolumeIDs = %v, want only vol-db", inv.deleteVolumeIDs)
+	}
+	if !inv.unboundVolumeIDs["vol-free"] || len(inv.unboundVolumeIDs) != 1 {
+		t.Errorf("unboundVolumeIDs = %v, want only vol-free", inv.unboundVolumeIDs)
 	}
 }
 
@@ -294,28 +302,118 @@ func TestReleaseEBSVolumesListFailure(t *testing.T) {
 	}
 }
 
+func cordonedNodes(names ...string) []runtime.Object {
+	var objs []runtime.Object
+	for _, name := range names {
+		n := node(name)
+		n.Spec.Unschedulable = true
+		objs = append(objs, n)
+	}
+	return objs
+}
+
 func TestUncordonNodes(t *testing.T) {
 	ctx := context.Background()
-	a, b, c := node("node-a"), node("node-b"), node("node-c")
-	a.Spec.Unschedulable = true
-	b.Spec.Unschedulable = true
-	c.Spec.Unschedulable = true
-	client := fake.NewSimpleClientset(a, b, c)
+	client := fake.NewSimpleClientset(cordonedNodes("node-a", "node-b", "node-c")...)
 
 	// node-gone no longer exists; node-c was cordoned by someone else.
-	if err := uncordonNodes(ctx, client, []string{"node-a", "node-b", "node-gone"}); err != nil {
+	n, err := uncordonNodes(ctx, client, []string{"node-a", "node-b", "node-gone"})
+	if err != nil {
 		t.Fatalf("uncordonNodes() error = %v", err)
+	}
+	if n != 2 {
+		t.Errorf("uncordonNodes() = %d, want 2", n)
 	}
 	want := map[string]bool{"node-a": false, "node-b": false, "node-c": true}
 	for name, unschedulable := range want {
-		n, err := client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		got, err := client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("get node %s: %v", name, err)
 		}
-		if n.Spec.Unschedulable != unschedulable {
-			t.Errorf("node %s unschedulable = %v, want %v", name, n.Spec.Unschedulable, unschedulable)
+		if got.Spec.Unschedulable != unschedulable {
+			t.Errorf("node %s unschedulable = %v, want %v", name, got.Spec.Unschedulable, unschedulable)
 		}
 	}
+}
+
+func TestUncordonNodesAPIServerErrors(t *testing.T) {
+	// client-go wraps transport failures in a *url.Error.
+	dnsErr := &url.Error{Op: "Patch", URL: "https://gone.eks.amazonaws.com", Err: &net.DNSError{Err: "no such host", Name: "gone.eks.amazonaws.com", IsNotFound: true}}
+	refusedErr := &url.Error{Op: "Patch", URL: "https://10.0.0.1", Err: &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}}
+
+	tests := []struct {
+		name    string
+		err     error
+		wantErr bool
+	}{
+		{name: "DNS name gone is nothing to uncordon", err: dnsErr},
+		{name: "connection refused is nothing to uncordon", err: refusedErr},
+		{name: "other errors are returned", err: errors.New("forbidden"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(cordonedNodes("node-a")...)
+			client.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, tt.err
+			})
+			n, err := uncordonNodes(context.Background(), client, []string{"node-a", "node-b"})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("uncordonNodes() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if n != 0 {
+				t.Errorf("uncordonNodes() = %d, want 0", n)
+			}
+		})
+	}
+}
+
+func TestAfterFailedTeardown(t *testing.T) {
+	ctx := context.Background()
+	destroyErr := errors.New("tofu destroy failed")
+
+	t.Run("uncordons the cordoned nodes and returns the destroy error", func(t *testing.T) {
+		client := fake.NewSimpleClientset(cordonedNodes("node-a", "node-b")...)
+		err := afterFailedTeardown(ctx, destroyErr, client, []string{"node-a"})
+		if !errors.Is(err, destroyErr) || err.Error() != destroyErr.Error() {
+			t.Fatalf("afterFailedTeardown() = %v, want only the destroy error", err)
+		}
+		a, _ := client.CoreV1().Nodes().Get(ctx, "node-a", metav1.GetOptions{})
+		b, _ := client.CoreV1().Nodes().Get(ctx, "node-b", metav1.GetOptions{})
+		if a.Spec.Unschedulable {
+			t.Error("node-a should be uncordoned")
+		}
+		if !b.Spec.Unschedulable {
+			t.Error("node-b was not cordoned by NIC and should stay cordoned")
+		}
+	})
+
+	t.Run("still uncordons when ctx is cancelled", func(t *testing.T) {
+		client := fake.NewSimpleClientset(cordonedNodes("node-a")...)
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		_ = afterFailedTeardown(cctx, destroyErr, client, []string{"node-a"})
+		a, _ := client.CoreV1().Nodes().Get(ctx, "node-a", metav1.GetOptions{})
+		if a.Spec.Unschedulable {
+			t.Error("node-a should be uncordoned even after an interrupt")
+		}
+	})
+
+	t.Run("uncordon failure is joined with the destroy error", func(t *testing.T) {
+		client := fake.NewSimpleClientset(cordonedNodes("node-a")...)
+		client.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New("forbidden")
+		})
+		err := afterFailedTeardown(ctx, destroyErr, client, []string{"node-a"})
+		if !errors.Is(err, destroyErr) || !strings.Contains(err.Error(), "uncordon node node-a") {
+			t.Fatalf("afterFailedTeardown() = %v, want destroy and uncordon errors", err)
+		}
+	})
+
+	t.Run("nothing cordoned needs no client", func(t *testing.T) {
+		if err := afterFailedTeardown(ctx, destroyErr, nil, nil); err != destroyErr {
+			t.Fatalf("afterFailedTeardown() = %v, want the destroy error", err)
+		}
+	})
 }
 
 // mockEBSClient evaluates the single filter deleteOrphanedEBSVolumes sends
@@ -393,6 +491,8 @@ func TestDeleteOrphanedEBSVolumes(t *testing.T) {
 	inv.deleteVolumeIDs["vol-gone"] = true
 	inv.deleteVolumeIDs["vol-vanished"] = true
 	inv.retainVolumeIDs["vol-keep"] = true
+	inv.unboundVolumeIDs["vol-static"] = true
+	inv.unboundVolumeIDs["vol-static-2"] = true
 
 	// The !inv.complete guard is the only thing keeping vol-db here.
 	incomplete := newEBSInventory()
@@ -412,6 +512,8 @@ func TestDeleteOrphanedEBSVolumes(t *testing.T) {
 			volumes: []ec2types.Volume{
 				vol("vol-db", ec2types.VolumeStateAvailable, cluster),
 				vol("vol-keep", ec2types.VolumeStateAvailable, cluster),        // Retain
+				vol("vol-static", ec2types.VolumeStateAvailable, cluster),      // unbound PV
+				untaggedVol("vol-static-2", ec2types.VolumeStateAvailable),     // unbound PV, any volume
 				vol("vol-old-cluster", ec2types.VolumeStateAvailable, cluster), // never seen
 				vol("vol-gone", ec2types.VolumeStateDeleting, cluster),         // driver got it
 				vol("vol-other", ec2types.VolumeStateAvailable, "other"),       // another cluster

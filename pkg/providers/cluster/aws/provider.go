@@ -739,24 +739,9 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
-		forcedErrs = append(forcedErrs, err)
-		// The cluster survived, so give back the nodes releaseEBSVolumes
-		// cordoned; otherwise nothing could schedule on it, including after a
-		// recovering `nic deploy`. Detached from ctx so this still runs when
-		// the destroy failed because the user interrupted it.
-		if len(cordonedNodes) > 0 {
-			uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-			uerr := uncordonNodes(uctx, k8sClient, cordonedNodes)
-			cancel()
-			if uerr != nil {
-				forcedErrs = append(forcedErrs, fmt.Errorf("uncordon nodes after failed destroy: %w", uerr))
-				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to uncordon nodes after failed destroy: %v", uerr)).
-					WithResource("ebs-volume").WithAction("cleanup"))
-			} else {
-				status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Uncordoned %d node(s) after failed destroy", len(cordonedNodes))).
-					WithResource("ebs-volume").WithAction("cleanup"))
-			}
-		}
+		// Give back the nodes releaseEBSVolumes cordoned, since the cluster
+		// may have survived.
+		forcedErrs = append(forcedErrs, afterFailedTeardown(ctx, err, k8sClient, cordonedNodes))
 		return errors.Join(forcedErrs...)
 	}
 

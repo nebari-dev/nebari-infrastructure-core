@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -55,22 +57,30 @@ type EBSClient interface {
 
 // ebsInventory records the EBS-backed PersistentVolumes seen before teardown.
 // The post-destroy fallback only deletes volumes listed in deleteVolumeIDs, so
-// a volume NIC never saw (or one whose PV said Retain) is never deleted.
+// a volume NIC never saw, one whose PV said Retain, or one behind an unbound
+// PV is never deleted.
 type ebsInventory struct {
 	// complete is false when the PV list could not be read; the fallback
 	// then deletes nothing and returns an error for any tagged volume left.
 	complete bool
-	// deleteVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Delete.
+	// deleteVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Delete
+	// and was bound to a claim.
 	deleteVolumeIDs map[string]bool
 	// retainVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Retain
 	// (or Recycle); the user asked to keep the data.
 	retainVolumeIDs map[string]bool
+	// unboundVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Delete
+	// but no claimRef. Kubernetes never reclaims an unbound PV, so it is a
+	// hand-made static PV that can point at any volume in the region; NIC
+	// reports these and never deletes them.
+	unboundVolumeIDs map[string]bool
 }
 
 func newEBSInventory() ebsInventory {
 	return ebsInventory{
-		deleteVolumeIDs: map[string]bool{},
-		retainVolumeIDs: map[string]bool{},
+		deleteVolumeIDs:  map[string]bool{},
+		retainVolumeIDs:  map[string]bool{},
+		unboundVolumeIDs: map[string]bool{},
 	}
 }
 
@@ -128,13 +138,12 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 			inv.retainVolumeIDs[volumeID] = true
 			continue
 		}
-		inv.deleteVolumeIDs[volumeID] = true
-		// A PV with no claim can't be released by deleting a PVC, so there is
-		// nothing to wait for; the post-destroy sweep deletes its volume.
 		ref := pv.Spec.ClaimRef
 		if ref == nil {
+			inv.unboundVolumeIDs[volumeID] = true
 			continue
 		}
+		inv.deleteVolumeIDs[volumeID] = true
 		pending[pv.Name] = true
 		if claims[ref.Namespace] == nil {
 			claims[ref.Namespace] = map[string]bool{}
@@ -145,10 +154,17 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 	span.SetAttributes(
 		attribute.Int("ebs_delete_volumes", len(inv.deleteVolumeIDs)),
 		attribute.Int("ebs_retain_volumes", len(inv.retainVolumeIDs)),
+		attribute.Int("ebs_unbound_volumes", len(inv.unboundVolumeIDs)),
 	)
 	if len(inv.retainVolumeIDs) > 0 {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo,
 			fmt.Sprintf("Keeping %d EBS volume(s) whose PersistentVolume reclaim policy is Retain", len(inv.retainVolumeIDs))).
+			WithResource("ebs-volume").WithAction("cleanup"))
+	}
+	if len(inv.unboundVolumeIDs) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			fmt.Sprintf("Leaving %d EBS volume(s) behind unbound PersistentVolumes in place; delete them by hand if unwanted: %s",
+				len(inv.unboundVolumeIDs), strings.Join(sortedKeys(inv.unboundVolumeIDs), ", "))).
 			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 	if len(pending) == 0 {
@@ -227,27 +243,81 @@ func cordonAllNodes(ctx context.Context, client kubernetes.Interface) ([]string,
 	return cordoned, nil
 }
 
-// uncordonNodes marks the named nodes schedulable again. Nodes that no longer
-// exist are skipped.
-func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []string) error {
+// uncordonNodes marks the named nodes schedulable again and returns how many
+// it uncordoned. Nodes that no longer exist are skipped. If the API server is
+// unreachable (its DNS name is gone or it refuses connections, as after the
+// control plane was deleted), there is nothing left to uncordon: it warns and
+// returns without an error.
+func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []string) (int, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.uncordonNodes")
 	defer span.End()
 	span.SetAttributes(attribute.Int("nodes", len(names)))
 
 	patch := []byte(`{"spec":{"unschedulable":false}}`)
+	var uncordoned int
 	var errs []error
 	for _, name := range names {
 		_, err := client.CoreV1().Nodes().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
-		if err != nil && !k8serrors.IsNotFound(err) {
+		switch {
+		case err == nil:
+			uncordoned++
+		case k8serrors.IsNotFound(err):
+		case apiServerUnreachable(err):
+			span.SetAttributes(attribute.Bool("api_server_unreachable", true))
+			status.Send(ctx, status.NewUpdate(status.LevelWarning,
+				fmt.Sprintf("Kubernetes API unreachable, so no nodes left to uncordon: %v", err)).
+				WithResource("ebs-volume").WithAction("cleanup"))
+			return uncordoned, errors.Join(errs...)
+		default:
 			errs = append(errs, fmt.Errorf("uncordon node %s: %w", name, err))
 		}
 	}
+	span.SetAttributes(attribute.Int("nodes_uncordoned", uncordoned))
 	if err := errors.Join(errs...); err != nil {
 		span.RecordError(err)
-		return err
+		return uncordoned, err
 	}
-	return nil
+	return uncordoned, nil
+}
+
+// apiServerUnreachable reports whether err means the Kubernetes API server
+// can't be reached at all: its DNS name doesn't resolve or the connection is
+// refused. client-go returns these wrapped in a *url.Error, which unwraps.
+func apiServerUnreachable(err error) bool {
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// afterFailedTeardown runs when tofu destroy fails. The cluster may still be
+// up, so it uncordons the nodes releaseEBSVolumes cordoned; otherwise nothing
+// could schedule on it, including after a recovering `nic deploy`. It returns
+// destroyErr joined with any uncordon failure. The uncordon is detached from
+// ctx so it still runs when the destroy failed because the user interrupted it.
+func afterFailedTeardown(ctx context.Context, destroyErr error, client kubernetes.Interface, cordoned []string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.afterFailedTeardown")
+	defer span.End()
+	span.SetAttributes(attribute.Int("cordoned_nodes", len(cordoned)))
+
+	if client == nil || len(cordoned) == 0 {
+		return destroyErr
+	}
+
+	uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	n, err := uncordonNodes(uctx, client, cordoned)
+	if err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Failed to uncordon nodes after failed destroy: %v", err)).
+			WithResource("ebs-volume").WithAction("cleanup"))
+		return errors.Join(destroyErr, fmt.Errorf("uncordon nodes after failed destroy: %w", err))
+	}
+	if n > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Uncordoned %d node(s) after failed destroy", n)).
+			WithResource("ebs-volume").WithAction("cleanup"))
+	}
+	return destroyErr
 }
 
 // deletePodsUsingClaims deletes the pods in ns that mount any of claims.
@@ -329,8 +399,26 @@ func waitForPVsGone(ctx context.Context, client kubernetes.Interface, names map[
 	}
 }
 
+// sortedKeys returns the keys of set in sorted order.
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // describeVolumes returns every volume matching filter, following pagination.
 func describeVolumes(ctx context.Context, client EBSClient, filter ec2types.Filter) ([]ec2types.Volume, error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.describeVolumes")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("filter", aws.ToString(filter.Name)),
+		attribute.Int("filter_values", len(filter.Values)),
+	)
+
 	var volumes []ec2types.Volume
 	paginator := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{
 		Filters: []ec2types.Filter{filter},
@@ -338,10 +426,12 @@ func describeVolumes(ctx context.Context, client EBSClient, filter ec2types.Filt
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
+			span.RecordError(err)
 			return nil, err
 		}
 		volumes = append(volumes, page.Volumes...)
 	}
+	span.SetAttributes(attribute.Int("volumes", len(volumes)))
 	return volumes, nil
 }
 
@@ -360,8 +450,8 @@ func volumeGone(vol ec2types.Volume) bool {
 //
 // Volumes tagged KubernetesCluster=<clusterName> are then listed for the
 // report and never deleted. With a complete inventory, a Retain volume is
-// reported as kept and a volume NIC never saw (e.g. left by an earlier
-// cluster with the same name) as a warning. With an incomplete inventory NIC
+// reported as kept, and a volume behind an unbound PV or one NIC never saw
+// (e.g. left by an earlier cluster with the same name) as a warning. With an incomplete inventory NIC
 // can't tell Delete volumes from Retain ones, so any tagged volume left is
 // returned as an error for the user to review.
 func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName string, inv ebsInventory) (int, error) {
@@ -378,11 +468,7 @@ func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName
 
 	// Pass 1: delete the recorded Delete-policy volumes that still exist.
 	if inv.complete && len(inv.deleteVolumeIDs) > 0 {
-		ids := make([]string, 0, len(inv.deleteVolumeIDs))
-		for id := range inv.deleteVolumeIDs {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
+		ids := sortedKeys(inv.deleteVolumeIDs)
 		// A volume-id filter, unlike the VolumeIds parameter, doesn't fail
 		// the whole call when some IDs (the ones the driver already deleted)
 		// no longer exist.
@@ -421,7 +507,7 @@ func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to list EBS volumes tagged %s=%s: %w", ebsClusterTag, clusterName, err))
 	}
-	var unknown, retained []string
+	var unknown, retained, unbound []string
 	for _, vol := range tagged {
 		id := aws.ToString(vol.VolumeId)
 		switch {
@@ -430,23 +516,33 @@ func deleteOrphanedEBSVolumes(ctx context.Context, client EBSClient, clusterName
 			// Handled (and, on failure, reported) in pass 1.
 		case inv.retainVolumeIDs[id]:
 			retained = append(retained, id)
+		case inv.unboundVolumeIDs[id]:
+			unbound = append(unbound, id)
 		default:
 			unknown = append(unknown, id)
 		}
 	}
 	sort.Strings(retained)
+	sort.Strings(unbound)
 	sort.Strings(unknown)
 
 	span.SetAttributes(
 		attribute.Int("ebs_volumes_deleted", deleted),
 		attribute.Int("ebs_volumes_unknown", len(unknown)),
 		attribute.Int("ebs_volumes_retained", len(retained)),
+		attribute.Int("ebs_volumes_unbound", len(unbound)),
 	)
 
 	if len(retained) > 0 {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo,
 			fmt.Sprintf("Kept %d EBS volume(s) whose PersistentVolume reclaim policy was Retain: %s",
 				len(retained), strings.Join(retained, ", "))).
+			WithResource("ebs-volume").WithAction("cleanup"))
+	}
+	if len(unbound) > 0 {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			fmt.Sprintf("Kept %d EBS volume(s) behind unbound PersistentVolumes: %s",
+				len(unbound), strings.Join(unbound, ", "))).
 			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 	if len(unknown) > 0 {
