@@ -179,7 +179,10 @@ func TestValidateNodeGroupAvailabilityZones(t *testing.T) {
 		{name: "AZ outside the cluster is rejected", groupAZs: []string{"us-west-2a", "us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs}, errSubstr: "us-west-2c is not one of"},
 		// Requiring them would make existing clusters set a list that can replace their subnets.
 		{name: "unset cluster AZs are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{}},
-		{name: "existing subnets are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{ExistingVPCID: "vpc-1", ExistingPrivateSubnetIDs: []string{"subnet-1"}}},
+		// The cluster AZs are set in these rows, so only whether NIC creates the VPC skips the check.
+		{name: "existing subnets are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs, ExistingVPCID: "vpc-1", ExistingPrivateSubnetIDs: []string{"subnet-1"}}},
+		{name: "existing VPC alone is left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs, ExistingVPCID: "vpc-1"}},
+		{name: "existing subnets alone are left to the module", groupAZs: []string{"us-west-2c"}, cfg: Config{AvailabilityZones: clusterAZs, ExistingPrivateSubnetIDs: []string{"subnet-1"}}},
 	}
 
 	for _, tt := range tests {
@@ -198,6 +201,27 @@ func TestValidateNodeGroupAvailabilityZones(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tt.errSubstr)
 			}
 		})
+	}
+}
+
+// TestValidate_NodeGroupAvailabilityZones checks that Validate runs the node
+// group AZ check, not just that the check itself works.
+func TestValidate_NodeGroupAvailabilityZones(t *testing.T) {
+	cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
+		"region":             "us-west-2",
+		"kubernetes_version": "1.34",
+		"availability_zones": []any{"us-west-2a", "us-west-2b"},
+		"node_groups": map[string]any{
+			"user": map[string]any{"instance": "m5.xlarge", "availability_zones": []any{"us-west-2c"}},
+		},
+	}}}
+
+	err := NewProvider().Validate(context.Background(), "test-project", cfg)
+	if err == nil {
+		t.Fatal("expected an error for a node group AZ outside the cluster's availability_zones, got nil")
+	}
+	if !strings.Contains(err.Error(), "us-west-2c is not one of") {
+		t.Fatalf("expected the node group AZ error, got: %v", err)
 	}
 }
 
