@@ -331,21 +331,27 @@ See [Migrating Longhorn dedicated_nodes modes](../operations/longhorn-dedicated-
 
 [PR #712](https://github.com/nebari-dev/nebari-infrastructure-core/pull/712)
 replaces the `gp2` fallback described under "Storage Class Selection". When
-Longhorn is disabled, the RWO class is no longer the in-tree `gp2` class EKS
-ships but an EBS CSI class that NIC manages.
+Longhorn is disabled, the RWO class is by default no longer the in-tree `gp2`
+class EKS ships but an EBS CSI class that NIC manages.
 
 - **Created on every AWS cluster.** NIC creates the class whether or not
   Longhorn is enabled. It is `gp3`, encrypted, `WaitForFirstConsumer` by
   default, and the optional `cluster.aws.ebs` block configures its type, IOPS,
-  throughput, KMS key and name.
-- **Default only when nothing else is.** The class becomes the cluster default
-  only when no other StorageClass is the default. With Longhorn enabled,
-  Longhorn keeps the default and the EBS class is used by name only. A default
-  the admin chose is never overridden.
+  throughput, KMS key and name. The exception is `ebs.type: gp2` with no
+  `ebs.storage_class_name`: the class name resolves to `gp2`, so NIC creates
+  nothing and reuses the in-tree `gp2` class EKS ships. That class does not set
+  `encrypted`, so its volumes are encrypted only if EBS encryption by default
+  is enabled in the account.
+- **Default only when nothing else is.** The EBS class becomes the cluster
+  default only when no other StorageClass is the default, and it never
+  overrides an existing default. With Longhorn enabled, Longhorn keeps the
+  default and the EBS class is used by name only. Longhorn's installer still
+  demotes every other default class on install and upgrade, as described in
+  the 2026-05 update.
 - **`InfraSettings().StorageClass`** returns `longhorn` when Longhorn is
   enabled, otherwise the EBS class name (`gp3` unless `ebs.storage_class_name`
   or `ebs.type` says otherwise).
 
-The EFS-default item under "Follow-up Work" is superseded: EBS, not EFS, is the
-default RWO class, and the EFS class stays opt-in by name
+The EFS-default item under "Follow-up Work" is superseded: Longhorn, or the EBS
+class when Longhorn is off, is the default RWO class. EFS stays opt-in by name
 ([#98](https://github.com/nebari-dev/nebari-infrastructure-core/issues/98)).

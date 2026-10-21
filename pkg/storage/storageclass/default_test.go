@@ -113,6 +113,7 @@ func TestMarkDefaultIfNone(t *testing.T) {
 		want        bool
 		wantErr     bool
 		wantDefault map[string]bool
+		wantPatch   bool // the call patches the target's annotation
 	}{
 		{
 			name: "marks target when no default exists",
@@ -120,8 +121,9 @@ func TestMarkDefaultIfNone(t *testing.T) {
 				sc("gp2", ""),
 				sc("gp3", ""),
 			},
-			target: "gp3",
-			want:   true,
+			target:    "gp3",
+			want:      true,
+			wantPatch: true,
 			wantDefault: map[string]bool{
 				"gp2": false,
 				"gp3": true,
@@ -133,8 +135,9 @@ func TestMarkDefaultIfNone(t *testing.T) {
 				sc("gp2", "false"),
 				sc("gp3", ""),
 			},
-			target: "gp3",
-			want:   true,
+			target:    "gp3",
+			want:      true,
+			wantPatch: true,
 			wantDefault: map[string]bool{
 				"gp2": false,
 				"gp3": true,
@@ -214,6 +217,15 @@ func TestMarkDefaultIfNone(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("MarkDefaultIfNone() error = %v", err)
+			}
+			patched := false
+			for _, action := range client.Actions() {
+				if action.GetVerb() == "patch" {
+					patched = true
+				}
+			}
+			if patched != tt.wantPatch {
+				t.Errorf("patch action recorded = %v, want %v", patched, tt.wantPatch)
 			}
 			if got != tt.want {
 				t.Errorf("MarkDefaultIfNone() = %v, want %v", got, tt.want)

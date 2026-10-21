@@ -341,6 +341,25 @@ func TestEnsureEBSStorageClassWithClient(t *testing.T) {
 			wantWarning:     true,
 		},
 		{
+			// Only the default gp2 name counts as reusing EKS's class. An
+			// in-tree gp2 class under a custom name still gets the warning.
+			name: "type gp2 with a custom name warns about an in-tree class under that name",
+			cfg:  &Config{EBS: &EBSConfig{Type: "gp2", StorageClassName: "gp2-legacy"}},
+			existing: []runtime.Object{
+				&storagev1.StorageClass{
+					ObjectMeta:  metav1.ObjectMeta{Name: "gp2-legacy"},
+					Provisioner: ebsInTreeProvisioner,
+					Parameters:  map[string]string{"type": "gp2", "fsType": "ext4"},
+				},
+			},
+			wantClass:       "gp2-legacy",
+			wantDefault:     true,
+			wantProvisioner: ebsInTreeProvisioner,
+			wantParams:      map[string]string{"type": "gp2", "fsType": "ext4"},
+			wantLabel:       false,
+			wantWarning:     true,
+		},
+		{
 			name:             "custom name creates a separate class",
 			cfg:              &Config{EBS: &EBSConfig{Type: "gp2", StorageClassName: "gp2-encrypted"}},
 			existing:         []runtime.Object{gp2()},
