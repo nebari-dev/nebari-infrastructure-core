@@ -19,6 +19,21 @@ const (
 	// rather than error.
 	defaultChartVersion = "9.7.1"
 
+	// redisImageRepository and redisImageTag point the chart's Redis at a copy
+	// of its default image mirrored to quay. Upstream pulls
+	// ecr-public.aws.com/docker/library/redis anonymously, and ECR Public's
+	// anonymous budget is shared by everyone behind the same egress IP: GitHub
+	// runners (and corporate NAT) get 429s often enough that Argo CD never
+	// comes up (#647). The tag pins the upstream index digest, so the bytes are
+	// the ones the chart would have pulled itself.
+	//
+	// .github/mirrored-images.txt is what the mirror workflow copies, and
+	// TestRedisImageIsMirrored keeps it in step with these two. When
+	// defaultChartVersion moves, check the new chart's redis.image.tag and
+	// re-mirror if it changed.
+	redisImageRepository = "quay.io/nebari/redis"
+	redisImageTag        = "8.2.3-alpine@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba"
+
 	// DefaultNamespace is the namespace Argo CD is installed into.
 	DefaultNamespace = "argocd"
 
@@ -184,7 +199,7 @@ func DefaultConfig() Config {
 			"repoServer":     goMemLimited("25m", "128Mi", "500m", repoServerMemLimitMiB),
 			"server":         helmResources("25m", "64Mi", "200m", "128Mi"),
 			"applicationSet": helmResources("25m", "64Mi", "200m", "128Mi"),
-			"redis":          helmResources("25m", "64Mi", "200m", "128Mi"),
+			"redis":          redisValues(),
 			"notifications":  helmResources("25m", "64Mi", "200m", "128Mi"),
 			// NIC wires ArgoCD OIDC directly to Keycloak; the dex pod the
 			// chart deploys by default is never referenced (#457).
@@ -232,6 +247,17 @@ func goMemLimited(cpuReq, memReq, cpuLim string, memLimitMiB int) map[string]any
 	// single request, so the suffix is asserted in TestGoMemLimitComponents.
 	v["env"] = []map[string]any{
 		{"name": "GOMEMLIMIT", "value": fmt.Sprintf("%dMiB", memLimitMiB*goMemLimitPercent/100)},
+	}
+	return v
+}
+
+// redisValues is the redis component's resources plus the mirrored image (see
+// redisImageRepository).
+func redisValues() map[string]any {
+	v := helmResources("25m", "64Mi", "200m", "128Mi")
+	v["image"] = map[string]any{
+		"repository": redisImageRepository,
+		"tag":        redisImageTag,
 	}
 	return v
 }
