@@ -41,7 +41,7 @@ func TestGenerateCLIDocsDeployFlagsDocumented(t *testing.T) {
 		t.Fatalf("read nic_deploy.md: %v", err)
 	}
 
-	for _, flag := range []string{"--file", "--dry-run", "--timeout", "--regen-apps"} {
+	for _, flag := range []string{"--file", "--dry-run", "--plan-out", "--timeout", "--regen-apps"} {
 		if !bytes.Contains(content, []byte(flag)) {
 			t.Errorf("flag %s missing from nic_deploy.md", flag)
 		}

@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,6 +21,7 @@ import (
 var (
 	deployConfigFile string
 	deployDryRun     bool
+	deployPlanOut    string
 	deployTimeout    string
 	deployRegenApps  bool
 
@@ -31,7 +35,8 @@ resources to establish a fully functional Nebari cluster.
 Configs that still contain the reserved CHANGEME placeholder are rejected before
 any provider API call, so an unedited starter cannot provision infrastructure.
 
-Use --dry-run to preview changes without applying them.`,
+Use --dry-run to preview changes without applying them. Add --plan-out to
+save the full OpenTofu plan (field-level diff) of a dry run to a file.`,
 		RunE: runDeploy,
 	}
 )
@@ -39,12 +44,24 @@ Use --dry-run to preview changes without applying them.`,
 func init() {
 	deployCmd.Flags().StringVarP(&deployConfigFile, "file", "f", "", "Path to nebari-config.yaml file (auto-discovered if omitted)")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show what would be deployed without making changes")
+	deployCmd.Flags().StringVar(&deployPlanOut, "plan-out", "", "Write the human-readable OpenTofu plan of a dry run to this file (requires --dry-run)")
 	deployCmd.Flags().StringVar(&deployTimeout, "timeout", "", "Override default timeout (e.g., '45m', '1h')")
 	deployCmd.Flags().BoolVar(&deployRegenApps, "regen-apps", false, "Regenerate ArgoCD application manifests even if already bootstrapped")
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	if deployPlanOut != "" {
+		if !deployDryRun {
+			return errors.New("--plan-out requires --dry-run")
+		}
+		// Fail now rather than after a multi-minute plan: PlanToFile only
+		// touches the path once tofu plan and tofu show have finished.
+		if err := checkPlanOutWritable(deployPlanOut); err != nil {
+			return err
+		}
+	}
 
 	configFile, err := resolveConfigFile(deployConfigFile)
 	if err != nil {
@@ -87,6 +104,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	result, err := client.Deploy(ctx, cfg, nic.DeployOptions{
 		DryRun:    deployDryRun,
+		PlanOut:   deployPlanOut,
 		Timeout:   timeout,
 		RegenApps: deployRegenApps,
 	})
@@ -110,6 +128,35 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		printDNSGuidance(cfg, result.LBEndpoint)
 	}
 
+	return nil
+}
+
+// checkPlanOutWritable verifies that path can be created or overwritten: its
+// parent must be an existing directory and the file must open for writing.
+// An existing file is opened without truncation so its content survives
+// until the new plan replaces it; a file the probe had to create is removed
+// again so a run that fails before planning leaves nothing behind.
+func checkPlanOutWritable(path string) error {
+	parent := filepath.Dir(path)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return fmt.Errorf("--plan-out: directory %s: %w", parent, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("--plan-out: %s is not a directory", parent)
+	}
+	_, statErr := os.Stat(path)
+	existed := statErr == nil
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600) //nolint:gosec // operator-chosen output path
+	if err != nil {
+		return fmt.Errorf("--plan-out: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("--plan-out: %w", err)
+	}
+	if !existed {
+		return os.Remove(path)
+	}
 	return nil
 }
 

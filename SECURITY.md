@@ -48,10 +48,10 @@ Out of scope here (please report upstream instead):
 
 Release checksums are signed with [Sigstore cosign](https://docs.sigstore.dev/) using keyless signing from the release workflow, each archive has a GitHub build-provenance attestation, and each archive ships with an SBOM (`*.sbom.json`).
 
-To verify a downloaded release (replace `vX.Y.Z` and the archive name):
+To verify a downloaded release (replace `vX.Y.Z` and the archive name), use cosign v2.6.5+ on 2.x or v3.1.3+ on 3.x. Earlier builds are affected by [GHSA-fx35-mq7g-6g98](https://github.com/sigstore/cosign/security/advisories/GHSA-fx35-mq7g-6g98), which lets a forged bundle pass the identity check. See [Verifying a NIC release](docs/operations/verifying-releases.md) for why, and for the SBOM check.
 
 ```bash
-# 1. Verify the signature on checksums.txt
+# 1. Verify the signature on checksums.txt (on cosign 2.x, add --new-bundle-format)
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
   --certificate-identity "https://github.com/nebari-dev/nebari-infrastructure-core/.github/workflows/release.yml@refs/tags/vX.Y.Z" \

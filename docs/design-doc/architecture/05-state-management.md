@@ -77,7 +77,15 @@ Drift detection is exposed via `--dry-run`:
 nic deploy -f config.yaml --dry-run
 ```
 
-Under the hood, this calls `Provider.Deploy(ctx, ..., DeployOptions{DryRun: true})`. The AWS provider implementation runs `tofu plan` and streams structured plan output through the status channel; the CLI translates it into a human-readable summary.
+Under the hood, this calls `Provider.Deploy(ctx, ..., DeployOptions{DryRun: true})`. The AWS provider implementation runs `tofu plan` and streams structured plan output through the status channel; the CLI translates it into a human-readable summary of one action verb per resource.
+
+That summary does not show which fields change. To see the field-level diff (old → new values per attribute), add `--plan-out`:
+
+```bash
+nic deploy -f config.yaml --dry-run --plan-out=plan.txt
+```
+
+This sets `DeployOptions.PlanOut`, and the OpenTofu-backed providers (AWS, Azure) call `TerraformExecutor.PlanToFile`, which plans with `-out`, renders the plan with `tofu show -no-color`, and writes the text to the path. The rendered text is kept rather than the binary plan: a binary plan can only be inspected from the working directory that produced it, and that directory is removed after the run (see §5.5). The flag requires `--dry-run` and is rejected on providers whose dry run produces no plan (`InfraSettings.ProducesPlan` false).
 
 There is no separate `nic status`, `nic plan`, or `nic state` subcommand today. Drift information is communicated through `--dry-run`.
 

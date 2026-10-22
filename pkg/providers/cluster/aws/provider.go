@@ -383,7 +383,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	}
 
 	if opts.DryRun {
-		_, err = tf.Plan(ctx, planOpts...)
+		_, err = tf.PlanToFile(ctx, opts.PlanOut, planOpts...)
 		if err != nil {
 			span.RecordError(err)
 			return err
@@ -895,6 +895,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		StorageClass:    sc,
 		EFSStorageClass: efsSC,
 		LonghornEnabled: longhornEnabled,
+		ProducesPlan:    true,
 		LoadBalancerAnnotations: map[string]string{
 			"service.beta.kubernetes.io/aws-load-balancer-type":            "external",
 			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",

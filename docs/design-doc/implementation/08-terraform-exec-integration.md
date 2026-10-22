@@ -50,6 +50,8 @@ func (te *TerraformExecutor) Init(ctx context.Context, opts ...tfexec.InitOption
 
 `Plan`, `Apply`, and `Destroy` follow the same pattern, calling `PlanJSON`, `ApplyJSON`, and `DestroyJSON` respectively. `Output` does not stream because its caller wants the parsed `map[string]tfexec.OutputMeta` directly.
 
+`PlanToFile(ctx, path, opts...)` is `Plan` followed by `tofu show -no-color` on the resulting plan, with the rendered text written to `path`. It backs `nic deploy --dry-run --plan-out`. An empty `path` is a plain `Plan`. The method keeps the binary plan inside the working directory, where `Cleanup()` removes it, and writes only the rendered text: a binary plan can only be inspected from the working directory that produced it (`tofu show` needs the config and initialized providers), and that directory is temporary, so the text is the only form an operator can open after the run.
+
 `streamThroughStatus` creates a stdout writer that maps each JSON line to a `status.Update` (`jsonLineMapper`) and a stderr writer that maps each raw line to an error-level `Update`. Both writers are flushed after the operation completes to drain any partial trailing line.
 
 ### Why JSON streaming?
@@ -139,7 +141,7 @@ There is a known cleanup gap during destroy ([#63](https://github.com/nebari-dev
 
 ## 8.8 OpenTelemetry Instrumentation Status
 
-`TerraformExecutor`'s operation-granularity methods (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) are **not yet** wrapped in their own spans. This is acknowledged as outstanding work in [`AGENTS.md`](../../../AGENTS.md). When that lands, each method will look like:
+`TerraformExecutor`'s operation-granularity methods (`Init`, `Plan`, `Apply`, `Destroy`, `Output`) are **not yet** wrapped in their own spans. `PlanToFile` is: it opens `tofu.PlanToFile` with the output path and `has_changes` as attributes and records errors from the plan, the render, and the write. This is acknowledged as outstanding work in [`AGENTS.md`](../../../AGENTS.md). When that lands, each method will look like:
 
 ```go
 func (te *TerraformExecutor) Apply(ctx context.Context, opts ...tfexec.ApplyOption) error {

@@ -15,10 +15,25 @@ sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
 
 ## 2. Verify the signature (authenticity)
 
-Requires [cosign](https://docs.sigstore.dev/) v3+. Identity pinning is mandatory:
-a bundle-only verify checks the math, not who signed it.
+Requires [cosign](https://docs.sigstore.dev/) v2.6.5+ on 2.x, or v3.1.3+ on
+3.x. Earlier builds are affected by
+[GHSA-fx35-mq7g-6g98](https://github.com/sigstore/cosign/security/advisories/GHSA-fx35-mq7g-6g98),
+where a legacy-format bundle carrying an attacker's own key passes an
+identity-pinned verify. 3.0.0 through 3.1.2 are affected even though they are
+newer than 2.6.5, so check the floor for your major version.
+
+Identity pinning is mandatory: a bundle-only verify checks the math, not who
+signed it.
+
+On cosign 2.x, also pass `--new-bundle-format`. It forces 2.x onto the new
+bundle format, so a legacy-format bundle is refused outright. 3.x has no
+equivalent: it still falls back to the legacy format when a bundle does not
+parse as the new one, which is why 3.0.0 through 3.1.2 are affected, and
+upgrading is the only fix. On 3.x the flag is accepted but changes nothing, and
+from 3.1.0 on it also prints a deprecation warning.
 
 ```bash
+# On cosign 2.x, add --new-bundle-format (see above).
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp '^https://github.com/nebari-dev/nebari-infrastructure-core/\.github/workflows/release\.yml@refs/tags/.*$' \

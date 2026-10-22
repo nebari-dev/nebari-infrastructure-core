@@ -184,3 +184,53 @@ func TestCommittedConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestEnsurePlanOutSupported(t *testing.T) {
+	tests := []struct {
+		name         string
+		opts         DeployOptions
+		producesPlan bool
+		wantErr      string
+	}{
+		{
+			name:         "no PlanOut is a no-op",
+			opts:         DeployOptions{DryRun: false},
+			producesPlan: false,
+		},
+		{
+			name:         "PlanOut without DryRun rejected",
+			opts:         DeployOptions{DryRun: false, PlanOut: "plan.txt"},
+			producesPlan: true,
+			wantErr:      "PlanOut requires DryRun",
+		},
+		{
+			name:         "PlanOut on provider without a plan rejected",
+			opts:         DeployOptions{DryRun: true, PlanOut: "plan.txt"},
+			producesPlan: false,
+			wantErr:      `cluster provider "local" does not produce a plan`,
+		},
+		{
+			name:         "PlanOut on dry run of a planning provider",
+			opts:         DeployOptions{DryRun: true, PlanOut: "plan.txt"},
+			producesPlan: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensurePlanOutSupported(tt.opts, tt.producesPlan, "local")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ensurePlanOutSupported() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("ensurePlanOutSupported() expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}

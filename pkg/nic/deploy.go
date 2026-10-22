@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +31,11 @@ import (
 type DeployOptions struct {
 	// DryRun previews changes without applying them.
 	DryRun bool
+
+	// PlanOut, when non-empty, saves the human-readable plan of a dry run to
+	// this path. Deploy rejects it unless DryRun is true and the cluster
+	// provider produces a plan (InfraSettings.ProducesPlan).
+	PlanOut string
 
 	// Timeout overrides the provider's default deploy timeout. Zero means
 	// the provider chooses.
@@ -184,6 +190,16 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 		return nil, err
 	}
 
+	// Reject a PlanOut the run could never honor before provisioning any
+	// infrastructure: without DryRun it would be a real apply with no file,
+	// and on a provider with no plan it would exit 0 and write nothing.
+	if err := ensurePlanOutSupported(opts, infraSettings.ProducesPlan, cfg.Cluster.ProviderName()); err != nil {
+		span.RecordError(err)
+		status.Send(ctx, status.NewUpdate(status.LevelError, "PlanOut not supported for this deploy").
+			WithMetadata("error", err.Error()))
+		return nil, err
+	}
+
 	// Resolve the top-level trust bundle once, here at the orchestration layer.
 	// The raw PEM feeds trust-manager via the GitOps repo (threaded into
 	// bootstrapGitOps) and its base64 form feeds the cluster provider's OS trust
@@ -202,6 +218,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// Deploy infrastructure
 	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
 		DryRun:       opts.DryRun,
+		PlanOut:      opts.PlanOut,
 		Timeout:      opts.Timeout,
 		TrustBundle:  caBundle,
 		BackupBucket: backupBucketSpec(cfg),
@@ -355,6 +372,22 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 // provider. The repository block is mandatory (enforced by config validation), so
 // cfg.Repository is non-nil here. Provision may have side effects (e.g. creating a
 // local directory), so callers run it only outside dry-run.
+// ensurePlanOutSupported rejects DeployOptions.PlanOut when the run cannot
+// produce the file: PlanOut requires DryRun, and a cluster provider whose dry
+// run produces no plan (InfraSettings.ProducesPlan false).
+func ensurePlanOutSupported(opts DeployOptions, producesPlan bool, providerName string) error {
+	if opts.PlanOut == "" {
+		return nil
+	}
+	if !opts.DryRun {
+		return errors.New("PlanOut requires DryRun")
+	}
+	if !producesPlan {
+		return fmt.Errorf("cluster provider %q does not produce a plan on dry run; PlanOut is only supported for OpenTofu-backed providers", providerName)
+	}
+	return nil
+}
+
 func (c *Client) resolveRepositorySource(ctx context.Context, cfg *config.NebariConfig, reg *registry.Registry) (repository.Source, error) {
 	provider, err := reg.RepositoryProviders.Get(ctx, cfg.Repository.ProviderName())
 	if err != nil {

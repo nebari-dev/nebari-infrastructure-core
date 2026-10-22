@@ -192,7 +192,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			WithResource("tofu").
 			WithAction("plan").
 			WithMetadata("cluster_name", projectName))
-		if _, err := tf.Plan(ctx); err != nil {
+		if _, err := tf.PlanToFile(ctx, opts.PlanOut); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("tofu plan: %w", err)
 		}
@@ -393,5 +393,6 @@ func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings 
 	return cluster.InfraSettings{
 		StorageClass:    "managed-csi",
 		LonghornEnabled: false,
+		ProducesPlan:    true,
 	}
 }

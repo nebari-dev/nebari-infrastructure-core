@@ -46,6 +46,11 @@ type DeployOptions struct {
 	DryRun  bool
 	Timeout time.Duration
 
+	// PlanOut, when non-empty, is the path the provider writes its
+	// human-readable dry-run plan to. Only meaningful when DryRun is true and
+	// InfraSettings.ProducesPlan is true; nic.Deploy rejects it otherwise.
+	PlanOut string
+
 	// TrustBundle is the resolved top-level CA bundle (base64-encoded PEM),
 	// passed so providers can apply it without seeing the full NebariConfig.
 	TrustBundle string
@@ -114,6 +119,13 @@ type InfraSettings struct {
 	// Empty when EFS is not enabled. Software packs can use this for ReadWriteMany
 	// volumes (e.g., shared model storage for LLM serving).
 	EFSStorageClass string
+
+	// ProducesPlan indicates whether a dry run of this provider produces a
+	// plan it can write to DeployOptions.PlanOut. True for providers that plan
+	// infrastructure changes with OpenTofu (AWS, Azure). Providers whose dry
+	// run is a no-op or a summary line leave it false so nic.Deploy can reject
+	// a PlanOut that would silently produce nothing.
+	ProducesPlan bool
 
 	// SupportsLocalGitOps indicates whether this provider can use local file:// git repos.
 	// True for providers where cluster nodes can access host filesystem paths (local, kind, k3s).

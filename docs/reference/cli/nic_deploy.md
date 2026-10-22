@@ -11,7 +11,8 @@ resources to establish a fully functional Nebari cluster.
 Configs that still contain the reserved CHANGEME placeholder are rejected before
 any provider API call, so an unedited starter cannot provision infrastructure.
 
-Use --dry-run to preview changes without applying them.
+Use --dry-run to preview changes without applying them. Add --plan-out to
+save the full OpenTofu plan (field-level diff) of a dry run to a file.
 
 ```
 nic deploy [flags]
@@ -20,11 +21,12 @@ nic deploy [flags]
 ### Options
 
 ```
-      --dry-run          Show what would be deployed without making changes
-  -f, --file string      Path to nebari-config.yaml file (auto-discovered if omitted)
-  -h, --help             help for deploy
-      --regen-apps       Regenerate ArgoCD application manifests even if already bootstrapped
-      --timeout string   Override default timeout (e.g., '45m', '1h')
+      --dry-run           Show what would be deployed without making changes
+  -f, --file string       Path to nebari-config.yaml file (auto-discovered if omitted)
+  -h, --help              help for deploy
+      --plan-out string   Write the human-readable OpenTofu plan of a dry run to this file (requires --dry-run)
+      --regen-apps        Regenerate ArgoCD application manifests even if already bootstrapped
+      --timeout string    Override default timeout (e.g., '45m', '1h')
 ```
 
 ### SEE ALSO
