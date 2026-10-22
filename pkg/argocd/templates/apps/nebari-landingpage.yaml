@@ -16,7 +16,7 @@ spec:
   sources:
     # Source 1: landing page Helm chart (hosted in the nebari-landing git repo)
     - repoURL: https://github.com/nebari-dev/nebari-landing
-      targetRevision: v0.1.0-alpha.5
+      targetRevision: v0.1.5
       path: charts/nebari-landing
       helm:
         releaseName: nebari-landing
