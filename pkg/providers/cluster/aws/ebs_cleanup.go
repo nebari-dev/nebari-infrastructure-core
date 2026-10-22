@@ -70,9 +70,10 @@ type ebsInventory struct {
 	// (or Recycle); the user asked to keep the data.
 	retainVolumeIDs map[string]bool
 	// unboundVolumeIDs are EBS volume IDs whose PV had reclaimPolicy Delete
-	// but no claimRef. Kubernetes never reclaims an unbound PV, so it is a
-	// hand-made static PV that can point at any volume in the region; NIC
-	// reports these and never deletes them.
+	// but was not bound to a claim: no claimRef, or a claimRef with no UID
+	// (pre-bound, reserved for a claim that never bound). Kubernetes never
+	// reclaims an unbound PV, so it is a hand-made static PV that can point
+	// at any volume in the region; NIC reports these and never deletes them.
 	unboundVolumeIDs map[string]bool
 }
 
@@ -138,8 +139,11 @@ func releaseEBSVolumes(ctx context.Context, client kubernetes.Interface, timeout
 			inv.retainVolumeIDs[volumeID] = true
 			continue
 		}
+		// A bound PV's claimRef carries the claim's UID. Without one the PV
+		// is at most pre-bound (reserved by name), which the PV controller
+		// never reclaims, so its volume isn't NIC's to delete.
 		ref := pv.Spec.ClaimRef
-		if ref == nil {
+		if ref == nil || ref.UID == "" {
 			inv.unboundVolumeIDs[volumeID] = true
 			continue
 		}
@@ -257,6 +261,7 @@ func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []str
 	patch := []byte(`{"spec":{"unschedulable":false}}`)
 	var uncordoned int
 	var errs []error
+nodes:
 	for _, name := range names {
 		_, err := client.CoreV1().Nodes().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 		switch {
@@ -268,7 +273,7 @@ func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []str
 			status.Send(ctx, status.NewUpdate(status.LevelWarning,
 				fmt.Sprintf("Kubernetes API unreachable, so no nodes left to uncordon: %v", err)).
 				WithResource("ebs-volume").WithAction("cleanup"))
-			return uncordoned, errors.Join(errs...)
+			break nodes
 		default:
 			errs = append(errs, fmt.Errorf("uncordon node %s: %w", name, err))
 		}
@@ -282,11 +287,16 @@ func uncordonNodes(ctx context.Context, client kubernetes.Interface, names []str
 }
 
 // apiServerUnreachable reports whether err means the Kubernetes API server
-// can't be reached at all: its DNS name doesn't resolve or the connection is
-// refused. client-go returns these wrapped in a *url.Error, which unwraps.
+// is gone: its DNS name doesn't exist (NXDOMAIN, as for a deleted EKS
+// endpoint) or the connection is refused. Resolver timeouts and other DNS
+// failures don't count, since they can be transient on a cluster that is
+// still up. client-go returns these wrapped in a *url.Error, which unwraps.
 func apiServerUnreachable(err error) bool {
 	var dnsErr *net.DNSError
-	return errors.As(err, &dnsErr) || errors.Is(err, syscall.ECONNREFUSED)
+	if errors.As(err, &dnsErr) {
+		return dnsErr.IsNotFound
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // afterFailedTeardown runs when tofu destroy fails. The cluster may still be
