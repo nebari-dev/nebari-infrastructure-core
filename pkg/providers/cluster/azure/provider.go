@@ -325,6 +325,11 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 	// fails teardown, even if the storage was never created.
 	cluster.RetainBackupResources(ctx, span, tf, opts.BackupBucket, backupStateAddrs(opts.BackupBucket))
 
+	// Let the cluster delete take the user node pools with it, so a
+	// PodDisruptionBudget cannot stall the teardown. Best-effort: never fails
+	// teardown, and on failure tofu deletes the pools individually as before.
+	releaseUserNodePools(ctx, tf)
+
 	status.Send(ctx, status.NewUpdate(status.LevelInfo, "Destroying Terraform-managed resources").
 		WithResource("tofu").
 		WithAction("destroy").
