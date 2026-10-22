@@ -30,9 +30,26 @@ type Auth interface {
 	isAuth()
 }
 
+// DefaultTokenUsername is the HTTPS username sent with a token when none is
+// configured. GitHub accepts any username with a token; Bitbucket checks it
+// (access tokens: "x-token-auth", API tokens: "x-bitbucket-api-token-auth").
+const DefaultTokenUsername = "git"
+
 // TokenAuth authenticates over HTTPS with a token used as the password.
 type TokenAuth struct {
 	Token string
+
+	// Username is sent alongside the token. Empty means DefaultTokenUsername.
+	Username string
+}
+
+// UsernameOrDefault returns the configured username, or DefaultTokenUsername
+// when none is set.
+func (a TokenAuth) UsernameOrDefault() string {
+	if a.Username == "" {
+		return DefaultTokenUsername
+	}
+	return a.Username
 }
 
 // SSHKeyAuth authenticates over SSH with a private key (PEM).
