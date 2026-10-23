@@ -25,7 +25,7 @@ const EnvTofuPath = "NIC_TOFU_PATH"
 
 // MinVersion is the oldest external OpenTofu release NIC accepts. External
 // binaries below this floor are rejected; see compatibleVersion.
-const MinVersion = "1.11.3"
+const MinVersion = "1.13.2"
 
 // MaxVersionExclusive caps external binaries below the next major version,
 // where breaking CLI or state format changes are fair game.
@@ -224,7 +224,7 @@ func (b *ResolvedBinary) announce(ctx context.Context) {
 // for external binaries.
 //
 // Pre-release versions are deliberately compared by their base version (Core):
-// 1.11.3-rc1 carries the features NIC needs from 1.11.3 and is accepted, while
+// 1.13.2-rc1 carries the features NIC needs from 1.13.2 and is accepted, while
 // 2.0.0-beta1 previews the breaking changes of 2.0.0 and is rejected.
 func compatibleVersion(raw string) error {
 	v, err := goversion.NewVersion(raw)

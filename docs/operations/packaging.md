@@ -42,13 +42,18 @@ NIC caches OpenTofu downloads under `<user-cache-dir>/nic/tofu/`, where
 | macOS    | `~/Library/Caches/nic/tofu/` |
 | Windows  | `%LocalAppData%\nic\tofu\` |
 
+Downloads live in a subdirectory named after the pinned version (e.g.
+`~/.cache/nic/tofu/1.13.2/`), so upgrading NIC to a new pin starts from an empty
+download cache. Subdirectories for earlier pins are not used again and can be
+deleted. The `plugins/` subdirectory is shared across versions.
+
 `nic version` reports which binary would be used, its version, and its source
 (`NIC_TOFU_PATH`, `PATH`, or downloaded), so include its output in support requests:
 
 ```console
 $ nic version
 ...
-OpenTofu version: 1.12.5 (from PATH: /usr/local/bin/tofu)
+OpenTofu version: 1.13.2 (from PATH: /usr/local/bin/tofu)
 ```
 
 ## Air-gapped and high-security environments
@@ -63,7 +68,9 @@ nic deploy -f config.yaml
 Alternatively, pre-seed the [NIC cache directory](#the-nic-cache-directory)
 (e.g. `~/.cache/nic/tofu/` on Linux, `~/Library/Caches/nic/tofu/` on macOS) from
 a machine with network access; NIC serves downloads from that cache indefinitely
-once populated.
+once populated. The seeded cache must contain the version pinned by the NIC
+release you run, so seed it again (or switch to `NIC_TOFU_PATH`) when upgrading
+NIC to a release with a new pin.
 
 Note that `tofu init` still needs access to provider plugin registries (or a
 pre-populated `TF_PLUGIN_CACHE_DIR`, which NIC sets to the `plugins/`

@@ -228,7 +228,11 @@ func (d *tofuDownloader) download(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("failed to initialize tofu downloader: %w", err)
 	}
 
-	storage, err := tofudl.NewFilesystemStorage(d.cacheDir)
+	// The mirror caches the release index (api.json) forever, so it must be
+	// keyed by the pinned version: an index cached under an older pin does
+	// not list the new one, and tofudl would fail with NoSuchVersionError
+	// instead of refetching it.
+	storage, err := tofudl.NewFilesystemStorage(filepath.Join(d.cacheDir, d.version))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tofu filesystem storage: %w", err)
 	}
@@ -351,8 +355,8 @@ func extractTemplates(appFs afero.Fs, templates fs.FS) (string, error) {
 // invoking those methods.
 // The caller is responsible for calling Init() and Apply() with appropriate options and
 // deferring Cleanup() to remove the temporary working directory.
-// Downloaded archives are cached in os.UserCacheDir()/nic/tofu (e.g. ~/.cache/nic/tofu on
-// Linux, ~/Library/Caches/nic/tofu on macOS) to avoid re-downloading on subsequent runs.
+// Downloaded archives are cached in os.UserCacheDir()/nic/tofu/<Version> (e.g. ~/.cache/nic/tofu/<Version> on
+// Linux, ~/Library/Caches/nic/tofu/<Version> on macOS) to avoid re-downloading on subsequent runs.
 // A downloaded binary is written to the temporary working directory to avoid conflicts
 // when multiple deployments run concurrently or use different OpenTofu versions; an
 // external binary (NIC_TOFU_PATH or PATH) is used in place and never copied or deleted.

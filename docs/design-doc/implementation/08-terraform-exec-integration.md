@@ -74,7 +74,7 @@ It does the following:
 
 1. Allocates a fresh temp working directory via `afero.TempDir`.
 2. Walks the `templates` filesystem (an `embed.FS` from the calling provider) and copies each file into the working dir.
-3. Ensures `os.UserCacheDir()/nic/tofu/` exists and uses it as the OpenTofu download cache.
+3. Ensures `os.UserCacheDir()/nic/tofu/` exists. Downloads are cached in its `<pinned version>/` subdirectory so a pin bump starts from a fresh release index, and `plugins/` holds the shared provider plugin cache.
 4. Resolves the OpenTofu binary (`resolve.go`): an explicit `NIC_TOFU_PATH` override (hard error if unusable), else a compatible `tofu` on `PATH` (skipped with a warning if unusable), else downloads the version pinned in `pkg/tofu/version.go` via the `tofudl` library, with `MirrorConfig` that caches both API responses and artifacts indefinitely. Only a **downloaded** binary is written into the working dir — that is what avoids version-mismatch races between concurrent NIC invocations; an external binary is used in place, never copied, so `Cleanup()` cannot touch it. See [Packaging and External Binaries](../../operations/packaging.md) for the resolution contract.
 5. Sets `TF_PLUGIN_CACHE_DIR` to the `plugins/` subdirectory of the cache so provider plugins are reused across runs.
 6. Marshals `tfvars` to `terraform.tfvars.json` in the working dir.
@@ -156,4 +156,4 @@ The byte/line helpers (`streamThroughStatus`, `jsonLineMapper`, `mapStatusLevel`
 
 ## 8.9 Not Implemented
 
-There is no `nic state` subcommand, no `nic plan` subcommand, no `nic unlock`, no `nic init-backend`, and no `nic status` subcommand. Several of those have open issues ([#64](https://github.com/nebari-dev/nebari-infrastructure-core/issues/64) for unlock). Users who need direct state manipulation today must invoke the tofu binary themselves; the bundled cache makes the same version available at `~/.cache/nic/tofu/`.
+There is no `nic state` subcommand, no `nic plan` subcommand, no `nic unlock`, no `nic init-backend`, and no `nic status` subcommand. Several of those have open issues ([#64](https://github.com/nebari-dev/nebari-infrastructure-core/issues/64) for unlock). Users who need direct state manipulation today must invoke the tofu binary themselves; the bundled cache makes the same version available under `~/.cache/nic/tofu/<pinned version>/`.
