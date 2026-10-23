@@ -28,7 +28,7 @@ jobs:
         with:
           # Kept in step with the runtime floor (pkg/tofu.MinVersion); the
           # lockfile output itself is version-independent, see ADR-0016.
-          tofu_version: "1.11.3"
+          tofu_version: "1.13.2"
 
       - name: Regenerate lockfiles
         run: make tofu-lock

@@ -45,11 +45,11 @@ func TestTofuVersionLine(t *testing.T) {
 	})
 
 	t.Run("override hit with differing version notes the pin", func(t *testing.T) {
-		path := writeFakeTofu(t, "OpenTofu v1.12.5")
+		path := writeFakeTofu(t, "OpenTofu v1.13.5")
 		t.Setenv(tofu.EnvTofuPath, path)
 
 		got := tofuVersionLine(context.Background())
-		want := "1.12.5 (from " + tofu.EnvTofuPath + ": " + path + "; NIC is tested against " + tofu.Version + ")"
+		want := "1.13.5 (from " + tofu.EnvTofuPath + ": " + path + "; NIC is tested against " + tofu.Version + ")"
 		if got != want {
 			t.Errorf("tofuVersionLine() = %q, want %q", got, want)
 		}

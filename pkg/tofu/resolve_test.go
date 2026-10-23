@@ -73,15 +73,15 @@ func TestResolve(t *testing.T) {
 			name:    "whitespace-only NIC_TOFU_PATH is treated as unset",
 			env:     "   ",
 			pathHit: "/usr/local/bin/tofu",
-			version: "1.12.5",
-			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.12.5", Source: SourcePath},
+			version: "1.13.5",
+			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.13.5", Source: SourcePath},
 		},
 		{
 			name:     "NIC_TOFU_PATH hit with newer compatible version",
 			env:      "/opt/tofu/bin/tofu",
 			statInfo: execInfo,
-			version:  "1.12.5",
-			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.12.5", Source: SourceOverride},
+			version:  "1.13.5",
+			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.13.5", Source: SourceOverride},
 		},
 		{
 			name:    "NIC_TOFU_PATH pointing at missing file",
@@ -126,8 +126,8 @@ func TestResolve(t *testing.T) {
 		{
 			name:    "PATH discovery hit",
 			pathHit: "/usr/local/bin/tofu",
-			version: "1.12.5",
-			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.12.5", Source: SourcePath},
+			version: "1.13.5",
+			want:    &ResolvedBinary{Path: "/usr/local/bin/tofu", Version: "1.13.5", Source: SourcePath},
 		},
 		{
 			name:     "PATH binary below version floor falls back to download",
@@ -152,8 +152,8 @@ func TestResolve(t *testing.T) {
 			env:      "/opt/tofu/bin/tofu",
 			pathHit:  "/usr/local/bin/tofu",
 			statInfo: execInfo,
-			version:  "1.12.5",
-			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.12.5", Source: SourceOverride},
+			version:  "1.13.5",
+			want:     &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.13.5", Source: SourceOverride},
 		},
 	}
 
@@ -279,14 +279,14 @@ func TestAnnounce(t *testing.T) {
 	})
 
 	t.Run("version differing from the pin", func(t *testing.T) {
-		updates := capture(t, &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.12.5", Source: SourceOverride})
+		updates := capture(t, &ResolvedBinary{Path: "/opt/tofu/bin/tofu", Version: "1.13.5", Source: SourceOverride})
 		if len(updates) != 1 {
 			t.Fatalf("announce() sent %d updates, want 1", len(updates))
 		}
 		if updates[0].Level != status.LevelInfo {
 			t.Errorf("announce() level = %q, want %q", updates[0].Level, status.LevelInfo)
 		}
-		wantParts := []string{"1.12.5", EnvTofuPath, "NIC is tested against " + Version}
+		wantParts := []string{"1.13.5", EnvTofuPath, "NIC is tested against " + Version}
 		for _, part := range wantParts {
 			if !strings.Contains(updates[0].Message, part) {
 				t.Errorf("announce() message = %q, want it to contain %q", updates[0].Message, part)
@@ -331,8 +331,13 @@ func TestCompatibleVersion(t *testing.T) {
 		// must always sit inside the supported range.
 		{version: Version, wantErr: false},
 		{version: MinVersion, wantErr: false},
-		{version: "1.11.2", wantErr: true},
-		{version: "1.12.5", wantErr: false},
+		{version: "1.11.3", wantErr: true},
+		// The floor sits at the first 1.13 release that distrusts the
+		// compromised eMudhra intermediates, so the earlier 1.13 patches are
+		// rejected along with the 1.12 line.
+		{version: "1.12.9", wantErr: true},
+		{version: "1.13.1", wantErr: true},
+		{version: "1.13.5", wantErr: false},
 		{version: "1.99.0", wantErr: false},
 		{version: "2.0.0", wantErr: true},
 		{version: "2.1.0", wantErr: true},
@@ -340,8 +345,8 @@ func TestCompatibleVersion(t *testing.T) {
 		{version: "not-a-version", wantErr: true},
 		// Pre-releases are compared by their base version (see compatibleVersion):
 		// an rc of the floor is accepted, a preview of 2.0 is rejected.
-		{version: "1.11.3-rc1", wantErr: false},
-		{version: "1.12.0-beta1", wantErr: false},
+		{version: "1.13.2-rc1", wantErr: false},
+		{version: "1.14.0-beta1", wantErr: false},
 		{version: "2.0.0-beta1", wantErr: true},
 	}
 
