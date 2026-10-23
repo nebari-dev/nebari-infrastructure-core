@@ -75,9 +75,9 @@ homebrew_casks:
         # Published binaries are not code-signed or notarized, so macOS Gatekeeper
         # quarantines them and `nic` fails to launch. Strip the quarantine xattr on
         # install so the CLI runs without the "developer cannot be verified" prompt.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/nic"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/nic"]
           end
 
 changelog:
