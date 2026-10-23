@@ -277,6 +277,8 @@ Options:
 
 **WARNING**: This operation is destructive and cannot be undone.
 
+**EBS volumes (AWS)**: If any PersistentVolumeClaim is bound to an EBS-backed PersistentVolume with reclaim policy `Delete`, `nic destroy` cordons the nodes before tearing down the cluster and deletes those claims (and the pods mounting them), so the EBS CSI driver deletes the volumes and their data. After the cluster is gone, any of those volumes still left are deleted by ID. Volumes whose PersistentVolume has reclaim policy `Retain`, and volumes behind PersistentVolumes not bound to a claim, are kept and listed in the output. If the PersistentVolumes can't be read before teardown, NIC deletes no volumes, and if any volume tagged `KubernetesCluster=<project_name>` remains, `nic destroy` exits non-zero after teardown completes and lists them for you to review. The state bucket is still deleted, so rerunning `nic destroy` won't retry this cleanup; delete any listed volumes you don't need by hand. If `tofu destroy` fails after the nodes were cordoned, NIC uncordons them.
+
 ### `nic kubeconfig`
 
 Generate a kubeconfig for the deployed Kubernetes cluster.
