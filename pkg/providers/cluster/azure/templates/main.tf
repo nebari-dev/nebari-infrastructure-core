@@ -1,8 +1,8 @@
 module "aks_cluster" {
-  # 0.2.0 is the first release carrying the longhorn_backup_* variables and the
-  # longhorn_backup_container output (nebari-dev/terraform-azurerm-aks-cluster#4).
-  source  = "nebari-dev/aks-cluster/azurerm"
-  version = "0.2.0"
+  # TEMPORARY: pinned to the head of nebari-dev/terraform-azurerm-aks-cluster#6
+  # to test the azurerm 5.x changes. Switch back to the registry source at the
+  # release that PR produces before merging.
+  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=a15f5f4af9613fe6973c4f47e144de930b28e9a1"
 
   project_name                 = var.project_name
   location                     = var.location
