@@ -31,9 +31,11 @@ credential, and why the password is generated fresh per run rather than
 reused.
 """
 
+import time
 from collections.abc import Callable
 from urllib.parse import urlparse
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 KEYCLOAK_USERNAME_SELECTOR = "#username"
@@ -182,3 +184,92 @@ def login_via_keycloak(page, url: str, username: str, password: str) -> None:
         page.wait_for_url(returned_to(page_host(url)), timeout=REDIRECT_TIMEOUT_MS)
     except PlaywrightTimeoutError:
         return
+
+
+# How long to wait for a login round trip to leave its session cookie.
+COOKIE_TIMEOUT_S = 30.0
+COOKIE_POLL_INTERVAL_S = 0.5
+
+
+def follow_login_redirects(page, url: str) -> None:
+    """Navigate to a login URL whose redirect chain ends on a page that
+    navigates again by itself.
+
+    Playwright reports that second navigation as net::ERR_ABORTED on the
+    goto, although the round trip it started completed. Only that error is
+    tolerated; anything else, a TLS failure included, still raises. The
+    caller confirms the outcome, typically with `wait_for_cookie`.
+    """
+    try:
+        page.goto(url)
+    except PlaywrightError as error:
+        if "net::ERR_ABORTED" not in str(error):
+            raise
+
+
+def wait_for_cookie(context, name: str, timeout: float = COOKIE_TIMEOUT_S) -> bool:
+    """Whether the browser context holds a cookie called `name` within
+    `timeout` seconds. Reads the context's cookie jar, so it also sees
+    HttpOnly cookies, which page JavaScript cannot."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if any(c.get("name") == name for c in context.cookies()):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(COOKIE_POLL_INTERVAL_S)
+
+
+# JupyterHub's OAuth authorize endpoint. For a hub service registered
+# without oauth_no_confirm (jhub-apps in data-science-pack, for one), it
+# renders an "Authorize access" page the user must approve once.
+HUB_OAUTH_AUTHORIZE_PATH = "/hub/api/oauth2/authorize"
+
+
+def approve_hub_oauth_consent(
+    page, session_cookie: str, timeout: float = COOKIE_TIMEOUT_S
+) -> bool:
+    """Approve JupyterHub's OAuth consent page if the login flow reaches
+    it, as a user would. Returns whether there was a page to approve.
+
+    The consent page may show up a moment after the navigation that started
+    the flow, when the service's own page script redirects there, so this
+    waits for whichever comes first: the consent page, or `session_cookie`
+    already being set (a hub configured to skip confirmation). Waits with
+    page.wait_for_timeout, not time.sleep, so Playwright keeps processing
+    the browser's navigation events and page.url stays current.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if HUB_OAUTH_AUTHORIZE_PATH in page.url:
+            page.get_by_role("button", name="Authorize").click()
+            return True
+        if any(c.get("name") == session_cookie for c in page.context.cookies()):
+            return False
+        page.wait_for_timeout(COOKIE_POLL_INTERVAL_S * 1000)
+    return False
+
+
+# Where Keycloak's login theme renders a rejected login ("Invalid username or
+# password.", "Account is disabled, contact your administrator.").
+KEYCLOAK_ERROR_SELECTOR = "#input-error, #kc-error-message, .kc-feedback-text"
+REJECTION_TIMEOUT_MS = 15_000
+
+
+def keycloak_refusal(page, url: str, username: str, password: str) -> str | None:
+    """Try to sign in at `url` and return Keycloak's error text, or None if
+    no error appeared. For journeys that expect the login to FAIL, so unlike
+    `login_via_keycloak` it does not wait for a redirect that should never
+    come."""
+    page.goto(url)
+    page.wait_for_selector(KEYCLOAK_USERNAME_SELECTOR, timeout=FORM_TIMEOUT_MS)
+    page.fill(KEYCLOAK_USERNAME_SELECTOR, username)
+    page.fill(KEYCLOAK_PASSWORD_SELECTOR, password)
+    page.click(KEYCLOAK_SUBMIT_SELECTOR)
+    try:
+        error = page.wait_for_selector(
+            KEYCLOAK_ERROR_SELECTOR, timeout=REJECTION_TIMEOUT_MS
+        )
+    except PlaywrightTimeoutError:
+        return None
+    return error.inner_text().strip()
