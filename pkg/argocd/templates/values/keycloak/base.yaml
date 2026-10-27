@@ -1,6 +1,16 @@
 args:
   - start
 replicas: 1
+# Pin the Keycloak server image explicitly instead of inheriting the chart's
+# appVersion default, so the running version is controlled here and tracked in
+# review. Keep it on a current, supported patch release and advance it on its
+# own cadence, independent of when the chart is bumped. Upgrading across minor
+# versions runs forward-only schema migrations against the CNPG keycloak
+# database, so back that database up before rolling a new tag onto an existing
+# cluster (see keycloak-db-cluster.yaml).
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "26.7.2"
 http:
   relativePath: "{{ .KeycloakBasePath }}/"
 extraEnv: |
