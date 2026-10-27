@@ -2,7 +2,7 @@ module "aks_cluster" {
   # TEMPORARY: pinned to the head of nebari-dev/terraform-azurerm-aks-cluster#6
   # to test the azurerm 5.x changes. Switch back to the registry source at the
   # release that PR produces before merging.
-  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=a15f5f4af9613fe6973c4f47e144de930b28e9a1"
+  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=010c23ea3b7af5d51222585e64d29804bb9b9a09"
 
   project_name                 = var.project_name
   location                     = var.location
