@@ -377,7 +377,7 @@ func TestKeycloakTemplate_ImagePin(t *testing.T) {
 	// that only checks for non-empty would let a chart bump or a stray edit
 	// move the deployed version without failing. Bump this alongside the tag in
 	// base.yaml when upgrading Keycloak on purpose.
-	const wantTag = "26.7.2"
+	const wantTag = "26.8.1"
 	if values.Image.Tag != wantTag {
 		t.Errorf("image.tag = %q, want %q: the Keycloak server version must be an explicit, reviewed pin", values.Image.Tag, wantTag)
 	}
