@@ -1,0 +1,176 @@
+name: Deployed image vulnerabilities
+
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pkg/**'
+      - 'internal/imageinventory/**'
+      - 'scripts/scan-images*'
+      - 'scripts/test_scan_images.py'
+      - 'scripts/report-image-issues.py'
+      - 'scripts/test_report_image_issues.py'
+      - '.trivyignore'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/deployed-images.yml'
+      - '.github/workflows/release.yml'
+      - '.goreleaser.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployed-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test inventory and report generation
+        run: |
+          go test ./internal/imageinventory
+          python3 -m unittest discover -s scripts -p 'test_*image*.py'
+
+      - name: Render the deployed image inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INVENTORY_TARGET: ${{ github.event_name == 'pull_request' && 'pull-request' || 'main' }}
+          INCLUDE_RELEASE: ${{ github.event_name != 'pull_request' }}
+        run: |
+          go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+          args=()
+          if [ "$INCLUDE_RELEASE" = true ]; then
+            args+=(--include-latest-release)
+          fi
+          python3 scripts/scan-images.py inventory --output dist/image-scan/inventory.json \
+            --target "$INVENTORY_TARGET" --repository "$GITHUB_REPOSITORY" "${args[@]}"
+
+      - name: Cache Trivy databases
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/trivy/db
+            ~/.cache/trivy/java-db
+          key: trivy-db-${{ runner.os }}-0.76.1-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-0.76.1-
+
+      # Pinned binary and checksum; no mutable action or installer script.
+      - name: Install Trivy 0.76.1
+        env:
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz \
+            --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      # Findings are report-only on PRs and scheduled runs. Scanner/pull/DB
+      # failures still fail this step. No continue-on-error can hide a blind spot.
+      - name: Scan images
+        # Keep Trivy's freshness checks enabled. Mirrors are tried before GHCR;
+        # only the databases are cached, not potentially huge image layers.
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1
+        run: python3 scripts/scan-images.py scan --inventory dist/image-scan/inventory.json --output dist/image-scan/results
+
+      - name: Add job summary
+        if: always()
+        run: |
+          if [ -f dist/image-scan/results/summary.md ]; then
+            cat dist/image-scan/results/summary.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f dist/image-scan/inventory.md ]; then
+            cat dist/image-scan/inventory.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload inventory and findings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployed-images
+          path: dist/image-scan/
+          retention-days: 7
+
+  # Keep Security-tab writes out of the job which executes repository code.
+  # PRs (including forks) get artifacts and a summary without write permissions.
+  publish:
+    needs: scan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout source locations for SARIF
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download findings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deployed-images
+          path: image-scan
+
+      - name: Upload SARIF to the Security tab
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: image-scan/results/results.sarif
+          category: nic-deployed-images
+
+  issues:
+    needs: scan
+    # Partial scans may report newly found vulnerabilities, but cannot close
+    # existing issues. A render/resolution failure produces no findings file.
+    if: always() && github.event_name == 'schedule' && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - name: Checkout issue reporter
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download scan evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deployed-images
+          path: image-scan
+
+      - name: Open, update or resolve security issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f image-scan/results/findings.json ]; then
+            python3 scripts/report-image-issues.py --repository "$GITHUB_REPOSITORY" \
+              --report image-scan/results/findings.json --apply
+          else
+            echo '::warning::No scan evidence; existing security issues are unchanged.'
+          fi

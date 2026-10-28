@@ -2,6 +2,9 @@
 
 This directory contains all documentation for the Nebari Infrastructure Core (NIC) project.
 
+[Deployed image vulnerability scans](operations/image-scanning.md) describes the
+daily image inventory, security issues, SARIF reports and coverage limits.
+
 ## Documentation Structure
 
 ### [Architecture Decision Records (ADRs)](adr/)

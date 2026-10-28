@@ -1,0 +1,3 @@
+# Each suppression must have its own '# reason: ...' comment immediately above it.
+# Every CVE/GHSA identifier must include an expiry: exp:YYYY-MM-DD (UTC).
+# No vulnerabilities are suppressed by default.

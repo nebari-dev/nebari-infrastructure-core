@@ -1,0 +1,4 @@
+{
+  "docker.io/envoyproxy/gateway-helm:v1.9.1": "sha256:91bae9aedb91ab34731e987afe01a3ccf454393015abeca705eea8ee15553e86",
+  "quay.io/nebari/charts/nebari-operator:0.2.0": "sha256:f24536dc9d34ebb744fa0a0cd41a2d0142c3bfae068171f69bd530a766a43f73"
+}

@@ -70,3 +70,4 @@ test-configs/
 # Also GoReleaser's output dir, so `make release-snapshot` (--clean) wipes any
 # starters generated here - regenerate them with `make starters` afterwards.
 dist/
+.release-assets/

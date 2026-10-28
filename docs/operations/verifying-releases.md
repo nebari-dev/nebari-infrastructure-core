@@ -2,7 +2,9 @@
 
 Each release publishes, alongside the binaries:
 
-- `checksums.txt` - SHA-256 of every archive
+- `checksums.txt` - SHA-256 of every archive and `images.json`
+- `images.json` - deployed image digests for Linux AMD64/ARM64, OCI chart digests,
+  provenance and explicit coverage limits (see [image scanning](image-scanning.md))
 - `checksums.txt.sigstore.json` - a keyless cosign signature bundle over `checksums.txt`
 - `<archive>.sbom.json` - an SPDX SBOM per archive
 - a build-provenance attestation (stored in GitHub, queried with `gh`)
@@ -53,6 +55,9 @@ gh attestation verify nebari-infrastructure-core_<version>_linux_x86_64.tar.gz \
 ```
 
 Expected: a line confirming the attestation was issued by the release workflow.
+
+The same command can verify `images.json`. Its checksum is also covered by the
+signed `checksums.txt`; older releases may not include this asset.
 
 ## 4. Inspect the SBOM
 

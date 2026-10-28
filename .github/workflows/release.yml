@@ -76,6 +76,16 @@ jobs:
       - name: Run tests
         run: go test -v ./...
 
+      # Freeze tags now, while building this release. Keep the asset outside
+      # dist/: GoReleaser --clean removes that directory. Both release.extra_files
+      # and checksum.extra_files include it before the existing cosign signing.
+      - name: Record deployed images for this release
+        run: |
+          go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+          python3 -m unittest discover -s scripts -p 'test_*image*.py'
+          python3 scripts/scan-images.py inventory --target release --output .release-assets/images.json
+          cat .release-assets/images.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -97,10 +107,20 @@ jobs:
           # always resolves even if the secret is unavailable to this repo.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
 
+      - name: Check inventory is covered by the signed checksum list
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          expected = hashlib.sha256(Path('.release-assets/images.json').read_bytes()).hexdigest()
+          entries = [line.split() for line in Path('dist/checksums.txt').read_text().splitlines()]
+          assert [entry[0] for entry in entries if entry[1].lstrip('*') == 'images.json'] == [expected]
+          PY
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: 'dist/*.tar.gz, dist/*.zip, dist/checksums.txt'
+          subject-path: 'dist/*.tar.gz, dist/*.zip, dist/checksums.txt, .release-assets/images.json'
 
   # The hand-off. This costs one short run that usually finds the channel not
   # ready and exits; the cron in publish-starters.yml is what actually lands it.

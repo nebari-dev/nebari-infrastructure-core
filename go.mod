@@ -19,6 +19,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
 	github.com/aws/smithy-go v1.27.2
 	github.com/cloudflare/cloudflare-go/v4 v4.6.0
+	github.com/distribution/reference v0.6.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/goccy/go-yaml v1.19.2
 	github.com/hashicorp/go-version v1.9.0
@@ -29,6 +30,7 @@ require (
 	github.com/skeema/knownhosts v1.3.2
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
+	go.etcd.io/bbolt v1.5.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0
