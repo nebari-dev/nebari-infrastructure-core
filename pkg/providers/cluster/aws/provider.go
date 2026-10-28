@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-exec/tfexec"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -697,8 +698,9 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		return nil
 	}
 
-	// Errors that Force downgrades from fatal to warning accumulate here and
-	// are returned joined at the end of the destroy.
+	// Errors that Force downgrades from fatal to warning, and post-destroy
+	// cleanup failures that never stop the teardown, accumulate here and are
+	// returned joined at the end of the destroy.
 	var forcedErrs []error
 
 	// Stage 1: Graceful Kubernetes-side cleanup. Best-effort; any failure
@@ -792,10 +794,51 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 		}
 	}
 
+	// Delete EBS-backed PVCs so the EBS CSI driver removes their volumes while
+	// the cluster is still up (#246). This cordons every node, so it runs after
+	// every step above that schedules pods. Best-effort: the inventory it
+	// returns drives the post-destroy sweep below, which deletes stragglers
+	// and returns an error for any volume it has to leave behind.
+	ebsInv := newEBSInventory()
+	var k8sClient kubernetes.Interface
+	var cordonedNodes []string
+	switch {
+	case kcErr != nil:
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping EBS volume release: kubeconfig unavailable: %v", kcErr)).
+			WithResource("ebs-volume").WithAction("cleanup"))
+	default:
+		client, err := newK8sClient(kubeconfigBytes)
+		if err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping EBS volume release: %v", err)).
+				WithResource("ebs-volume").WithAction("cleanup"))
+			break
+		}
+		k8sClient = client
+		ebsInv, cordonedNodes, err = releaseEBSVolumes(ctx, k8sClient, ebsReleaseTimeout)
+		if err != nil {
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("EBS volume release incomplete, will sweep after destroy: %v", err)).
+				WithResource("ebs-volume").WithAction("cleanup"))
+		}
+	}
+
 	err = tf.Destroy(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return errors.Join(append(forcedErrs, err)...)
+		// Give back the nodes releaseEBSVolumes cordoned, since the cluster
+		// may have survived.
+		forcedErrs = append(forcedErrs, afterFailedTeardown(ctx, err, k8sClient, cordonedNodes))
+		return errors.Join(forcedErrs...)
+	}
+
+	// Sweep EBS volumes the CSI driver didn't delete. This is a post-teardown
+	// sweep, so a failure never stops the destroy but is always returned
+	// (Destroy Error Contract, case 2) so a leaked volume isn't silent.
+	_, err = deleteOrphanedEBSVolumes(ctx, ec2ClientForCleanup, projectName, ebsInv)
+	if err != nil {
+		span.RecordError(err)
+		forcedErrs = append(forcedErrs, fmt.Errorf("clean up orphaned EBS volumes: %w", err))
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Orphaned EBS volume cleanup failed: %v", err)).
+			WithResource("ebs-volume").WithAction("cleanup"))
 	}
 
 	if err := destroyStateBucket(ctx, s3Client, region, bucketName); err != nil {
