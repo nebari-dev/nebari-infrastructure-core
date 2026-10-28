@@ -212,10 +212,12 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 	trustPEM := trustBundle.PEM
 	caBundle := trustBundle.Base64()
-	// Say what was picked up (or that nothing was) so operators can confirm the
-	// bundle reached both halves of the propagation without inspecting nodes.
+	// Say what was picked up (or that nothing was). Where each half of the
+	// propagation actually happens is reported by the code that does it: the
+	// cluster provider for worker nodes (AWS only today) and WriteAllToGit for
+	// trust-manager, neither of which runs on every provider or in dry-run.
 	if trustBundle.IsSet() {
-		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Trust bundle resolved; installing on worker nodes and syncing in-cluster via trust-manager").
+		status.Send(ctx, status.NewUpdate(status.LevelInfo, "Trust bundle resolved").
 			WithResource("trust-bundle").
 			WithAction("resolving").
 			WithMetadata("source", trustBundle.Source).

@@ -113,7 +113,7 @@ var configFiles = []configFile{
 			"TrustBundleConfig",
 		},
 		docTitle: "Trust Bundle Configuration",
-		docDesc:  "Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.",
+		docDesc:  "Enterprise CA trust-bundle propagation into the cluster via trust-manager and, on AWS, to worker-node OS trust stores.",
 	},
 	{
 		// BackupsConfig is a top-level NebariConfig field in its own file.

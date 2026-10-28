@@ -455,10 +455,10 @@ The certificate must cover the apex domain plus the `keycloak.` and `argocd.` su
 
 ## 5. Trust Bundle
 
-Defined by `TrustBundleConfig` in `pkg/config/trust_bundle.go`. Required when egress is TLS-inspected by a corporate proxy. The bundle is propagated both to worker-node OS trust stores (via the cluster provider) and into the cluster via trust-manager.
+Defined by `TrustBundleConfig` in `pkg/config/trust_bundle.go`. Required when egress is TLS-inspected by a corporate proxy. The bundle is propagated into the cluster via trust-manager on every provider. Only the AWS provider also installs it into worker-node OS trust stores; on other providers it reaches pods only.
 
 ```yaml
-trust_bundle:                                  # exactly one of path / inline
+trust_bundle:                                  # at most one of path / inline
   path: /etc/ssl/corp-ca.pem                   # PEM file on the operator's machine
   # inline: |
   #   -----BEGIN CERTIFICATE-----
@@ -469,9 +469,10 @@ trust_bundle:                                  # exactly one of path / inline
 Rules:
 
 - `path` and `inline` are mutually exclusive.
-- The material must contain at least one `-----BEGIN CERTIFICATE-----` block.
+- The material must contain at least one `CERTIFICATE` block, and every certificate block must parse as X.509.
+- Every PEM block must be a `CERTIFICATE` block with no PEM headers, matching what trust-manager accepts. Free text between blocks is ignored.
 - A `PRIVATE KEY` block is rejected outright. The resolved bundle is written to OpenTofu state and projected cluster-wide via the GitOps repo, so a stray cert+key file must never be distributed.
-- `Validate()` never touches disk, so a `path:`-based bundle is only read (and PEM-checked) at deploy/destroy time. Config linting in CI will not catch a missing file.
+- `Validate()` never touches disk, so a `path:`-based bundle is only read (and parsed) at deploy/destroy time. Config linting in CI will not catch a missing file.
 
 ---
 

@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -48,12 +49,36 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 -----END CERTIFICATE-----
 `
 
+const ecParamsPEM = `-----BEGIN EC PARAMETERS-----
+BggqhkjOPQMBBw==
+-----END EC PARAMETERS-----
+`
+
+// The '!' is outside the base64 alphabet, so pem.Decode skips this block
+// rather than returning it.
+const corruptBase64PEM = `-----BEGIN CERTIFICATE-----
+MIIB!!!!
+-----END CERTIFICATE-----
+`
+
+// withHeader re-encodes a single-block PEM with a PEM header attached.
+func withHeader(t *testing.T, certPEM string) string {
+	t.Helper()
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		t.Fatal("withHeader: no PEM block")
+	}
+	block.Headers = map[string]string{"Comment": "corp root"}
+	return string(pem.EncodeToMemory(block))
+}
+
 const samplePrivateKeyPEM = `-----BEGIN PRIVATE KEY-----
 MIICfQIBADANBgkqhkiG9w0BAQEFAASCAmcwggJjAgEAAoGBAQ0123456789==
 -----END PRIVATE KEY-----
 `
 
-func TestTrustBundleResolveBase64(t *testing.T) {
+// TestTrustBundleBase64 covers the base64 form handed to the cluster provider.
+func TestTrustBundleBase64(t *testing.T) {
 	certPEM := newTestCertPEM(t, "Test Org Root CA")
 	tmp := t.TempDir()
 	pemPath := filepath.Join(tmp, "ca.pem")
@@ -82,7 +107,8 @@ func TestTrustBundleResolveBase64(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.bundle.ResolveBase64()
+			resolved, err := tt.bundle.Resolve()
+			got := resolved.Base64()
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
@@ -100,33 +126,10 @@ func TestTrustBundleResolveBase64(t *testing.T) {
 			}
 			decoded, err := base64.StdEncoding.DecodeString(got)
 			if err != nil {
-				t.Fatalf("ResolveBase64 returned a non-base64 value: %v", err)
+				t.Fatalf("Base64 returned a non-base64 value: %v", err)
 			}
 			if string(decoded) != certPEM {
 				t.Errorf("decoded payload should be the PEM verbatim; got %q", decoded)
-			}
-		})
-	}
-}
-
-func TestTrustBundleResolvePEM(t *testing.T) {
-	certPEM := newTestCertPEM(t, "Test Org Root CA")
-	tests := []struct {
-		name   string
-		bundle *TrustBundleConfig
-		want   string
-	}{
-		{name: "nil is empty", bundle: nil, want: ""},
-		{name: "inline returns raw PEM", bundle: &TrustBundleConfig{Inline: certPEM}, want: certPEM},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.bundle.ResolvePEM()
-			if err != nil {
-				t.Fatalf("ResolvePEM: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("ResolvePEM = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -160,7 +163,16 @@ func TestTrustBundleResolve(t *testing.T) {
 		{name: "text between blocks is tolerated", bundle: &TrustBundleConfig{Inline: "subject=CN=Root\n" + root + "subject=CN=Issuing\n" + intermediate}, wantSource: "inline", wantCerts: 2, wantPEM: "subject=CN=Root\n" + root + "subject=CN=Issuing\n" + intermediate},
 		{name: "one bad cert among good ones fails the whole bundle", bundle: &TrustBundleConfig{Inline: root + malformedBodyPEM}, wantErr: "not a valid X.509 certificate"},
 		{name: "DER (non-PEM) input is rejected", bundle: &TrustBundleConfig{Inline: "\x30\x82\x01\x0a"}, wantErr: "no PEM certificate"},
-		{name: "non-certificate blocks alone do not count", bundle: &TrustBundleConfig{Inline: "-----BEGIN EC PARAMETERS-----\nBggqhkjOPQMBBw==\n-----END EC PARAMETERS-----\n"}, wantErr: "no PEM certificate"},
+		// trust-manager's AddCertsFromPEM rejects the whole source on any
+		// non-CERTIFICATE block or any block with PEM headers, so validation
+		// must too or the bundle passes `nic validate` and fails at sync.
+		{name: "non-certificate block alone is rejected", bundle: &TrustBundleConfig{Inline: ecParamsPEM}, wantErr: `block 1 in inline is a "EC PARAMETERS" block`},
+		{name: "non-certificate block alongside a cert is rejected", bundle: &TrustBundleConfig{Inline: root + ecParamsPEM}, wantErr: `block 2 in inline is a "EC PARAMETERS" block`},
+		{name: "certificate block with PEM headers is rejected", bundle: &TrustBundleConfig{Inline: root + withHeader(t, intermediate)}, wantErr: "block 2 in inline has PEM headers"},
+		// pem.Decode silently skips a block with corrupt base64, which would
+		// otherwise drop that certificate from an otherwise valid bundle.
+		{name: "corrupt base64 among good certs is rejected", bundle: &TrustBundleConfig{Inline: root + corruptBase64PEM + intermediate}, wantErr: "3 PEM BEGIN markers but only 2 decodable blocks"},
+		{name: "bad cert after good ones reports its block index", bundle: &TrustBundleConfig{Inline: root + intermediate + malformedBodyPEM}, wantErr: "block 3 in inline is not a valid X.509 certificate"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +180,9 @@ func TestTrustBundleResolve(t *testing.T) {
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+				if !errors.Is(err, ErrInvalidTrustBundle) {
+					t.Errorf("content error should wrap ErrInvalidTrustBundle, got %v", err)
 				}
 				return
 			}
@@ -215,5 +230,14 @@ func TestTrustBundleValidate(t *testing.T) {
 				t.Fatalf("Validate err = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNegativeSerialHint(t *testing.T) {
+	if got := negativeSerialHint(errors.New("x509: negative serial number")); !strings.Contains(got, "GODEBUG=x509negativeserial=1") {
+		t.Errorf("hint for a negative serial should mention the GODEBUG setting, got %q", got)
+	}
+	if got := negativeSerialHint(errors.New("x509: malformed certificate")); got != "" {
+		t.Errorf("unrelated parse errors should get no hint, got %q", got)
 	}
 }
