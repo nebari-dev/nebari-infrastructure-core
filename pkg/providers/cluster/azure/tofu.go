@@ -31,7 +31,6 @@ type TFVars struct {
 	NetworkPlugin             string                 `json:"network_plugin"`
 	NetworkPluginMode         string                 `json:"network_plugin_mode"`
 	NetworkDataPlane          string                 `json:"network_data_plane,omitempty"`
-	NodeProvisioningMode      string                 `json:"node_provisioning_mode,omitempty"`
 	PodCIDR                   string                 `json:"pod_cidr,omitempty"`
 	ServiceCIDR               string                 `json:"service_cidr,omitempty"`
 	DNSServiceIP              string                 `json:"dns_service_ip,omitempty"`
@@ -80,12 +79,6 @@ const (
 	dataPlaneCilium = "cilium"
 )
 
-// AKS node provisioning modes for node_provisioning_mode.
-const (
-	napModeManual = "Manual"
-	napModeAuto   = "Auto"
-)
-
 // Azure tag names disallow these reserved chars: < > % & \ ? /
 // (the Kubernetes-style "domain/key" convention doesn't survive on Azure), so
 // we substitute "_" for "/" while keeping the nic.nebari.dev namespace.
@@ -116,7 +109,6 @@ func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) 
 		AuthorizedIPRanges:    c.AuthorizedIPRanges,
 		SKUTier:               defaultIfEmpty(c.SKUTier, "Free"),
 		IdentityType:          "UserAssigned",
-		NodeProvisioningMode:  c.NodeProvisioningMode,
 		NodeGroups:            convertNodeGroups(c.NodeGroups),
 	}
 

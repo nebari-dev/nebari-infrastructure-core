@@ -338,10 +338,6 @@ cluster:
       # existing_vnet_id: /subscriptions/.../virtualNetworks/foo
       # existing_node_subnet_id: /subscriptions/.../subnets/foo
 
-    # Node Auto Provisioning (Karpenter): "Manual" (default) | "Auto".
-    # "Auto" requires network.dataplane: cilium.
-    # node_provisioning_mode: Auto
-
     node_groups:                                # required; at most one may set mode: System
       system:
         instance: Standard_D4_v3

@@ -22,10 +22,6 @@ type Config struct {
 	Network               *NetworkConfig       `yaml:"network,omitempty"`
 	NodeGroups            map[string]NodeGroup `yaml:"node_groups"`
 	Tags                  map[string]string    `yaml:"tags,omitempty"`
-	// NodeProvisioningMode enables AKS Node Auto Provisioning (Karpenter) when
-	// set to "Auto". Defaults to "Manual". "Auto" requires the cilium dataplane
-	// (network.dataplane: cilium).
-	NodeProvisioningMode string `yaml:"node_provisioning_mode,omitempty"`
 }
 
 // NetworkConfig groups all VNet/subnet/CIDR knobs.
@@ -89,20 +85,6 @@ func (c *Config) Validate() error {
 	if c.Network != nil {
 		if err := c.Network.validate(); err != nil {
 			return err
-		}
-	}
-
-	switch c.NodeProvisioningMode {
-	case "", napModeManual, napModeAuto:
-	default:
-		return fmt.Errorf("cluster.azure.node_provisioning_mode %q is invalid (expected %q or %q)", c.NodeProvisioningMode, napModeManual, napModeAuto)
-	}
-
-	// Node Auto Provisioning requires the cilium dataplane (enforced upstream by
-	// the Terraform module too; we check here for a fast, clear error).
-	if c.NodeProvisioningMode == napModeAuto {
-		if c.Network == nil || c.Network.DataPlane != dataPlaneCilium {
-			return fmt.Errorf("cluster.azure.node_provisioning_mode %q requires network.dataplane: %q", napModeAuto, dataPlaneCilium)
 		}
 	}
 

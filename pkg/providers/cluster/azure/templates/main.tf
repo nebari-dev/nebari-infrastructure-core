@@ -1,8 +1,8 @@
 module "aks_cluster" {
-  # TEMPORARY: pinned to the head of nebari-dev/terraform-azurerm-aks-cluster#6
-  # to test the azurerm 5.x changes. Switch back to the registry source at the
-  # release that PR produces before merging.
-  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=010c23ea3b7af5d51222585e64d29804bb9b9a09"
+  # TEMPORARY: pinned to the head of nebari-dev/terraform-azurerm-aks-cluster#7
+  # to test the azurerm 5.x changes without NAP. Switch back to the registry
+  # source at the release that PR produces before merging.
+  source = "git::https://github.com/nebari-dev/terraform-azurerm-aks-cluster.git?ref=d02eacde10a94f5fb5af7eef014f6038590ddec3"
 
   project_name                 = var.project_name
   location                     = var.location
@@ -17,7 +17,6 @@ module "aks_cluster" {
   network_plugin               = var.network_plugin
   network_plugin_mode          = var.network_plugin_mode
   network_data_plane           = var.network_data_plane
-  node_provisioning_mode       = var.node_provisioning_mode
   pod_cidr                     = var.pod_cidr
   service_cidr                 = var.service_cidr
   dns_service_ip               = var.dns_service_ip
