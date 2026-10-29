@@ -339,6 +339,50 @@ func TestKeycloakTemplate_HealthProbes(t *testing.T) {
 	}
 }
 
+// TestKeycloakTemplate_ImagePin verifies the Keycloak server image is pinned
+// explicitly in the values, rather than inheriting the chart's appVersion
+// default. This keeps the running server version under review control, so a
+// chart bump cannot silently change (or un-patch) the deployed Keycloak.
+func TestKeycloakTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/keycloak/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read keycloak base values template: %v", err)
+	}
+
+	data := TemplateData{
+		Domain:            "test.example.com",
+		KeycloakNamespace: "keycloak",
+	}
+
+	processed, err := processTemplate("values/keycloak/base.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	var values struct {
+		Image struct {
+			Repository string `yaml:"repository"`
+			Tag        string `yaml:"tag"`
+		} `yaml:"image"`
+	}
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("keycloakx Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	if values.Image.Repository != "quay.io/keycloak/keycloak" {
+		t.Errorf("image.repository = %q, want %q", values.Image.Repository, "quay.io/keycloak/keycloak")
+	}
+	// Assert the exact tag, not just that one is set. The point of the pin is
+	// that the running server version is a deliberate, reviewed value; a test
+	// that only checks for non-empty would let a chart bump or a stray edit
+	// move the deployed version without failing. Bump this alongside the tag in
+	// base.yaml when upgrading Keycloak on purpose.
+	const wantTag = "26.8.1"
+	if values.Image.Tag != wantTag {
+		t.Errorf("image.tag = %q, want %q: the Keycloak server version must be an explicit, reviewed pin", values.Image.Tag, wantTag)
+	}
+}
+
 // TestKeycloakTemplate_TrustBundle verifies the org CA bundle is wired into
 // Keycloak only when trust-manager is enabled: the projected ConfigMap is
 // mounted and KC_TRUSTSTORE_PATHS points at it so outbound TLS trusts the org CA.
