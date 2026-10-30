@@ -205,7 +205,7 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 		fmt.Println("  The load balancer endpoint is not yet available.")
 		fmt.Println("  Run the following command to check when it's ready:")
 		fmt.Println()
-		fmt.Println("    kubectl get svc -o yaml -n envoy-gateway-system  -l gateway.envoyproxy.io/owning-gateway-name=nebari-gateway --kubeconfig=<(nic kubeconfig  -f <config-file>)")
+		fmt.Println("    kubectl get svc -o yaml -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=nebari-gateway --kubeconfig=<(nic kubeconfig -f <config-file>)")
 		fmt.Println()
 		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
 		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)

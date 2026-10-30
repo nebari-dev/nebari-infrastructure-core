@@ -95,6 +95,7 @@ func TestPrintDNSGuidance(t *testing.T) {
 			},
 			wantAbsent: []string{
 				"ingress-nginx",
+				"nic status",
 			},
 		},
 	}
