@@ -29,7 +29,6 @@ Config is the user-facing Azure cluster configuration as parsed from the
 | Network | `network` | `*NetworkConfig` | No |  |
 | NodeGroups | `node_groups` | `map[string]NodeGroup` | Yes |  |
 | Tags | `tags` | `map[string]string` | No |  |
-| NodeProvisioningMode | `node_provisioning_mode` | string | No | NodeProvisioningMode enables AKS Node Auto Provisioning (Karpenter) when set to "Auto". Defaults to "Manual". "Auto" requires the cilium dataplane (network.dataplane: cilium). |
 
 ---
 

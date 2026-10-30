@@ -86,33 +86,26 @@ func TestToTFVarsNICTagsInjected(t *testing.T) {
 	}
 }
 
-func TestToTFVarsDataPlaneAndNAP(t *testing.T) {
-	t.Run("propagates cilium dataplane and NAP", func(t *testing.T) {
+func TestToTFVarsDataPlane(t *testing.T) {
+	t.Run("propagates cilium dataplane", func(t *testing.T) {
 		cfg := Config{
-			Region:               "eastus",
-			NodeGroups:           map[string]NodeGroup{"s": {Mode: modeSystem}},
-			NodeProvisioningMode: napModeAuto,
-			Network:              &NetworkConfig{DataPlane: dataPlaneCilium},
+			Region:     "eastus",
+			NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
+			Network:    &NetworkConfig{DataPlane: dataPlaneCilium},
 		}
 		vars := cfg.toTFVars("p", nil)
 		if vars.NetworkDataPlane != dataPlaneCilium {
 			t.Errorf("NetworkDataPlane = %q, want %q", vars.NetworkDataPlane, dataPlaneCilium)
 		}
-		if vars.NodeProvisioningMode != napModeAuto {
-			t.Errorf("NodeProvisioningMode = %q, want %q", vars.NodeProvisioningMode, napModeAuto)
-		}
 	})
-	t.Run("omits dataplane and NAP when unset so module defaults win", func(t *testing.T) {
+	t.Run("omits dataplane when unset so the module default wins", func(t *testing.T) {
 		cfg := Config{Region: "eastus", NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}}}
 		b, err := json.Marshal(cfg.toTFVars("p", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
-		s := string(b)
-		for _, key := range []string{"network_data_plane", "node_provisioning_mode"} {
-			if contains(s, key) {
-				t.Errorf("expected %q to be omitted from JSON, got: %s", key, s)
-			}
+		if s := string(b); contains(s, "network_data_plane") {
+			t.Errorf("expected network_data_plane to be omitted from JSON, got: %s", s)
 		}
 	})
 }
