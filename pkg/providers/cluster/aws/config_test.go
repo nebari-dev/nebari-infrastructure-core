@@ -19,12 +19,12 @@ func TestLonghornEnabled(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "nil LonghornConfig defaults to enabled",
+			name:     "nil LonghornConfig defaults to disabled",
 			config:   Config{Longhorn: nil},
-			expected: true,
+			expected: false,
 		},
 		{
-			name:     "empty LonghornConfig defaults to enabled",
+			name:     "empty LonghornConfig enables Longhorn",
 			config:   Config{Longhorn: &longhorn.Config{}},
 			expected: true,
 		},
@@ -298,15 +298,24 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "nil provider config defaults to longhorn",
+			name:     "nil provider config defaults to gp3",
 			config:   nil,
-			expected: "longhorn",
+			expected: "gp3",
 		},
 		{
-			name: "longhorn enabled returns longhorn",
+			name: "no longhorn block returns gp3",
 			config: map[string]any{
 				"region":      "us-west-2",
 				"node_groups": map[string]any{},
+			},
+			expected: "gp3",
+		},
+		{
+			name: "empty longhorn block returns longhorn",
+			config: map[string]any{
+				"region":      "us-west-2",
+				"node_groups": map[string]any{},
+				"longhorn":    map[string]any{},
 			},
 			expected: "longhorn",
 		},
@@ -354,6 +363,7 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 			config: map[string]any{
 				"region":      "us-west-2",
 				"node_groups": map[string]any{},
+				"longhorn":    map[string]any{"enabled": true},
 				"ebs":         map[string]any{"storage_class_name": "fast-ssd"},
 			},
 			expected: "longhorn",
