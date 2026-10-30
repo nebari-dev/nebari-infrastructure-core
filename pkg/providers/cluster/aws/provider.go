@@ -316,6 +316,21 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	region := awsCfg.Region
 	span.SetAttributes(attribute.String("aws.region", region))
 
+	// Longhorn is opt-in. Before anything changes, refuse to deploy a cluster
+	// that runs Longhorn without the config enabling it, so it isn't silently
+	// left unmanaged.
+	if !awsCfg.LonghornEnabled() {
+		eksClient, err := newEKSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create EKS client: %w", err)
+		}
+		if err := checkUnmanagedLonghorn(ctx, eksClient, projectName, region, longhorn.IsInstalled); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	// Get bucket name from config or generate one
 	bucketName := awsCfg.StateBucket
 	if bucketName == "" {
@@ -954,8 +969,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
-// StorageClass is "longhorn" when Longhorn is enabled (default), otherwise the
-// NIC-managed EBS class, "gp3" unless the ebs block overrides it (see
+// StorageClass is "longhorn" when Longhorn is enabled, otherwise (the default)
+// the NIC-managed EBS class, "gp3" unless the ebs block overrides it (see
 // ensureEBSStorageClass).
 // EFSStorageClass is set when EFS is enabled.
 //
@@ -965,8 +980,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // is reachable from outside the VPC; operators with private-only VPCs can
 // override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
-	sc := longhorn.StorageClassName
-	longhornEnabled := true // AWS default — see Config.LonghornEnabled
+	sc := defaultEBSVolumeType
+	longhornEnabled := false // AWS default, see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
 
@@ -975,8 +990,9 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 			longhornEnabled = awsCfg.LonghornEnabled()
-			if !longhornEnabled {
-				sc = awsCfg.EBSStorageClassName()
+			sc = awsCfg.EBSStorageClassName()
+			if longhornEnabled {
+				sc = longhorn.StorageClassName
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()
