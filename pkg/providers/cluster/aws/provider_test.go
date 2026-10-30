@@ -31,13 +31,25 @@ func TestNewProvider(t *testing.T) {
 func TestProvider_InfraSettings_LonghornEnabled(t *testing.T) {
 	p := NewProvider()
 
-	t.Run("default config reports Longhorn enabled", func(t *testing.T) {
+	t.Run("default config reports Longhorn disabled", func(t *testing.T) {
 		cfg := &config.ClusterConfig{
 			Providers: map[string]any{"aws": map[string]any{}},
 		}
 		s := p.InfraSettings(cfg)
+		if s.LonghornEnabled {
+			t.Errorf("InfraSettings.LonghornEnabled = true, want false (AWS default)")
+		}
+	})
+
+	t.Run("longhorn block reports Longhorn enabled", func(t *testing.T) {
+		cfg := &config.ClusterConfig{
+			Providers: map[string]any{
+				"aws": map[string]any{"longhorn": map[string]any{}},
+			},
+		}
+		s := p.InfraSettings(cfg)
 		if !s.LonghornEnabled {
-			t.Errorf("InfraSettings.LonghornEnabled = false, want true (AWS default)")
+			t.Errorf("InfraSettings.LonghornEnabled = false, want true")
 		}
 	})
 
@@ -72,7 +84,7 @@ func TestInfraSettings(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"StorageClass", settings.StorageClass, "longhorn"},
+		{"StorageClass", settings.StorageClass, "gp3"},
 		{"GatewayHostAddress is empty", settings.GatewayHostAddress, ""},
 		{"KeycloakBasePath is empty", settings.KeycloakBasePath, ""},
 		{"LB type annotation", settings.LoadBalancerAnnotations["service.beta.kubernetes.io/aws-load-balancer-type"], "external"},
