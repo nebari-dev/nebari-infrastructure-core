@@ -113,7 +113,8 @@ Configuration options specific to Amazon Web Services (EKS).
 ## EBSConfig
 
 EBSConfig configures the EBS StorageClass NIC creates on every cluster. It
-is the RWO class (and cluster default) when Longhorn is disabled.
+is the RWO class (and cluster default) when Longhorn is disabled, which is
+the default.
 
 | Field | YAML Key | Type | Required | Description |
 |-------|----------|------|----------|-------------|
