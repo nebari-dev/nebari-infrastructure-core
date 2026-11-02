@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -21,12 +22,13 @@ func TestEnsureBackupsHaveLonghorn(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		provider     string
-		backups      *config.BackupsConfig
-		storageClass string
-		wantErr      bool
-		errContains  string
+		name            string
+		provider        string
+		backups         *config.BackupsConfig
+		storageClass    string
+		longhornEnabled bool
+		wantErr         bool
+		errContains     string
 	}{
 		{
 			name:         "backups disabled with non-longhorn storage class is allowed",
@@ -63,7 +65,15 @@ func TestEnsureBackupsHaveLonghorn(t *testing.T) {
 			backups:      backups(&enabled),
 			storageClass: "gp3",
 			wantErr:      true,
-			errContains:  "not Longhorn",
+			errContains:  "If this cluster already runs Longhorn, enable it in the cluster config",
+		},
+		{
+			name:            "backups enabled on aws with longhorn installed but not the default class is allowed",
+			provider:        "aws",
+			backups:         backups(&enabled),
+			storageClass:    "gp3",
+			longhornEnabled: true,
+			wantErr:         false,
 		},
 	}
 
@@ -73,7 +83,7 @@ func TestEnsureBackupsHaveLonghorn(t *testing.T) {
 				Cluster: clusterFor(tt.provider),
 				Backups: tt.backups,
 			}
-			err := ensureBackupsHaveLonghorn(cfg, tt.storageClass)
+			err := ensureBackupsHaveLonghorn(cfg, cluster.InfraSettings{StorageClass: tt.storageClass, LonghornEnabled: tt.longhornEnabled})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")

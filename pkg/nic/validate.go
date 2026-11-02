@@ -60,7 +60,7 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return fmt.Errorf("get cluster provider %q: %w", cfg.Cluster.ProviderName(), err)
 	}
 	infraSettings := clusterProvider.InfraSettings(cfg.Cluster)
-	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
