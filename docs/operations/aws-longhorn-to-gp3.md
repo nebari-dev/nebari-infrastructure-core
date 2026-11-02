@@ -156,7 +156,7 @@ This applies to any volume whose data you want to keep, like JupyterHub home dir
 
     Setting the reclaim policy to `Retain` keeps the new volume when its temporary PVC is deleted. Deleting the original PVC deletes the Longhorn volume.
 
-5. Save the following as `pvc.yaml` with the same values and apply it. Copy over any labels and annotations the original PVC had, since the workload that created it may rely on them:
+5. Save the following as `pvc.yaml` with the same values and apply it. Copy over any labels and annotations the workload set on the original PVC, since it may rely on them. Leave out the ones Kubernetes adds, like `pv.kubernetes.io/*`, `volume.kubernetes.io/*`, `volume.beta.kubernetes.io/*` and `kubectl.kubernetes.io/last-applied-configuration`:
 
     ```yaml
     apiVersion: v1
