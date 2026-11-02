@@ -130,9 +130,11 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		attribute.Int("release_version", release.Version),
 	)
 
-	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	if cfg.IsDefaultClass() {
+		if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+		}
 	}
 
 	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
@@ -178,9 +180,11 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfig
 		attribute.Int("release_version", release.Version),
 	)
 
-	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+	if cfg.IsDefaultClass() {
+		if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
+		}
 	}
 
 	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
@@ -214,7 +218,7 @@ func loadChart(chartPathOptions action.ChartPathOptions) (*chart.Chart, error) {
 // Helm chart.
 func buildHelmValues(cfg *Config) map[string]any {
 	persistence := map[string]any{
-		"defaultClass":             true,
+		"defaultClass":             cfg.IsDefaultClass(),
 		"defaultClassReplicaCount": cfg.Replicas(),
 		"defaultFsType":            "ext4",
 	}

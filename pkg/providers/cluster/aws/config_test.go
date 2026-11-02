@@ -368,6 +368,16 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 			},
 			expected: "longhorn",
 		},
+		{
+			name: "longhorn not the default class returns the ebs class",
+			config: map[string]any{
+				"region":      "us-west-2",
+				"node_groups": map[string]any{},
+				"longhorn":    map[string]any{"enabled": true, "default_class": false},
+				"ebs":         map[string]any{"storage_class_name": "fast-ssd"},
+			},
+			expected: "fast-ssd",
+		},
 	}
 
 	for _, tt := range tests {

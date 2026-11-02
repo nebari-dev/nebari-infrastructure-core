@@ -965,9 +965,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
-// StorageClass is "longhorn" when Longhorn is enabled, otherwise (the default)
-// the NIC-managed EBS class, "gp3" unless the ebs block overrides it (see
-// ensureEBSStorageClass).
+// StorageClass is "longhorn" when Longhorn is enabled and is the default class,
+// otherwise the NIC-managed EBS class, "gp3" unless the ebs block overrides it
+// (see ensureEBSStorageClass).
 // EFSStorageClass is set when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
@@ -987,7 +987,10 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 			longhornEnabled = awsCfg.LonghornEnabled()
 			sc = awsCfg.EBSStorageClassName()
-			if longhornEnabled {
+			// NIC's own workloads follow the default class: Longhorn only
+			// while it is the default, so clusters moving off it get the EBS
+			// class on regen.
+			if longhornEnabled && awsCfg.Longhorn.IsDefaultClass() {
 				sc = longhorn.StorageClassName
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {

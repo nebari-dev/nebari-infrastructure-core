@@ -61,6 +61,15 @@ type Config struct {
 	Enabled      *bool `yaml:"enabled,omitempty"`
 	ReplicaCount int   `yaml:"replica_count,omitempty"`
 
+	// DefaultClass makes the longhorn StorageClass the cluster default and
+	// removes the default from every other class on each install. Defaults to
+	// true. Set false while moving volumes off Longhorn so a deploy doesn't
+	// take the default back from the class you switched to. On AWS it also
+	// makes NIC's own workloads use the EBS class. If no other class is the
+	// default, PVCs that don't name a class stay Pending, so only set it once
+	// another class is the default.
+	DefaultClass *bool `yaml:"default_class,omitempty"`
+
 	// DedicatedNodes confines Longhorn replica data to a dedicated, tainted
 	// storage node group (disks are created only there; see NodeSelector and
 	// CreateDefaultDiskLabel).
@@ -138,6 +147,15 @@ func (c *Config) IsEnabled() bool {
 		return true
 	}
 	return *c.Enabled
+}
+
+// IsDefaultClass returns whether the longhorn StorageClass should be the
+// cluster default. Unset (or a nil Config) means true.
+func (c *Config) IsDefaultClass() bool {
+	if c == nil || c.DefaultClass == nil {
+		return true
+	}
+	return *c.DefaultClass
 }
 
 // Replicas returns the configured replica count, falling back to the default

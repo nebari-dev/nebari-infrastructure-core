@@ -37,6 +37,13 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
+			name:   "default_class false keeps longhorn out of the default",
+			config: &Config{DefaultClass: boolPtr(false)},
+			checkValues: map[string]any{
+				"persistence.defaultClass": false,
+			},
+		},
+		{
 			name:   "custom replica count",
 			config: &Config{ReplicaCount: 3},
 			checkValues: map[string]any{
@@ -222,6 +229,26 @@ func TestConfigIsEnabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.cfg.IsEnabled(); got != tt.want {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigIsDefaultClass(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"nil config is the default", nil, true},
+		{"unset is the default", &Config{}, true},
+		{"explicit true", &Config{DefaultClass: boolPtr(true)}, true},
+		{"explicit false", &Config{DefaultClass: boolPtr(false)}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.IsDefaultClass(); got != tt.want {
+				t.Errorf("IsDefaultClass() = %v, want %v", got, tt.want)
 			}
 		})
 	}

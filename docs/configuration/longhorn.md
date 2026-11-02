@@ -23,6 +23,7 @@ clusters; production deploys should raise it.
 |-------|----------|------|----------|-------------|
 | Enabled | `enabled` | `*bool` | No |  |
 | ReplicaCount | `replica_count` | int | No |  |
+| DefaultClass | `default_class` | `*bool` | No | DefaultClass makes the longhorn StorageClass the cluster default and removes the default from every other class on each install. Defaults to true. Set false while moving volumes off Longhorn so a d... |
 | DedicatedNodes | `dedicated_nodes` | bool | No | DedicatedNodes confines Longhorn replica data to a dedicated, tainted storage node group (disks are created only there; see NodeSelector and CreateDefaultDiskLabel).  WARNING — toggling this is a M... |
 | NodeSelector | `node_selector` | `map[string]string` | No | NodeSelector is the label set that identifies the dedicated storage nodes when DedicatedNodes is true (defaults to {node.longhorn.io/storage: "true"}, i.e. NodeStorageLabel). It no longer pins Long... |
 | InstanceManagerCPUPercent | `instance_manager_cpu_percent` | `*int` | No | InstanceManagerCPUPercent overrides Longhorn's "Guaranteed Instance Manager CPU" setting: the percentage (0-40) of each node's allocatable CPU reserved for every instance-manager pod, per node. Lon... |

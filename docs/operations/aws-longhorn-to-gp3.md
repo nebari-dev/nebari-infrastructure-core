@@ -4,8 +4,6 @@ Longhorn is no longer installed by default on AWS, and a future release will rem
 
 Keep the `longhorn:` and `backups:` blocks in your config while you migrate. If your config has no `longhorn:` block because your cluster got Longhorn from the old default, add `longhorn: {enabled: true}` under `cluster.aws`. Longhorn stays installed until you upgrade to the release that removes it. Removing the `backups:` block makes `nic deploy` try to delete the backup bucket and the backups in it, so leave it in place.
 
-Don't run `nic deploy` during the migration. With the `longhorn:` block in the config, it makes `longhorn` the default StorageClass again, and with `--regen-apps` it also sets the Keycloak database back to `longhorn`.
-
 If your config sets `cluster.aws.ebs.storage_class_name`, use that class wherever this guide says `gp3`.
 
 ## Before you start
@@ -22,6 +20,16 @@ Make `gp3` the default StorageClass, so volumes created during the migration don
 kubectl patch storageclass longhorn -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
 kubectl patch storageclass gp3 -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 kubectl get storageclass
+```
+
+Then set `default_class: false` in the `longhorn:` block of your config, so the next `nic deploy` doesn't make `longhorn` the default again and `nic deploy --regen-apps` keeps the Keycloak database on `gp3`. You don't need to deploy for this. It applies on your next deploy:
+
+```yaml
+cluster:
+  aws:
+    longhorn:
+      enabled: true
+      default_class: false
 ```
 
 ## Keycloak database
