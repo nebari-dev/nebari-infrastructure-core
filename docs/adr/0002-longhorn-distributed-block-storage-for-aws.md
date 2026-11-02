@@ -355,3 +355,31 @@ class EKS ships but an EBS CSI class that NIC manages.
 The EFS-default item under "Follow-up Work" is superseded: Longhorn, or the EBS
 class when Longhorn is off, is the default RWO class. EFS stays opt-in by name
 ([#98](https://github.com/nebari-dev/nebari-infrastructure-core/issues/98)).
+
+## Update (2026-11): Longhorn opt-in on AWS
+
+[PR #756](https://github.com/nebari-dev/nebari-infrastructure-core/pull/756)
+makes Longhorn opt-in on AWS, the first step to removing it from the AWS
+provider ([#711](https://github.com/nebari-dev/nebari-infrastructure-core/issues/711)).
+The "Decision Outcome" above (enabled by default, opt-out) and the AWS row of
+the 2026-05 table no longer hold.
+
+- **Opt-in.** An omitted `longhorn:` block now means disabled on AWS, the same
+  as the shared `longhorn.Config`. A block without `enabled` still enables it.
+  New clusters use the EBS class from the 2026-10 update. Hetzner keeps its
+  opt-out default.
+- **Guard on deploy.** When the config doesn't enable Longhorn but the cluster
+  runs the `longhorn` Helm release, `Deploy` fails before the state bucket or
+  OpenTofu run and asks for `longhorn: {enabled: true}`. This covers clusters
+  that got Longhorn from the old default, which have no block.
+- **Uninstall on every destroy.** `Destroy` runs `longhorn.Uninstall` whatever
+  the config says, since a cluster from the old default runs Longhorn without
+  a block. `Uninstall` returns early when there is no release.
+- **`default_class`.** A new field on the shared config keeps Longhorn
+  installed without making it the default StorageClass. With
+  `default_class: false` the installer no longer demotes other default
+  classes, and on AWS `InfraSettings().StorageClass` returns the EBS class, so
+  `--regen-apps` keeps NIC's own workloads off Longhorn.
+- **Migration.** [Migrating AWS clusters from Longhorn to gp3](../operations/aws-longhorn-to-gp3.md)
+  moves the Keycloak database, the landing page Redis and user volumes to gp3.
+  Longhorn itself is removed from AWS in a later release (#711).
