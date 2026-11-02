@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/service/eks"
-	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -20,34 +18,27 @@ import (
 // cluster deployed before it became opt-in can have no longhorn block. A
 // deploy would then stop managing Longhorn (its webhook security group rules,
 // the storage nodes' disk label, its manifests) while its volumes still hold
-// data. A cluster that doesn't exist yet passes. Any other failure to check is
-// returned, since the deploy can't tell whether it is safe. installed reports
-// whether the release is present (longhorn.IsInstalled outside tests).
-func checkUnmanagedLonghorn(ctx context.Context, client EKSClient, clusterName, region string, installed func(context.Context, []byte) (bool, error)) error {
+// data. A cluster that doesn't exist yet, or never became reachable (for
+// example still creating after an interrupted first deploy), can't run
+// Longhorn and passes. Any other failure to check is returned, since the
+// deploy can't tell whether it is safe. kubeconfig wraps fetchEKSKubeconfig
+// and installed is longhorn.IsInstalled outside tests.
+func checkUnmanagedLonghorn(ctx context.Context, clusterName string, kubeconfig func(context.Context) ([]byte, error), installed func(context.Context, []byte) (bool, error)) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.checkUnmanagedLonghorn")
 	defer span.End()
-	span.SetAttributes(
-		attribute.String("cluster_name", clusterName),
-		attribute.String(attrKeyRegion, region),
-	)
+	span.SetAttributes(attribute.String("cluster_name", clusterName))
 
-	if _, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &clusterName}); err != nil {
-		var notFound *ekstypes.ResourceNotFoundException
-		if errors.As(err, &notFound) {
-			span.SetAttributes(attribute.Bool("cluster_exists", false))
-			return nil
-		}
-		span.RecordError(err)
-		return fmt.Errorf("failed to check for an existing Longhorn install: %w", err)
+	kubeconfigBytes, err := kubeconfig(ctx)
+	if errors.Is(err, errClusterNotFound) || errors.Is(err, errClusterNotReady) {
+		span.SetAttributes(attribute.Bool("cluster_reachable", false))
+		return nil
 	}
-	span.SetAttributes(attribute.Bool("cluster_exists", true))
-
-	kubeconfigBytes, err := fetchEKSKubeconfig(ctx, client, clusterName, region)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to check for an existing Longhorn install: %w", err)
 	}
+	span.SetAttributes(attribute.Bool("cluster_reachable", true))
 
 	found, err := installed(ctx, kubeconfigBytes)
 	if err != nil {

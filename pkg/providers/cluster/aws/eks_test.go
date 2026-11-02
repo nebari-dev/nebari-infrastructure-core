@@ -146,6 +146,43 @@ func TestFetchEKSKubeconfig_ResourceNotFoundMapsToFriendlyError(t *testing.T) {
 	if !strings.Contains(err.Error(), "run 'deploy' first") {
 		t.Fatalf("expected friendly 'run deploy first' message, got: %v", err)
 	}
+	if !errors.Is(err, errClusterNotFound) {
+		t.Fatalf("expected errClusterNotFound, got: %v", err)
+	}
+}
+
+func TestFetchEKSKubeconfig_ClusterStatus(t *testing.T) {
+	tests := []struct {
+		status       ekstypes.ClusterStatus
+		wantNotReady bool
+	}{
+		{ekstypes.ClusterStatusActive, false},
+		{ekstypes.ClusterStatusUpdating, false},
+		{ekstypes.ClusterStatusCreating, true},
+		{ekstypes.ClusterStatusPending, true},
+		{ekstypes.ClusterStatusFailed, true},
+		{ekstypes.ClusterStatusDeleting, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			mock := &mockEKSClient{
+				DescribeClusterFunc: func(_ context.Context, _ *eks.DescribeClusterInput, _ ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
+					out := successOutput()
+					out.Cluster.Status = tt.status
+					return out, nil
+				},
+			}
+
+			_, err := fetchEKSKubeconfig(context.Background(), mock, "proj", "us-west-2")
+			if got := errors.Is(err, errClusterNotReady); got != tt.wantNotReady {
+				t.Fatalf("errors.Is(err, errClusterNotReady) = %v, want %v (err: %v)", got, tt.wantNotReady, err)
+			}
+			if !tt.wantNotReady && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }
 
 func TestFetchEKSKubeconfig_OtherAWSErrorPropagates(t *testing.T) {
@@ -178,8 +215,8 @@ func TestFetchEKSKubeconfig_MissingEndpointFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "not ready") {
-		t.Fatalf("expected 'not ready' error, got: %v", err)
+	if !errors.Is(err, errClusterNotReady) {
+		t.Fatalf("expected errClusterNotReady, got: %v", err)
 	}
 }
 
@@ -196,8 +233,8 @@ func TestFetchEKSKubeconfig_MissingCertificateAuthorityFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "not ready") {
-		t.Fatalf("expected 'not ready' error, got: %v", err)
+	if !errors.Is(err, errClusterNotReady) {
+		t.Fatalf("expected errClusterNotReady, got: %v", err)
 	}
 }
 

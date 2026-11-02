@@ -11,9 +11,20 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 )
 
+// clusterWithStatus is a DescribeCluster response for a cluster in the given
+// status, with the endpoint and CA data an ACTIVE cluster has.
+func clusterWithStatus(s ekstypes.ClusterStatus) *eks.DescribeClusterOutput {
+	out := successOutput()
+	out.Cluster.Status = s
+	return out
+}
+
+// The guard goes through fetchEKSKubeconfig, so these cases also cover how it
+// reports a cluster that is missing or not ready.
 func TestCheckUnmanagedLonghorn(t *testing.T) {
 	tests := []struct {
 		name          string
+		describeOut   *eks.DescribeClusterOutput
 		describeErr   error
 		installed     bool
 		installedErr  error
@@ -23,6 +34,21 @@ func TestCheckUnmanagedLonghorn(t *testing.T) {
 		{
 			name:        "cluster does not exist yet",
 			describeErr: &ekstypes.ResourceNotFoundException{Message: aws.String("no such cluster")},
+		},
+		{
+			name:        "cluster still creating, no endpoint yet",
+			describeOut: &eks.DescribeClusterOutput{Cluster: &ekstypes.Cluster{Status: ekstypes.ClusterStatusCreating}},
+		},
+		{
+			name:        "cluster failed to create",
+			describeOut: clusterWithStatus(ekstypes.ClusterStatusFailed),
+		},
+		{
+			name:          "cluster updating is still checked",
+			describeOut:   clusterWithStatus(ekstypes.ClusterStatusUpdating),
+			installed:     true,
+			wantInstalled: true,
+			wantErr:       "add `longhorn: {enabled: true}`",
 		},
 		{
 			name:          "cluster without Longhorn",
@@ -54,8 +80,14 @@ func TestCheckUnmanagedLonghorn(t *testing.T) {
 					if tt.describeErr != nil {
 						return nil, tt.describeErr
 					}
-					return successOutput(), nil
+					if tt.describeOut != nil {
+						return tt.describeOut, nil
+					}
+					return clusterWithStatus(ekstypes.ClusterStatusActive), nil
 				},
+			}
+			kubeconfig := func(ctx context.Context) ([]byte, error) {
+				return fetchEKSKubeconfig(ctx, mock, "proj", "us-west-2")
 			}
 			called := false
 			installed := func(context.Context, []byte) (bool, error) {
@@ -63,7 +95,7 @@ func TestCheckUnmanagedLonghorn(t *testing.T) {
 				return tt.installed, tt.installedErr
 			}
 
-			err := checkUnmanagedLonghorn(context.Background(), mock, "proj", "us-west-2", installed)
+			err := checkUnmanagedLonghorn(context.Background(), "proj", kubeconfig, installed)
 			if tt.wantErr == "" && err != nil {
 				t.Fatalf("checkUnmanagedLonghorn() error = %v, want nil", err)
 			}

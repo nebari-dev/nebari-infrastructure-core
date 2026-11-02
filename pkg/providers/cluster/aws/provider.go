@@ -325,7 +325,12 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			span.RecordError(err)
 			return fmt.Errorf("failed to create EKS client: %w", err)
 		}
-		if err := checkUnmanagedLonghorn(ctx, eksClient, projectName, region, longhorn.IsInstalled); err != nil {
+		// Not GetKubeconfig: its cache would outlive an apply that replaces
+		// the cluster, leaving the post-apply steps a stale endpoint and CA.
+		kubeconfig := func(ctx context.Context) ([]byte, error) {
+			return fetchEKSKubeconfig(ctx, eksClient, projectName, region)
+		}
+		if err := checkUnmanagedLonghorn(ctx, projectName, kubeconfig, longhorn.IsInstalled); err != nil {
 			span.RecordError(err)
 			return err
 		}
