@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/nebari-dev/nebari-infrastructure-core/pkg/status"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/storage/longhorn"
 )
 
@@ -64,4 +65,35 @@ func checkUnmanagedLonghorn(ctx context.Context, client EKSClient, clusterName, 
 		clusterName, longhorn.ReleaseName, longhorn.Namespace)
 	span.RecordError(err)
 	return err
+}
+
+// uninstallLonghornBeforeDestroy runs the Longhorn uninstall that Destroy
+// does before tofu destroy, whatever the config says, since a cluster from the
+// old AWS default runs Longhorn without a longhorn block. uninstall is
+// longhorn.Uninstall outside tests, which returns early when there is no
+// release. A missing kubeconfig only skips the step with a warning. A failed
+// uninstall is returned as err (abort the destroy) without force, or as
+// forced (keep going and report it at the end) with force.
+func uninstallLonghornBeforeDestroy(ctx context.Context, kubeconfigBytes []byte, kubeconfigErr error, force bool, uninstall func(context.Context, []byte) error) (forced error, err error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "aws.uninstallLonghornBeforeDestroy")
+	defer span.End()
+	span.SetAttributes(attribute.Bool("force", force))
+
+	if kubeconfigErr != nil {
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kubeconfigErr)).
+			WithResource("longhorn").WithAction("uninstalling"))
+		return nil, nil
+	}
+
+	if uerr := uninstall(ctx, kubeconfigBytes); uerr != nil {
+		span.RecordError(uerr)
+		if !force {
+			return nil, fmt.Errorf("failed to uninstall Longhorn: %w", uerr)
+		}
+		status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", uerr)).
+			WithResource("longhorn").WithAction("uninstalling"))
+		return fmt.Errorf("uninstall Longhorn: %w", uerr), nil
+	}
+	return nil, nil
 }

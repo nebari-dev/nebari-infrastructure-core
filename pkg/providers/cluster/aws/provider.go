@@ -763,23 +763,19 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
 	// Longhorn-backed PVs left in the cluster can block EKS node group
-	// deletion via CSI finalizers.
-	if awsCfg.LonghornEnabled() {
+	// deletion via CSI finalizers. Not gated on the config: clusters that got
+	// Longhorn from the old AWS default have no longhorn block but still run
+	// it, and Uninstall returns early when there is no release.
+	{
 		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
-		switch {
-		case kErr != nil:
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
-				WithResource("longhorn").WithAction("uninstalling"))
-		default:
-			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
-				span.RecordError(err)
-				if !opts.Force {
-					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
-				}
-				forcedErrs = append(forcedErrs, fmt.Errorf("uninstall Longhorn: %w", err))
-				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
-					WithResource("longhorn").WithAction("uninstalling"))
-			}
+		forcedErr, err := uninstallLonghornBeforeDestroy(ctx, kubeconfigBytes, kErr, opts.Force, longhorn.Uninstall)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if forcedErr != nil {
+			span.RecordError(forcedErr)
+			forcedErrs = append(forcedErrs, forcedErr)
 		}
 	}
 

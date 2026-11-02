@@ -76,3 +76,41 @@ func TestCheckUnmanagedLonghorn(t *testing.T) {
 		})
 	}
 }
+
+func TestUninstallLonghornBeforeDestroy(t *testing.T) {
+	tests := []struct {
+		name          string
+		kubeconfigErr error
+		uninstallErr  error
+		force         bool
+		wantCalled    bool
+		wantErr       bool
+		wantForced    bool
+	}{
+		{name: "uninstalls", wantCalled: true},
+		{name: "kubeconfig unavailable skips", kubeconfigErr: errors.New("cluster gone")},
+		{name: "failure aborts without force", uninstallErr: errors.New("hook failed"), wantCalled: true, wantErr: true},
+		{name: "failure continues with force", uninstallErr: errors.New("hook failed"), force: true, wantCalled: true, wantForced: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			uninstall := func(context.Context, []byte) error {
+				called = true
+				return tt.uninstallErr
+			}
+
+			forced, err := uninstallLonghornBeforeDestroy(context.Background(), []byte("kubeconfig"), tt.kubeconfigErr, tt.force, uninstall)
+			if called != tt.wantCalled {
+				t.Errorf("uninstall called = %v, want %v", called, tt.wantCalled)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if (forced != nil) != tt.wantForced {
+				t.Errorf("forced = %v, wantForced %v", forced, tt.wantForced)
+			}
+		})
+	}
+}
