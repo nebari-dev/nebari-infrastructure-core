@@ -130,11 +130,9 @@ func Install(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 		attribute.Int("release_version", release.Version),
 	)
 
-	if cfg.IsDefaultClass() {
-		if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
-		}
+	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
 	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
@@ -180,11 +178,9 @@ func upgrade(ctx context.Context, actionConfig *action.Configuration, kubeconfig
 		attribute.Int("release_version", release.Version),
 	)
 
-	if cfg.IsDefaultClass() {
-		if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, StorageClassName); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
-		}
+	if err := ensureSoleDefaultStorageClass(ctx, kubeconfigBytes, cfg); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to demote previous default StorageClass: %w", err)
 	}
 
 	if err := warnIfMissingStorageDiskLabel(ctx, kubeconfigBytes, cfg); err != nil {
