@@ -161,7 +161,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	// Reject Longhorn backups on a cluster whose storage layer is not Longhorn
 	// (e.g. Azure, or AWS with longhorn disabled). Without Longhorn installed the
 	// longhorn.io CRDs are absent and the backups ArgoCD app would never sync.
-	if err := ensureBackupsHaveLonghorn(cfg, infraSettings.StorageClass); err != nil {
+	if err := ensureBackupsHaveLonghorn(cfg, infraSettings); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelError, "Backups configuration is invalid for this provider").
 			WithMetadata("provider", cfg.Cluster.ProviderName()).

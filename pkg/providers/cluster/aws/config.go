@@ -198,21 +198,17 @@ func (c *Config) createsVPC() bool {
 }
 
 // LonghornEnabled returns whether Longhorn distributed block storage should
-// be deployed on this AWS cluster. Defaults to true when the Longhorn block
-// is omitted entirely — Longhorn is the AWS storage default. The shared
-// longhorn.Config defaults to disabled-when-nil because non-AWS providers
-// require an explicit opt-in.
+// be deployed on this AWS cluster. Longhorn is opt-in: it is off when the
+// longhorn block is omitted, and on when the block is present unless it sets
+// enabled: false. Deploy refuses to run when Longhorn is off but the cluster
+// still runs it (see checkUnmanagedLonghorn).
 func (c *Config) LonghornEnabled() bool {
-	if c.Longhorn == nil {
-		return true
-	}
 	return c.Longhorn.IsEnabled()
 }
 
 // LonghornReplicaCount returns the number of Longhorn volume replicas.
-// Safe to call when c.Longhorn is nil — Replicas() is a nil-receiver method
-// and returns the package default (this matches the LonghornEnabled() == true
-// path when no longhorn block is configured on AWS).
+// Safe to call when c.Longhorn is nil: Replicas() is a nil-receiver method
+// and returns the package default.
 func (c *Config) LonghornReplicaCount() int {
 	return c.Longhorn.Replicas()
 }
@@ -240,7 +236,8 @@ func (c *Config) EFSStorageClassName() string {
 }
 
 // EBSConfig configures the EBS StorageClass NIC creates on every cluster. It
-// is the RWO class (and cluster default) when Longhorn is disabled.
+// is the RWO class (and cluster default) when Longhorn is disabled, which is
+// the default.
 type EBSConfig struct {
 	Type             string `yaml:"type,omitempty"`               // default: gp3; gp2, gp3, io1, io2, st1 or sc1
 	IOPS             *int   `yaml:"iops,omitempty"`               // gp3, io1 and io2 only; required for io1 and io2

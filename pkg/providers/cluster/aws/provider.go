@@ -316,6 +316,26 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	region := awsCfg.Region
 	span.SetAttributes(attribute.String("aws.region", region))
 
+	// Longhorn is opt-in. Before anything changes, refuse to deploy a cluster
+	// that runs Longhorn without the config enabling it, so it isn't silently
+	// left unmanaged.
+	if !awsCfg.LonghornEnabled() {
+		eksClient, err := newEKSClient(ctx, region)
+		if err != nil {
+			span.RecordError(err)
+			return fmt.Errorf("failed to create EKS client: %w", err)
+		}
+		// Not GetKubeconfig: its cache would outlive an apply that replaces
+		// the cluster, leaving the post-apply steps a stale endpoint and CA.
+		kubeconfig := func(ctx context.Context) ([]byte, error) {
+			return fetchEKSKubeconfig(ctx, eksClient, projectName, region)
+		}
+		if err := checkUnmanagedLonghorn(ctx, projectName, kubeconfig, longhorn.IsInstalled); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	// Get bucket name from config or generate one
 	bucketName := awsCfg.StateBucket
 	if bucketName == "" {
@@ -748,23 +768,19 @@ func (p *Provider) Destroy(ctx context.Context, projectName string, clusterConfi
 
 	// Uninstall Longhorn before tofu destroy (ADR-0002 §"Destroy Flow").
 	// Longhorn-backed PVs left in the cluster can block EKS node group
-	// deletion via CSI finalizers.
-	if awsCfg.LonghornEnabled() {
+	// deletion via CSI finalizers. Not gated on the config: clusters that got
+	// Longhorn from the old AWS default have no longhorn block but still run
+	// it, and Uninstall returns early when there is no release.
+	{
 		kubeconfigBytes, kErr := p.GetKubeconfig(ctx, projectName, clusterConfig)
-		switch {
-		case kErr != nil:
-			status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Skipping Longhorn uninstall — kubeconfig unavailable: %v", kErr)).
-				WithResource("longhorn").WithAction("uninstalling"))
-		default:
-			if err := longhorn.Uninstall(ctx, kubeconfigBytes); err != nil {
-				span.RecordError(err)
-				if !opts.Force {
-					return fmt.Errorf("failed to uninstall Longhorn: %w", err)
-				}
-				forcedErrs = append(forcedErrs, fmt.Errorf("uninstall Longhorn: %w", err))
-				status.Send(ctx, status.NewUpdate(status.LevelWarning, fmt.Sprintf("Longhorn uninstall failed, continuing with --force: %v", err)).
-					WithResource("longhorn").WithAction("uninstalling"))
-			}
+		forcedErr, err := uninstallLonghornBeforeDestroy(ctx, kubeconfigBytes, kErr, opts.Force, longhorn.Uninstall)
+		if err != nil {
+			span.RecordError(err)
+			return err
+		}
+		if forcedErr != nil {
+			span.RecordError(forcedErr)
+			forcedErrs = append(forcedErrs, forcedErr)
 		}
 	}
 
@@ -954,9 +970,9 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 }
 
 // InfraSettings returns AWS-specific Kubernetes infrastructure settings.
-// StorageClass is "longhorn" when Longhorn is enabled (default), otherwise the
-// NIC-managed EBS class, "gp3" unless the ebs block overrides it (see
-// ensureEBSStorageClass).
+// StorageClass is "longhorn" when Longhorn is enabled and is the default class,
+// otherwise the NIC-managed EBS class, "gp3" unless the ebs block overrides it
+// (see ensureEBSStorageClass).
 // EFSStorageClass is set when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
@@ -965,8 +981,8 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // is reachable from outside the VPC; operators with private-only VPCs can
 // override this to "internal" via cluster.aws.load_balancer_scheme.
 func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
-	sc := longhorn.StorageClassName
-	longhornEnabled := true // AWS default — see Config.LonghornEnabled
+	sc := defaultEBSVolumeType
+	longhornEnabled := false // AWS default, see Config.LonghornEnabled
 	var efsSC string
 	lbScheme := loadBalancerSchemeInternetFacing
 
@@ -975,8 +991,12 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 		var awsCfg Config
 		if err := config.UnmarshalProviderConfig(context.Background(), rawCfg, &awsCfg); err == nil {
 			longhornEnabled = awsCfg.LonghornEnabled()
-			if !longhornEnabled {
-				sc = awsCfg.EBSStorageClassName()
+			sc = awsCfg.EBSStorageClassName()
+			// NIC's own workloads follow the default class: Longhorn only
+			// while it is the default, so clusters moving off it get the EBS
+			// class on regen.
+			if longhornEnabled && awsCfg.Longhorn.IsDefaultClass() {
+				sc = longhorn.StorageClassName
 			}
 			if awsCfg.EFS != nil && awsCfg.EFS.Enabled {
 				efsSC = awsCfg.EFSStorageClassName()

@@ -16,14 +16,13 @@ func TestToTFVarsLonghornSGRules(t *testing.T) {
 		wantRuleKeys  []string
 	}{
 		{
-			name: "longhorn enabled by default populates SG rules",
+			name: "no longhorn block omits SG rules",
 			config: Config{
 				Region:            "us-west-2",
 				KubernetesVersion: "1.33",
 				NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
 			},
-			wantRuleCount: 2,
-			wantRuleKeys:  []string{"longhorn_webhook_admission", "longhorn_webhook_conversion"},
+			wantRuleCount: 0,
 		},
 		{
 			name: "longhorn explicitly enabled populates SG rules",
@@ -116,6 +115,7 @@ func TestToTFVarsLonghornSGRulePorts(t *testing.T) {
 		Region:            "us-west-2",
 		KubernetesVersion: "1.33",
 		NodeGroups:        map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
+		Longhorn:          &longhorn.Config{},
 	}
 
 	vars := cfg.toTFVars("test-project", "", nil, "")

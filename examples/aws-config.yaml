@@ -174,7 +174,9 @@ cluster:
       #   max_nodes: 2
       #   ami_type: AL2023_x86_64_NEURON
 
-    # Longhorn distributed block storage (enabled by default on AWS).
+    # Longhorn distributed block storage (opt-in on AWS: installed only when this
+    # block is present). To move an existing cluster off Longhorn, see
+    # docs/operations/aws-longhorn-to-gp3.md.
     # Production-recommended: dedicate tainted storage nodes (see the "storage"
     # node group above) and keep at least one replica per AZ. The dedicated nodes
     # must carry the node.longhorn.io/storage=true:NoSchedule taint shown there;
@@ -186,7 +188,8 @@ cluster:
       replica_count: 2 # one replica per storage node / AZ; raise to 3 for 3 AZs
       # node_selector:      # optional; defaults to {node.longhorn.io/storage: "true"}
       #   node.longhorn.io/storage: "true"
-      # enabled: true       # default true on AWS; set false to opt out (falls back to the EBS class below)
+      # enabled: true       # default true when this block is present; set false to skip Longhorn (the EBS class below is used instead)
+      # default_class: false # keep Longhorn installed without making it the default StorageClass
       # instance_manager_cpu_percent: 12 # % of each node's CPU reserved per instance-manager
       #                                  # pod (Longhorn default 12, range 0-40). Maps to
       #                                  # Longhorn's "Guaranteed Instance Manager CPU"

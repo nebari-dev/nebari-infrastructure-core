@@ -7,10 +7,10 @@ import (
 )
 
 func TestAWSConfigLonghornDefaults(t *testing.T) {
-	t.Run("nil Longhorn block defaults to enabled (AWS opt-in)", func(t *testing.T) {
+	t.Run("nil Longhorn block defaults to disabled (AWS opt-in)", func(t *testing.T) {
 		cfg := &Config{}
-		if !cfg.LonghornEnabled() {
-			t.Error("LonghornEnabled() = false on AWS config with nil Longhorn, want true")
+		if cfg.LonghornEnabled() {
+			t.Error("LonghornEnabled() = true on AWS config with nil Longhorn, want false")
 		}
 		if cfg.LonghornReplicaCount() == 0 {
 			t.Error("LonghornReplicaCount() = 0, want non-zero default")

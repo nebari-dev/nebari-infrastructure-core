@@ -36,9 +36,21 @@ func newEKSClient(ctx context.Context, region string) (EKSClient, error) {
 	return eks.NewFromConfig(cfg), nil
 }
 
+var (
+	// errClusterNotFound is wrapped by fetchEKSKubeconfig (and so
+	// GetKubeconfig) when the EKS cluster doesn't exist.
+	errClusterNotFound = errors.New("run 'deploy' first")
+	// errClusterNotReady is wrapped when the EKS cluster exists but can't be
+	// reached yet, or anymore: it isn't ACTIVE or UPDATING, or has no
+	// endpoint or CA data.
+	errClusterNotReady = errors.New("cluster is not ready")
+)
+
 // fetchEKSKubeconfig calls DescribeCluster and assembles a kubeconfig from
 // the returned endpoint and certificate authority data. ResourceNotFound is
-// translated into a friendly "run 'deploy' first" error.
+// translated into a friendly "run 'deploy' first" error wrapping
+// errClusterNotFound, and a cluster that can't be reached into one wrapping
+// errClusterNotReady, so callers can tell both apart from real failures.
 func fetchEKSKubeconfig(ctx context.Context, client EKSClient, clusterName, region string) ([]byte, error) {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.fetchEKSKubeconfig")
@@ -54,7 +66,7 @@ func fetchEKSKubeconfig(ctx context.Context, client EKSClient, clusterName, regi
 	if err != nil {
 		var notFound *ekstypes.ResourceNotFoundException
 		if errors.As(err, &notFound) {
-			err := fmt.Errorf("cluster %q not found in region %q: run 'deploy' first", clusterName, region)
+			err := fmt.Errorf("cluster %q not found in region %q: %w", clusterName, region, errClusterNotFound)
 			span.RecordError(err)
 			return nil, err
 		}
@@ -62,8 +74,17 @@ func fetchEKSKubeconfig(ctx context.Context, client EKSClient, clusterName, regi
 		return nil, fmt.Errorf("failed to describe EKS cluster: %w", err)
 	}
 
+	if out.Cluster != nil {
+		switch out.Cluster.Status {
+		case ekstypes.ClusterStatusCreating, ekstypes.ClusterStatusDeleting, ekstypes.ClusterStatusFailed, ekstypes.ClusterStatusPending:
+			err := fmt.Errorf("%w: cluster %q has status %s", errClusterNotReady, clusterName, out.Cluster.Status)
+			span.RecordError(err)
+			return nil, err
+		}
+	}
+
 	if out.Cluster == nil || out.Cluster.Endpoint == nil || out.Cluster.CertificateAuthority == nil || out.Cluster.CertificateAuthority.Data == nil {
-		err := fmt.Errorf("cluster %q is not ready: endpoint or CA data missing", clusterName)
+		err := fmt.Errorf("%w: cluster %q has no endpoint or CA data", errClusterNotReady, clusterName)
 		span.RecordError(err)
 		return nil, err
 	}
