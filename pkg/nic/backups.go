@@ -27,8 +27,8 @@ func ensureBackupsHaveLonghorn(cfg *config.NebariConfig, settings cluster.InfraS
 		return nil
 	}
 	if !settings.LonghornEnabled && settings.StorageClass != longhorn.StorageClassName {
-		return fmt.Errorf("backups.longhorn is enabled but the %q provider's storage layer is %q, not Longhorn; Longhorn backups require Longhorn to be the cluster storage class (%q). Longhorn is not installed on this provider/config — see docs/longhorn-backups.md. If this cluster already runs Longhorn, enable it in the cluster config",
-			cfg.Cluster.ProviderName(), settings.StorageClass, longhorn.StorageClassName)
+		return fmt.Errorf("backups.longhorn is enabled but the %q provider's storage layer is %q, not Longhorn; Longhorn backups require Longhorn to be installed. Longhorn is not installed on this provider/config — see docs/longhorn-backups.md. If this cluster already runs Longhorn, enable it in the cluster config",
+			cfg.Cluster.ProviderName(), settings.StorageClass)
 	}
 	return nil
 }
