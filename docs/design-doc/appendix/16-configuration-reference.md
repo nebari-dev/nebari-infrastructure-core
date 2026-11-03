@@ -164,7 +164,7 @@ cluster:
       # kms_key_arn: arn:aws:kms:...
       # storage_class_name: efs-sc
 
-    # Optional: Longhorn distributed storage (default: enabled when the block is omitted)
+    # Optional: Longhorn distributed storage (opt-in on AWS: installed only when the block is present)
     # longhorn:
     #   enabled: true
     #   replica_count: 2
