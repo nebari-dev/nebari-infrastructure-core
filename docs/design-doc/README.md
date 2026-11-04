@@ -62,6 +62,9 @@ Detailed implementation specifications and technical designs.
 11. **[Nebari Operator](implementation/11-nebari-operator.md)**
     How NIC deploys the out-of-tree operator that reconciles the `NebariApp` CRD
 
+18. **[Software Pack Spins](implementation/18-software-pack-spins.md)**
+    Curated install-time pack compositions generated into ordinary config and GitOps files
+
 ### Operations
 
 Testing, deployment, and operational procedures.
@@ -113,6 +116,7 @@ Understand the foundational software stack:
 - [Foundational Software Stack](implementation/10-foundational-software.md)
 - [Nebari Kubernetes Operator](implementation/11-nebari-operator.md)
 - [Configuration Design](implementation/07-configuration-design.md)
+- [Software Pack Spins](implementation/18-software-pack-spins.md)
 
 ### For Architects
 
