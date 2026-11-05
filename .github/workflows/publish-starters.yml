@@ -14,13 +14,21 @@ name: Publish starters
 # workflow once (it usually finds the channel not ready), and an hourly cron
 # fires it again until the channel catches up. Two jobs keep that cheap and safe:
 #
-#   check    no environment, no secrets. Decides, per release and per provider,
-#            whether anything is left to publish and whether the channel can
-#            serve it yet. Most runs end here.
+#   check    no environment, no Quay token. Decides, per release and per
+#            provider, whether anything is left to publish and whether the
+#            channel can serve it yet. Most runs end here.
 #   publish  gated by the `quay-publish` environment, so an approval is only
 #            ever requested when there is something to push. Runs once per
 #            release that needs it, from that release's own tag checkout, and
 #            re-checks quay before each push.
+#
+# The approval is requested whenever the channel catches up, which is hours or
+# days after anyone was thinking about the release. So check also keeps one
+# issue, labelled `starters-pending` and assigned to whoever cut the release,
+# open for as long as a publish is waiting on that approval, and closes it once
+# every starter is on quay. While a publish is waiting, check queues no other:
+# a second one would only sit behind it in the concurrency group and be
+# cancelled by the next tick, burying the run that needs approving.
 #
 # Every decision is re-derived from quay and the channel on each run, so a
 # publish that failed is picked up again on a later tick, and nothing already on
@@ -59,8 +67,12 @@ jobs:
     name: What needs publishing
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read  # find a publish already waiting for approval
+      issues: write  # the starters-pending reminder
     outputs:
-      pending: ${{ steps.channel.outputs.pending }}
+      pending: ${{ steps.queue.outputs.pending }}
     steps:
       - name: Candidate releases
         env:
@@ -318,6 +330,126 @@ jobs:
             exit 1
           fi
 
+      # Runs even when the channel step failed after writing pending, like
+      # publish does, so the releases that are ready still go out.
+      - name: Is a publish already waiting for approval?
+        id: queue
+        if: ${{ !cancelled() && steps.channel.outputs.pending != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PENDING: ${{ steps.channel.outputs.pending }}
+        run: |
+          set -euo pipefail
+          runs="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs"
+          if [[ "$PENDING" == '[]' ]]; then
+            echo "pending=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A publish waiting on quay-publish holds the concurrency group, so
+          # one queued behind it only waits to be cancelled by the next tick's.
+          # Leave the waiting run as the one to approve; once it has published,
+          # the next tick queues whatever it did not cover. If the lookup
+          # itself fails, queue anyway: a stacked run is noise, a skipped one
+          # is a release that never publishes.
+          if waiting="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow publish-starters.yml \
+                          --status waiting --json databaseId \
+                          --jq "map(select(.databaseId != ${GITHUB_RUN_ID})) | .[0].databaseId // empty" \
+                          2>"$RUNNER_TEMP/gh.err")"; then
+            if [[ -n "$waiting" ]]; then
+              echo "::notice::run ${waiting} is already waiting for the quay-publish approval; not queuing another publish behind it"
+              echo "pending=[]" >> "$GITHUB_OUTPUT"
+              echo "approve=${runs}/${waiting}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "::warning::could not look for a publish already waiting for approval: $(tr '\n' ' ' <"$RUNNER_TEMP/gh.err")"
+          fi
+          echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
+          echo "approve=${runs}/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      # The approval is asked for whenever the channel catches up, long after
+      # the release, and a pending deployment only notifies the whole reviewer
+      # team. An issue assigned to whoever cut the release is the reminder that
+      # does not depend on someone remembering to come back.
+      - name: Ask whoever cut the release to approve it
+        if: ${{ !cancelled() && steps.queue.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVE: ${{ steps.queue.outputs.approve }}
+          LABEL: starters-pending
+        run: |
+          set -euo pipefail
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+                     --json number --jq '.[0].number // empty')"
+          if [[ "$(jq length "$RUNNER_TEMP/missing.json")" -eq 0 ]]; then
+            if [[ -n "$issue" ]]; then
+              gh issue close "$issue" --repo "$GITHUB_REPOSITORY" \
+                --comment "Every starter for the recent releases is on quay now."
+            fi
+            exit 0
+          fi
+          # Missing, but not on the channel yet: there is nothing to approve,
+          # and the channel step's notice, warning or error covers the wait.
+          if [[ -z "${APPROVE:-}" ]]; then
+            exit 0
+          fi
+
+          missing="$(jq -r '
+              group_by(.tag | ltrimstr("v") | split(".") | map(tonumber))
+              | .[] | "- `\(.[0].tag)`: \(map(.provider) | join(", "))"
+            ' "$RUNNER_TEMP/missing.json")"
+          {
+            echo "Starters for these releases are not on quay yet:"
+            echo
+            echo "$missing"
+            echo
+            echo 'The channel serves them now, and the publish is waiting for the `quay-publish` approval on this run:'
+            echo
+            echo "$APPROVE"
+            echo
+            echo 'Open it, choose **Review deployments** and approve `quay-publish`. With more than one release, each one asks in turn, oldest first. The hourly check closes this issue once every starter is on quay. See `docs/operations/packaging.md`.'
+          } > "$RUNNER_TEMP/issue.md"
+
+          assignees=()
+          for tag in $(jq -r '[.[].tag] | unique | .[]' "$RUNNER_TEMP/missing.json"); do
+            author="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.author.login' 2>/dev/null || true)"
+            # A release created by a workflow has a bot author, which cannot
+            # be assigned.
+            if [[ -n "$author" && "$author" != *'[bot]' ]]; then
+              assignees+=("$author")
+            fi
+          done
+          assign="$(printf '%s\n' "${assignees[@]}" | sed '/^$/d' | sort -u | paste -sd, -)"
+
+          if [[ -z "$issue" ]]; then
+            gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --force --color FBCA04 \
+              --description "Starters waiting for the quay-publish approval (publish-starters.yml)"
+            args=(--repo "$GITHUB_REPOSITORY" --label "$LABEL" --body-file "$RUNNER_TEMP/issue.md"
+                  --title "Starters are waiting for the quay-publish approval")
+            # Assigning fails for a login that can no longer be assigned; an
+            # unassigned issue still beats none.
+            if [[ -z "$assign" ]] || ! gh issue create "${args[@]}" --assignee "$assign"; then
+              gh issue create "${args[@]}"
+            fi
+            exit 0
+          fi
+          old="$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          # Nothing is written on a tick where nothing changed.
+          if [[ "$old" == "$(cat "$RUNNER_TEMP/issue.md")" ]]; then
+            exit 0
+          fi
+          gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/issue.md"
+          # A newer release can bring in whoever cut it.
+          if [[ -n "$assign" ]]; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-assignee "$assign" \
+              || echo "::warning::could not assign issue ${issue} to ${assign}"
+          fi
+          # A body edit notifies nobody, so a new run to approve also gets a
+          # comment, once, for the assignees to see.
+          if [[ "$old" != *"$APPROVE"* ]]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Now waiting for approval on ${APPROVE}"
+          fi
+
   publish:
     name: Publish ${{ matrix.tag }}
     needs: check
@@ -354,23 +486,18 @@ jobs:
     steps:
       # The release's own tree, not the branch the run was triggered from. The
       # run executes on main, and the starters for vX must carry vX's examples,
-      # templates and OpenTofu window, validated by vX's nic.
+      # templates and OpenTofu window, validated by vX's nic: the released one
+      # the starter's own lock installs, not a build from this checkout.
       - name: Checkout the release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: refs/tags/${{ matrix.tag }}
 
+      # For cmd/starters, which renders the templates.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-
-      - name: Build nic and put it on PATH
-        shell: bash
-        run: |
-          set -euo pipefail
-          make build
-          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
 
       - name: Install pixi and nebi
         shell: bash
@@ -475,12 +602,29 @@ jobs:
             nebi import "${QUAY_REGISTRY}/${QUAY_NAMESPACE}/${STARTER_REPO_PREFIX}/${provider}:${TAG}" -o "$dest"
             test -f "$dest/config.yaml"
             test -f "$dest/README.md"
+            test -f "$dest/pixi.lock"
             grep -q CHANGEME "$dest/config.yaml"
+            pushd "$dest" > /dev/null
+            # What a user does after importing: install exactly the published
+            # lock (--locked fails if it no longer matches pixi.toml) and run
+            # the nic it pins.
+            pixi install --locked
+            # Asserted first, so that "nic is missing from the environment"
+            # cannot pass as the rejection the next check expects.
+            pixi run nic version | tee "$RUNNER_TEMP/nic-version.txt"
+            grep -qF "Version: ${VERSION}" "$RUNNER_TEMP/nic-version.txt" \
+              || { echo "::error::the ${provider} starter's lock does not install nic ${VERSION}"; exit 1; }
             # The published bundle must be rejected unedited, same as the
-            # freshly generated one.
-            if nic validate -f "$dest/config.yaml"; then
+            # freshly generated one, and for the placeholder rather than
+            # anything else.
+            if pixi run nic validate -f config.yaml > "$RUNNER_TEMP/validate.txt" 2>&1; then
+              cat "$RUNNER_TEMP/validate.txt"
               echo "::error::published ${provider} starter validates unedited"
               exit 1
             fi
-            echo "OK: ${provider}:${TAG} round-tripped and is still not deployable as-is"
+            cat "$RUNNER_TEMP/validate.txt"
+            grep -qF CHANGEME "$RUNNER_TEMP/validate.txt" \
+              || { echo "::error::published ${provider} starter was rejected, but not for its CHANGEME placeholder"; exit 1; }
+            popd > /dev/null
+            echo "OK: ${provider}:${TAG} round-tripped, installs nic ${VERSION} from its lock, and is still not deployable as-is"
           done
