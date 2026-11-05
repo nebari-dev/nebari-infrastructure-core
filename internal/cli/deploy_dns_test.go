@@ -91,11 +91,12 @@ func TestPrintDNSGuidance(t *testing.T) {
 			endpoint: nil,
 			wantContains: []string{
 				"example.com",
-				"nic kubeconfig",
+				"nic outputs -f <config-file> --wait",
 			},
 			wantAbsent: []string{
 				"ingress-nginx",
 				"nic status",
+				"kubectl",
 			},
 		},
 	}
