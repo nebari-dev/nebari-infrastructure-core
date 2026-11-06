@@ -1,6 +1,6 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.10.0"
+  # TODO: switch back to the registry source with the release that includes single-AZ support.
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=d3e0411bb0b22c73591a188175d6c669d2e7e45f"
 
 
   project_name                             = var.project_name
