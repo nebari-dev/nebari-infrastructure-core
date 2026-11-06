@@ -14,11 +14,17 @@ type Config struct {
 	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
 	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs []string `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID  string   `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion        string   `yaml:"kubernetes_version,omitempty"`
-	EndpointPrivateAccess    bool     `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess     bool     `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                string   `yaml:"eks_kms_arn,omitempty"`
+	// Subnets for the EKS control plane when using existing subnets. Unset: the
+	// control plane uses existing_private_subnet_ids. EKS needs them in two AZs, so
+	// set this to run the nodes in one AZ, for example to the node subnet plus a
+	// subnet in a second AZ. Changing it later must keep the AZs the cluster was
+	// created with.
+	ExistingControlPlaneSubnetIDs []string `yaml:"existing_control_plane_subnet_ids,omitempty"`
+	ExistingSecurityGroupID       string   `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion             string   `yaml:"kubernetes_version,omitempty"`
+	EndpointPrivateAccess         bool     `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess          bool     `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                     string   `yaml:"eks_kms_arn,omitempty"`
 	// KMS key ARNs (not aliases) the EBS CSI driver may use; key policies must
 	// delegate to IAM. NIC adds the default EBS key when the deployer has
 	// ec2:GetEbsDefaultKmsKeyId and kms:DescribeKey.

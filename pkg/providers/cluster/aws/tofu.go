@@ -34,6 +34,7 @@ type TFVars struct {
 	VPCCIDRBlock                  *string              `json:"vpc_cidr_block,omitempty"`
 	ExistingVPCID                 *string              `json:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs      []string             `json:"existing_private_subnet_ids,omitempty"`
+	ExistingControlPlaneSubnetIDs []string             `json:"existing_control_plane_subnet_ids,omitempty"`
 	CreateSecurityGroup           bool                 `json:"create_security_group"`
 	ExistingSecurityGroupID       *string              `json:"existing_security_group_id,omitempty"`
 	KubernetesVersion             string               `json:"kubernetes_version"`
@@ -195,6 +196,9 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 	}
 	if len(c.ExistingPrivateSubnetIDs) > 0 {
 		vars.ExistingPrivateSubnetIDs = c.ExistingPrivateSubnetIDs
+	}
+	if len(c.ExistingControlPlaneSubnetIDs) > 0 {
+		vars.ExistingControlPlaneSubnetIDs = c.ExistingControlPlaneSubnetIDs
 	}
 	if c.ExistingSecurityGroupID != "" {
 		vars.ExistingSecurityGroupID = &c.ExistingSecurityGroupID

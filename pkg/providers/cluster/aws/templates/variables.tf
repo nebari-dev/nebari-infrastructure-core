@@ -35,6 +35,11 @@ variable "existing_private_subnet_ids" {
   default = []
 }
 
+variable "existing_control_plane_subnet_ids" {
+  type    = list(string)
+  default = []
+}
+
 variable "create_security_group" {
   type = bool
 }

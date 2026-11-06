@@ -102,6 +102,7 @@ cluster:
     # Optional: adopt existing VPC infrastructure
     # existing_vpc_id: vpc-...
     # existing_private_subnet_ids: [subnet-..., subnet-...]
+    # existing_control_plane_subnet_ids: [subnet-..., subnet-...]  # default: existing_private_subnet_ids
     # existing_security_group_id: sg-...
 
     # Optional: pin to existing IAM roles

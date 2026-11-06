@@ -26,6 +26,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | VPCCIDRBlock | `vpc_cidr_block` | string | No |  |
 | ExistingVPCID | `existing_vpc_id` | string | No |  |
 | ExistingPrivateSubnetIDs | `existing_private_subnet_ids` | `[]string` | No |  |
+| ExistingControlPlaneSubnetIDs | `existing_control_plane_subnet_ids` | `[]string` | No | Subnets for the EKS control plane when using existing subnets. Unset: the control plane uses existing_private_subnet_ids. EKS needs them in two AZs, so set this to run the nodes in one AZ, for exam... |
 | ExistingSecurityGroupID | `existing_security_group_id` | string | No |  |
 | KubernetesVersion | `kubernetes_version` | string | No |  |
 | EndpointPrivateAccess | `endpoint_private_access` | bool | No |  |

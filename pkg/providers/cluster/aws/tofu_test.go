@@ -2,6 +2,7 @@ package aws
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -387,6 +388,35 @@ func TestToTFVarsEnableIRSA(t *testing.T) {
 		}
 		if *vars.EnableIRSA != true {
 			t.Errorf("expected EnableIRSA=true, got %v", *vars.EnableIRSA)
+		}
+	})
+}
+
+func TestToTFVarsExistingControlPlaneSubnetIDs(t *testing.T) {
+	baseConfig := func() Config {
+		return Config{
+			Region:                   "us-west-2",
+			KubernetesVersion:        "1.33",
+			ExistingVPCID:            "vpc-1",
+			ExistingPrivateSubnetIDs: []string{"subnet-a"},
+			NodeGroups:               map[string]NodeGroup{"general": {Instance: "m5.xlarge"}},
+		}
+	}
+
+	t.Run("unset omits the field so the module uses the node subnets", func(t *testing.T) {
+		cfg := baseConfig()
+		vars := cfg.toTFVars("test", "", nil, "")
+		if vars.ExistingControlPlaneSubnetIDs != nil {
+			t.Errorf("expected ExistingControlPlaneSubnetIDs to be nil when unset, got %v", vars.ExistingControlPlaneSubnetIDs)
+		}
+	})
+
+	t.Run("set propagates through", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.ExistingControlPlaneSubnetIDs = []string{"subnet-a", "subnet-b"}
+		vars := cfg.toTFVars("test", "", nil, "")
+		if !slices.Equal(vars.ExistingControlPlaneSubnetIDs, []string{"subnet-a", "subnet-b"}) {
+			t.Errorf("expected ExistingControlPlaneSubnetIDs [subnet-a subnet-b], got %v", vars.ExistingControlPlaneSubnetIDs)
 		}
 	})
 }
