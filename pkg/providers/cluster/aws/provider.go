@@ -105,10 +105,11 @@ func validateNodeGroupAvailabilityZones(nodeGroupName string, nodeGroup NodeGrou
 	return nil
 }
 
-// validateExistingControlPlaneSubnets rejects control plane subnets when NIC
-// creates the VPC, since the module ignores them then.
+// validateExistingControlPlaneSubnets rejects control plane subnets unless both
+// existing_vpc_id and existing_private_subnet_ids are set, since the module only
+// uses them with an existing VPC.
 func validateExistingControlPlaneSubnets(cfg *Config) error {
-	if len(cfg.ExistingControlPlaneSubnetIDs) > 0 && cfg.createsVPC() {
+	if len(cfg.ExistingControlPlaneSubnetIDs) > 0 && (cfg.ExistingVPCID == "" || len(cfg.ExistingPrivateSubnetIDs) == 0) {
 		return fmt.Errorf("existing_control_plane_subnet_ids is only used with an existing VPC: also set existing_vpc_id and existing_private_subnet_ids")
 	}
 	return nil
