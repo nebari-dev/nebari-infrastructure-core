@@ -327,6 +327,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return err
 	}
 
+	if err := validateExistingControlPlaneSubnets(awsCfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	region := awsCfg.Region
 	span.SetAttributes(attribute.String("aws.region", region))
 
