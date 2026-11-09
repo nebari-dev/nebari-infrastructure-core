@@ -51,7 +51,16 @@ cluster:
     availability_zones:
       - us-west-2a
       - us-west-2b
+    # One AZ also works. NIC adds a control-plane-only subnet in a second AZ,
+    # since EKS needs two. To grow later, add the control_plane_availability_zone
+    # deploy output last in this list.
     vpc_cidr_block: "10.10.0.0/16"
+    # Optional: use an existing VPC instead (availability_zones and
+    # vpc_cidr_block are then ignored). To run the nodes in one AZ, give the
+    # control plane a subnet in a second AZ.
+    # existing_vpc_id: vpc-...
+    # existing_private_subnet_ids: [subnet-in-az-a]
+    # existing_control_plane_subnet_ids: [subnet-in-az-a, subnet-in-az-b]
     endpoint_private_access: true
     endpoint_public_access: true
 
