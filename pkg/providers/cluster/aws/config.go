@@ -19,11 +19,9 @@ type Config struct {
 	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
 	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs []string `yaml:"existing_private_subnet_ids,omitempty"`
-	// Subnets for the EKS control plane when using existing subnets. Unset: the
-	// control plane uses existing_private_subnet_ids. EKS needs them in two AZs, so
-	// set this to run the nodes in one AZ, for example to the node subnet plus a
-	// subnet in a second AZ. Changing it later must keep the AZs the cluster was
-	// created with.
+	// Control plane subnets with an existing VPC. Their AZs can't change after the
+	// cluster is created. Unset: existing_private_subnet_ids. To run the nodes in one
+	// AZ, add a subnet in a second AZ.
 	ExistingControlPlaneSubnetIDs []string `yaml:"existing_control_plane_subnet_ids,omitempty"`
 	ExistingSecurityGroupID       string   `yaml:"existing_security_group_id,omitempty"`
 	KubernetesVersion             string   `yaml:"kubernetes_version,omitempty"`
