@@ -39,6 +39,11 @@ output "private_subnet_ids" {
   value       = module.eks_cluster.private_subnet_ids
 }
 
+output "control_plane_availability_zone" {
+  description = "AZ of the control-plane-only subnet NIC adds when availability_zones has one AZ. Add it last in availability_zones to grow to two AZs. Null otherwise."
+  value       = module.eks_cluster.control_plane_availability_zone
+}
+
 output "efs_id" {
   description = "The ID of the EFS file system"
   value       = module.eks_cluster.efs_id
