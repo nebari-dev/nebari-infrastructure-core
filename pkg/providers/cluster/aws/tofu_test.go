@@ -403,20 +403,35 @@ func TestToTFVarsExistingControlPlaneSubnetIDs(t *testing.T) {
 		}
 	}
 
+	// controlPlaneSubnetIDs returns the existing_control_plane_subnet_ids key of the
+	// tfvars JSON OpenTofu reads, or nil when the key is missing.
+	controlPlaneSubnetIDs := func(t *testing.T, cfg Config) *[]string {
+		t.Helper()
+		raw, err := json.Marshal(cfg.toTFVars("test", "", nil, ""))
+		if err != nil {
+			t.Fatalf("marshal tfvars: %v", err)
+		}
+		var vars struct {
+			IDs *[]string `json:"existing_control_plane_subnet_ids"`
+		}
+		if err := json.Unmarshal(raw, &vars); err != nil {
+			t.Fatalf("unmarshal tfvars: %v", err)
+		}
+		return vars.IDs
+	}
+
 	t.Run("unset omits the field so the module uses the node subnets", func(t *testing.T) {
-		cfg := baseConfig()
-		vars := cfg.toTFVars("test", "", nil, "")
-		if vars.ExistingControlPlaneSubnetIDs != nil {
-			t.Errorf("expected ExistingControlPlaneSubnetIDs to be nil when unset, got %v", vars.ExistingControlPlaneSubnetIDs)
+		if got := controlPlaneSubnetIDs(t, baseConfig()); got != nil {
+			t.Errorf("expected existing_control_plane_subnet_ids to be omitted when unset, got %v", *got)
 		}
 	})
 
 	t.Run("set propagates through", func(t *testing.T) {
 		cfg := baseConfig()
 		cfg.ExistingControlPlaneSubnetIDs = []string{"subnet-a", "subnet-b"}
-		vars := cfg.toTFVars("test", "", nil, "")
-		if !slices.Equal(vars.ExistingControlPlaneSubnetIDs, []string{"subnet-a", "subnet-b"}) {
-			t.Errorf("expected ExistingControlPlaneSubnetIDs [subnet-a subnet-b], got %v", vars.ExistingControlPlaneSubnetIDs)
+		got := controlPlaneSubnetIDs(t, cfg)
+		if got == nil || !slices.Equal(*got, []string{"subnet-a", "subnet-b"}) {
+			t.Errorf("expected existing_control_plane_subnet_ids [subnet-a subnet-b], got %v", got)
 		}
 	})
 }
