@@ -22,7 +22,7 @@ Configuration options specific to Amazon Web Services (EKS).
 |-------|----------|------|----------|-------------|
 | Region | `region` | string | Yes |  |
 | StateBucket | `state_bucket` | string | No |  |
-| AvailabilityZones | `availability_zones` | `[]string` | No |  |
+| AvailabilityZones | `availability_zones` | `[]string` | No | AZs for the nodes, subnets, NAT gateways and VPC endpoints when NIC creates the VPC. One AZ works: NIC adds a control-plane-only subnet in a second AZ. Grow by adding that AZ last in the list. It's... |
 | VPCCIDRBlock | `vpc_cidr_block` | string | No |  |
 | ExistingVPCID | `existing_vpc_id` | string | No |  |
 | ExistingPrivateSubnetIDs | `existing_private_subnet_ids` | `[]string` | No |  |

@@ -8,8 +8,13 @@ import (
 )
 
 type Config struct {
-	Region                   string   `yaml:"region"`
-	StateBucket              string   `yaml:"state_bucket,omitempty"`
+	Region      string `yaml:"region"`
+	StateBucket string `yaml:"state_bucket,omitempty"`
+	// AZs for the nodes, subnets, NAT gateways and VPC endpoints when NIC creates the VPC.
+	// One AZ works: NIC adds a control-plane-only subnet in a second AZ. Grow by adding
+	// that AZ last in the list. It's the control_plane_availability_zone output at the
+	// end of a deploy. Unset: the region's first three AZs. Reordering the list replaces
+	// the subnets. Ignored with an existing VPC.
 	AvailabilityZones        []string `yaml:"availability_zones,omitempty"`
 	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
 	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
