@@ -104,7 +104,7 @@ func initTofuBackend(ctx context.Context, tf *tofu.TerraformExecutor, subID, pro
 // `tofu init` and `tofu apply`, and streams output through the status channel.
 // With opts.DryRun it runs `tofu plan` instead of apply and never creates the
 // state backend for a cluster that hasn't been deployed yet.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, _ string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "azure.Deploy")
 	defer span.End()

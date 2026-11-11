@@ -216,7 +216,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	// Deploy infrastructure
-	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DeployOptions{
+	if err := clusterProvider.Deploy(ctx, cfg.ProjectName, cfg.Domain, cfg.Cluster, cluster.DeployOptions{
 		DryRun:       opts.DryRun,
 		PlanOut:      opts.PlanOut,
 		Timeout:      opts.Timeout,

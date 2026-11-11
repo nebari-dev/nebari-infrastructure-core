@@ -20,7 +20,7 @@
 │    $ nic deploy -f config.yaml                              │
 │    - cmd/nic parses YAML into pkg/config.NebariConfig       │
 │    - Looks up the provider from pkg/registry.Registry       │
-│    - Calls provider.Deploy(ctx, projectName, cluster, opts) │
+│    - Calls provider.Deploy(ctx, project, domain, cl, opts)  │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐

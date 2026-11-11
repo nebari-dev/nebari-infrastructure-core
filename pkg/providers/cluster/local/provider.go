@@ -84,7 +84,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // does not already exist. The gateway's NodePorts are published on host ports
 // at creation time (see gatewayPortMappings), so the platform is reachable at
 // 127.0.0.1 without any load-balancer or DNS setup.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.Deploy")
 	defer span.End()

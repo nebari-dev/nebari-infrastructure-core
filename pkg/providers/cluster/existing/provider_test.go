@@ -120,7 +120,7 @@ func TestDeploy(t *testing.T) {
 	p := NewProvider()
 	cc := clusterConfig(map[string]any{"context": "my-context"})
 
-	err := p.Deploy(context.Background(), "test", cc, cluster.DeployOptions{})
+	err := p.Deploy(context.Background(), "test", "", cc, cluster.DeployOptions{})
 	if err != nil {
 		t.Errorf("expected Deploy to be no-op, got error: %v", err)
 	}
