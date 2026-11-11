@@ -203,9 +203,9 @@ func printDNSGuidance(cfg *config.NebariConfig, lb *endpoint.LoadBalancerEndpoin
 		fmt.Println("  └─────────────────────────────────────────────────────────────────────────┘")
 	} else {
 		fmt.Println("  The load balancer endpoint is not yet available.")
-		fmt.Println("  Run the following command to check when it's ready:")
+		fmt.Println("  Run the following command to wait for it:")
 		fmt.Println()
-		fmt.Println("    nic status -f <config-file>")
+		fmt.Println("    nic outputs -f <config-file> --wait")
 		fmt.Println()
 		fmt.Println("  Once the endpoint is available, create A (for IP) or CNAME (for hostname)")
 		fmt.Printf("  records pointing %s and *.%s to the endpoint.\n", cfg.Domain, cfg.Domain)
