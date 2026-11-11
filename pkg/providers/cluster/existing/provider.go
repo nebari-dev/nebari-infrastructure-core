@@ -120,7 +120,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // Infrastructure is assumed to already exist (the cluster was provisioned
 // out-of-band), so this is mostly a no-op except for opt-in components like
 // Longhorn that the user can request via the existing-cluster config.
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, _ string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "existing.Deploy")
 	defer span.End()

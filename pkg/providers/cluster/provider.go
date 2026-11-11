@@ -164,7 +164,9 @@ type Provider interface {
 	// with the same config should converge to the same infrastructure state. The
 	// backing tool is provider-specific (e.g., OpenTofu for AWS, hetzner-k3s for
 	// Hetzner). Use DeployOptions.DryRun to preview changes without applying them.
-	Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
+	// domain is the platform's top-level domain (empty when none is configured),
+	// for providers that set up cluster-level networking for it.
+	Deploy(ctx context.Context, projectName, domain string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
 
 	// Destroy tears down all infrastructure resources in the correct order,
 	// respecting dependencies (e.g., node groups before cluster, cluster before VPC).
