@@ -19,6 +19,7 @@ cloud infrastructure for Nebari using native cloud SDKs with declarative semanti
 * [nic destroy](nic_destroy.md)	 - Destroy cloud infrastructure
 * [nic kubeconfig](nic_kubeconfig.md)	 - Generate kubeconfig for the deployed Nebari cluster
 * [nic outputs](nic_outputs.md)	 - Print the deployed platform's entry points
+* [nic quickstart](nic_quickstart.md)	 - Deploy Nebari on a local kind cluster with Nebi and the Data Science Pack
 * [nic validate](nic_validate.md)	 - Validate configuration file
 * [nic version](nic_version.md)	 - Show version information
 
