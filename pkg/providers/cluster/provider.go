@@ -19,6 +19,15 @@ const (
 	GatewayHTTPSNodePort = 30443
 )
 
+// Fixed name and namespace of the gateway's Envoy service when InfraSettings.
+// GatewayHostAddress is set. Envoy Gateway otherwise generates a name with a
+// hash suffix; pinning it lets the provider point in-cluster DNS for the
+// platform domain at the service before ArgoCD has created it.
+const (
+	GatewayServiceName      = "nebari-gateway"
+	GatewayServiceNamespace = "envoy-gateway-system"
+)
+
 // BackupBucketSpec describes an object-storage bucket/container the provider's
 // Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec
 // in DeployOptions means "do not provision" (external or pre-existing bucket).

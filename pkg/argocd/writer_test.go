@@ -177,6 +177,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.GatewayHTTPNodePort != cluster.GatewayHTTPNodePort || data.GatewayHTTPSNodePort != cluster.GatewayHTTPSNodePort {
 				t.Errorf("gateway NodePorts = %d/%d, want %d/%d", data.GatewayHTTPNodePort, data.GatewayHTTPSNodePort, cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort)
 			}
+			if data.GatewayServiceName != cluster.GatewayServiceName {
+				t.Errorf("GatewayServiceName = %q, want %q", data.GatewayServiceName, cluster.GatewayServiceName)
+			}
 		})
 	}
 }
@@ -1357,6 +1360,8 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 
 		for _, want := range []string{
 			"envoyService:",
+			// The provider's in-cluster DNS rule targets this name.
+			"name: " + cluster.GatewayServiceName,
 			"type: NodePort",
 			// Local, Envoy Gateway's default, would drop traffic arriving at
 			// the control plane's host ports whenever Envoy runs on a worker.
@@ -1393,7 +1398,9 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 			StorageClass: "gp2",
 		})
 
-		for _, unwanted := range []string{"envoyService:", "NodePort", "externalTrafficPolicy"} {
+		// Renaming the service on a cloud provider would replace its load
+		// balancer and change the address DNS records point at.
+		for _, unwanted := range []string{"envoyService:", "NodePort", "externalTrafficPolicy", "name: " + cluster.GatewayServiceName} {
 			if strings.Contains(out, unwanted) {
 				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
 			}

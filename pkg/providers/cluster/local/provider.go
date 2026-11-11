@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -83,7 +84,9 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 // Deploy creates the NIC-managed kind cluster (named after the project) if it
 // does not already exist. The gateway's NodePorts are published on host ports
 // at creation time (see gatewayPortMappings), so the platform is reachable at
-// 127.0.0.1 without any load-balancer or DNS setup.
+// 127.0.0.1 without any load-balancer or DNS setup. On every deploy it also
+// points domain and its subdomains at the gateway service in the cluster's
+// CoreDNS (see ensurePlatformDNS), so pods can reach the platform's hostnames.
 func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "local.Deploy")
@@ -129,6 +132,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clust
 		span.RecordError(err)
 		return err
 	}
+	var client kubernetes.Interface
 	if exists {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, fmt.Sprintf("Kind cluster %s already exists, reusing it (changes to kind settings such as node_image, extra_mounts, node_groups, or the default local GitOps mount path only take effect on a recreate)", projectName)).
 			WithResource("provider").
@@ -139,7 +143,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clust
 		// from the ones the cluster was created with: the mappings cannot
 		// change on a live cluster, so continuing would move the gateway
 		// listeners and printed URLs to ports the host does not publish.
-		client, err := clusterClient(kp, projectName)
+		client, err = clusterClient(kp, projectName)
 		if err != nil {
 			span.RecordError(err)
 			return err
@@ -180,7 +184,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clust
 		// can run, and pkg/nic fetches the kubeconfig the same way right
 		// after Deploy returns, so continuing could not produce a working
 		// deploy.
-		client, err := clusterClient(kp, projectName)
+		client, err = clusterClient(kp, projectName)
 		if err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "Could not connect to the new kind cluster").
@@ -211,6 +215,13 @@ func (p *Provider) Deploy(ctx context.Context, projectName, domain string, clust
 			span.RecordError(err)
 			return err
 		}
+	}
+
+	// Runs on new and reused clusters alike: the rule is rewritten only when it
+	// changes, and a changed domain replaces the old one.
+	if err := ensurePlatformDNS(ctx, client, domain); err != nil {
+		span.RecordError(err)
+		return err
 	}
 
 	return nil

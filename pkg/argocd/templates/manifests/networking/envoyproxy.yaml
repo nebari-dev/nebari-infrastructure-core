@@ -30,6 +30,10 @@ spec:
       # cluster creation. The patch merges by port number into the service
       # Envoy Gateway generates from the Gateway listeners.
       envoyService:
+        # A fixed name, instead of Envoy Gateway's hashed default, so the
+        # cluster provider can point in-cluster DNS for the platform domain
+        # at this service before it exists.
+        name: {{ .GatewayServiceName }}
         type: NodePort
         # Cluster, not Envoy Gateway's default Local: host-port publishing
         # binds the ports on a subset of the nodes, so Local would drop
