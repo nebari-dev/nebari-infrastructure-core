@@ -1,0 +1,42 @@
+# Installed by `nic quickstart`. This file is yours: edit it to change the
+# Nebi configuration, or delete it to uninstall Nebi.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nebi-pack
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-software-packs
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nebari-apps
+  source:
+    repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+    chart: nebari-nebi-pack
+    targetRevision: 0.1.4
+    helm:
+      # data-science-pack derives Nebi's OIDC client ID from this release name.
+      releaseName: nebi-pack
+      valuesObject:
+        nebariapp:
+          hostname: nebi.{{ .Domain }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nebi
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The nebari-operator only manages namespaces carrying this label.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

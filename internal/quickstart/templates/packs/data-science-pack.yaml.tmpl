@@ -1,0 +1,47 @@
+# Installed by `nic quickstart`. This file is yours: edit it to change the
+# JupyterHub configuration, or delete it to uninstall the Data Science Pack.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-science-pack
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-software-packs
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nebari-apps
+  source:
+    repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+    chart: nebari-data-science-pack
+    targetRevision: 0.1.7
+    helm:
+      releaseName: data-science-pack
+      valuesObject:
+        keycloak:
+          hostname: keycloak.{{ .Domain }}
+        sharedStorage:
+          nfsServer:
+            # kind nodes run on overlayfs, where the NFS server's NFSv4 export
+            # is broken. See the chart's shared-pvc.yaml.
+            mountOptions:
+              - nfsvers=3
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-science
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The nebari-operator only manages namespaces carrying this label.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
