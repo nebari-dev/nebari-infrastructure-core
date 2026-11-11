@@ -116,7 +116,7 @@ func InstallPacks(ctx context.Context, repoDir string, packs map[string][]byte) 
 
 	for name, content := range packs {
 		dest := filepath.Join(client.WorkDir(), appsDir, name)
-		if err := os.WriteFile(dest, content, git.GitOpsFileMode); err != nil { //nolint:gosec // GitOps manifests are not secret and must be readable by the ArgoCD repo-server
+		if err := os.WriteFile(dest, content, git.GitOpsFileMode); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("write %s: %w", dest, err)
 		}
