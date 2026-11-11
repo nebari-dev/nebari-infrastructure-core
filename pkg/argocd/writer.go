@@ -78,6 +78,10 @@ type TemplateData struct {
 	// mappings and the rendered service cannot drift.
 	GatewayHTTPNodePort  int
 	GatewayHTTPSNodePort int
+	// GatewayServiceName pins the Envoy service's name when GatewayHostAddress
+	// is set, threaded from the cluster package constant so the provider's
+	// in-cluster DNS rule and the rendered service cannot drift.
+	GatewayServiceName string
 
 	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
 	// when a top-level trust_bundle is configured.
@@ -150,6 +154,7 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		GatewayHostAddress:      settings.GatewayHostAddress,
 		GatewayHTTPNodePort:     cluster.GatewayHTTPNodePort,
 		GatewayHTTPSNodePort:    cluster.GatewayHTTPSNodePort,
+		GatewayServiceName:      cluster.GatewayServiceName,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 		LonghornEnabled:         settings.LonghornEnabled,
