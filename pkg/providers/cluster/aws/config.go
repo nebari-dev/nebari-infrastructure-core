@@ -8,17 +8,26 @@ import (
 )
 
 type Config struct {
-	Region                   string   `yaml:"region"`
-	StateBucket              string   `yaml:"state_bucket,omitempty"`
+	Region      string `yaml:"region"`
+	StateBucket string `yaml:"state_bucket,omitempty"`
+	// AZs for the nodes, subnets, NAT gateways and VPC endpoints when NIC creates the VPC.
+	// One AZ works: NIC adds a control-plane-only subnet in a second AZ. Grow by adding
+	// that AZ last in the list. It's the control_plane_availability_zone output at the
+	// end of a deploy. Unset: the region's first three AZs. Reordering the list replaces
+	// the subnets. Ignored with an existing VPC.
 	AvailabilityZones        []string `yaml:"availability_zones,omitempty"`
 	VPCCIDRBlock             string   `yaml:"vpc_cidr_block,omitempty"`
 	ExistingVPCID            string   `yaml:"existing_vpc_id,omitempty"`
 	ExistingPrivateSubnetIDs []string `yaml:"existing_private_subnet_ids,omitempty"`
-	ExistingSecurityGroupID  string   `yaml:"existing_security_group_id,omitempty"`
-	KubernetesVersion        string   `yaml:"kubernetes_version,omitempty"`
-	EndpointPrivateAccess    bool     `yaml:"endpoint_private_access,omitempty"`
-	EndpointPublicAccess     bool     `yaml:"endpoint_public_access,omitempty"`
-	EKSKMSArn                string   `yaml:"eks_kms_arn,omitempty"`
+	// Control plane subnets with an existing VPC. Their AZs can't change after the
+	// cluster is created. Unset: existing_private_subnet_ids. To run the nodes in one
+	// AZ, add a subnet in a second AZ.
+	ExistingControlPlaneSubnetIDs []string `yaml:"existing_control_plane_subnet_ids,omitempty"`
+	ExistingSecurityGroupID       string   `yaml:"existing_security_group_id,omitempty"`
+	KubernetesVersion             string   `yaml:"kubernetes_version,omitempty"`
+	EndpointPrivateAccess         bool     `yaml:"endpoint_private_access,omitempty"`
+	EndpointPublicAccess          bool     `yaml:"endpoint_public_access,omitempty"`
+	EKSKMSArn                     string   `yaml:"eks_kms_arn,omitempty"`
 	// KMS key ARNs (not aliases) the EBS CSI driver may use; key policies must
 	// delegate to IAM. NIC adds the default EBS key when the deployer has
 	// ec2:GetEbsDefaultKmsKeyId and kms:DescribeKey.

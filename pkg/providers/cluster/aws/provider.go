@@ -105,6 +105,16 @@ func validateNodeGroupAvailabilityZones(nodeGroupName string, nodeGroup NodeGrou
 	return nil
 }
 
+// validateExistingControlPlaneSubnets rejects control plane subnets unless both
+// existing_vpc_id and existing_private_subnet_ids are set, since the module only
+// uses them with an existing VPC.
+func validateExistingControlPlaneSubnets(cfg *Config) error {
+	if len(cfg.ExistingControlPlaneSubnetIDs) > 0 && (cfg.ExistingVPCID == "" || len(cfg.ExistingPrivateSubnetIDs) == 0) {
+		return fmt.Errorf("existing_control_plane_subnet_ids is only used with an existing VPC: also set existing_vpc_id and existing_private_subnet_ids")
+	}
+	return nil
+}
+
 // containsSubstring checks if any string in the slice contains the substring
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
@@ -193,6 +203,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 			span.RecordError(err)
 			return err
 		}
+	}
+
+	if err := validateExistingControlPlaneSubnets(awsCfg); err != nil {
+		span.RecordError(err)
+		return err
 	}
 
 	if err := validateKMSKeyARNs(awsCfg.EBSKMSKeyARNs); err != nil {
@@ -309,6 +324,11 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 	// Validate never runs on deploy; drop it once that is fixed in
 	// https://github.com/nebari-dev/nebari-infrastructure-core/issues/520.
 	if err := validateEBSConfig(awsCfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	if err := validateExistingControlPlaneSubnets(awsCfg); err != nil {
 		span.RecordError(err)
 		return err
 	}

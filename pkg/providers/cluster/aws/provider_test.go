@@ -216,6 +216,33 @@ func TestValidateNodeGroupAvailabilityZones(t *testing.T) {
 	}
 }
 
+func TestValidateExistingControlPlaneSubnets(t *testing.T) {
+	controlPlaneSubnets := []string{"subnet-a", "subnet-b"}
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{name: "unset is fine", cfg: Config{}},
+		{name: "existing VPC and subnets are accepted", cfg: Config{ExistingVPCID: "vpc-1", ExistingPrivateSubnetIDs: []string{"subnet-a"}, ExistingControlPlaneSubnetIDs: controlPlaneSubnets}},
+		{name: "rejected when NIC creates the VPC", cfg: Config{ExistingControlPlaneSubnetIDs: controlPlaneSubnets}, wantErr: true},
+		{name: "rejected with only existing_vpc_id", cfg: Config{ExistingVPCID: "vpc-1", ExistingControlPlaneSubnetIDs: controlPlaneSubnets}, wantErr: true},
+		{name: "rejected with only existing_private_subnet_ids", cfg: Config{ExistingPrivateSubnetIDs: []string{"subnet-a"}, ExistingControlPlaneSubnetIDs: controlPlaneSubnets}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateExistingControlPlaneSubnets(&tt.cfg)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestValidate_NodeGroupAvailabilityZones checks that Validate runs the node
 // group AZ check, not just that the check itself works.
 func TestValidate_NodeGroupAvailabilityZones(t *testing.T) {

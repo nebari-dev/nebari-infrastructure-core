@@ -1,6 +1,6 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.10.0"
+  version = "0.11.0"
 
 
   project_name                             = var.project_name
@@ -10,6 +10,7 @@ module "eks_cluster" {
   vpc_cidr_block                           = var.vpc_cidr_block
   existing_vpc_id                          = var.existing_vpc_id
   existing_private_subnet_ids              = var.existing_private_subnet_ids
+  existing_control_plane_subnet_ids        = var.existing_control_plane_subnet_ids
   create_security_group                    = var.create_security_group
   existing_security_group_id               = var.existing_security_group_id
   kubernetes_version                       = var.kubernetes_version
