@@ -149,11 +149,24 @@ spec:
                 -s directAccessGrantsEnabled=false \
                 -s standardFlowEnabled=true || echo "Client may already exist"
 
-              # Add groups scope to argocd client as a default scope
               ARGOCD_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
                 grep -B1 '"clientId" *: *"argocd"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+              if [ -z "$ARGOCD_CLIENT_ID" ]; then
+                echo "ArgoCD OIDC client not found after create" >&2
+                exit 1
+              fi
 
-              if [ -n "$ARGOCD_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
+              # Once the client exists the create above fails and is ignored,
+              # so its redirect URI would keep the first deploy's domain. Set
+              # it on every run. No || true here: a failed update fails this
+              # hook instead of leaving the client stale. Stopgap until
+              # keycloak-config-cli (ADR-0009) replaces this script.
+              echo "Reconciling ArgoCD OIDC client redirect URI..."
+              $KCADM update clients/$ARGOCD_CLIENT_ID -r nebari \
+                -s "redirectUris=[\"https://argocd.$DOMAIN/auth/callback\"]"
+
+              # Add groups scope to argocd client as a default scope
+              if [ -n "$GROUPS_SCOPE_ID" ]; then
                 echo "Adding groups scope to argocd client..."
                 $KCADM update clients/$ARGOCD_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
               fi
@@ -194,11 +207,20 @@ spec:
                   -s directAccessGrantsEnabled=false \
                   -s standardFlowEnabled=true || echo "Client may already exist"
 
-                # Attach groups scope to longhorn client so id_token carries group claims
                 LONGHORN_CLIENT_ID=$($KCADM get clients -r nebari --fields id,clientId | \
                   grep -B1 '"clientId" *: *"longhorn"' | sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p')
+                if [ -z "$LONGHORN_CLIENT_ID" ]; then
+                  echo "Longhorn OIDC client not found after create" >&2
+                  exit 1
+                fi
 
-                if [ -n "$LONGHORN_CLIENT_ID" ] && [ -n "$GROUPS_SCOPE_ID" ]; then
+                # Same reconcile as the ArgoCD client above.
+                echo "Reconciling Longhorn OIDC client redirect URI..."
+                $KCADM update clients/$LONGHORN_CLIENT_ID -r nebari \
+                  -s "redirectUris=[\"https://longhorn.$DOMAIN/oauth2/callback\"]"
+
+                # Attach groups scope to longhorn client so id_token carries group claims
+                if [ -n "$GROUPS_SCOPE_ID" ]; then
                   echo "Adding groups scope to longhorn client..."
                   $KCADM update clients/$LONGHORN_CLIENT_ID/default-client-scopes/$GROUPS_SCOPE_ID -r nebari || true
                 fi
