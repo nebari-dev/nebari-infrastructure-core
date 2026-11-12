@@ -77,7 +77,7 @@ func contains(slice []string, str string) bool {
 // terraform-aws-eks-cluster module expects and what config taints carry; EKS
 // maps these to the Kubernetes taint effects.
 func validateTaints(nodeGroupName string, taints []Taint) error {
-	validEffects := []string{"NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
+	validEffects := []string{eksNoSchedule, "NO_EXECUTE", "PREFER_NO_SCHEDULE"}
 	for i, taint := range taints {
 		if taint.Key == "" {
 			return fmt.Errorf("node group %s: taint %d is missing key", nodeGroupName, i)
@@ -586,7 +586,7 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 			return fmt.Errorf("failed to get kubeconfig for GPU Operator install: %w", err)
 		}
 
-		if err := installGPUOperator(ctx, kubeconfigBytes); err != nil {
+		if err := installGPUOperator(ctx, kubeconfigBytes, awsCfg); err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("failed to install GPU Operator: %w", err)
 		}
