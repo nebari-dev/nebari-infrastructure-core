@@ -30,12 +30,20 @@ var templates embed.FS
 
 const (
 	templateDir = "templates"
-	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
-	// not configured a real ACME provider.
+	// certificateIssuerSelfSigned signs each certificate with its own key. It
+	// signs the root CA, and the operator's per-app certificates with
+	// certificate.type=existing.
 	certificateIssuerSelfSigned = "selfsigned-issuer"
+	// certificateIssuerCA signs with the cluster's root CA. It issues the
+	// gateway and per-app certificates with certificate.type=selfsigned, so
+	// they all chain to one trust anchor.
+	certificateIssuerCA = "nebari-ca-issuer"
 	// certificateIssuerLetsEncrypt is the cert-manager ACME Issuer used when the
 	// user explicitly selects Let's Encrypt.
 	certificateIssuerLetsEncrypt = "letsencrypt-issuer"
+	// rootCASecretName names both the root CA Certificate and its Secret in the
+	// cert-manager namespace.
+	rootCASecretName = "nebari-root-ca" //nolint:gosec // Secret name reference, not a credential
 )
 
 // TemplateData holds the dynamic values for template processing
@@ -51,9 +59,12 @@ type TemplateData struct {
 	StorageClass string // Provider-appropriate storage class for persistent volumes
 
 	// Certificate configuration
-	CertificateIssuer string // "selfsigned-issuer" or "letsencrypt-issuer"
+	CertificateIssuer string // "nebari-ca-issuer", "letsencrypt-issuer" or "selfsigned-issuer"
 	ACMEEmail         string
 	ACMEServer        string
+	// RootCASecretName names the root CA Certificate and Secret that back
+	// nebari-ca-issuer.
+	RootCASecretName string
 
 	// UseExistingCertificate is true when the user supplies their own TLS cert
 	// (certificate.type=existing). When true, the cert-manager Certificate is
@@ -84,12 +95,17 @@ type TemplateData struct {
 	GatewayServiceName string
 
 	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
-	// when a top-level trust_bundle is configured.
+	// when the cluster has a root CA or a top-level trust_bundle is configured.
 	TrustManagerEnabled bool
 
 	// TrustBundlePEM is the raw PEM of the org CA, rendered inline into the
-	// trust-manager Bundle. Empty unless TrustManagerEnabled is true.
+	// trust-manager Bundle. Empty when no trust_bundle is configured.
 	TrustBundlePEM string
+
+	// RootCAEnabled is true when certificates are signed by the cluster's root
+	// CA (certificate.type=selfsigned). Its certificate is then added to the
+	// trust-manager Bundle so pods trust the platform's own hostnames.
+	RootCAEnabled bool
 
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
 	HTTPSPort int
@@ -159,6 +175,7 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		KeycloakBasePath:        settings.KeycloakBasePath,
 		LonghornEnabled:         settings.LonghornEnabled,
 		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
+		RootCASecretName:        rootCASecretName,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -179,8 +196,18 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		data.GitPath = src.RepoPath()
 	}
 
-	// Set certificate configuration
-	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
+	// Set certificate configuration. Each type picks its issuer explicitly, so a
+	// new type has to choose one instead of inheriting a fallback.
+	certificateType := config.CertificateTypeSelfSigned
+	if cfg.Certificate != nil && cfg.Certificate.Type != "" {
+		certificateType = cfg.Certificate.Type
+	}
+	switch certificateType {
+	case config.CertificateTypeSelfSigned:
+		data.CertificateIssuer = certificateIssuerCA
+		data.RootCAEnabled = true
+		data.TrustManagerEnabled = true
+	case config.CertificateTypeLetsEncrypt:
 		data.CertificateIssuer = certificateIssuerLetsEncrypt
 		// Precondition: Validate() requires ACME configuration for letsencrypt.
 		// Keep the nil guard because WriteAllToGit can also be called directly.
@@ -191,7 +218,9 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 				data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
 			}
 		}
-	} else {
+	case config.CertificateTypeExisting:
+		// The gateway uses the user's certificate. The operator still needs an
+		// issuer for per-app certificates.
 		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
 
@@ -532,6 +561,8 @@ const (
 	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
 	letsencryptIssuerPath     = "manifests/security/issuers/letsencrypt-clusterissuer.yaml"
 	selfSignedIssuerPath      = "manifests/security/issuers/selfsigned-clusterissuer.yaml"
+	rootCACertificatePath     = "manifests/security/issuers/root-ca-certificate.yaml"
+	caIssuerPath              = "manifests/security/issuers/ca-clusterissuer.yaml"
 )
 
 // skipCertificateTemplate reports whether a cert-related template should be
@@ -544,9 +575,10 @@ const (
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
 // it would report as failed. Issuer manifests are selected independently:
-// letsencrypt uses the ACME issuer, while selfsigned and existing use the
-// self-signed issuer (the latter remains available for operator-managed
-// per-application certificates).
+// letsencrypt uses the ACME issuer, selfsigned uses the root CA and its issuer,
+// and existing uses the self-signed issuer for operator-managed per-application
+// certificates. The self-signed issuer is also rendered with the root CA, which
+// it signs.
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
@@ -556,7 +588,9 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	case letsencryptIssuerPath:
 		return data.CertificateIssuer != certificateIssuerLetsEncrypt
 	case selfSignedIssuerPath:
-		return data.CertificateIssuer != certificateIssuerSelfSigned
+		return data.CertificateIssuer != certificateIssuerSelfSigned && !data.RootCAEnabled
+	case rootCACertificatePath, caIssuerPath:
+		return !data.RootCAEnabled
 	default:
 		return false
 	}

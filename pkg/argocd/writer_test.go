@@ -1800,9 +1800,16 @@ func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		cfg := &config.NebariConfig{Domain: "test.example.com"}
+		// letsencrypt has no root CA, so with no trust_bundle trust-manager is off.
+		cfg := &config.NebariConfig{
+			Domain: "test.example.com",
+			Certificate: &config.CertificateConfig{
+				Type: config.CertificateTypeLetsEncrypt,
+				ACME: &config.ACMEConfig{Email: "admin@example.com"},
+			},
+		}
 		settings := cluster.InfraSettings{StorageClass: "gp2"}
-		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil {
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 
