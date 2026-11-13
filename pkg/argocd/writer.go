@@ -95,12 +95,17 @@ type TemplateData struct {
 	GatewayServiceName string
 
 	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
-	// when a top-level trust_bundle is configured.
+	// when the cluster has a root CA or a top-level trust_bundle is configured.
 	TrustManagerEnabled bool
 
 	// TrustBundlePEM is the raw PEM of the org CA, rendered inline into the
-	// trust-manager Bundle. Empty unless TrustManagerEnabled is true.
+	// trust-manager Bundle. Empty when no trust_bundle is configured.
 	TrustBundlePEM string
+
+	// RootCAEnabled is true when certificates are signed by the cluster's root
+	// CA (certificate.type=selfsigned). Its certificate is then added to the
+	// trust-manager Bundle so pods trust the platform's own hostnames.
+	RootCAEnabled bool
 
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
 	HTTPSPort int
@@ -200,6 +205,8 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 	switch certificateType {
 	case config.CertificateTypeSelfSigned:
 		data.CertificateIssuer = certificateIssuerCA
+		data.RootCAEnabled = true
+		data.TrustManagerEnabled = true
 	case config.CertificateTypeLetsEncrypt:
 		data.CertificateIssuer = certificateIssuerLetsEncrypt
 		// Precondition: Validate() requires ACME configuration for letsencrypt.
@@ -581,9 +588,9 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	case letsencryptIssuerPath:
 		return data.CertificateIssuer != certificateIssuerLetsEncrypt
 	case selfSignedIssuerPath:
-		return data.CertificateIssuer != certificateIssuerSelfSigned && data.CertificateIssuer != certificateIssuerCA
+		return data.CertificateIssuer != certificateIssuerSelfSigned && !data.RootCAEnabled
 	case rootCACertificatePath, caIssuerPath:
-		return data.CertificateIssuer != certificateIssuerCA
+		return !data.RootCAEnabled
 	default:
 		return false
 	}

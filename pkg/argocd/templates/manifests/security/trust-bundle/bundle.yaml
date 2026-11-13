@@ -11,16 +11,27 @@ metadata:
     app.kubernetes.io/managed-by: nebari-infrastructure-core
 spec:
   sources:
-    # The projected file must be system roots + org CA, not org-only: consumers
-    # point SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS at it, and
-    # those REPLACE the default pool rather than extend it. An org-only file
-    # breaks TLS to anything allow-listed past the proxy or publicly signed
-    # (e.g. pip install from PyPI). useDefaultCAs pulls in trust-manager's
-    # default CA package (public roots), which apps/trust-manager.yaml
-    # explicitly enables.
+    # The projected file must include the system roots, not only our CAs:
+    # consumers point SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS
+    # at it, and those REPLACE the default pool rather than extend it. A file
+    # without them breaks TLS to anything allow-listed past the proxy or
+    # publicly signed (e.g. pip install from PyPI). useDefaultCAs pulls in
+    # trust-manager's default CA package (public roots), which
+    # apps/trust-manager.yaml explicitly enables.
     - useDefaultCAs: true
+{{- if .RootCAEnabled }}
+    # The cluster's root CA, which signs the gateway and per-app certificates
+    # (certificate.type=selfsigned), so pods trust the platform's own hostnames.
+    # cert-manager keeps it in the trust namespace, where trust-manager reads it.
+    - secret:
+        name: {{ .RootCASecretName }}
+        key: ca.crt
+{{- end }}
+{{- if .TrustBundlePEM }}
+    # The org CA from the top-level trust_bundle.
     - inLine: |-
 {{ indent 8 .TrustBundlePEM }}
+{{- end }}
   target:
     configMap:
       key: ca-certificates.crt
