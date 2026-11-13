@@ -18,3 +18,13 @@ def pytest_addoption(parser):
         default=False,
         help="Do not delete scratch namespaces, for debugging a failed journey.",
     )
+    parser.addoption(
+        "--allow-disruption",
+        action="store_true",
+        default=False,
+        help=(
+            "Run journeys marked `disruptive`, which restart platform pods "
+            "(operator, Keycloak, Envoy) and so briefly interrupt the cluster "
+            "for everyone using it. Off by default."
+        ),
+    )

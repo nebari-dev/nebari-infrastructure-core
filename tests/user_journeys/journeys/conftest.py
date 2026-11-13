@@ -399,3 +399,16 @@ def browser_context_args(browser_context_args, trust_anchor):
     around a rejected self-signed chain: the SPKI pin is the fix.
     """
     return dict(browser_context_args)
+
+
+@pytest.fixture(autouse=True)
+def skip_disruptive_unless_allowed(request):
+    """Journeys marked `disruptive` restart platform pods. They run only
+    when the operator of the run asked for it with --allow-disruption."""
+    if request.node.get_closest_marker("disruptive") and not request.config.getoption(
+        "--allow-disruption"
+    ):
+        pytest.skip(
+            "restarts platform pods and briefly interrupts the cluster; "
+            "rerun with --allow-disruption to include it"
+        )

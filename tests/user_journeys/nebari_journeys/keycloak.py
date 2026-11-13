@@ -342,3 +342,46 @@ class Keycloak:
         if group is None:
             raise ValueError(f"group {group_name!r} not found in the realm")
         self._send("put", self._admin_url(f"/users/{user_id}/groups/{group}"))
+
+
+# The nebari realm's token endpoint, as opposed to TOKEN_PATH (master,
+# for the admin client).
+REALM_TOKEN_PATH = f"/realms/{constants.REALM_NAME}/protocol/openid-connect/token"
+
+
+def set_user_enabled(keycloak: "Keycloak", user_id: str, enabled: bool) -> None:
+    """Enable or disable a realm user. Journeys only ever do this to their
+    own scratch user."""
+    keycloak._send(
+        "put", keycloak._admin_url(f"/users/{user_id}"), json={"enabled": enabled}
+    )
+
+
+def user_tokens(
+    keycloak: "Keycloak",
+    username: str,
+    password: str,
+    client_id: str = ADMIN_CLI,
+    scope: str = "openid",
+) -> dict:
+    """A realm user's tokens issued to `client_id`, by password grant.
+
+    `admin-cli` exists in every realm, is public and allows the password
+    grant, so it yields a genuine, Keycloak-signed ID token for the user
+    whose audience is NOT any application's. Journeys use it to check that
+    an app rejects a token meant for someone else.
+    """
+    response = keycloak.session.post(
+        f"{keycloak.base_url}{REALM_TOKEN_PATH}",
+        data={
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "scope": scope,
+        },
+        verify=keycloak.verify,
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()
