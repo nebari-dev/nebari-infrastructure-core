@@ -153,18 +153,27 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 	// Re-resolve the bundle so the destroy plan matches what was deployed. The
 	// applied value already lives in TF state, so a source PEM that was deleted
 	// or moved after deploy must not block teardown: downgrade a missing file to
-	// an empty bundle and warn rather than fail.
-	caBundle, err := cfg.TrustBundle.ResolveBase64()
-	if errors.Is(err, fs.ErrNotExist) {
+	// an empty bundle and warn rather than fail. The same goes for a file that no
+	// longer passes validation, such as a CA that an older nic accepted but
+	// today's parser rejects (a negative serial number, a non-CERTIFICATE block).
+	trustBundle, err := cfg.TrustBundle.Resolve()
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		status.Send(ctx, status.NewUpdate(status.LevelWarning,
 			"trust_bundle PEM file is no longer present; continuing destroy with the value already in Terraform state").
-			WithResource("trust_bundle"))
-		caBundle, err = "", nil
+			WithResource("trust-bundle"))
+		trustBundle, err = config.ResolvedTrustBundle{}, nil
+	case errors.Is(err, config.ErrInvalidTrustBundle):
+		status.Send(ctx, status.NewUpdate(status.LevelWarning,
+			fmt.Sprintf("trust_bundle no longer validates; continuing destroy with the value already in Terraform state: %v", err)).
+			WithResource("trust-bundle"))
+		trustBundle, err = config.ResolvedTrustBundle{}, nil
 	}
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("resolve trust_bundle: %w", err)
 	}
+	caBundle := trustBundle.Base64()
 
 	var destroyErr error
 	if err := clusterProvider.Destroy(ctx, cfg.ProjectName, cfg.Cluster, cluster.DestroyOptions{

@@ -22,7 +22,7 @@ This directory contains auto-generated documentation for Nebari Infrastructure C
 
 ### Additional Configuration
 
-- [Trust Bundle Configuration](trust-bundle.md) - Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.
+- [Trust Bundle Configuration](trust-bundle.md) - Enterprise CA trust-bundle propagation into the cluster via trust-manager and, on AWS, to worker-node OS trust stores.
 - [Backups Configuration](backups.md) - Off-cluster backup scheduling for Longhorn volumes (S3/Azure targets, retention, keyless auth).
 - [Longhorn Storage Configuration](longhorn.md) - Distributed block storage settings shared by the cloud providers, including dedicated-node scheduling.
 - [Cloudflare DNS Configuration](cloudflare.md) - Configuration options for Cloudflare DNS provider.

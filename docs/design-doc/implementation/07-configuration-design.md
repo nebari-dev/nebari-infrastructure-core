@@ -98,7 +98,7 @@ type ACMEConfig struct {
 
 Two further optional top-level blocks, defined in `pkg/config/trust_bundle.go` and `pkg/config/backups.go`:
 
-- `trust_bundle:` takes exactly one of `path` (a PEM file on the operator's machine) or `inline` (the PEM text). NIC propagates it to worker-node OS trust stores via the cluster provider and into the cluster via trust-manager. A `PRIVATE KEY` block is rejected: the resolved bundle ends up in OpenTofu state and is projected cluster-wide through the GitOps repo.
+- `trust_bundle:` takes at most one of `path` (a PEM file on the operator's machine) or `inline` (the PEM text); leaving both unset installs no bundle. NIC propagates it into the cluster via trust-manager on every provider, and on AWS also to worker-node OS trust stores via the cluster provider. A `PRIVATE KEY` block is rejected: the resolved bundle ends up in OpenTofu state and is projected cluster-wide through the GitOps repo.
 - `backups.longhorn:` configures off-cluster backups against a Longhorn-native S3 or azblob target, plus the snapshot/backup RecurringJob schedules. Opt-in: an omitted block means no backups.
 
 Field-level detail for both lives in [`16-configuration-reference.md`](../appendix/16-configuration-reference.md).
