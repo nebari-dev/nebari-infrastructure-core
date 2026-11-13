@@ -1,0 +1,85 @@
+name: Mirror images
+
+# Copies the third-party images NIC points its charts at into quay.io/nebari,
+# by digest. The list is .github/mirrored-images.txt, and pkg/argocd's tests
+# keep NIC's Helm values pointing at a line in it.
+#
+# The first entry is the Argo CD chart's Redis. Upstream pulls it from
+# ecr-public.aws.com anonymously, and ECR Public's anonymous budget is shared
+# by everyone behind the same egress IP, so GitHub runners get 429s often
+# enough that Argo CD never comes up.
+#
+# One-time prerequisites, for a quay org admin:
+#   - each destination repository exists on quay and is public, so clusters
+#     pull it without credentials.
+#   - a robot account with write access to those repositories, stored on the
+#     `quay-publish` environment as the QUAY_MIRROR_USERNAME variable and the
+#     QUAY_MIRROR_TOKEN secret.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/mirrored-images.txt
+      - .github/workflows/mirror-images.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-images
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror to quay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Required reviewers and a main-only deployment policy, same as the
+    # starter publish.
+    environment: quay-publish
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Versioned install: the Go checksum database verifies the module.
+      - name: Install crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+
+      - name: Log in to quay
+        env:
+          QUAY_USERNAME: ${{ vars.QUAY_MIRROR_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${QUAY_USERNAME:?QUAY_MIRROR_USERNAME is not set}"
+          : "${QUAY_TOKEN:?QUAY_MIRROR_TOKEN is not set}"
+          printf '%s' "$QUAY_TOKEN" | crane auth login quay.io -u "$QUAY_USERNAME" --password-stdin
+
+      # Skips a destination that already holds the pinned digest, so a re-run
+      # only copies what changed. Each copy is read back before moving on.
+      - name: Copy and verify each image
+        run: |
+          set -euo pipefail
+          while read -r src dst; do
+            [[ -z "$src" || "$src" == \#* ]] && continue
+            want="${src##*@}"
+            if have="$(crane digest "$dst" 2>/dev/null)" && [[ "$have" == "$want" ]]; then
+              echo "$dst already at $want"
+              continue
+            fi
+            crane copy "$src" "$dst"
+            have="$(crane digest "$dst")"
+            if [[ "$have" != "$want" ]]; then
+              echo "::error::$dst resolves to $have after the copy, expected $want"
+              exit 1
+            fi
+            echo "copied $src -> $dst"
+          done < .github/mirrored-images.txt

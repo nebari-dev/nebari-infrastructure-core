@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -323,6 +324,45 @@ func TestGoMemLimitComponents(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRedisImageIsMirrored ties the Redis image in NIC's values to a line in
+// .github/mirrored-images.txt, so the tag Argo CD pulls is one the mirror
+// workflow actually copies, from the same upstream digest (#647). A tag bumped
+// here without the list, or the reverse, leaves Argo CD pulling a tag that was
+// never mirrored.
+func TestRedisImageIsMirrored(t *testing.T) {
+	redis, ok := DefaultConfig().Values["redis"].(map[string]any)
+	if !ok {
+		t.Fatal("Values[redis] missing or not a map")
+	}
+	image, ok := redis["image"].(map[string]any)
+	if !ok {
+		t.Fatal("Values[redis][image] missing; the chart would pull from ecr-public.aws.com")
+	}
+	repo, _ := image["repository"].(string)
+	tag, _ := image["tag"].(string)
+	name, digest, pinned := strings.Cut(tag, "@")
+	if !pinned || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("redis tag %q is not pinned by digest", tag)
+	}
+
+	data, err := os.ReadFile("../../.github/mirrored-images.txt")
+	if err != nil {
+		t.Fatalf("reading the mirror list: %v", err)
+	}
+	want := repo + ":" + name
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || strings.HasPrefix(fields[0], "#") || fields[1] != want {
+			continue
+		}
+		if !strings.HasSuffix(fields[0], "@"+digest) {
+			t.Fatalf("mirror list copies %s from %s, but NIC pins %s", want, fields[0], digest)
+		}
+		return
+	}
+	t.Fatalf("%s is not in .github/mirrored-images.txt, so nothing mirrors it", want)
 }
 
 // TestDefaultConfigDisablesDex: NIC wires ArgoCD OIDC directly to Keycloak,
