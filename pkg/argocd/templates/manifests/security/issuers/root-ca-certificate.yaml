@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .RootCASecretName }}
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  isCA: true
+  commonName: "Nebari root CA ({{ .Domain }})"
+  secretName: {{ .RootCASecretName }}
+  duration: 87600h # 10 years
+  renewBefore: 720h # 30 days
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  nameConstraints:
+    critical: true
+    permitted:
+      dnsDomains:
+        - "{{ .Domain }}"
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer

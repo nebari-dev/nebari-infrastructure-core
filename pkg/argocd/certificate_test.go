@@ -227,21 +227,24 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 		name             string
 		certificate      *config.CertificateConfig
 		wantSelfSigned   bool
+		wantRootCA       bool
 		wantLetsEncrypt  bool
 		wantOperatorName string
 		wantACMEEmail    string
 		wantACMEServer   string
 	}{
 		{
-			name:             "default uses selfsigned",
+			name:             "default uses the root CA",
 			wantSelfSigned:   true,
-			wantOperatorName: certificateIssuerSelfSigned,
+			wantRootCA:       true,
+			wantOperatorName: certificateIssuerCA,
 		},
 		{
-			name:             "selfsigned uses only selfsigned",
+			name:             "selfsigned uses the root CA",
 			certificate:      &config.CertificateConfig{Type: config.CertificateTypeSelfSigned},
 			wantSelfSigned:   true,
-			wantOperatorName: certificateIssuerSelfSigned,
+			wantRootCA:       true,
+			wantOperatorName: certificateIssuerCA,
 		},
 		{
 			name: "letsencrypt uses only letsencrypt",
@@ -268,7 +271,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			for _, path := range []string{selfSignedIssuerPath, letsencryptIssuerPath} {
+			for _, path := range []string{selfSignedIssuerPath, letsencryptIssuerPath, rootCACertificatePath, caIssuerPath} {
 				fullPath := filepath.Join(tmpDir, path)
 				if err := os.MkdirAll(filepath.Dir(fullPath), 0750); err != nil {
 					t.Fatalf("create stale issuer directory: %v", err)
@@ -288,6 +291,8 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				want bool
 			}{
 				{name: "selfsigned issuer", path: selfSignedIssuerPath, want: tt.wantSelfSigned},
+				{name: "root CA certificate", path: rootCACertificatePath, want: tt.wantRootCA},
+				{name: "CA issuer", path: caIssuerPath, want: tt.wantRootCA},
 				{name: "letsencrypt issuer", path: letsencryptIssuerPath, want: tt.wantLetsEncrypt},
 				{name: "cluster issuers application", path: "apps/cluster-issuers.yaml", want: true},
 			}
@@ -326,7 +331,61 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			if !strings.Contains(string(operatorValues), wantIssuerValue) {
 				t.Errorf("operator values missing %q", wantIssuerValue)
 			}
+
+			if tt.certificate == nil || tt.certificate.Type != config.CertificateTypeExisting {
+				// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+				gatewayCert, err := os.ReadFile(filepath.Join(tmpDir, gatewayCertificatePath))
+				if err != nil {
+					t.Fatalf("read gateway certificate: %v", err)
+				}
+				wantGatewayIssuer := "name: " + tt.wantOperatorName
+				if !strings.Contains(string(gatewayCert), wantGatewayIssuer) {
+					t.Errorf("gateway certificate missing issuer %q:\n%s", wantGatewayIssuer, gatewayCert)
+				}
+			}
 		})
+	}
+}
+
+func TestWriteAllToGit_RootCA(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NebariConfig{Domain: "nebari.example.com"}
+	if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+
+	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+	rootCA, err := os.ReadFile(filepath.Join(tmpDir, rootCACertificatePath))
+	if err != nil {
+		t.Fatalf("read root CA certificate: %v", err)
+	}
+	for _, want := range []string{
+		"kind: Certificate",
+		"name: " + rootCASecretName,
+		"namespace: cert-manager",
+		"isCA: true",
+		"secretName: " + rootCASecretName,
+		`- "nebari.example.com"`,
+		"name: " + certificateIssuerSelfSigned,
+	} {
+		if !strings.Contains(string(rootCA), want) {
+			t.Errorf("root CA certificate missing %q:\n%s", want, rootCA)
+		}
+	}
+
+	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+	caIssuer, err := os.ReadFile(filepath.Join(tmpDir, caIssuerPath))
+	if err != nil {
+		t.Fatalf("read CA issuer: %v", err)
+	}
+	for _, want := range []string{
+		"kind: ClusterIssuer",
+		"name: " + certificateIssuerCA,
+		"secretName: " + rootCASecretName,
+	} {
+		if !strings.Contains(string(caIssuer), want) {
+			t.Errorf("CA issuer missing %q:\n%s", want, caIssuer)
+		}
 	}
 }
 

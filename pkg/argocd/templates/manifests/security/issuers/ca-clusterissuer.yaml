@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  # Only rendered for certificate.type=selfsigned, where this is nebari-ca-issuer.
+  name: {{ .CertificateIssuer }}
+  labels:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  ca:
+    secretName: {{ .RootCASecretName }}
