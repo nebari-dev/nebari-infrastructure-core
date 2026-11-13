@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -27,7 +28,9 @@ const (
 	// the prefix is intentional and required for LocateChart to resolve it -
 	// unlike the bare-semver aws-load-balancer-controller chart. Check the NGC
 	// catalog (https://catalog.ngc.nvidia.com/orgs/nvidia/helm-charts/gpu-operator)
-	// for the current version when bumping.
+	// for the current version when bumping. A bump also means re-checking
+	// chartOperandTolerations and chartNFDWorkerTolerations against the new
+	// chart's values.yaml: they restate its default toleration lists.
 	gpuOperatorChartVersion   = "v26.3.2"
 	gpuOperatorNamespace      = "gpu-operator"
 	gpuOperatorReleaseName    = "gpu-operator"
@@ -35,6 +38,11 @@ const (
 
 	// enabledKey is the gpu-operator chart's per-component on/off value key.
 	enabledKey = "enabled"
+
+	// eksNoSchedule is the NoSchedule taint effect as config (and EKS) spell
+	// it; k8sNoSchedule is the Kubernetes spelling tolerations use.
+	eksNoSchedule = "NO_SCHEDULE"
+	k8sNoSchedule = "NoSchedule"
 )
 
 // gpuOperatorHelmValues builds the Helm values for the gpu-operator chart.
@@ -45,10 +53,14 @@ const (
 // disabled so the device plugin doesn't claim all /dev/infiniband/uverbs*
 // devices and conflict with the AWS EFA device plugin on EFA-enabled nodes.
 //
+// When a GPU node group carries taints beyond nvidia.com/gpu (a dedicated or
+// per-team pool), the operands and the NFD worker are given tolerations for
+// them; see gpuNodeGroupTolerations.
+//
 // When the operator grows to other providers these values will need to vary by
 // provider; for now they are AWS-specific.
-func gpuOperatorHelmValues() map[string]any {
-	return map[string]any{
+func gpuOperatorHelmValues(cfg *Config) map[string]any {
+	values := map[string]any{
 		"driver":  map[string]any{enabledKey: false},
 		"toolkit": map[string]any{enabledKey: false},
 		"devicePlugin": map[string]any{
@@ -58,6 +70,109 @@ func gpuOperatorHelmValues() map[string]any {
 			},
 		},
 	}
+
+	extra := gpuNodeGroupTolerations(cfg)
+	if len(extra) == 0 {
+		// Leave the chart's own tolerations alone: they already cover the
+		// nvidia.com/gpu taint NIC applies.
+		return values
+	}
+
+	// Setting a tolerations list replaces the chart's default, so restate it.
+	// The operands (device plugin, validator, GFD, DCGM exporter, ...) take
+	// daemonsets.tolerations through the ClusterPolicy. The NFD worker is a
+	// subchart DaemonSet with its own list, and it has to run on the node too:
+	// the operator schedules operands only on nodes NFD has labelled as having
+	// an NVIDIA PCI device.
+	values["daemonsets"] = map[string]any{
+		"tolerations": append(chartOperandTolerations(), extra...),
+	}
+	values["node-feature-discovery"] = map[string]any{
+		"worker": map[string]any{
+			"tolerations": append(chartNFDWorkerTolerations(), extra...),
+		},
+	}
+	return values
+}
+
+// chartOperandTolerations is the gpu-operator chart's default
+// daemonsets.tolerations (v26.3.2).
+func chartOperandTolerations() []any {
+	return []any{
+		toleration(gpuTaintKey, "Exists", "", k8sNoSchedule),
+	}
+}
+
+// chartNFDWorkerTolerations is the gpu-operator chart's default
+// node-feature-discovery.worker.tolerations (v26.3.2).
+func chartNFDWorkerTolerations() []any {
+	return []any{
+		toleration("node-role.kubernetes.io/control-plane", "Equal", "", k8sNoSchedule),
+		toleration(gpuTaintKey, "Exists", "", k8sNoSchedule),
+	}
+}
+
+// toleration builds one Helm tolerations entry. An Exists toleration carries
+// no value.
+func toleration(key, operator, value, effect string) map[string]any {
+	t := map[string]any{"key": key, "operator": operator, "effect": effect}
+	if operator != "Exists" {
+		t["value"] = value
+	}
+	return t
+}
+
+// taintEffects maps the EKS taint effect spelling used in config to the
+// Kubernetes one used in tolerations.
+var taintEffects = map[string]string{
+	eksNoSchedule:        k8sNoSchedule,
+	"NO_EXECUTE":         "NoExecute",
+	"PREFER_NO_SCHEDULE": "PreferNoSchedule",
+}
+
+// gpuNodeGroupTolerations returns a toleration for each taint on a GPU node
+// group that the chart's defaults don't already tolerate, matching the taint's
+// key, value and effect exactly. Without them the device plugin never runs on
+// such a node, so it never advertises nvidia.com/gpu, and a GPU pod loops
+// through autoscaler scale-ups. The nvidia.com/gpu NoSchedule taint NIC applies
+// is covered by the defaults; an nvidia.com/gpu taint with another effect is
+// not, so it is included. The result is sorted so the values are the same on
+// every deploy.
+//
+// The match is exact (Equal) rather than Exists on the key, and never a
+// tolerate-all: the NFD worker has no node selector, so it runs on every node
+// its tolerations admit. Exact tolerations keep it to the GPU pools and to
+// nodes carrying an identical taint (a team's CPU pool, say), where it only
+// adds feature labels.
+func gpuNodeGroupTolerations(cfg *Config) []any {
+	if cfg == nil {
+		return nil
+	}
+	seen := map[string]Taint{}
+	for _, group := range cfg.NodeGroups {
+		if !group.GPU {
+			continue
+		}
+		for _, t := range group.Taints {
+			if t.Key == gpuTaintKey && t.Effect == eksNoSchedule {
+				continue
+			}
+			seen[t.Key+"="+t.Value+":"+t.Effect] = t
+		}
+	}
+
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	tolerations := make([]any, 0, len(ids))
+	for _, id := range ids {
+		t := seen[id]
+		tolerations = append(tolerations, toleration(t.Key, "Equal", t.Value, taintEffects[t.Effect]))
+	}
+	return tolerations
 }
 
 // loadGPUOperatorChart locates and loads the gpu-operator Helm chart.
@@ -79,7 +194,7 @@ func loadGPUOperatorChart(chartPathOptions action.ChartPathOptions) (*chart.Char
 // Safe to call on every deploy; it upgrades an existing release rather than
 // failing. The operator needs no cloud IAM - it manages only in-cluster
 // resources - so unlike the LBC and autoscaler there is no Pod Identity here.
-func installGPUOperator(ctx context.Context, kubeconfigBytes []byte) error {
+func installGPUOperator(ctx context.Context, kubeconfigBytes []byte, cfg *Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.installGPUOperator")
 	defer span.End()
@@ -111,7 +226,7 @@ func installGPUOperator(ctx context.Context, kubeconfigBytes []byte) error {
 		status.Send(ctx, status.NewUpdate(status.LevelInfo, "GPU Operator already installed, upgrading").
 			WithResource("gpu-operator").
 			WithAction("upgrading"))
-		return upgradeGPUOperator(ctx, actionConfig)
+		return upgradeGPUOperator(ctx, actionConfig, cfg)
 	case errors.Is(err, driver.ErrReleaseNotFound):
 		// No existing release; fall through to fresh install.
 	default:
@@ -141,7 +256,7 @@ func installGPUOperator(ctx context.Context, kubeconfigBytes []byte) error {
 	// RunWithContext, not Run: Install.Run builds its own context.Background()
 	// and ignores ours, so a cancellation/timeout during the install window
 	// wouldn't propagate to Helm.
-	release, err := client.RunWithContext(ctx, loadedChart, gpuOperatorHelmValues())
+	release, err := client.RunWithContext(ctx, loadedChart, gpuOperatorHelmValues(cfg))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to install GPU Operator: %w", err)
@@ -161,7 +276,7 @@ func installGPUOperator(ctx context.Context, kubeconfigBytes []byte) error {
 }
 
 // upgradeGPUOperator upgrades an existing gpu-operator release.
-func upgradeGPUOperator(ctx context.Context, actionConfig *action.Configuration) error {
+func upgradeGPUOperator(ctx context.Context, actionConfig *action.Configuration, cfg *Config) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.upgradeGPUOperator")
 	defer span.End()
@@ -182,7 +297,7 @@ func upgradeGPUOperator(ctx context.Context, actionConfig *action.Configuration)
 
 	// RunWithContext, not Run: Upgrade.Run ignores the caller's context (it
 	// builds its own context.Background()).
-	release, err := client.RunWithContext(ctx, gpuOperatorReleaseName, loadedChart, gpuOperatorHelmValues())
+	release, err := client.RunWithContext(ctx, gpuOperatorReleaseName, loadedChart, gpuOperatorHelmValues(cfg))
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to upgrade GPU Operator: %w", err)
