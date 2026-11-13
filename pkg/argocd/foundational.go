@@ -67,6 +67,12 @@ const (
 	// value is written into both the keycloak namespace (read by realm-setup-job) and
 	// the longhorn-system namespace (read by the SecurityPolicy that fronts the UI).
 	LonghornOIDCClientSecretName = "longhorn-oidc-client-secret" //nolint:gosec // Secret name reference, not a credential
+
+	// ArgoCDOIDCClientSecretName is the name of the Kubernetes secret in the
+	// keycloak namespace holding the ArgoCD OIDC client secret. The realm-setup
+	// job registers the Keycloak client from it, and every deploy after the
+	// first reuses it for Argo CD's Helm values (see EnsureArgoCDClientSecret).
+	ArgoCDOIDCClientSecretName = "argocd-oidc-client-secret" //nolint:gosec // Secret name reference, not a credential
 )
 
 // FoundationalConfig holds configuration for foundational services
@@ -366,6 +372,11 @@ func createSecret(ctx context.Context, client kubernetes.Interface, secret *core
 	namespace := secret.Namespace
 	_, err := client.CoreV1().Secrets(namespace).Get(ctx, secret.Name, metav1.GetOptions{})
 	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			// Only NotFound means it's missing. Report other read errors as
+			// they are, not as a confusing AlreadyExists from the Create.
+			return fmt.Errorf("failed to get secret %s: %w", secret.Name, err)
+		}
 		// Secret doesn't exist, create it
 		_, err = client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
 		if err != nil {
@@ -423,20 +434,7 @@ func createKeycloakSecrets(ctx context.Context, client kubernetes.Interface, key
 
 	// 3. Create ArgoCD OIDC client secret (used by realm-setup job to configure the Keycloak client)
 	if argocdSSO.ClientSecret != "" {
-		if err := createSecret(ctx, client, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "argocd-oidc-client-secret",
-				Namespace: namespace,
-				Labels: map[string]string{
-					PartOfLabel:    NebariFoundationalPartOf,
-					ManagedByLabel: NebariManagedByValue,
-				},
-			},
-			Type: corev1.SecretTypeOpaque,
-			StringData: map[string]string{
-				"client-secret": argocdSSO.ClientSecret,
-			},
-		}); err != nil {
+		if err := createSecret(ctx, client, argoCDOIDCSecret(argocdSSO.ClientSecret)); err != nil {
 			return err
 		}
 	}

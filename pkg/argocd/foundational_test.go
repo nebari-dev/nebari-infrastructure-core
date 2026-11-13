@@ -2,10 +2,13 @@ package argocd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -471,4 +474,20 @@ func TestNewK8sClient(t *testing.T) {
 			t.Error("newK8sClient() should fail with empty kubeconfig")
 		}
 	})
+}
+
+// TestCreateSecretReturnsReadErrors checks that only NotFound counts as a
+// missing secret. Any other read error must come back as is, without an
+// attempt to create the secret.
+func TestCreateSecretReturnsReadErrors(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	failSecrets("get", KeycloakDefaultNamespace, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, ArgoCDOIDCClientSecretName, nil))(client)
+
+	err := createSecret(context.Background(), client, argoCDOIDCSecret("value"))
+	if err == nil || !strings.Contains(err.Error(), "failed to get secret argocd-oidc-client-secret") || !apierrors.IsForbidden(err) {
+		t.Fatalf("createSecret() error = %v, want the wrapped Forbidden read error", err)
+	}
+	if writes := secretWrites(client); len(writes) != 0 {
+		t.Errorf("secret writes = %v, want none", writes)
+	}
 }
