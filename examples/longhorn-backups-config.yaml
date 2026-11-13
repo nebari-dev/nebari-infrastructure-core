@@ -10,12 +10,15 @@ certificate:
 # GitOps repository configuration (required for foundational services)
 repository:
   existing:
-    url: "git@github.com:my-org/my-gitops-repo.git"
+    url: "https://github.com/my-org/my-gitops-repo.git"  # with ssh, use git@github.com:my-org/my-gitops-repo.git
     branch: main
     path: "clusters/my-nebari-aws-backups"
     auth:
-      ssh:
-        env: GIT_SSH_PRIVATE_KEY
+      token:
+        env: GIT_TOKEN  # environment variable containing a Git access token
+      # OR use an SSH key (required for Bitbucket, and use the git@ URL above):
+      # ssh:
+      #   env: GIT_SSH_PRIVATE_KEY
 
 cluster:
   aws:
