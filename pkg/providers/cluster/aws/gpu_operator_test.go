@@ -140,6 +140,13 @@ func TestGPUOperatorHelmValuesTolerations(t *testing.T) {
 			},
 		},
 		{
+			name: "taint without a value",
+			nodeGroups: map[string]NodeGroup{"gpu": {Instance: "g5.xlarge", GPU: true, Taints: []Taint{
+				{Key: "dedicated", Effect: "NO_SCHEDULE"},
+			}}},
+			want: []any{equal("dedicated", "", "NoSchedule")},
+		},
+		{
 			name: "nvidia.com/gpu taint with another effect, and other effects",
 			nodeGroups: map[string]NodeGroup{"gpu": {Instance: "g5.xlarge", GPU: true, Taints: []Taint{
 				{Key: gpuTaintKey, Value: "true", Effect: "NO_EXECUTE"},
@@ -175,6 +182,41 @@ func TestGPUOperatorHelmValuesTolerations(t *testing.T) {
 				t.Errorf("node-feature-discovery.worker.tolerations = %v, want %v", worker, want)
 			}
 		})
+	}
+}
+
+// TestGPUOperatorHelmValuesTolerationsLiteral pins the exact Helm values for one
+// tainted GPU node group, spelled out rather than built from the helpers the
+// code uses, so a change to the restated chart defaults or to the toleration
+// shape fails here. The defaults are the gpu-operator v26.3.2 values.yaml lists.
+func TestGPUOperatorHelmValuesTolerationsLiteral(t *testing.T) {
+	v := gpuOperatorHelmValues(&Config{NodeGroups: map[string]NodeGroup{
+		"team-a-gpu": {Instance: "g6.4xlarge", GPU: true, Taints: []Taint{
+			{Key: "tenant.nebari.dev/group", Value: "a", Effect: "NO_SCHEDULE"},
+			{Key: "dedicated", Effect: "NO_EXECUTE"},
+		}},
+	}})
+
+	gpuDefault := map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+	extra := []any{
+		// A taint without a value keeps an explicit empty value: Equal with
+		// value "" matches only a taint whose value is empty.
+		map[string]any{"key": "dedicated", "operator": "Equal", "value": "", "effect": "NoExecute"},
+		map[string]any{"key": "tenant.nebari.dev/group", "operator": "Equal", "value": "a", "effect": "NoSchedule"},
+	}
+
+	wantOperands := append([]any{gpuDefault}, extra...)
+	if got := v["daemonsets"].(map[string]any)["tolerations"]; !reflect.DeepEqual(got, wantOperands) {
+		t.Errorf("daemonsets.tolerations = %v, want %v", got, wantOperands)
+	}
+
+	wantWorker := append([]any{
+		map[string]any{"key": "node-role.kubernetes.io/control-plane", "operator": "Equal", "value": "", "effect": "NoSchedule"},
+		gpuDefault,
+	}, extra...)
+	got := v["node-feature-discovery"].(map[string]any)["worker"].(map[string]any)["tolerations"]
+	if !reflect.DeepEqual(got, wantWorker) {
+		t.Errorf("node-feature-discovery.worker.tolerations = %v, want %v", got, wantWorker)
 	}
 }
 

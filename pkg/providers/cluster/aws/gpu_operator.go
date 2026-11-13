@@ -28,7 +28,9 @@ const (
 	// the prefix is intentional and required for LocateChart to resolve it -
 	// unlike the bare-semver aws-load-balancer-controller chart. Check the NGC
 	// catalog (https://catalog.ngc.nvidia.com/orgs/nvidia/helm-charts/gpu-operator)
-	// for the current version when bumping.
+	// for the current version when bumping. A bump also means re-checking
+	// chartOperandTolerations and chartNFDWorkerTolerations against the new
+	// chart's values.yaml: they restate its default toleration lists.
 	gpuOperatorChartVersion   = "v26.3.2"
 	gpuOperatorNamespace      = "gpu-operator"
 	gpuOperatorReleaseName    = "gpu-operator"
@@ -136,6 +138,12 @@ var taintEffects = map[string]string{
 // is covered by the defaults; an nvidia.com/gpu taint with another effect is
 // not, so it is included. The result is sorted so the values are the same on
 // every deploy.
+//
+// The match is exact (Equal) rather than Exists on the key, and never a
+// tolerate-all: the NFD worker has no node selector, so it runs on every node
+// its tolerations admit. Exact tolerations keep it to the GPU pools and to
+// nodes carrying an identical taint (a team's CPU pool, say), where it only
+// adds feature labels.
 func gpuNodeGroupTolerations(cfg *Config) []any {
 	if cfg == nil {
 		return nil
