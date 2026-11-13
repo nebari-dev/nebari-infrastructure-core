@@ -48,7 +48,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, _ *config.C
 }
 
 // Deploy deploys GCP infrastructure (stub implementation)
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, _ cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, _ string, clusterConfig *config.ClusterConfig, _ cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	_, span := tracer.Start(ctx, "gcp.Deploy")
 	defer span.End()

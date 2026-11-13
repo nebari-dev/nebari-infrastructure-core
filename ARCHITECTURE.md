@@ -210,12 +210,13 @@ func (p *Provider) someFunction(ctx context.Context, clients *Clients, cfg *conf
 
 **Status:** NIC-managed kind (Kubernetes-in-Docker) cluster for local development
 
-**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Publishes the gateway's pinned NodePorts on host ports of 127.0.0.1 at cluster creation, so the platform is reachable via /etc/hosts entries without a LoadBalancer. To deploy onto a pre-existing cluster instead, use the `existing` provider.
+**Purpose:** Creates and tears down a local kind cluster as part of `nic deploy`/`nic destroy` (cluster named after `project_name`). Publishes the gateway's pinned NodePorts on host ports of 127.0.0.1 at cluster creation, so the platform is reachable via /etc/hosts entries without a LoadBalancer. On every deploy it also points the platform domain and its subdomains at the gateway service in the cluster's CoreDNS, so pods can reach the platform's hostnames. To deploy onto a pre-existing cluster instead, use the `existing` provider.
 
 | File | Purpose |
 |------|---------|
 | `provider.go` | Provider implementation: create/destroy the kind cluster, fetch kubeconfig |
 | `kind.go` | kind cluster lifecycle via `sigs.k8s.io/kind` (create/delete/list, node list from the worker node groups, gitops mount, gateway host port mappings, wait for all nodes Ready when there are workers, worker-count check on reuse) |
+| `coredns.go` | In-cluster DNS: a managed rewrite in the `coredns` ConfigMap that answers the platform domain with the gateway service |
 | `marker.go` | Provisioning marker (`nic-local-cluster` ConfigMap) recording the host ports a cluster was created with, verified on redeploy |
 | `config.go` | Local-specific config types: `Config`, `KindConfig`, `KindMount` |
 

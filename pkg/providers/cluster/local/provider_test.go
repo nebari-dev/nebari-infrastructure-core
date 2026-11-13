@@ -263,7 +263,7 @@ func TestDeployValidatesConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.ClusterConfig{Providers: map[string]any{"local": tt.local}}
 
-			err := p.Deploy(context.Background(), "test-project", cfg, cluster.DeployOptions{DryRun: true})
+			err := p.Deploy(context.Background(), "test-project", "", cfg, cluster.DeployOptions{DryRun: true})
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("Deploy returned error: %v", err)
