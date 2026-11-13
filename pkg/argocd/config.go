@@ -150,7 +150,7 @@ g, /argocd-viewers, role:readonly`
 	}
 	configs["secret"] = map[string]any{
 		"extra": map[string]any{
-			"oidc.keycloak.clientSecret": clientSecret,
+			argoCDOIDCClientSecretKey: clientSecret,
 		},
 	}
 

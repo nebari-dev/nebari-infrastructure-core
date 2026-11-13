@@ -272,7 +272,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 
 		// Generate OIDC client secret upfront - needed by both ArgoCD Helm values
 		// and the Keycloak realm-setup job
-		argoCDClientSecret, err := generateSecurePassword(rand.Reader)
+		generatedClientSecret, err := generateSecurePassword(rand.Reader)
 		if err != nil {
 			span.RecordError(err)
 			status.Send(ctx, status.NewUpdate(status.LevelError, "Failed to generate ArgoCD client secret").
@@ -280,10 +280,17 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 			return nil, fmt.Errorf("generate ArgoCD client secret: %w", err)
 		}
 
-		// Build ArgoCD config with Keycloak OIDC SSO
-		argoCDConfig := argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)
-
-		if err := argocd.Install(ctx, cfg, clusterProvider, repoSource, trustPEM, argoCDConfig); err != nil {
+		// The generated secret is only used on the first deploy. After that the
+		// stored one wins, so Argo CD and the Keycloak client keep the same
+		// value across redeploys and chart upgrades (#463).
+		argoCDClientSecret, err := argocd.EnsureArgoCDClientSecret(ctx, cfg, clusterProvider, generatedClientSecret)
+		if err != nil {
+			// Installing with a value that may not match the stored one would
+			// bring the drift back, so skip Argo CD as if its install failed.
+			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Skipping Argo CD install").
+				WithMetadata("error", err.Error()))
+		} else if err := argocd.Install(ctx, cfg, clusterProvider, repoSource, trustPEM,
+			argocd.ConfigWithOIDC(cfg.Domain, infraSettings.KeycloakBasePath, argoCDClientSecret)); err != nil {
 			// Log error but don't fail deployment
 			status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install Argo CD").
 				WithMetadata("error", err.Error()))
