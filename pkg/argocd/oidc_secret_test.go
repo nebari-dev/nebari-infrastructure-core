@@ -67,6 +67,9 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 		wantErr    string
 		wantStored map[string]string // keycloak namespace Secret data afterwards; nil: no Secret
 		wantWrites []string
+		// wantDiffers: an installed Argo CD holds a value other than the
+		// returned one, so the caller has to force the Helm upgrade.
+		wantDiffers bool
 	}{
 		{
 			name:       "first deploy stores the generated secret",
@@ -75,13 +78,39 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 			wantWrites: []string{"create"},
 		},
 		{
-			name: "the stored secret wins over the generated one and Argo CD's copy",
+			name: "the stored secret wins over the generated one and a drifted Argo CD",
 			objects: []runtime.Object{
 				storedArgoCDSecret(value("stored")),
 				installedArgoCDSecret(argoCD("drifted")),
 			},
+			want:        "stored",
+			wantStored:  map[string]string{"client-secret": "stored"},
+			wantDiffers: true,
+		},
+		{
+			name: "an Argo CD that already has the stored secret needs no upgrade",
+			objects: []runtime.Object{
+				storedArgoCDSecret(value("stored")),
+				installedArgoCDSecret(argoCD("stored")),
+			},
 			want:       "stored",
 			wantStored: map[string]string{"client-secret": "stored"},
+		},
+		{
+			name:       "the stored secret is used as is when Argo CD isn't installed",
+			objects:    []runtime.Object{storedArgoCDSecret(value("stored"))},
+			want:       "stored",
+			wantStored: map[string]string{"client-secret": "stored"},
+		},
+		{
+			name: "an Argo CD install without an OIDC secret differs from the stored one",
+			objects: []runtime.Object{
+				storedArgoCDSecret(value("stored")),
+				installedArgoCDSecret(map[string][]byte{"server.secretkey": []byte("x")}),
+			},
+			want:        "stored",
+			wantStored:  map[string]string{"client-secret": "stored"},
+			wantDiffers: true,
 		},
 		{
 			name:       "with nothing stored, the value Argo CD is installed with is kept",
@@ -108,11 +137,12 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 			wantWrites: []string{"update"},
 		},
 		{
-			name:       "an Argo CD install without an OIDC secret falls back to the generated one",
-			objects:    []runtime.Object{installedArgoCDSecret(map[string][]byte{"server.secretkey": []byte("x")})},
-			want:       "generated",
-			wantStored: map[string]string{"client-secret": "generated"},
-			wantWrites: []string{"create"},
+			name:        "an Argo CD install without an OIDC secret falls back to the generated one",
+			objects:     []runtime.Object{installedArgoCDSecret(map[string][]byte{"server.secretkey": []byte("x")})},
+			want:        "generated",
+			wantStored:  map[string]string{"client-secret": "generated"},
+			wantWrites:  []string{"create"},
+			wantDiffers: true,
 		},
 		{
 			name:    "an error reading the stored secret is returned, not treated as missing",
@@ -123,6 +153,13 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 			name:    "an error reading Argo CD's secret is returned, not treated as missing",
 			react:   failSecrets("get", DefaultNamespace, unavailable),
 			wantErr: "failed to get secret argocd-secret",
+		},
+		{
+			name:       "an error reading Argo CD's secret is returned even when a value is stored",
+			objects:    []runtime.Object{storedArgoCDSecret(value("stored"))},
+			react:      failSecrets("get", DefaultNamespace, unavailable),
+			wantErr:    "failed to get secret argocd-secret",
+			wantStored: map[string]string{"client-secret": "stored"},
 		},
 		{
 			name:    "a failed create is returned",
@@ -148,7 +185,7 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 				tt.react(client)
 			}
 
-			got, err := ensureArgoCDClientSecret(context.Background(), client, "generated")
+			got, differs, err := ensureArgoCDClientSecret(context.Background(), client, "generated")
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -157,8 +194,8 @@ func TestEnsureArgoCDClientSecret(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("ensureArgoCDClientSecret() error = %v", err)
 			}
-			if got != tt.want {
-				t.Errorf("ensureArgoCDClientSecret() = %q, want %q", got, tt.want)
+			if got != tt.want || differs != tt.wantDiffers {
+				t.Errorf("ensureArgoCDClientSecret() = %q, %v, want %q, %v", got, differs, tt.want, tt.wantDiffers)
 			}
 			if writes := secretWrites(client); strings.Join(writes, ",") != strings.Join(tt.wantWrites, ",") {
 				t.Errorf("secret writes = %v, want %v", writes, tt.wantWrites)
@@ -194,11 +231,11 @@ func TestEnsureArgoCDClientSecretAcrossDeploys(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
 
-	first, err := ensureArgoCDClientSecret(ctx, client, "first-deploy")
+	first, _, err := ensureArgoCDClientSecret(ctx, client, "first-deploy")
 	if err != nil {
 		t.Fatalf("first deploy: %v", err)
 	}
-	second, err := ensureArgoCDClientSecret(ctx, client, "second-deploy")
+	second, _, err := ensureArgoCDClientSecret(ctx, client, "second-deploy")
 	if err != nil {
 		t.Fatalf("second deploy: %v", err)
 	}
