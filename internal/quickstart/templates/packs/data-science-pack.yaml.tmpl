@@ -23,9 +23,34 @@ spec:
         jupyterhub:
           custom:
             # Mount the cluster's CA bundle in user and app pods, so notebooks
-            # trust the platform's self-signed certificates. The hub mounts it
-            # regardless of this setting.
+            # trust the platform's self-signed certificates.
             trust-bundle-enabled: true
+          hub:
+            # The chart's hub volumes, copied from its values.yaml (Helm
+            # replaces lists), with org-ca required instead of optional. The
+            # chart mounts it as optional, so a hub that starts before the
+            # bundle exists runs without the cluster's CA. Quickstart clusters
+            # always have the bundle, so the hub waits for it instead.
+            extraVolumes:
+              - name: custom-config
+                configMap:
+                  name: nebari-data-science-pack-hub-config
+              - name: oauth-client
+                secret:
+                  secretName: data-science-pack-nebari-data-science-pack-oidc-client
+                  optional: true
+              - name: org-ca
+                configMap:
+                  name: nebari-trust-bundle
+              - name: ca-merged
+                emptyDir: {}
+            config:
+              KeyCloakOAuthenticator:
+                # The hub's login calls go through pycurl, whose libcurl
+                # ignores SSL_CERT_FILE, so point it at the CA bundle the hub
+                # merges at startup.
+                http_request_kwargs:
+                  ca_certs: /etc/ssl/certs-extra/ca-bundle.crt
         sharedStorage:
           nfsServer:
             # kind nodes run on overlayfs, where the NFS server's NFSv4 export
