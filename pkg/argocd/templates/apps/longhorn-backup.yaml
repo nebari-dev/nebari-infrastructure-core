@@ -31,8 +31,9 @@ spec:
       # longhorn-system is created by the Longhorn Helm install, which runs before
       # ArgoCD syncs this app — so CreateNamespace is intentionally omitted.
       - ServerSideApply=true
+    # Retry indefinitely, see https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
     retry:
-      limit: 5
+      limit: -1
       backoff:
         duration: 5s
         factor: 2
