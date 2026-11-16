@@ -12,15 +12,18 @@ metadata:
 spec:
   project: nebari-apps
   source:
-    repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
-    chart: nebari-nebi-pack
-    targetRevision: 0.1.4
+    repoURL: https://github.com/nebari-dev/nebi-pack
+    targetRevision: org-ca-bundle-key
+    path: .
     helm:
       # data-science-pack derives Nebi's OIDC client ID from this release name.
       releaseName: nebi-pack
       valuesObject:
         nebariapp:
           hostname: nebi.{{ .Domain }}
+        orgCABundle:
+          configMapName: nebari-trust-bundle
+          key: ca-certificates.crt
   destination:
     server: https://kubernetes.default.svc
     namespace: nebi
