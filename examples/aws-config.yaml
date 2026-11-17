@@ -168,6 +168,8 @@ cluster:
       #             # nvidia.com/gpu=true:NO_SCHEDULE taint (set your own
       #             # nvidia.com/gpu taint to override). GPU workloads must
       #             # tolerate it; the NVIDIA GPU Operator tolerates it already.
+      #             # Other taints on a gpu: true group are added to the
+      #             # operator's tolerations automatically.
       #
       # # Example: ARM64 Graviton node group
       # graviton:

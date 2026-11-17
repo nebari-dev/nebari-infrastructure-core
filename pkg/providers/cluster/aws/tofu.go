@@ -108,7 +108,7 @@ func applyGPUTaint(group NodeGroup) NodeGroup {
 	}
 	taints := make([]Taint, len(group.Taints), len(group.Taints)+1)
 	copy(taints, group.Taints)
-	taints = append(taints, Taint{Key: gpuTaintKey, Value: "true", Effect: "NO_SCHEDULE"})
+	taints = append(taints, Taint{Key: gpuTaintKey, Value: "true", Effect: eksNoSchedule})
 	group.Taints = taints
 	return group
 }

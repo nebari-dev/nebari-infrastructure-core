@@ -173,7 +173,7 @@ cluster:
     #   node_selector: { node.longhorn.io/storage: "true" }
 ```
 
-**GPU node groups:** setting `gpu: true` selects the `AL2023_x86_64_NVIDIA` AMI and makes NIC automatically apply the taint `nvidia.com/gpu=true:NO_SCHEDULE`, so only pods that tolerate it schedule onto GPU nodes. The NVIDIA GPU Operator does not taint nodes itself; it only tolerates this taint on its own operands. To use a different value or effect, set an explicit `nvidia.com/gpu` taint in the node group's `taints` and NIC leaves it untouched.
+**GPU node groups:** setting `gpu: true` selects the `AL2023_x86_64_NVIDIA` AMI and makes NIC automatically apply the taint `nvidia.com/gpu=true:NO_SCHEDULE`, so only pods that tolerate it schedule onto GPU nodes. The NVIDIA GPU Operator does not taint nodes itself; it only tolerates this taint on its own operands. To use a different value or effect, set an explicit `nvidia.com/gpu` taint in the node group's `taints` and NIC leaves it untouched. Any other taint on a GPU node group (a dedicated or per-team pool) is added to the GPU Operator's operand and NFD worker tolerations, so the device plugin still runs there and the node advertises `nvidia.com/gpu`.
 
 **Longhorn default:** on AWS Longhorn is opt-in: an omitted `longhorn:` block means *disabled*, following the shared `longhorn.Config` in `pkg/storage/longhorn/config.go`, and a block without `enabled` enables it. `default_class: false` keeps Longhorn installed without making it the default StorageClass. Hetzner inverts the shared default, so there an omitted block means *enabled*. To move an AWS cluster off Longhorn, see [Migrating AWS clusters from Longhorn to gp3](../../operations/aws-longhorn-to-gp3.md).
 
