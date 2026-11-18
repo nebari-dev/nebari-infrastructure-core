@@ -7,6 +7,7 @@ Configuration options specific to Microsoft Azure (AKS).
 ## Table of Contents
 
 - [Config](#config)
+- [FilesConfig](#filesconfig)
 - [NetworkConfig](#networkconfig)
 - [NodeGroup](#nodegroup)
 
@@ -29,6 +30,22 @@ Config is the user-facing Azure cluster configuration as parsed from the
 | Network | `network` | `*NetworkConfig` | No |  |
 | NodeGroups | `node_groups` | `map[string]NodeGroup` | Yes |  |
 | Tags | `tags` | `map[string]string` | No |  |
+| Files | `files` | `*FilesConfig` | No |  |
+
+---
+
+## FilesConfig
+
+FilesConfig enables a ReadWriteMany StorageClass backed by Azure Files over
+NFS. The Azure Files CSI driver ships with AKS and creates a storage account
+and one file share per PersistentVolumeClaim, so NIC only creates the
+StorageClass and opens the node subnet to Azure Storage.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | bool | No |  |
+| SKU | `sku` | string | No | default: PremiumV2_LRS. PremiumV2_LRS, PremiumV2_ZRS, Premium_LRS or Premium_ZRS. PremiumV2 needs kubernetes_version 1.35 or later |
+| StorageClassName | `storage_class_name` | string | No | default: azurefile-nfs |
 
 ---
 

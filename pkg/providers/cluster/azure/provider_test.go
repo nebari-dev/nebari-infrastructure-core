@@ -122,6 +122,31 @@ func TestProviderInfraSettings(t *testing.T) {
 	}
 }
 
+func TestProviderInfraSettingsRWXStorageClass(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]any
+		want  string
+	}{
+		{name: "files not configured", files: nil, want: ""},
+		{name: "files disabled", files: map[string]any{"enabled": false}, want: ""},
+		{name: "files enabled", files: map[string]any{"enabled": true}, want: "azurefile-nfs"},
+		{name: "files with a custom name", files: map[string]any{"enabled": true, "storage_class_name": "shared"}, want: "shared"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			azureCfg := map[string]any{"region": "eastus"}
+			if tc.files != nil {
+				azureCfg["files"] = tc.files
+			}
+			cc := &config.ClusterConfig{Providers: map[string]any{ProviderName: azureCfg}}
+			if got := NewProvider().InfraSettings(cc).RWXStorageClass; got != tc.want {
+				t.Errorf("RWXStorageClass = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProviderSummaryWithConfig(t *testing.T) {
 	p := NewProvider()
 	cc := &config.ClusterConfig{

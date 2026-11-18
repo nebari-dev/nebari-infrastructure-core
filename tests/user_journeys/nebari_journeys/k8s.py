@@ -145,13 +145,19 @@ class ScratchNamespace:
             if exc.status != 404:
                 raise
 
-    def request_volume(self, name: str, size: str, storage_class: str) -> str:
+    def request_volume(
+        self,
+        name: str,
+        size: str,
+        storage_class: str,
+        access_mode: str = "ReadWriteOnce",
+    ) -> str:
         self.cluster.core.create_namespaced_persistent_volume_claim(
             namespace=self.name,
             body={
                 "metadata": {"name": name, "labels": dict(JOURNEY_LABELS)},
                 "spec": {
-                    "accessModes": ["ReadWriteOnce"],
+                    "accessModes": [access_mode],
                     "storageClassName": storage_class,
                     "resources": {"requests": {"storage": size}},
                 },
@@ -160,22 +166,62 @@ class ScratchNamespace:
         return name
 
     def wait_volume_bound(self, name: str, timeout: float = 180) -> None:
+        """Wait for a PVC to bind, naming its events if it never does.
+
+        CI destroys the cluster right after the journeys run, so a bare
+        timeout leaves nothing to inspect. The PVC's events are where
+        Kubernetes says why: ProvisioningFailed with the provisioner's error,
+        or only ExternalProvisioning ("waiting for a volume to be created")
+        when the provisioner never picked the claim up.
+        """
+
         def bound() -> bool:
             pvc = self.cluster.core.read_namespaced_persistent_volume_claim(
                 name=name, namespace=self.name
             )
             return pvc.status.phase == "Bound"
 
-        wait_for_condition(
-            bound, timeout=timeout, description=f"PVC {self.name}/{name} to bind"
-        )
+        try:
+            wait_for_condition(
+                bound, timeout=timeout, description=f"PVC {self.name}/{name} to bind"
+            )
+        except TimeoutError as exc:
+            raise TimeoutError(f"{exc}; {self.volume_events(name)}") from exc
+
+    def volume_events(self, name: str) -> str:
+        """The PVC's events as one line, for an error message.
+
+        Never raises: it only runs on a path that is already failing, and an
+        error here must not replace the timeout it is meant to explain.
+        """
+        try:
+            events = self.cluster.core.list_namespaced_event(
+                namespace=self.name,
+                field_selector=(
+                    f"involvedObject.kind=PersistentVolumeClaim,involvedObject.name={name}"
+                ),
+            ).items
+        except ApiException as exc:
+            return f"could not read PVC events: {exc.status} {exc.reason}"
+        if not events:
+            return "the PVC has no events"
+        lines = [f"{e.type} {e.reason} (x{e.count or 1}): {e.message}" for e in events]
+        return "PVC events: " + " | ".join(lines)
 
     def run_pod(
         self,
         name: str,
         pvc_name: str | None = None,
         command: list[str] | None = None,
+        run_as_user: int | None = None,
+        fs_group: int | None = None,
     ) -> str:
+        """Start a utility pod, optionally mounting a PVC at MOUNT_PATH.
+
+        run_as_user and fs_group set the pod securityContext, for journeys
+        that must write as a non-root user the way real workloads do. Both
+        are omitted when unset, so the image default (root) applies.
+        """
         container = {
             "name": "main",
             "image": UTILITY_IMAGE,
@@ -189,15 +235,24 @@ class ScratchNamespace:
             )
             container["volumeMounts"].append({"name": "data", "mountPath": MOUNT_PATH})
 
+        spec: dict = {
+            "restartPolicy": "Never",
+            "containers": [container],
+            "volumes": volumes,
+        }
+        security_context = {}
+        if run_as_user is not None:
+            security_context["runAsUser"] = run_as_user
+        if fs_group is not None:
+            security_context["fsGroup"] = fs_group
+        if security_context:
+            spec["securityContext"] = security_context
+
         self.cluster.core.create_namespaced_pod(
             namespace=self.name,
             body={
                 "metadata": {"name": name, "labels": dict(JOURNEY_LABELS)},
-                "spec": {
-                    "restartPolicy": "Never",
-                    "containers": [container],
-                    "volumes": volumes,
-                },
+                "spec": spec,
             },
         )
         return name
@@ -282,8 +337,9 @@ class ScratchNamespace:
         `if ns.exec(...) != ""` is a false pass, and `assert expected in
         ns.exec(...)` is the only safe shape.
 
-        Both current callers use that safe shape: they assert on a specific
-        canary string, which a shell error message cannot satisfy. A caller
+        Every current caller uses that safe shape: they assert on a specific
+        canary string, which a shell error message cannot satisfy, and only
+        quote any other exec output in a failure message. A caller
         that needs to know whether the command SUCCEEDED must not use this
         method as-is; give it a checked variant built on
         `stream(..., _preload_content=False)`, which exposes `returncode` and

@@ -18,31 +18,32 @@ var tofuTemplates embed.FS
 // types + `omitempty` let us pass null-as-omitted so the module's defaults win
 // when a user doesn't set a value.
 type TFVars struct {
-	ProjectName               string                 `json:"project_name"`
-	Location                  string                 `json:"location"`
-	Tags                      map[string]string      `json:"tags,omitempty"`
-	CreateResourceGroup       bool                   `json:"create_resource_group"`
-	ExistingResourceGroupName *string                `json:"existing_resource_group_name,omitempty"`
-	CreateVNet                bool                   `json:"create_vnet"`
-	VNetCIDRBlock             string                 `json:"vnet_cidr_block,omitempty"`
-	NodeSubnetCIDRBlock       string                 `json:"node_subnet_cidr_block,omitempty"`
-	ExistingVNetID            *string                `json:"existing_vnet_id,omitempty"`
-	ExistingNodeSubnetID      *string                `json:"existing_node_subnet_id,omitempty"`
-	NetworkPlugin             string                 `json:"network_plugin"`
-	NetworkPluginMode         string                 `json:"network_plugin_mode"`
-	NetworkDataPlane          string                 `json:"network_data_plane,omitempty"`
-	PodCIDR                   string                 `json:"pod_cidr,omitempty"`
-	ServiceCIDR               string                 `json:"service_cidr,omitempty"`
-	DNSServiceIP              string                 `json:"dns_service_ip,omitempty"`
-	KubernetesVersion         *string                `json:"kubernetes_version,omitempty"`
-	PrivateClusterEnabled     bool                   `json:"private_cluster_enabled"`
-	AuthorizedIPRanges        []string               `json:"authorized_ip_ranges,omitempty"`
-	SKUTier                   string                 `json:"sku_tier"`
-	IdentityType              string                 `json:"identity_type"`
-	NodeGroups                map[string]TFNodeGroup `json:"node_groups"`
-	BackupContainerCreate     bool                   `json:"backup_container_create"`
-	BackupStorageAccount      string                 `json:"backup_storage_account,omitempty"`
-	BackupContainerName       string                 `json:"backup_container_name,omitempty"`
+	ProjectName                string                 `json:"project_name"`
+	Location                   string                 `json:"location"`
+	Tags                       map[string]string      `json:"tags,omitempty"`
+	CreateResourceGroup        bool                   `json:"create_resource_group"`
+	ExistingResourceGroupName  *string                `json:"existing_resource_group_name,omitempty"`
+	CreateVNet                 bool                   `json:"create_vnet"`
+	VNetCIDRBlock              string                 `json:"vnet_cidr_block,omitempty"`
+	NodeSubnetCIDRBlock        string                 `json:"node_subnet_cidr_block,omitempty"`
+	ExistingVNetID             *string                `json:"existing_vnet_id,omitempty"`
+	ExistingNodeSubnetID       *string                `json:"existing_node_subnet_id,omitempty"`
+	NodeSubnetServiceEndpoints []string               `json:"node_subnet_service_endpoints,omitempty"`
+	NetworkPlugin              string                 `json:"network_plugin"`
+	NetworkPluginMode          string                 `json:"network_plugin_mode"`
+	NetworkDataPlane           string                 `json:"network_data_plane,omitempty"`
+	PodCIDR                    string                 `json:"pod_cidr,omitempty"`
+	ServiceCIDR                string                 `json:"service_cidr,omitempty"`
+	DNSServiceIP               string                 `json:"dns_service_ip,omitempty"`
+	KubernetesVersion          *string                `json:"kubernetes_version,omitempty"`
+	PrivateClusterEnabled      bool                   `json:"private_cluster_enabled"`
+	AuthorizedIPRanges         []string               `json:"authorized_ip_ranges,omitempty"`
+	SKUTier                    string                 `json:"sku_tier"`
+	IdentityType               string                 `json:"identity_type"`
+	NodeGroups                 map[string]TFNodeGroup `json:"node_groups"`
+	BackupContainerCreate      bool                   `json:"backup_container_create"`
+	BackupStorageAccount       string                 `json:"backup_storage_account,omitempty"`
+	BackupContainerName        string                 `json:"backup_container_name,omitempty"`
 }
 
 // TFNodeGroup is the JSON shape the Terraform module expects for each node
@@ -86,6 +87,9 @@ const (
 	tagClusterName = "nic.nebari.dev_cluster-name"
 	tagManagedBy   = "nic.nebari.dev_managed-by"
 )
+
+// storageServiceEndpoint is the subnet service endpoint NFS file shares need.
+const storageServiceEndpoint = "Microsoft.Storage"
 
 // managedByValue is the value stamped on the tagManagedBy tag to mark
 // resources as managed by NIC, enabling tag-based discovery and cleanup.
@@ -134,6 +138,14 @@ func (c *Config) toTFVars(projectName string, backup *cluster.BackupBucketSpec) 
 		if c.Network.ExistingNodeSubnetID != "" {
 			vars.ExistingNodeSubnetID = &c.Network.ExistingNodeSubnetID
 		}
+	}
+
+	// NFS file shares only accept traffic from the VNet, through a
+	// Microsoft.Storage service endpoint on the node subnet. The module manages
+	// the endpoints of a subnet it creates, so the endpoint has to be declared
+	// there or the next apply removes it. An existing subnet is the operator's.
+	if c.FilesEnabled() && vars.CreateVNet {
+		vars.NodeSubnetServiceEndpoints = []string{storageServiceEndpoint}
 	}
 
 	if backup != nil {

@@ -115,10 +115,11 @@ type InfraSettings struct {
 	// can override this.
 	HTTPSPort int
 
-	// EFSStorageClass is the name of the EFS-backed StorageClass, if available.
-	// Empty when EFS is not enabled. Software packs can use this for ReadWriteMany
-	// volumes (e.g., shared model storage for LLM serving).
-	EFSStorageClass string
+	// RWXStorageClass is the name of the NIC-managed StorageClass that provides
+	// ReadWriteMany volumes on a cloud-managed shared filesystem, if the
+	// cluster config enables one. Empty means NIC created no such class.
+	// Examples: "efs-sc" (AWS EFS), "azurefile-nfs" (Azure Files over NFS).
+	RWXStorageClass string
 
 	// ProducesPlan indicates whether a dry run of this provider produces a
 	// plan it can write to DeployOptions.PlanOut. True for providers that plan
