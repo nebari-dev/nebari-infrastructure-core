@@ -126,6 +126,75 @@ func TestConfigValidate(t *testing.T) {
 			wantErr:   true,
 			wantInErr: "dataplane",
 		},
+		{
+			name: "files disabled ignores an invalid sku",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Files:      &FilesConfig{SKU: "Standard_LRS"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "files enabled with defaults",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Files:      &FilesConfig{Enabled: true},
+			},
+			wantErr: false,
+		},
+		{
+			name: "files rejects a Standard sku",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Files:      &FilesConfig{Enabled: true, SKU: "Standard_LRS"},
+			},
+			wantErr:   true,
+			wantInErr: "files.sku",
+		},
+		{
+			name: "files default PremiumV2 sku on kubernetes 1.34",
+			cfg: Config{
+				Region:            "eastus",
+				NodeGroups:        map[string]NodeGroup{"system": validNodeGroup},
+				KubernetesVersion: "1.34",
+				Files:             &FilesConfig{Enabled: true},
+			},
+			wantErr:   true,
+			wantInErr: "1.35 or later",
+		},
+		{
+			name: "files PremiumV2 sku on kubernetes 1.35.2",
+			cfg: Config{
+				Region:            "eastus",
+				NodeGroups:        map[string]NodeGroup{"system": validNodeGroup},
+				KubernetesVersion: "1.35.2",
+				Files:             &FilesConfig{Enabled: true, SKU: "PremiumV2_ZRS"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "files Premium sku on kubernetes 1.34",
+			cfg: Config{
+				Region:            "eastus",
+				NodeGroups:        map[string]NodeGroup{"system": validNodeGroup},
+				KubernetesVersion: "1.34",
+				Files:             &FilesConfig{Enabled: true, SKU: "Premium_LRS"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "files rejects an invalid storage class name",
+			cfg: Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"system": validNodeGroup},
+				Files:      &FilesConfig{Enabled: true, StorageClassName: "Azure_Files"},
+			},
+			wantErr:   true,
+			wantInErr: "storage_class_name",
+		},
 	}
 
 	for _, tc := range cases {
@@ -139,6 +208,35 @@ func TestConfigValidate(t *testing.T) {
 			}
 			if tc.wantErr && tc.wantInErr != "" && !strings.Contains(err.Error(), tc.wantInErr) {
 				t.Fatalf("error %q does not contain expected substring %q", err.Error(), tc.wantInErr)
+			}
+		})
+	}
+}
+
+func TestFilesDefaults(t *testing.T) {
+	cases := []struct {
+		name      string
+		files     *FilesConfig
+		wantSKU   string
+		wantClass string
+	}{
+		{name: "nil block", files: nil, wantSKU: "PremiumV2_LRS", wantClass: "azurefile-nfs"},
+		{name: "empty block", files: &FilesConfig{Enabled: true}, wantSKU: "PremiumV2_LRS", wantClass: "azurefile-nfs"},
+		{
+			name:      "overrides",
+			files:     &FilesConfig{Enabled: true, SKU: "Premium_ZRS", StorageClassName: "shared"},
+			wantSKU:   "Premium_ZRS",
+			wantClass: "shared",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Files: tc.files}
+			if got := cfg.FilesSKU(); got != tc.wantSKU {
+				t.Errorf("FilesSKU() = %q, want %q", got, tc.wantSKU)
+			}
+			if got := cfg.FilesStorageClassName(); got != tc.wantClass {
+				t.Errorf("FilesStorageClassName() = %q, want %q", got, tc.wantClass)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package azure
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -146,6 +147,35 @@ func TestToTFVarsBackupContainer(t *testing.T) {
 			t.Fatalf("bad tfvars: %+v", v)
 		}
 	})
+}
+
+func TestToTFVarsNodeSubnetServiceEndpoints(t *testing.T) {
+	byoNetwork := &NetworkConfig{ExistingVNetID: "/subs/.../vn1", ExistingNodeSubnetID: "/subs/.../sub1"}
+
+	cases := []struct {
+		name    string
+		files   *FilesConfig
+		network *NetworkConfig
+		want    []string
+	}{
+		{name: "files disabled", files: nil, want: nil},
+		{name: "files enabled on a module-created subnet", files: &FilesConfig{Enabled: true}, want: []string{"Microsoft.Storage"}},
+		{name: "files enabled on an existing subnet", files: &FilesConfig{Enabled: true}, network: byoNetwork, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{
+				Region:     "eastus",
+				NodeGroups: map[string]NodeGroup{"s": {Mode: modeSystem}},
+				Network:    tc.network,
+				Files:      tc.files,
+			}
+			got := cfg.toTFVars("p", nil).NodeSubnetServiceEndpoints
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("NodeSubnetServiceEndpoints = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func contains(haystack, needle string) bool {

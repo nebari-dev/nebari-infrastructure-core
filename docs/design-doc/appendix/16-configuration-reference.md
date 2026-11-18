@@ -356,11 +356,19 @@ cluster:
 
     tags:
       Environment: development
+
+    # Optional ReadWriteMany StorageClass on Azure Files over NFS.
+    # files:
+    #   enabled: true
+    #   sku: PremiumV2_LRS                     # default | PremiumV2_ZRS | Premium_LRS | Premium_ZRS
+    #   storage_class_name: azurefile-nfs      # default
 ```
 
 Requires `AZURE_SUBSCRIPTION_ID`, which NIC maps to `ARM_SUBSCRIPTION_ID` for the child OpenTofu process. Remaining auth is resolved by `azidentity.DefaultAzureCredential` (env vars, workload identity, managed identity, then `az login`).
 
-The provider consumes the upstream `nebari-dev/aks-cluster/azurerm` registry module. It is currently pinned to a git branch ref while the Longhorn backup-container support is unreleased (see the `TODO(#431)` in `pkg/providers/cluster/azure/templates/main.tf`); it reverts to the registry source + pinned version once a release lands. State lives in an `azurerm` backend on a bootstrapped storage account.
+`files.enabled` creates a ReadWriteMany StorageClass backed by Azure Files over NFS, the Azure counterpart of `cluster.aws.efs`. The Azure Files CSI driver ships with AKS and creates a storage account in the node resource group and one file share per PersistentVolumeClaim, so nothing else is provisioned and the shares are deleted with the cluster. NFS shares only accept traffic from the VNet, so NIC adds a `Microsoft.Storage` service endpoint to the node subnet it creates. With `existing_node_subnet_id`, the operator must add that endpoint to the subnet. The PremiumV2 SKUs need `kubernetes_version` 1.35 or later, because AKS ships the CSI driver version that supports them from 1.35 on. Each share is billed for at least the SKU's minimum size (32 GiB for PremiumV2, 100 GiB for Premium), however small the claim.
+
+The provider consumes the upstream `nebari-dev/aks-cluster/azurerm` module. It is currently pinned to a git commit while the node subnet service endpoint support is unreleased (see the TODO in `pkg/providers/cluster/azure/templates/main.tf`), and it reverts to the registry source and a pinned version once a release lands. State lives in an `azurerm` backend on a bootstrapped storage account.
 
 ### 2.6 `cluster.gcp` (stub)
 

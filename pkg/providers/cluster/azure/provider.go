@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -208,10 +209,55 @@ func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig
 		return fmt.Errorf("tofu apply: %w", err)
 	}
 
+	if cfg.FilesEnabled() {
+		if err := setupFiles(ctx, tf, cfg, projectName); err != nil {
+			span.RecordError(err)
+			return err
+		}
+	}
+
 	status.Send(ctx, status.NewUpdate(status.LevelSuccess, "Azure cluster deployed").
 		WithResource("cluster").
 		WithAction("deploy").
 		WithMetadata("cluster_name", projectName))
+	return nil
+}
+
+// setupFiles creates the Azure Files NFS StorageClass after apply. It reads
+// the node subnet from the tofu outputs, which covers both a module-created
+// subnet and an existing one.
+func setupFiles(ctx context.Context, tf *tofu.TerraformExecutor, cfg *Config, projectName string) error {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "azure.setupFiles")
+	defer span.End()
+
+	outputs, err := tf.Output(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("read tofu outputs for Azure Files: %w", err)
+	}
+	out, ok := outputs["node_subnet_id"]
+	if !ok {
+		err := fmt.Errorf("node_subnet_id not found in tofu outputs")
+		span.RecordError(err)
+		return err
+	}
+	var subnetID string
+	if err := json.Unmarshal(out.Value, &subnetID); err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("unmarshal node_subnet_id: %w", err)
+	}
+
+	kubeconfig, err := fetchKubeconfigForCluster(ctx, cfg, projectName)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("get kubeconfig for Azure Files StorageClass: %w", err)
+	}
+
+	if err := ensureFilesStorageClass(ctx, kubeconfig, cfg, subnetID); err != nil {
+		span.RecordError(err)
+		return err
+	}
 	return nil
 }
 
@@ -389,10 +435,18 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 
 // InfraSettings returns Azure-specific Kubernetes infrastructure settings.
 // LonghornEnabled is false: Longhorn is not yet wired for Azure.
-func (p *Provider) InfraSettings(_ *config.ClusterConfig) cluster.InfraSettings {
-	return cluster.InfraSettings{
+// RWXStorageClass is the Azure Files NFS class when files is enabled.
+func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.InfraSettings {
+	settings := cluster.InfraSettings{
 		StorageClass:    "managed-csi",
 		LonghornEnabled: false,
 		ProducesPlan:    true,
 	}
+	if clusterConfig == nil {
+		return settings
+	}
+	if cfg, err := p.parseConfig(context.Background(), clusterConfig); err == nil && cfg.FilesEnabled() {
+		settings.RWXStorageClass = cfg.FilesStorageClassName()
+	}
+	return settings
 }
