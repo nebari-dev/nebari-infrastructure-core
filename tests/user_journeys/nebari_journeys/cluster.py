@@ -43,6 +43,15 @@ LONGHORN_NODE_PLURAL = "nodes"
 LONGHORN_STORAGE_CLASS = "longhorn"
 FALLBACK_STORAGE_CLASS = LONGHORN_STORAGE_CLASS
 
+# Provisioners of the cloud-managed shared filesystems NIC can create a
+# ReadWriteMany StorageClass for (cluster.aws.efs, cluster.azure.files). They
+# are fixed by the CSI drivers rather than by NIC, so they are not mirrored
+# constants. The class is found by provisioner, not by name, because NIC lets
+# the operator rename it. Azure Files also serves SMB, and every AKS cluster
+# ships SMB classes, so an Azure Files class only counts with protocol nfs.
+EFS_PROVISIONER = "efs.csi.aws.com"
+AZURE_FILES_PROVISIONER = "file.csi.azure.com"
+
 NOT_FOUND_STATUS = 404
 
 # Longhorn's robustness values. `unknown` is what a detached volume
@@ -427,6 +436,33 @@ class Cluster:
                 f"Longhorn is not installed on this cluster: no {LONGHORN_STORAGE_CLASS!r} "
                 "StorageClass exists"
             )
+
+    def rwx_storage_class(self) -> str | None:
+        """The name of a cloud-managed ReadWriteMany StorageClass, or None.
+
+        These classes are optional: NIC creates one only when the cluster
+        config enables EFS on AWS or Azure Files on Azure.
+        """
+        for sc in self.storage.list_storage_class().items:
+            if sc.provisioner == EFS_PROVISIONER:
+                return sc.metadata.name
+            if (
+                sc.provisioner == AZURE_FILES_PROVISIONER
+                and (sc.parameters or {}).get("protocol") == "nfs"
+            ):
+                return sc.metadata.name
+        return None
+
+    def require_rwx(self) -> str:
+        """The ReadWriteMany StorageClass name; skips the caller without one."""
+        name = self.rwx_storage_class()
+        if name is None:
+            pytest.skip(
+                "no cloud-managed ReadWriteMany StorageClass on this cluster: none "
+                f"uses the {EFS_PROVISIONER!r} provisioner, or "
+                f"{AZURE_FILES_PROVISIONER!r} with protocol nfs"
+            )
+        return name
 
     def default_storage_class(self) -> str:
         """The class marked default, else Longhorn's."""
