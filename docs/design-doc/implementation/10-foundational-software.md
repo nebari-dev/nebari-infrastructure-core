@@ -114,7 +114,7 @@ The Provider interface returns `InfraSettings` (see `pkg/providers/cluster/provi
 - **`KeycloakBasePath`** - `/auth` for the Codecentric keycloakx chart; empty for upstream/Bitnami Keycloak
 - **`HTTPSPort`** - Gateway HTTPS listener port (`443` normalized from `0`; can be overridden e.g. for local-dev on `8443`)
 - **`LoadBalancerAnnotations`** - applied to the Gateway's provisioned `LoadBalancer` Service
-- **`EFSStorageClass`** - name of the EFS-backed `StorageClass` if available (AWS-only)
+- **`RWXStorageClass`** - name of the NIC-managed ReadWriteMany `StorageClass` on a cloud-managed shared filesystem, if the config enables one (EFS on AWS, Azure Files over NFS on Azure)
 - **`SupportsLocalGitOps`** - whether `file://` GitOps repos are acceptable (`local` only)
 - **`LonghornEnabled`** - whether Longhorn (and its UI, OIDC client, and gateway route) is deployed by this provider
 

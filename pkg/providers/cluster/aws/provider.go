@@ -993,7 +993,7 @@ func (p *Provider) Summary(clusterConfig *config.ClusterConfig) map[string]strin
 // StorageClass is "longhorn" when Longhorn is enabled and is the default class,
 // otherwise the NIC-managed EBS class, "gp3" unless the ebs block overrides it
 // (see ensureEBSStorageClass).
-// EFSStorageClass is set when EFS is enabled.
+// RWXStorageClass is the EFS class when EFS is enabled.
 //
 // LoadBalancerAnnotations route the Gateway's Service to the AWS Load Balancer
 // Controller (type=external) and request an IP-targeted NLB. The
@@ -1027,7 +1027,7 @@ func (p *Provider) InfraSettings(clusterConfig *config.ClusterConfig) cluster.In
 
 	return cluster.InfraSettings{
 		StorageClass:    sc,
-		EFSStorageClass: efsSC,
+		RWXStorageClass: efsSC,
 		LonghornEnabled: longhornEnabled,
 		ProducesPlan:    true,
 		LoadBalancerAnnotations: map[string]string{
