@@ -4,7 +4,7 @@ The platform's storage promise is that a user's data outlives the pod
 that wrote it. These journeys exercise that promise rather than
 asserting that Longhorn looks healthy.
 
-All three require Longhorn and skip without it. Longhorn is the platform's
+The Longhorn journeys require Longhorn and skip without it. Longhorn is the platform's
 own storage layer, and it is optional: a Nebari cluster on EKS or GKE can run
 entirely on the cloud provider's storage. `default_storage_class()` is
 deliberately NOT used here. On EKS it returns `gp2`/`gp3` and on GKE
@@ -12,6 +12,10 @@ deliberately NOT used here. On EKS it returns `gp2`/`gp3` and on GKE
 provisioner while claiming to test Longhorn's promise, and the replication
 journey would then raise a bare 404 looking for a Longhorn Volume behind an
 EBS-backed PV.
+
+The shared-volume journey requires a cloud-managed ReadWriteMany
+StorageClass, which NIC creates only when the cluster config enables one
+(cluster.aws.efs or cluster.azure.files), and skips without one.
 """
 
 import pytest
@@ -29,6 +33,17 @@ CANARY_TEXT = "nebari-journey-canary"
 # CSI attacher round trip. A first run on EKS timed out at the default
 # 180s waiting for exactly that. Pods that mount nothing keep the default.
 POD_MOUNTS_LONGHORN_TIMEOUT = 300
+
+# Binding a shared volume can wait on the cloud creating a storage account
+# and share (Azure Files) or an access point (EFS), which takes minutes on a
+# cold start rather than the seconds a Longhorn volume needs.
+RWX_VOLUME_BOUND_TIMEOUT = 600
+POD_MOUNTS_RWX_TIMEOUT = 300
+
+# A non-root identity like the one real workloads run as (JupyterHub runs
+# users as 1000 with fsGroup 100).
+NON_ROOT_UID = 1000
+NON_ROOT_FS_GROUP = 100
 
 
 def _replication_unverified_message(
@@ -77,6 +92,44 @@ def test_a_users_data_survives_their_pod(cluster, scratch_namespace):
         "data written before the pod was replaced did not survive; "
         f"expected to find {CANARY_TEXT!r} in {CANARY_PATH}, "
         f"but the replacement pod read back {recovered!r}"
+    )
+
+
+@pytest.mark.slow
+def test_a_shared_volume_is_writable_by_non_root_pods(cluster, scratch_namespace):
+    """Two non-root pods mount the same ReadWriteMany volume at the same time,
+    and one reads what the other writes.
+    """
+    storage_class = cluster.require_rwx()
+    ns = scratch_namespace
+
+    ns.request_volume("shared", VOLUME_SIZE, storage_class, access_mode="ReadWriteMany")
+    ns.wait_volume_bound("shared", timeout=RWX_VOLUME_BOUND_TIMEOUT)
+
+    for pod in ("writer", "reader"):
+        ns.run_pod(
+            pod,
+            pvc_name="shared",
+            run_as_user=NON_ROOT_UID,
+            fs_group=NON_ROOT_FS_GROUP,
+        )
+    for pod in ("writer", "reader"):
+        ns.wait_pod_ready(pod, timeout=POD_MOUNTS_RWX_TIMEOUT)
+
+    # exec does not check exit codes, so the write's output is only kept for
+    # the failure message. A failed write leaves no file, and the assert on
+    # the reader's output is what catches it.
+    write_output = ns.exec(
+        "writer", ["sh", "-c", f"echo {CANARY_TEXT} > {CANARY_PATH}"]
+    )
+    recovered = ns.exec("reader", ["sh", "-c", f"cat {CANARY_PATH}"])
+
+    assert CANARY_TEXT in recovered, (
+        f"a pod running as uid {NON_ROOT_UID} with fsGroup {NON_ROOT_FS_GROUP} "
+        f"could not share data through {storage_class!r}: the reader read back "
+        f"{recovered!r} from {CANARY_PATH}, and the write reported "
+        f"{write_output!r}. A 'Permission denied' write means the volume's root "
+        "directory is not writable by a non-root user"
     )
 
 
