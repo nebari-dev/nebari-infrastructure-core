@@ -104,7 +104,7 @@ The actual repository layout is captured in [`AGENTS.md`](../../../AGENTS.md). K
 
 **`pkg/providers/cluster/` (Cluster providers)**
 
-- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `GatewayHostAddress`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, `EFSStorageClass`, `SupportsLocalGitOps`, `LonghornEnabled`).
+- `pkg/providers/cluster/provider.go` defines the `Provider` interface (`Name`, `Validate`, `Deploy`, `Destroy`, `GetKubeconfig`, `Summary`, `InfraSettings`) and the `InfraSettings` capability struct (`StorageClass`, `GatewayHostAddress`, `LoadBalancerAnnotations`, `KeycloakBasePath`, `HTTPSPort`, `RWXStorageClass`, `SupportsLocalGitOps`, `LonghornEnabled`).
 - One sub-package per cluster provider. `aws/`, `azure/`, `hetzner/`, `local/`, and `existing/` are implemented; `gcp/` is a registered stub (its `Deploy`/`Destroy` emit a "(stub)" status message and return `nil` rather than provisioning anything, and `GetKubeconfig` returns "not yet implemented").
 - AWS-specific Terraform templates live under `pkg/providers/cluster/aws/templates/` and are embedded into the binary via `go:embed`.
 
