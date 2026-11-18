@@ -11,4 +11,5 @@ These were considered and are not in the contract. A pack that needs one solves 
 - The Prometheus Operator.
 - Extra cluster operators such as KubeRay.
 - Backups for pack data.
+- A runtime platform-facts ConfigMap that pods read from the cluster. P5 delivers the facts as Helm values at render time, which covers what packs need today; a pod that needs a value at runtime gets it from an object the pack renders from `global.nebari`. The operator's OIDC client Secret also carries an `issuer-url` key today, but the operator specification does not name it, so it is not promised.
 - A NebariApp `database` field (proposed in ADR-0007). It would be an experimental convenience on top of P4: the operator creates a CNPG Cluster with platform defaults and writes a credentials Secret with fixed keys (`host`, `port`, `username`, `password`, `database`, `uri`). Packs whose needs outgrow it keep using the CNPG API directly. It is also P4's path to an implementation-neutral interface, since any Postgres operator could satisfy it.

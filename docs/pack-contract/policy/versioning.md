@@ -19,7 +19,7 @@ The [compatibility promise](compatibility.md) is what keeps Macro bumps rare: bu
 ## Contract versions and releases
 
 - Each contract version names the Pack Specification version it includes, so the two cannot disagree. Contract `0.1.0` includes Pack Specification `0.1.0`, plus the relaxation of the one-NebariApp rule described on [P2](../p02-several-nebariapps.md) once that specification change is accepted.
-- Each NIC release implements exactly one contract version. Its release notes name it, and the cluster publishes it as `contract-version` in the [`nebari-platform` ConfigMap](../p05-platform-facts.md) once P5 is built, on full installations only.
+- Each NIC release implements exactly one contract version. Its release notes name it, and packs receive it as `global.nebari.contractVersion` in the [platform values](../p05-platform-facts.md) once P5 is built, on full installations only.
 - Each nebari-operator release states the range of contract versions it supports. A NIC release pins an operator version inside that range.
 - A NIC release may implement a newer contract version than the previous NIC release, never an older one.
 

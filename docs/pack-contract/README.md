@@ -24,13 +24,15 @@ Each promise page starts with YAML front matter that records its level, state, c
 
 All seventeen are required for 1.0.
 
+**This is the 1.0 contract, and most of it is not built yet.** It lists every promise contract 1.0 will make, so pack authors and NIC maintainers work toward the same target. Most promises are still planned or partly built; the table shows the state of each. A promise's level says what it will be once built; its state says what holds now. A planned promise carries no guarantee, whatever its level, and its interface may change until it is built (see [Compatibility](policy/compatibility.md#what-is-not-covered)).
+
 | # | Promise | Level | State | Page |
 |---|---|---|---|---|
 | P1 | Routing, TLS, SSO and landing tile through NebariApp | stable | partly built | [P1](p01-nebariapp.md) |
 | P2 | Several NebariApps per pack | stable | planned | [P2](p02-several-nebariapps.md) |
 | P3 | Default storage class | stable | partly built | [P3](p03-default-storageclass.md) |
 | P4 | Postgres through CloudNativePG | stable | built | [P4](p04-cloudnativepg.md) |
-| P5 | Platform facts (`nebari-platform` ConfigMap) | stable | planned | [P5](p05-platform-facts.md) |
+| P5 | Platform facts (`global.nebari` Helm values) | stable | planned | [P5](p05-platform-facts.md) |
 | P6 | Groups claim as full paths | stable | partly built | [P6](p06-groups-claim.md) |
 | P7 | Trust bundle | stable | partly built | [P7](p07-trust-bundle.md) |
 | P8 | Argo CD project for packs | stable | built | [P8](p08-argocd-project.md) |

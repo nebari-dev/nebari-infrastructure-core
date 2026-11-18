@@ -29,7 +29,7 @@ The guiding rule is "no is temporary, yes is forever". The contract offers what 
 - Pack authors need a strong compatibility guarantee, a predictable deprecation process and a clear rule for security exceptions, in the spirit of Go's.
 - Clusters already deployed must reach the contract by running `nic deploy` with a new NIC release, without recreating the cluster.
 
-**Related proposals.** [ADR-0021](https://github.com/nebari-dev/nebari-infrastructure-core/pull/749) proposes that packs get plain values and never query the cluster, with render-time values from `nic outputs`; #670 proposes typed render-time pack values; nebari-operator PR #211 proposes a `PackContract` CRD. P5 is a runtime ConfigMap. The contract can carry both channels: P5 for values a pack reads at runtime, and a render-time channel later, through its own RFD, for values a chart needs at template time. No stable promise needs a value at render time, so 1.0 does not depend on that channel. A `PackContract` CRD could later become how a pack declares its contract version and the promises it uses.
+**Related proposals.** [ADR-0021](https://github.com/nebari-dev/nebari-infrastructure-core/pull/749) proposes that packs get plain values and never query the cluster, with render-time values from `nic outputs`; #670 proposes typed render-time pack values; nebari-operator PR #211 proposes a `PackContract` CRD. P5 uses the render-time channel: platform facts reach a pack as Helm values under `global.nebari`, which NIC writes into the GitOps repository and the pack's Argo CD Application loads as a value file. A pack needs these facts when its chart is rendered (the NebariApp `spec.hostname` and an upstream app's public URL and OIDC settings), and Argo CD renders charts without cluster access, so a runtime ConfigMap could not supply them. How a pack's Application references the file depends on #670, and the nebari-app library chart in nebari-operator is the recommended way to consume the values. A runtime channel is listed in [Not yet](../pack-contract/not-yet.md). A `PackContract` CRD could later become how a pack declares its contract version and the promises it uses.
 
 ## Considered Options
 
@@ -45,13 +45,15 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 
 **The promises.** Seventeen promises, nine stable and eight experimental, each with a level, a state (built, partly built or planned), an interface, what packs may and must not rely on, per-target notes and a conformance test. All seventeen are required for 1.0.
 
+**This is the 1.0 contract, and most of it is not built yet.** It lists every promise contract 1.0 will make, so pack authors and NIC maintainers work toward the same target. Most promises are still planned or partly built; the table shows the state of each. A promise's level says what it will be once built; its state says what holds now. A planned promise carries no guarantee, whatever its level, and its interface may change until it is built (see [Compatibility](../pack-contract/policy/compatibility.md#what-is-not-covered)).
+
 | # | Promise | Level | State |
 |---|---|---|---|
 | P1 | Routing, TLS, SSO and landing tile through NebariApp | stable | partly built |
 | P2 | Several NebariApps per pack | stable | planned |
 | P3 | Default storage class | stable | partly built |
 | P4 | Postgres through CloudNativePG | stable | built |
-| P5 | Platform facts (`nebari-platform` ConfigMap) | stable | planned |
+| P5 | Platform facts (`global.nebari` Helm values) | stable | planned |
 | P6 | Groups claim as full paths | stable | partly built |
 | P7 | Trust bundle | stable | partly built |
 | P8 | Argo CD project for packs | stable | built |
@@ -101,6 +103,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 - A strong compatibility promise makes every stable promise expensive to change. Mistakes in a stable interface are carried, deprecated, indefinitely, so the contract has to stay small.
 - Compatibility settings add code paths that must be kept and tested for at least two years each.
 - While the contract is 0.x, pack authors depend on a document that still lists planned parts.
+- Platform facts reach a pack only through how the pack is installed, so P5 depends on #670, and a pack installed by hand must load the platform value file itself. A pack that wraps an upstream chart that does not template its values needs a small shim (an object it renders from `global.nebari`) to pass the facts on.
 - Until the conformance suite can verify substituted software, restricted installations that bring their own identity provider, gateway or other foundational software get no guarantee. Packs may still work there, but that is between the pack and the admin.
 
 ## Options Detail

@@ -27,8 +27,8 @@ The suite will be a `pack_contract` group in NIC's user journey tests ([ADR-0017
 The contract covers a cluster only when NIC installs and manages every foundational component on it. An installation that leaves out or replaces any of them, such as an a la carte install on a restricted cluster that supplies its own identity provider, gateway, certificate management, Postgres operator or telemetry pipeline, is outside the contract, whoever installed the rest.
 
 - Packs cannot rely on the contract there. Some promises may still hold, for example P3 when the cluster has one default StorageClass, but none is promised, and a pack that breaks on such a cluster is not a compatibility violation.
-- Such a cluster does not claim conformance to any contract version, even if parts of the suite pass on it. Once P5 is built, NIC does not publish `contract-version` in the [`nebari-platform` ConfigMap](../p05-platform-facts.md) there, so packs and tooling can tell they are outside the contract. Admins can run the suite to see which promises hold before installing a pack.
-- This is a limit of 0.x, not the goal. The conformance suite is the only proof that substituted software keeps a promise, and it is not built yet. Once it is, a cluster is covered when the suite passes on it, whatever implements the foundational pieces, and `contract-version` is published where conformance is verified rather than only on full NIC installations. Promises bound to one product (see [Proposals and governance](proposals.md#entry-rules)) still need that product.
+- Such a cluster does not claim conformance to any contract version, even if parts of the suite pass on it. Once P5 is built, NIC does not set `global.nebari.contractVersion` in the [platform values](../p05-platform-facts.md) there, so packs and tooling can tell they are outside the contract. Admins can run the suite to see which promises hold before installing a pack.
+- This is a limit of 0.x, not the goal. The conformance suite is the only proof that substituted software keeps a promise, and it is not built yet. Once it is, a cluster is covered when the suite passes on it, whatever implements the foundational pieces, and `contractVersion` is set where conformance is verified rather than only on full NIC installations. Promises bound to one product (see [Proposals and governance](proposals.md#entry-rules)) still need that product.
 - Pack authors who want to support restricted installations list the promises they use, as [What a pack must do](#what-a-pack-must-do) requires, so admins can check them one by one.
 
 ## Other platforms
@@ -43,7 +43,7 @@ A pack stays inside the compatibility promise when it:
 - registers its Applications in the `nebari-apps` project;
 - declares the contract version it targets (see [Pack-declared contract version](versioning.md#pack-declared-contract-version));
 - lists every promise it uses in its README, marking the experimental ones;
-- tolerates keys and fields it does not know (for example new keys in `nebari-platform`), because Micro versions add them;
+- tolerates keys and fields it does not know (for example new keys under `global.nebari`), because Micro versions add them;
 - works, or fails with a clear message, where a [provided-not-promised](../provided-not-promised.md) capability is missing;
 - keeps a security contact in its `SECURITY.md`, so it can receive PRIVATE-track details of [break-glass](security.md) changes under embargo.
 
