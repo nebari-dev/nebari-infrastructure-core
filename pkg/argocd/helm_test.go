@@ -3,8 +3,11 @@ package argocd
 import (
 	"testing"
 
+	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage"
+	"helm.sh/helm/v3/pkg/storage/driver"
 )
 
 // TestShouldSkipUpgrade tests the shouldSkipUpgrade function with real release objects
@@ -13,6 +16,7 @@ func TestShouldSkipUpgrade(t *testing.T) {
 		name          string
 		release       *release.Release
 		targetVersion string
+		force         bool
 		want          bool
 	}{
 		{
@@ -66,6 +70,20 @@ func TestShouldSkipUpgrade(t *testing.T) {
 			},
 			targetVersion: "9.4.1",
 			want:          true,
+		},
+		{
+			name: "deployed and version matches but forced - upgrade needed",
+			release: &release.Release{
+				Info: &release.Info{Status: release.StatusDeployed},
+				Chart: &chart.Chart{
+					Metadata: &chart.Metadata{
+						Version: "9.4.1",
+					},
+				},
+			},
+			targetVersion: "9.4.1",
+			force:         true,
+			want:          false,
 		},
 		{
 			name: "deployed but version differs - upgrade needed",
@@ -136,11 +154,49 @@ func TestShouldSkipUpgrade(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldSkipUpgrade(tt.release, tt.targetVersion)
+			got := shouldSkipUpgrade(tt.release, Config{Version: tt.targetVersion, ForceUpgrade: tt.force})
 			if got != tt.want {
 				t.Errorf("shouldSkipUpgrade() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestCurrentRelease checks that the skip decision sees the newest revision.
+// After one upgrade, revision 1 is superseded, so comparing against it made
+// every later deploy upgrade Argo CD again (#774).
+func TestCurrentRelease(t *testing.T) {
+	cfg := &action.Configuration{Releases: storage.Init(driver.NewMemory())}
+
+	if current, ok := currentRelease(cfg, "argocd"); ok {
+		t.Fatalf("currentRelease() = revision %d before anything was installed", current.Version)
+	}
+
+	for i, version := range []string{"9.5.22", "9.6.0", "9.7.1"} {
+		releaseStatus := release.StatusSuperseded
+		if version == "9.7.1" {
+			releaseStatus = release.StatusDeployed
+		}
+		if err := cfg.Releases.Create(&release.Release{
+			Name:      "argocd",
+			Namespace: "argocd",
+			Version:   i + 1,
+			Info:      &release.Info{Status: releaseStatus},
+			Chart:     &chart.Chart{Metadata: &chart.Metadata{Version: version}},
+		}); err != nil {
+			t.Fatalf("record revision %d: %v", i+1, err)
+		}
+	}
+
+	current, ok := currentRelease(cfg, "argocd")
+	if !ok {
+		t.Fatal("currentRelease() found no release")
+	}
+	if current.Version != 3 || getCurrentVersion(current) != "9.7.1" {
+		t.Errorf("currentRelease() = revision %d (chart %s), want revision 3 (chart 9.7.1)", current.Version, getCurrentVersion(current))
+	}
+	if !shouldSkipUpgrade(current, Config{Version: "9.7.1"}) {
+		t.Error("a deploy with the deployed chart version should skip the upgrade")
 	}
 }
 

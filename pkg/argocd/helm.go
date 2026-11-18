@@ -25,8 +25,12 @@ const (
 
 // shouldSkipUpgrade determines if a Helm upgrade can be skipped because
 // the installed release already matches the target version and is healthy.
-// Returns false if the release is in a failed or pending state, even if versions match.
-func shouldSkipUpgrade(current *release.Release, targetVersion string) bool {
+// Returns false if the release is in a failed or pending state, even if versions match,
+// and when config.ForceUpgrade is set.
+func shouldSkipUpgrade(current *release.Release, config Config) bool {
+	if config.ForceUpgrade {
+		return false
+	}
 	if current == nil || current.Chart == nil || current.Chart.Metadata == nil {
 		return false
 	}
@@ -35,7 +39,18 @@ func shouldSkipUpgrade(current *release.Release, targetVersion string) bool {
 	if current.Info == nil || current.Info.Status != release.StatusDeployed {
 		return false
 	}
-	return current.Chart.Metadata.Version == targetVersion
+	return current.Chart.Metadata.Version == config.Version
+}
+
+// currentRelease returns the newest revision of the named release, or false
+// when it isn't installed. action.History can't be used for this: it ignores
+// Max and doesn't sort, so its first entry is usually revision 1.
+func currentRelease(actionConfig *action.Configuration, name string) (*release.Release, bool) {
+	current, err := actionConfig.Releases.Last(name)
+	if err != nil {
+		return nil, false
+	}
+	return current, true
 }
 
 // getCurrentVersion safely extracts the chart version from a Helm release.
@@ -89,12 +104,9 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 	}
 
 	// Check if release already exists (idempotency)
-	histClient := action.NewHistory(actionConfig)
-	histClient.Max = 1
-	if releases, err := histClient.Run(config.ReleaseName); err == nil && len(releases) > 0 {
+	if current, ok := currentRelease(actionConfig, config.ReleaseName); ok {
 		// Release exists - check if upgrade is actually needed
-		current := releases[0]
-		if shouldSkipUpgrade(current, config.Version) {
+		if shouldSkipUpgrade(current, config) {
 			// Note: This comparison only checks the chart version. Changes to DefaultConfig() values
 			// (like Helm configuration parameters) will NOT trigger an upgrade unless the version is bumped.
 			// To apply updated values, increment the version in DefaultConfig().
@@ -108,7 +120,8 @@ func InstallHelm(ctx context.Context, kubeconfigBytes []byte, config Config) err
 			WithResource("argocd").
 			WithAction("upgrading").
 			WithMetadata("current_version", getCurrentVersion(current)).
-			WithMetadata("target_version", config.Version))
+			WithMetadata("target_version", config.Version).
+			WithMetadata("forced", config.ForceUpgrade))
 		return upgradeHelm(ctx, actionConfig, config)
 	}
 
