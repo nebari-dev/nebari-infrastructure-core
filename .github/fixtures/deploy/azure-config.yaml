@@ -50,3 +50,6 @@ cluster:
     tags:
       Environment: development
       Project: nebari
+
+    files:
+      enabled: true
