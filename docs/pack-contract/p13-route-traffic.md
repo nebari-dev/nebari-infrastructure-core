@@ -1,3 +1,12 @@
+---
+promise: P13
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 2a70b64d1db82f66
+---
 # P13: Per-route timeouts, streaming and buffer size
 
 ## Promise

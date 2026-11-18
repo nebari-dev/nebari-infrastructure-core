@@ -1,3 +1,12 @@
+---
+promise: P10
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 5f8b17bceeb8a0c3
+---
 # P10: Machine clients
 
 ## Promise

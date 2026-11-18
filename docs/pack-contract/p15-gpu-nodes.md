@@ -1,3 +1,12 @@
+---
+promise: P15
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: bc6eec066d3ff498
+---
 # P15: GPU node label and taint
 
 ## Promise

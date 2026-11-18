@@ -1,3 +1,12 @@
+---
+promise: P2
+level: stable
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 91342168c7c591bc
+---
 # P2: Several NebariApps per pack
 
 ## Promise

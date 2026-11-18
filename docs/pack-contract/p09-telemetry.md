@@ -1,3 +1,13 @@
+---
+promise: P9
+level: stable
+state: partly built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: d21fd00a2d6fa22a
+---
 # P9: Telemetry endpoint
 
 ## Promise

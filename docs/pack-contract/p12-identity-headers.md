@@ -1,3 +1,12 @@
+---
+promise: P12
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: a0aa200494b51538
+---
 # P12: Logged-in identity passed to the app
 
 ## Promise

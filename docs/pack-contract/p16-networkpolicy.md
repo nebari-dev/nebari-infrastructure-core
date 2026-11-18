@@ -1,3 +1,12 @@
+---
+promise: P16
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 799670fa09c6b6a9
+---
 # P16: NetworkPolicy enforced
 
 ## Promise

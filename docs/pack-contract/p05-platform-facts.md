@@ -1,3 +1,12 @@
+---
+promise: P5
+level: stable
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 30f57ad968a12403
+---
 # P5: Platform facts
 
 ## Promise

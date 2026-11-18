@@ -11,3 +11,4 @@ These were considered and are not in the contract. A pack that needs one solves 
 - The Prometheus Operator.
 - Extra cluster operators such as KubeRay.
 - Backups for pack data.
+- A NebariApp `database` field (proposed in ADR-0007). It would be an experimental convenience on top of P4: the operator creates a CNPG Cluster with platform defaults and writes a credentials Secret with fixed keys (`host`, `port`, `username`, `password`, `database`, `uri`). Packs whose needs outgrow it keep using the CNPG API directly.

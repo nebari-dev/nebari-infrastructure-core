@@ -4,7 +4,7 @@ The [compatibility promise](compatibility.md) gives way when keeping a promise w
 
 ## When break glass applies
 
-Nebari may change or remove a stable or experimental promise outside the normal [RFD process](proposals.md) and [deprecation](deprecation.md) notice only when:
+Experimental promises may change at any time (see [Deprecation](deprecation.md#changing-or-removing-experimental-promises)), so a security fix to one ships as an ordinary change, through the tracks below. Nebari may change or remove a stable promise outside the normal [RFD process](proposals.md) and [deprecation](deprecation.md) rules only when:
 
 - the promise as specified, or as implemented, lets an attacker cross a boundary the platform is meant to hold (between packs, between users, or between a pack and the platform); and
 - no fix that keeps the promise intact closes the hole.

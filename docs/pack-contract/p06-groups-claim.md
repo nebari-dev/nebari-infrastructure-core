@@ -1,3 +1,13 @@
+---
+promise: P6
+level: stable
+state: partly built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: e3b9402cf7f372da
+---
 # P6: Groups claim as full paths
 
 ## Promise

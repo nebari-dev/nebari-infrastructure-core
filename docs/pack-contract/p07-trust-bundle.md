@@ -1,3 +1,13 @@
+---
+promise: P7
+level: stable
+state: partly built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: d97572038353301f
+---
 # P7: Trust bundle
 
 ## Promise

@@ -15,7 +15,7 @@ Nothing in a built stable promise is removed or changed incompatibly, in any lat
 ## What is not covered
 
 - **Planned promises.** A promise whose state is `planned` carries no compatibility promise until it is built. Its intended interface may change before then.
-- **Experimental promises.** Experimental promises may change shape between contract versions, with the notice the [Deprecation](deprecation.md) page sets. Packs that use them say so in their README.
+- **Experimental promises.** Experimental promises may change or be removed in any contract version, without notice (see [Deprecation](deprecation.md#changing-or-removing-experimental-promises)). Packs that use them do so at their own risk and say so in their README.
 - **Anything not in the contract.** Names, namespaces, Services, chart-generated resources and everything on the [do-not-rely-on list](../do-not-rely-on.md) can change in any release. Something that exists today is not promised unless a promise page says so.
 - **Provided but not promised.** Capabilities on the [provided-not-promised list](../provided-not-promised.md) can change or disappear on any target.
 - **Performance and capacity.** Request latency, start-up time, default resource sizes and node counts may change between releases. They are not correctness.

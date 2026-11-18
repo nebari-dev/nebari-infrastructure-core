@@ -1,3 +1,12 @@
+---
+promise: P17
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 24bff669b6868b6f
+---
 # P17: Bucket binding
 
 ## Promise

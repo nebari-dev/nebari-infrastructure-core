@@ -1,3 +1,12 @@
+---
+promise: P11
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: df388ba7ab08239c
+---
 # P11: API clients with bearer tokens through the gateway
 
 ## Promise

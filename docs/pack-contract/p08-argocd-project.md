@@ -1,3 +1,13 @@
+---
+promise: P8
+level: stable
+state: built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: c66b85ce29233ae0
+---
 # P8: Argo CD project for packs
 
 ## Promise

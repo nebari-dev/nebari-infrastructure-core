@@ -1,3 +1,12 @@
+---
+promise: P14
+level: experimental
+state: planned
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: bbacd0148c42ae63
+---
 # P14: Generated secrets stable under Argo CD
 
 ## Promise

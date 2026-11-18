@@ -458,6 +458,26 @@ References:
 - The AWS provider relies on OpenTofu state comparison; running `nic deploy` twice on AWS with the same config shows no changes in the plan.
 - Other providers handle idempotency per their backing tool's semantics.
 
+### Pack Platform Contract
+
+[ADR-0023](docs/adr/0023-pack-platform-contract.md) (Proposed) defines what Nebari promises to software packs. The reference is [`docs/pack-contract/`](docs/pack-contract/README.md): one page per promise (P1-P17), the provided-not-promised, not-yet and do-not-rely-on lists, and the policy pages under `docs/pack-contract/policy/`. Packs rely on it, so treat it as a public interface, not as notes.
+
+**Before changing anything packs depend on**, check whether a promise page covers it. That includes NebariApp behavior, storage classes, CloudNativePG, the Keycloak groups claim, the trust bundle, the `nebari-apps` Argo CD project, telemetry, the `nebari-platform` ConfigMap, and the names on the do-not-rely-on list. If a change would alter what a page says packs may rely on, stop and say so: under the [compatibility policy](docs/pack-contract/policy/compatibility.md) a built stable promise does not change incompatibly except for the listed exceptions, and the [proposals policy](docs/pack-contract/policy/proposals.md) requires a platform RFD for any change to a stable page's Promise, Level, Interface, may-rely or must-not-rely text. Experimental promises carry no stability guarantee and may change or be removed without notice through an ordinary pull request.
+
+**CI enforces the contract's rules.** Each promise page starts with YAML front matter (`promise`, `level`, `state`, `built`, `conformance_test`, `renewals`, `deprecated`, `changes`), and `internal/packcontract` checks it on every `go test ./...` (see [How CI enforces these rules](docs/pack-contract/policy/proposals.md#how-ci-enforces-these-rules)). When `TestRepositoryPackContract` fails, fix the page or the record it names. Never edit the test, or a hash, to make it pass: a changed hash means the promise text changed, and that needs a new `changes` entry. The one exception is the founding record while ADR-0023 is Proposed: the contract is still being drafted, so a page's founding `hash` is updated along with its text until the ADR is accepted. After that, every change gets its own entry (with `date`, `kind`, the `hash` the test prints, an `rfd` link for stable promises and graduations, and an `exception` for an incompatible change to a built stable promise).
+
+**Keep the contract current as work lands.** Every pull request that builds, fixes or changes part of a promise updates the contract docs in the same pull request:
+
+- **State.** Move the promise's state (`planned` -> `partly built` -> `built`) in its front matter, rewrite its State paragraph to say what exists and what is still missing, and update the same row in the promise tables in [`docs/pack-contract/README.md`](docs/pack-contract/README.md) and in ADR-0023. CI fails if the four disagree. When an experimental promise becomes `built`, set `built:` to that date; it starts the 18-month graduation clock, and CI fails once the clock runs out unless the promise has graduated, been renewed by RFD (`renewals`) or been deprecated (`deprecated`).
+- **Tracking issues.** Replace "Tracking issue: to be filed when the contract is accepted" with the issue link once it exists.
+- **Known problems.** When one of the pre-1.0 problems listed in the README is fixed, remove it from that list and from the promise page, and name the regression test that guards it.
+- **Conformance.** When a promise gets its test under `tests/user_journeys/journeys/pack_contract/`, set `conformance_test: <file>::<function>` in its front matter (replacing `pending`) and describe it in the Conformance test section. The test must run on every target: no `tls`, `requires_trusted_ca`, `skip` or `xfail` markers. Once the suite exists, a change that turns a conformance test red for an existing promise is a compatibility break.
+- **Planned machinery.** When the conformance suite, the `nic deploy` preflight, runtime deprecation notices, compatibility settings or pack-declared contract versions are built, change "planned" to the real behavior on the policy page that describes it.
+- **Releases.** A release that changes the implemented contract version or a supported range updates the compatibility matrix in [`docs/pack-contract/policy/versioning.md`](docs/pack-contract/policy/versioning.md) and names the contract version in its release notes.
+- **This section.** Update this section when the ADR's status changes (for example to Accepted) or when the contract's layout or rules change.
+
+**Writing contract pages.** Every promise page has the sections Promise, Level, State, Interface, Packs may rely on, Packs must not rely on, Per-target notes and Conformance test, in that order. Promises are expressed through stable interfaces (a CRD field, a named class, a label or a documented key), never through incidental Service names, namespaces or chart-generated resources. Each paragraph is a single line, and links between contract pages are relative.
+
 ## Documentation
 
 - **`docs/README.md`** - Documentation overview and navigation
@@ -466,6 +486,8 @@ References:
   - **ADR-0002** - Longhorn for distributed block storage on AWS
   - **ADR-0003** - Software pack codegen
   - **ADR-0004** - Out-of-tree provider plugin architecture (Proposed)
+  - **ADR-0023** - Pack platform contract (Proposed)
+- **`docs/pack-contract/`** - The pack platform contract: what Nebari promises to software packs, and the compatibility, versioning, deprecation, governance, security and conformance policies (see [Pack Platform Contract](#pack-platform-contract))
 - **`docs/design-doc/`** - Living design docs (architecture / implementation / operations / appendix)
 - **`docs/reference/cli/`** - Generated CLI command reference (from `internal/cli`'s cobra tree; regenerate with `make docs`)
 - **`docs/configuration/`** - Generated configuration reference (from provider config structs; regenerate with `make docs`)
@@ -514,5 +536,6 @@ Run before every commit:
 5. **OpenTelemetry instrumentation** in new `pkg/` functions (see exemptions above)
 6. **Logging convention:** `slog` usage only in the application layer (`cmd/nic` / `internal/cli`), not in `pkg/`
 7. **Abstraction boundary:** no provider-name switches outside `pkg/providers/cluster/`, `pkg/providers/dns/`, or `pkg/providers/repository/`
+8. **Pack contract:** if the change touches anything packs rely on, the matching `docs/pack-contract/` page (front matter and text), the README table and ADR-0023 are updated in the same commit, and `go test ./internal/packcontract/` passes (see [Pack Platform Contract](#pack-platform-contract))
 
 Integration tests (`make test-integration`) should pass before merging changes that touch provider code.

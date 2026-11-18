@@ -8,10 +8,12 @@ Targets: AWS, Azure, Hetzner, local (kind) and existing clusters. Every promise 
 
 The NebariApp chapter lives in the nebari-operator [pack specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md). This contract pins that specification at version `0.1.0`. [P2](p02-several-nebariapps.md) needs one rule in it relaxed, which is pending.
 
+Each promise page starts with YAML front matter that records its level, state, conformance test and changes. CI checks it against the page and the tables below (see [How CI enforces these rules](policy/proposals.md#how-ci-enforces-these-rules)).
+
 ## Levels and states
 
 - **Stable:** packs may rely on it without reservation. Covered by the [compatibility promise](policy/compatibility.md) once built.
-- **Experimental:** offered and, once built, tested on every target, but may change shape between contract versions with notice. Packs that use it say so in their README.
+- **Experimental:** offered and, once built, tested on every target, but may change or be removed in any contract version without notice. Packs rely on it at their own risk and say so in their README.
 - **Built:** exists today on every target as the page describes.
 - **Partly built:** exists, but not yet as promised on every target; the page says what is missing.
 - **Planned:** not built yet. The page gives the intended interface, which may change before it is built.

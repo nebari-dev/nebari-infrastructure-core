@@ -16,10 +16,10 @@ Removing a deprecated stable part happens only if Core accepts an RFD for it und
 
 ## Changing or removing experimental promises
 
-Experimental promises may change shape or be removed, with notice:
+Experimental promises carry no stability guarantee. They may change shape or be removed in any contract version, without notice, and packs that rely on them do so at their own risk.
 
-- The change is announced as deprecated in one contract version and lands no earlier than 3 months later, in a later contract version.
-- The promise page and release notes describe the change and the migration.
+- Such a change needs only a pull request, not an RFD (see [Proposals and governance](proposals.md#when-an-rfd-is-needed)).
+- The promise page and the release notes of the contract version that carries the change say what changed, after the fact.
 - An experimental promise has 18 months after it is built to graduate. Then it is graduated, renewed by an RFD with a reason, or deprecated for removal (see [Proposals and governance](proposals.md#levels-and-graduation)). Experiments do not linger.
 
 ## Behavior changes and compatibility settings

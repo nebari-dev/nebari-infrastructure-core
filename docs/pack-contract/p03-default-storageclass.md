@@ -1,3 +1,13 @@
+---
+promise: P3
+level: stable
+state: partly built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 998e25eb22d4f0fd
+---
 # P3: Default storage class
 
 ## Promise

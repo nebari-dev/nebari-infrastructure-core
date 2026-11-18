@@ -1,3 +1,13 @@
+---
+promise: P1
+level: stable
+state: partly built
+conformance_test: pending
+changes:
+  - date: 2026-11-17
+    kind: founding
+    hash: 8df2e2bce04eb78d
+---
 # P1: Routing, TLS, SSO and landing tile through NebariApp
 
 ## Promise
