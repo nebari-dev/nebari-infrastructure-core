@@ -4,7 +4,9 @@ This is the reference for what Nebari promises to software packs, and how those 
 
 Contract version: `0.1.0` (proposed), versioned with [EffVer](policy/versioning.md). The contract is pre-1.0 while any required promise is not fully built. It becomes 1.0 when every required promise is built and its conformance test passes on every supported target.
 
-Targets: AWS, Azure, Hetzner, local (kind) and existing clusters. Every promise works the same on every target, or its page says how a target differs and the pack is told. GCP joins when its provider is supported.
+Targets: AWS, Azure, Hetzner, local (kind) and existing clusters on which NIC installs and manages all of the foundational software. Every promise works the same on every target, or its page says how a target differs and the pack is told. GCP joins when its provider is supported.
+
+The contract covers a cluster only when NIC installs and manages every foundational component on it. An installation that leaves out or replaces any of them, for example an a la carte install on a restricted cluster that brings its own identity provider, gateway or Postgres operator, is not covered: packs cannot rely on the contract there, even though some promises may hold (see [Conformance](policy/conformance.md#partial-installations)). The goal is wider: interfaces are standards or Nebari-owned abstractions, so that once the conformance suite exists, any foundational software that passes it can be swapped in. A few promises are still bound to one product; their pages say so and name the path to a neutral interface.
 
 The NebariApp chapter lives in the nebari-operator [pack specification](https://github.com/nebari-dev/nebari-operator/blob/main/docs/pack-specification.md). This contract pins that specification at version `0.1.0`. [P2](p02-several-nebariapps.md) needs one rule in it relaxed, which is pending.
 

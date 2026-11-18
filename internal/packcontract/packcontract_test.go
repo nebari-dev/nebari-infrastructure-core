@@ -24,6 +24,7 @@ type fixture struct {
 	extraFront      string // extra front matter lines (built, conformance_test, renewals, deprecated)
 	changes         string // the changes list, with {{hash}} replaced by the current hash
 	promiseText     string
+	interfaceText   string
 	swapSections    bool
 	testFile        string // content of the conformance test file; empty means absent
 }
@@ -41,6 +42,7 @@ func validFixture() fixture {
 		adrState:        "planned",
 		changes:         "  - date: 2026-11-17\n    kind: founding\n    hash: {{hash}}\n",
 		promiseText:     "Packs get a thing.",
+		interfaceText:   "A key.",
 	}
 }
 
@@ -51,7 +53,7 @@ func (f fixture) body() string {
 		"## Promise\n\n" + f.promiseText,
 		"## Level\n\n" + f.sectionLevel,
 		"## State\n\n" + f.sectionState,
-		"## Interface\n\nA key.",
+		"## Interface\n\n" + f.interfaceText,
 		"## Packs may rely on\n\n- The key.",
 		"## Packs must not rely on\n\n- Anything else.",
 		"## Per-target notes\n\nNone.",
@@ -310,6 +312,26 @@ func TestCheck(t *testing.T) {
 			want: "pytest.mark.tls",
 		},
 		{
+			name:   "bound promise whose Interface section does not say so",
+			mutate: func(f *fixture) { f.extraFront = "bound_to: ThingDB\n" },
+			want:   "bound_to is ThingDB but the Interface section has no \"Bound to ThingDB\"",
+		},
+		{
+			name: "bound promise that says so and names its neutral path",
+			mutate: func(f *fixture) {
+				f.extraFront = "bound_to: ThingDB\n"
+				f.interfaceText = "A key.\n\n**Bound to ThingDB.** Path to a neutral interface: a NebariApp field."
+			},
+		},
+		{
+			name: "bound promise without a path to a neutral interface",
+			mutate: func(f *fixture) {
+				f.extraFront = "bound_to: ThingDB\n"
+				f.interfaceText = "A key.\n\n**Bound to ThingDB.**"
+			},
+			want: "names no \"Path to a neutral interface\"",
+		},
+		{
 			name:   "unknown front matter field",
 			mutate: func(f *fixture) { f.extraFront = "colour: blue\n" },
 			want:   "field colour not found",
@@ -344,6 +366,19 @@ func experimentalBuilt(f *fixture, extra string) {
 	f.extraFront = extra
 }
 
+func TestBoundPromises(t *testing.T) {
+	f := validFixture()
+	f.extraFront = "bound_to: ThingDB\n"
+	f.interfaceText = "A key.\n\n**Bound to ThingDB.** Path to a neutral interface: a field."
+	got := BoundPromises(f.fs(t))
+	if len(got) != 1 || got[0] != "P1: ThingDB" {
+		t.Fatalf("want [P1: ThingDB], got %v", got)
+	}
+	if got := BoundPromises(validFixture().fs(t)); len(got) != 0 {
+		t.Fatalf("want no bound promises, got %v", got)
+	}
+}
+
 // TestRepositoryPackContract checks the real contract pages. It is what makes
 // CI enforce the rules in docs/pack-contract/policy/: if it fails, read the
 // problem, fix the page (or record the change), and see AGENTS.md "Pack
@@ -352,7 +387,14 @@ func TestRepositoryPackContract(t *testing.T) {
 	if _, err := os.Stat("../../docs/pack-contract/README.md"); err != nil {
 		t.Fatalf("pack contract reference not found: %v", err)
 	}
-	for _, p := range Check(os.DirFS("../.."), time.Now().UTC()) {
+	repo := os.DirFS("../..")
+	for _, p := range Check(repo, time.Now().UTC()) {
 		t.Error(p)
+	}
+	// Promises bound to one product are allowed only until a neutral
+	// interface exists (policy/proposals.md, entry rule 3). Listing them keeps
+	// them visible in every test run.
+	for _, b := range BoundPromises(repo) {
+		t.Logf("bound to a product: %s", b)
 	}
 }

@@ -2,11 +2,12 @@
 promise: P8
 level: stable
 state: built
+bound_to: Argo CD
 conformance_test: pending
 changes:
   - date: 2026-11-17
     kind: founding
-    hash: c66b85ce29233ae0
+    hash: c16efe5bd67b0fb1
 ---
 # P8: Argo CD project for packs
 
@@ -25,6 +26,8 @@ built. The AppProject `nebari-apps` exists today. It allows more than this page 
 ## Interface
 
 AppProject `nebari-apps`. Pack Applications set `project: nebari-apps`. The project accepts the pack's source repository and lets it deploy any namespaced kind into its own namespaces, plus these cluster-scoped kinds: `Namespace`, `CustomResourceDefinition`, `ClusterRole`, `ClusterRoleBinding`, `ValidatingWebhookConfiguration` and `MutatingWebhookConfiguration`. These are the cluster-scoped kinds packs ship today, except `StorageClass`, which only data-science-pack ships for its own NFS server and which the contract does not promise because it does not offer RWX.
+
+**Bound to Argo CD.** An AppProject is an Argo CD resource, so another GitOps engine cannot satisfy this promise. Path to a neutral interface: a Nebari-owned way for a pack to register its deployment, which a later promise would define.
 
 ## Packs may rely on
 

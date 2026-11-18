@@ -20,9 +20,20 @@ The suite will be a `pack_contract` group in NIC's user journey tests ([ADR-0017
 
 **NIC-managed clusters.** Once the suite exists, every NIC release runs it on every supported target before it ships, and the contract version a release implements is the version whose suite passed. Today the user journey tests run on release and on demand.
 
-**Existing clusters.** NIC does not control the CNI or storage on a cluster it did not create. A preflight in `nic deploy` (planned) will check the requirements it can observe before installing anything: exactly one default StorageClass, the CloudNativePG CRDs absent or in the supported range, and NetworkPolicy enforcement once P16 is built. It stops with a message that names the missing requirement, and runs on every provider, so a NIC-managed cluster that drifts is caught too. Admins can run the suite against their cluster to check the rest.
+**Existing clusters.** An existing cluster is covered when NIC installs and manages all of the foundational software on it. Even then, NIC does not control the CNI or storage on a cluster it did not create. A preflight in `nic deploy` (planned) will check the requirements it can observe before installing anything: exactly one default StorageClass, the CloudNativePG CRDs absent or in the supported range, and NetworkPolicy enforcement once P16 is built. It stops with a message that names the missing requirement, and runs on every provider, so a NIC-managed cluster that drifts is caught too. Admins can run the suite against their cluster to check the rest.
 
-**Other distributions.** A platform that is not deployed by NIC may say it conforms to contract `X.Y.Z` when that version's suite passes on it and the results are published. A claim names the experimental promises it covers separately.
+## Partial installations
+
+The contract covers a cluster only when NIC installs and manages every foundational component on it. An installation that leaves out or replaces any of them, such as an a la carte install on a restricted cluster that supplies its own identity provider, gateway, certificate management, Postgres operator or telemetry pipeline, is outside the contract, whoever installed the rest.
+
+- Packs cannot rely on the contract there. Some promises may still hold, for example P3 when the cluster has one default StorageClass, but none is promised, and a pack that breaks on such a cluster is not a compatibility violation.
+- Such a cluster does not claim conformance to any contract version, even if parts of the suite pass on it. Once P5 is built, NIC does not publish `contract-version` in the [`nebari-platform` ConfigMap](../p05-platform-facts.md) there, so packs and tooling can tell they are outside the contract. Admins can run the suite to see which promises hold before installing a pack.
+- This is a limit of 0.x, not the goal. The conformance suite is the only proof that substituted software keeps a promise, and it is not built yet. Once it is, a cluster is covered when the suite passes on it, whatever implements the foundational pieces, and `contract-version` is published where conformance is verified rather than only on full NIC installations. Promises bound to one product (see [Proposals and governance](proposals.md#entry-rules)) still need that product.
+- Pack authors who want to support restricted installations list the promises they use, as [What a pack must do](#what-a-pack-must-do) requires, so admins can check them one by one.
+
+## Other platforms
+
+**Other distributions.** A platform that is not deployed by NIC may say it conforms to contract `X.Y.Z` when that version's suite passes on it and the results are published. A claim names the experimental promises it covers separately. The claim and keeping it true are the distribution's, not Nebari's: the contract itself covers only clusters where NIC installs all of the foundational software.
 
 ## What a pack must do
 

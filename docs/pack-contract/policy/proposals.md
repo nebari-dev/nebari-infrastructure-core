@@ -30,7 +30,7 @@ Core accepts a new promise only when all of these hold:
 
 1. **Proven need:** at least two packs need it, or one pack plus a clear near-term need. One pack's need is that pack's to solve until a second pack needs it.
 2. **Every target:** it can work on every supported target. Where a cloud lacks it, Nebari provides it in-cluster.
-3. **Stable interface:** it is offered through a CRD field, a named class, a label or a documented key, never through an incidental Service name, namespace or chart-generated resource.
+3. **Stable, implementation-neutral interface:** it is offered through a Kubernetes or open standard (a StorageClass, a NetworkPolicy, Gateway API, OIDC, OTLP) or through a Nebari-owned abstraction (a NebariApp field, a `nebari-platform` key, a named class or label), never through one product's API, and never through an incidental Service name, namespace or chart-generated resource. The aim is that any foundational software that satisfies the contract can be swapped in. A promise bound to one product is accepted only when no neutral interface exists yet: its front matter sets `bound_to`, and its Interface section says "Bound to <product>" and names a "Path to a neutral interface".
 4. **Conformance-tested:** the RFD names the test that will prove it on every target.
 5. **Versioned:** it fits the [versioning](versioning.md) rules, and its removal path is clear.
 
@@ -55,13 +55,14 @@ Core decides every RFD, as the governance sets out, and records the decision on 
 
 ## How CI enforces these rules
 
-Rules that people have to remember get lost, so CI checks them. Every promise page starts with YAML front matter that records its level, its state, the date an experimental promise was built, its conformance test, any renewals or deprecation, and a list of changes to its protected text (Promise, Level, Interface, may-rely and must-not-rely). The Go test in `internal/packcontract` runs with every `go test ./...`, in CI and in the pre-commit hook, and fails when:
+Rules that people have to remember get lost, so CI checks them. Every promise page starts with YAML front matter that records its level, its state, the date an experimental promise was built, its conformance test, any renewals or deprecation, the product it is bound to, if any, and a list of changes to its protected text (Promise, Level, Interface, may-rely and must-not-rely). The Go test in `internal/packcontract` runs with every `go test ./...`, in CI and in the pre-commit hook, and fails when:
 
 - a page's front matter, its Level and State sections, the [README](../README.md) table and the ADR-0023 table disagree, or a page is missing a section or has them out of order;
 - the protected text changed without a new entry in `changes` carrying the hash the test prints. While ADR-0023 is Proposed, the founding entry's hash is updated with the text instead, because nothing has been promised yet;
 - a change to a stable promise, or a graduation, has no link to a platform RFD in `nebari-dev/governance`;
 - an incompatible change to a built stable promise names no [compatibility exception](compatibility.md#exceptions);
 - a built experimental promise is past 18 months from its built date or latest renewal, and has not graduated or been deprecated;
+- a promise marked `bound_to` does not say so in its Interface section, or names no path to a neutral interface (the test also lists every bound promise in its output);
 - a built or partly built promise names no conformance test, or names one that does not exist, lives outside `tests/user_journeys/journeys/pack_contract/`, or skips on some targets. `pending` is accepted only before contract 1.0.
 
 The check proves that the record is complete and consistent. It cannot prove that an RFD it links was accepted, that a change marked compatible really is, or that NIC behaves as a page says; reviewers and the conformance suite do that.

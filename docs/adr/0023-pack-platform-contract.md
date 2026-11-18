@@ -14,7 +14,7 @@ Packs integrate with Nebari through a mix of documented interfaces, implicit det
 
 Each of these dependencies works until a chart rename, a provider difference or a namespace change breaks it, and nothing tells the pack author which names are safe. Nothing tells them either how Nebari will change: whether a capability can disappear in the next release, how much notice they get, or what happens when a security fix has to break something.
 
-Nebari needs a short list of promises that pack authors can depend on, that hold on every supported target (AWS, Azure, Hetzner, local kind and existing clusters; GCP joins when its provider is supported), that a test proves on each of them, and that change only under rules pack authors can plan around.
+Nebari needs a short list of promises that pack authors can depend on, that hold on every supported target (AWS, Azure, Hetzner, local kind and existing clusters on which NIC installs all of the foundational software; GCP joins when its provider is supported), that a test proves on each of them, and that change only under rules pack authors can plan around.
 
 The guiding rule is "no is temporary, yes is forever". The contract offers what packs demonstrably need and nothing more. Anything not in the contract is not promised, even if it exists today.
 
@@ -25,6 +25,7 @@ The guiding rule is "no is temporary, yes is forever". The contract offers what 
 - A promise without a passing conformance test drifts from reality.
 - The contract must sit next to the code and tests that keep it. Most promises (storage classes, CloudNativePG, the trust bundle, the Argo CD project, telemetry and every per-target difference) are built in NIC.
 - Promises expressed as incidental names (a Service, a namespace, a Gateway name, a chart-generated resource) break when the incidental thing changes.
+- Any foundational software that satisfies the contract should be swappable, not only the specific products NIC installs today, so restricted platforms such as OpenShift can supply their own equivalents.
 - Pack authors need a strong compatibility guarantee, a predictable deprecation process and a clear rule for security exceptions, in the spirit of Go's.
 - Clusters already deployed must reach the contract by running `nic deploy` with a new NIC release, without recreating the cluster.
 
@@ -64,7 +65,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 | P16 | NetworkPolicy enforced | experimental | planned |
 | P17 | Bucket binding | experimental | planned |
 
-**Entry rules.** A capability enters the contract only when it has a proven need (two packs, or one plus a clear near-term need), works on every target (in-cluster where a cloud lacks it), has a stable interface (a CRD field, class, label or documented key), has a conformance test on every target, and fits the versioning rules. Details are in [Proposals and governance](../pack-contract/policy/proposals.md).
+**Entry rules.** A capability enters the contract only when it has a proven need (two packs, or one plus a clear near-term need), works on every target (in-cluster where a cloud lacks it), has a stable, implementation-neutral interface (a Kubernetes or open standard, or a Nebari-owned abstraction, never one product's API; a promise bound to one product is accepted only when no neutral interface exists yet, and is marked and given a path to one), has a conformance test on every target, and fits the versioning rules. Details are in [Proposals and governance](../pack-contract/policy/proposals.md).
 
 **Levels.** Stable promises may be relied on without reservation. Experimental promises are tested on every target once built, but carry no stability guarantee: they may change or be removed in any contract version, without notice, and packs rely on them at their own risk. Within 18 months of being built, each is graduated, renewed with a reason, or retired.
 
@@ -78,9 +79,9 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 
 **Adoption and governance.** The contract is behavior in NIC that packs rely on, so under the Nebari governance (RFD #59) every change to what it promises is a platform RFD in `nebari-dev/governance`, decided by Core, except changes to experimental promises, which need only a pull request. New capabilities must meet the entry rules, enter as experimental unless they document existing behavior, and graduate through an RFD; the first contract version sets its own levels, so P2, P5 and P6 start as stable. Implementation designs live in the repository that owns the change. A Go test that runs in CI checks the level, state, change record, graduation clock and conformance test of every promise page, so these rules hold without anyone having to remember them. This ADR is itself accepted through a platform RFD. See [Proposals and governance](../pack-contract/policy/proposals.md).
 
-**Conformance.** A cluster conforms to a contract version when that version's suite passes on it. NIC will check the requirements it can observe on existing clusters before installing anything (planned). Packs stay inside the compatibility promise by using only contract interfaces and meeting the obligations in [Conformance](../pack-contract/policy/conformance.md).
+**Conformance.** The contract covers a cluster only when NIC installs and manages every foundational component on it. A partial or a la carte installation, where any foundational component is left out or replaced, is outside the contract: some promises may hold there, but packs cannot rely on them. That limit exists because the conformance suite is the only proof and it is not built yet. The goal is that once it is, a cluster is covered when the suite passes on it, whatever software implements the foundational pieces; promises bound to one product still need that product. A cluster conforms to a contract version when that version's suite passes on it. NIC will check the requirements it can observe on existing clusters before installing anything (planned). Packs stay inside the compatibility promise by using only contract interfaces and meeting the obligations in [Conformance](../pack-contract/policy/conformance.md).
 
-**ADR-0007.** If this ADR is accepted, [ADR-0007](0007-cloudnativepg-managed-databases.md) is accepted with an amendment: the stable promise is the CloudNativePG `postgresql.cnpg.io/v1` API used directly (P4), the NebariApp `database` field is deferred to a later experimental promise built on top of P4, and backups to object storage are not promised. The API comes first for four reasons. It is built today on every target, and the field is not. Unlike a Keycloak client, which needs admin credentials a pack must never hold, a CNPG Cluster in the pack's own namespace needs no extra privilege, so routing it through the operator adds no protection. A stable field would fall under the compatibility promise forever while packs need pooling, extra databases, extensions and sizing that a thin field cannot cover, and a thick one would reimplement the CNPG Cluster spec inside NebariApp. And a pack that uses CNPG directly runs on any cluster with CNPG. The field still has real value (one line instead of a manifest, platform defaults for sizing, monitoring and later backups, and a credentials Secret with fixed keys), so it is listed as a candidate experimental promise that graduates only if packs adopt it.
+**ADR-0007.** If this ADR is accepted, [ADR-0007](0007-cloudnativepg-managed-databases.md) is accepted with an amendment: the stable promise is the CloudNativePG `postgresql.cnpg.io/v1` API used directly (P4), the NebariApp `database` field is deferred to a later experimental promise built on top of P4, and backups to object storage are not promised. The API comes first for four reasons. It is built today on every target, and the field is not. Unlike a Keycloak client, which needs admin credentials a pack must never hold, a CNPG Cluster in the pack's own namespace needs no extra privilege, so routing it through the operator adds no protection. A stable field would fall under the compatibility promise forever while packs need pooling, extra databases, extensions and sizing that a thin field cannot cover, and a thick one would reimplement the CNPG Cluster spec inside NebariApp. And a pack that uses CNPG directly runs on any cluster with CNPG. The field still has real value (one line instead of a manifest, platform defaults for sizing, monitoring and later backups, and a credentials Secret with fixed keys), so it is listed as a candidate experimental promise that graduates only if packs adopt it. It is also P4's path to an implementation-neutral interface: P4 is bound to CloudNativePG, and a NebariApp field would let another Postgres operator satisfy it.
 
 ### Consequences
 
@@ -91,6 +92,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 - Packs can drop the workarounds found today: hardcoded service names, CoreDNS patches, `verifyCert=false`, master admin credentials, bundled Postgres and hand-made Envoy policies.
 - Breaking changes become rare, announced and reversible per cluster for a stated time, and security fixes have a known path.
 - Moving to a separate repository later (Option 3) does not break any pack.
+- Interfaces are standards or Nebari-owned abstractions, so foundational software can be swapped without changing packs. The two promises bound to a product (P4 to CloudNativePG, P8 to Argo CD) are marked and each has a path to a neutral interface.
 
 **Bad:**
 
@@ -99,6 +101,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 - A strong compatibility promise makes every stable promise expensive to change. Mistakes in a stable interface are carried, deprecated, indefinitely, so the contract has to stay small.
 - Compatibility settings add code paths that must be kept and tested for at least two years each.
 - While the contract is 0.x, pack authors depend on a document that still lists planned parts.
+- Until the conformance suite can verify substituted software, restricted installations that bring their own identity provider, gateway or other foundational software get no guarantee. Packs may still work there, but that is between the pack and the admin.
 
 ## Options Detail
 

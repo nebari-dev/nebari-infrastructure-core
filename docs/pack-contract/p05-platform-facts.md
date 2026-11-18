@@ -5,7 +5,7 @@ state: planned
 changes:
   - date: 2026-11-17
     kind: founding
-    hash: 30f57ad968a12403
+    hash: 22bafd3d9a8c7d6f
 ---
 # P5: Platform facts
 
@@ -27,26 +27,26 @@ ConfigMap `nebari-platform` in each opted-in namespace, kept in sync with the so
 
 | Key | Meaning |
 |---|---|
-| `contract-version` | the contract version this cluster implements, as an EffVer version such as `0.1.0` (see [Versioning and support](policy/versioning.md)) |
+| `contract-version` | the contract version this cluster implements, as an EffVer version such as `0.1.0` (see [Versioning and support](policy/versioning.md)). Published only when NIC installs and manages all of the foundational software; absent on a partial installation, which the contract does not cover (see [Conformance](policy/conformance.md#partial-installations)) |
 | `domain` | the cluster's base domain |
-| `keycloak-issuer-url` | the OIDC issuer URL for realm `nebari` |
-| `keycloak-realm` | `nebari` |
+| `oidc-issuer-url` | the OIDC issuer URL of the platform's identity provider (realm `nebari` on Keycloak) |
 | `otlp-grpc-endpoint` | OTLP gRPC endpoint (P9) |
 | `otlp-http-endpoint` | OTLP HTTP endpoint (P9) |
 
 ## Packs may rely on
 
 - The keys in the table above.
+- A missing `contract-version` key, or a missing `nebari-platform` ConfigMap in an opted-in namespace, meaning the cluster is outside the contract.
 - Pods reaching the issuer URL on every target.
 - The issuer URL's certificate verifying against the trust bundle (P7), so a backend uses the same URL for discovery, token exchange and validation.
-- The issuer URL as the only Keycloak address in the contract.
+- The issuer URL as the only identity-provider address in the contract.
 
 ## Packs must not rely on
 
 - Keycloak's in-cluster Service name or port.
 - The Keycloak namespace.
 - The master realm.
-- Any key not listed in the table. Minor versions may add keys, so packs ignore keys they do not know.
+- Any key not listed in the table. Micro versions may add keys, so packs ignore keys they do not know.
 
 ## Per-target notes
 

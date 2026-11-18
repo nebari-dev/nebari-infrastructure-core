@@ -2,11 +2,12 @@
 promise: P4
 level: stable
 state: built
+bound_to: CloudNativePG
 conformance_test: pending
 changes:
   - date: 2026-11-17
     kind: founding
-    hash: 94f16abc9f0c6cae
+    hash: 4d411b14b383d3d1
 ---
 # P4: Postgres through CloudNativePG
 
@@ -27,6 +28,8 @@ built. NIC deploys the CloudNativePG operator on every cluster (the `cloudnative
 The `postgresql.cnpg.io/v1` API. Packs create `Cluster` resources, and `Database` and `Pooler` where needed, in their own namespace. Storage for a pack's Cluster comes from P3.
 
 Packs use the CNPG API directly, not a NebariApp field, because a pack can create a Cluster in its own namespace without any privilege it does not already have, so an operator in between adds no protection; because the CNPG API covers pooling, extra databases, extensions and sizing that a thin field would leave packs working around; and because a pack written this way runs on any cluster with CNPG, not only on Nebari. See [ADR-0023](../adr/0023-pack-platform-contract.md).
+
+**Bound to CloudNativePG.** This interface is one product's API, so another Postgres operator cannot satisfy it. Path to a neutral interface: the NebariApp `database` field listed in [Not yet](not-yet.md), which would let any operator that provides Postgres satisfy the promise without changing packs.
 
 ## Packs may rely on
 

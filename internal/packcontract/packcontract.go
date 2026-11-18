@@ -99,6 +99,7 @@ type frontMatter struct {
 	Built           string    `yaml:"built"`
 	ConformanceTest string    `yaml:"conformance_test"`
 	Deprecated      string    `yaml:"deprecated"`
+	BoundTo         string    `yaml:"bound_to"`
 	Renewals        []renewal `yaml:"renewals"`
 	Changes         []change  `yaml:"changes"`
 }
@@ -270,6 +271,17 @@ func checkPage(fsys fs.FS, id, text string, readmeRows, adrRows map[string]table
 		}
 	}
 
+	// A promise bound to one product must say so where packs read its
+	// interface, and name the way to a neutral one (policy/proposals.md).
+	if fm.BoundTo != "" {
+		switch {
+		case !strings.Contains(content["Interface"], "Bound to "+fm.BoundTo):
+			add("bound_to is %s but the Interface section has no \"Bound to %s\"", fm.BoundTo, fm.BoundTo)
+		case !strings.Contains(content["Interface"], "Path to a neutral interface"):
+			add("bound_to is %s but the Interface section names no \"Path to a neutral interface\"", fm.BoundTo)
+		}
+	}
+
 	hash, _ := protectedHash(body)
 	problems = append(problems, checkChanges(fm, hash, now)...)
 	problems = append(problems, checkClock(fm, now)...)
@@ -398,6 +410,36 @@ func checkConformance(fsys fs.FS, fm frontMatter, major int) []string {
 		}
 	}
 	return problems
+}
+
+// BoundPromises lists the promises whose interface is bound to one product,
+// as "P4: CloudNativePG", in page order. Pages it cannot read or parse are
+// skipped; Check reports them.
+func BoundPromises(fsys fs.FS) []string {
+	entries, err := fs.ReadDir(fsys, contractDir)
+	if err != nil {
+		return nil
+	}
+	var bound []string
+	for _, e := range entries {
+		if e.IsDir() || !pagePattern.MatchString(e.Name()) {
+			continue
+		}
+		data, err := fs.ReadFile(fsys, path.Join(contractDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		raw, _, ok := splitFrontMatter(string(data))
+		if !ok {
+			continue
+		}
+		var fm frontMatter
+		if err := yaml.Unmarshal([]byte(raw), &fm); err != nil || fm.BoundTo == "" {
+			continue
+		}
+		bound = append(bound, fm.Promise+": "+fm.BoundTo)
+	}
+	return bound
 }
 
 // protectedHash returns a short hash of the protected sections of a page body.
