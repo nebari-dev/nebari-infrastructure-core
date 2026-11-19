@@ -30,3 +30,4 @@ certificates for in-cluster TLS: see docs/internal-certificates.md.
 |-------|----------|------|----------|-------------|
 | Path | `path` | string | No |  |
 | Inline | `inline` | string | No |  |
+
