@@ -1,0 +1,17 @@
+name: Container Image Security
+
+on:
+  push:
+    branches:
+      - main
+      - chore/745_pin_and_scan_images_for_vulnerabilities
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+
+permissions:
+  contents: read

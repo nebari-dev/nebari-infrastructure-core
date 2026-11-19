@@ -1,3 +1,11 @@
+global:
+  images:
+    envoyGateway:
+      image: docker.io/envoyproxy/gateway:v1.9.1
+    ratelimit:
+      image: docker.io/envoyproxy/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1
+    envoyProxy:
+      image: docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
 config:
   envoyGateway:
     gateway:

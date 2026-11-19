@@ -4,8 +4,16 @@ crds:
 # useDefaultCAs source in the nebari-trust-bundle Bundle; trust-manager
 # rejects such Bundles when it runs without a default package. Enabled
 # by chart default, pinned explicitly because the Bundle depends on it.
+image:
+  repository: quay.io/jetstack/trust-manager
+  tag: "v0.22.1"
+
 defaultPackage:
   enabled: true
+defaultPackageImage:
+  repository: quay.io/jetstack/trust-pkg-debian-bookworm
+  tag: "20230311-deb12u1.6"
+
 app:
   trust:
     namespace: cert-manager

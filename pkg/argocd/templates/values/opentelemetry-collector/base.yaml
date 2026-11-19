@@ -1,6 +1,6 @@
 image:
   repository: otel/opentelemetry-collector-k8s
-  tag: ""
+  tag: "0.143.0"
 mode: daemonset
 presets:
   # In daemonset mode the kubernetesAttributes preset also injects the

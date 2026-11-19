@@ -8,6 +8,11 @@ installCRDs: true
 global:
   leaderElection:
     namespace: cert-manager
+
+image:
+  repository: quay.io/jetstack/cert-manager-controller
+  tag: "v1.17.2"
+
 config:
   enableGatewayAPI: true
 # Serialize ACME HTTP-01 challenges to avoid a race when two Certificates
@@ -29,6 +34,9 @@ resources:
     cpu: 200m
     memory: 256Mi
 webhook:
+  image:
+    repository: quay.io/jetstack/cert-manager-webhook
+    tag: "v1.17.2"
   resources:
     requests:
       cpu: 10m
@@ -37,6 +45,9 @@ webhook:
       cpu: 100m
       memory: 128Mi
 cainjector:
+  image:
+    repository: quay.io/jetstack/cert-manager-cainjector
+    tag: "v1.17.2"
   resources:
     requests:
       cpu: 10m
@@ -44,3 +55,13 @@ cainjector:
     limits:
       cpu: 200m
       memory: 256Mi
+
+acmesolver:
+  image:
+    repository: quay.io/jetstack/cert-manager-acmesolver
+    tag: "v1.17.2"
+
+startupapicheck:
+  image:
+    repository: quay.io/jetstack/cert-manager-startupapicheck
+    tag: "v1.17.2"

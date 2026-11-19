@@ -1,6 +1,10 @@
 # Operator-only install: per-database Cluster resources are created
 # by consumers (NIC's own manifests, nebari-operator, software packs),
 # not by this chart.
+image:
+  repository: ghcr.io/cloudnative-pg/cloudnative-pg
+  pullPolicy: IfNotPresent
+  tag: "1.30.0"
 resources:
   requests:
     cpu: 100m
