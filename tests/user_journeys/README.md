@@ -9,9 +9,9 @@ merely that it deployed. Design and rationale: [ADR-0017](../../docs/adr/0017-us
 tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
   conftest.py            # only pytest_addoption for --keep-namespace
-  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, argocd, keycloak, ui
+  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, certs, argocd, keycloak, ui
   tests_lib/              # unit tests OF the library, no cluster needed
-  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py
+  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py, test_internal_certificates.py
 ```
 
 `journeys/` and `tests_lib/` each carry an `__init__.py`. Those are load
@@ -52,6 +52,7 @@ pixi run fmt                    # ruff format .
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
 | `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a self-signed leaf (#447) or a privately issued chain such as Let's Encrypt staging. See "Three kinds of trust anchor" below for why this is split. |
+| `test_internal_certificates.py` | A pack can get a certificate for its Service from the cluster's internal CA and pods trust it, on every certificate type. A Certificate for `<svc>.<ns>.svc` and `<svc>.<ns>.svc.cluster.local` from `nebari-ca-issuer` is issued by `CN=Nebari root CA (<domain>)`; a pod that mounts the `nebari-trust-bundle` ConfigMap verifies it with curl while a pod without the bundle is rejected; and a Certificate for `example.com` is either refused by cert-manager or rejected by a bundle-trusting client, because the root is name-constrained (3 checks). Pulls `python:3.13-alpine` and `curlimages/curl:8.11.1` on first use. |
 
 ## Adding a journey
 
@@ -93,13 +94,14 @@ other fails the Go build. Add new mirrored constants to both the Python module
 and that test's table.
 
 A name that mirrors Go or a manifest template belongs in `constants.py` and
-nowhere else, so the contract test can see it. Three pinning patterns exist:
+nowhere else, so the contract test can see it. Four pinning patterns exist:
 
 | Source | Test |
 |---|---|
 | A Go constant | `TestPythonConstantsMatchGo` |
 | `metadata.name` in a manifest template | `TestPythonResourceNamesMatchTemplates` |
 | A shell literal in `realm-setup-job.yaml` | `TestPythonRealmLiteralsMatchTemplate` |
+| The trust bundle's target ConfigMap key | `TestPythonTrustBundleKeyMatchesTemplate` |
 
 `TestPythonConstantsEnrollment` fails when a constant is added without landing
 in one of them or being listed as suite-owned.
