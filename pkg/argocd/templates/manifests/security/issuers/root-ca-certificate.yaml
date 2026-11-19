@@ -18,11 +18,16 @@ spec:
   nameConstraints:
     critical: true
     permitted:
-      # svc covers the short Service name the API server dials for webhooks, svc.cluster.local the fully qualified one; NIC already assumes the cluster.local Service domain (KeycloakServiceURL).
+      # svc covers the short Service name the API server dials for webhooks, svc.cluster.local the fully qualified one; NIC already assumes the cluster.local Service domain (KeycloakServiceURL). The platform domain is listed only on certificate.type=selfsigned (see RootCAPermittedDNSDomains).
       dnsDomains:
-        - "{{ .Domain }}"
-        - "svc"
-        - "svc.cluster.local"
+{{- range .RootCAPermittedDNSDomains }}
+        - "{{ . }}"
+{{- end }}
+    # DNS constraints alone leave IP SANs unrestricted, so every IPv4 and IPv6 address is excluded. URI SANs stay unconstrained so a future mesh can issue SPIFFE identities from this root.
+    excluded:
+      ipRanges:
+        - "0.0.0.0/0"
+        - "::/0"
   issuerRef:
     name: selfsigned-issuer
     kind: ClusterIssuer
