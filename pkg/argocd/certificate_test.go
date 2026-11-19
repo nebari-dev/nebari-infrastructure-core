@@ -492,6 +492,23 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 		t.Errorf("root CA excluded ipRanges = %q, want %q", got, wantExcludedIPRanges)
 	}
 
+	// Rotating the root's key would stop every leaf it signed from verifying
+	// until reissued, so the policy is pinned rather than left to
+	// cert-manager's default, which becomes Always from v1.18.
+	var rootSpec struct {
+		Spec struct {
+			PrivateKey struct {
+				RotationPolicy string `json:"rotationPolicy"`
+			} `json:"privateKey"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(rootCA, &rootSpec); err != nil {
+		t.Fatalf("parse root CA certificate: %v", err)
+	}
+	if got := rootSpec.Spec.PrivateKey.RotationPolicy; got != "Never" {
+		t.Errorf("root CA privateKey.rotationPolicy = %q, want %q", got, "Never")
+	}
+
 	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
 	caIssuer, err := os.ReadFile(filepath.Join(tmpDir, caIssuerPath))
 	if err != nil {
