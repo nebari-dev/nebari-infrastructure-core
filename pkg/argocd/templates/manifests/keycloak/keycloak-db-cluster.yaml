@@ -31,6 +31,15 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
 spec:
   instances: 1
+  # With a single instance there is no replica to switch over to, so CNPG's
+  # default primary PodDisruptionBudget (minAvailable: 1) never allows the pod
+  # to be evicted. Any drain of the node running keycloak-db-1 then blocks
+  # forever: node pool deletion on destroy, node image upgrades, autoscaler
+  # scale-down (issue #724). CNPG recommends disabling the PDB for
+  # single-instance clusters. The cost is a short Keycloak database outage
+  # while the pod is rescheduled during a drain.
+  # https://cloudnative-pg.io/docs/1.30/kubernetes_upgrade/
+  enablePDB: false
   # Pin the PostgreSQL image explicitly. The operator's implicit default is
   # whatever was current when that operator release was cut, so leaving this
   # unset makes the Postgres major version an accidental side effect of a

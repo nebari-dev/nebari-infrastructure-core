@@ -67,6 +67,11 @@ func TestKeycloakDBClusterTemplate_PinsShape(t *testing.T) {
 	if wave, _ := annotations["argocd.argoproj.io/sync-wave"].(string); wave != "-1" {
 		t.Errorf("sync-wave annotation = %q, want \"-1\" (must apply before the wave-0 StatefulSet)", wave)
 	}
+	// A single-instance Cluster must not get CNPG's primary PDB, which allows
+	// zero disruptions and blocks every drain of the database node (issue #724).
+	if spec["enablePDB"] != false {
+		t.Errorf("enablePDB = %v, want false (the single-instance primary PDB would block node drains)", spec["enablePDB"])
+	}
 	resources, _ := spec["resources"].(map[string]any)
 	requests, _ := resources["requests"].(map[string]any)
 	limits, _ := resources["limits"].(map[string]any)
