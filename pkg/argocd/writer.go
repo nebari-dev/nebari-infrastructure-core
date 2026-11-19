@@ -65,6 +65,15 @@ type TemplateData struct {
 	// RootCASecretName names the root CA Certificate and Secret that back
 	// nebari-ca-issuer.
 	RootCASecretName string
+	// CAIssuerName names the ClusterIssuer that signs with the root CA. It is
+	// the same on every certificate type; CertificateIssuer only matches it on
+	// selfsigned.
+	CAIssuerName string
+	// RootCAPermittedDNSDomains lists the DNS domains the root CA may sign:
+	// the in-cluster Service domains on every type, and the platform domain
+	// only on selfsigned, where the root signs the gateway and per-app
+	// certificates.
+	RootCAPermittedDNSDomains []string
 
 	// UseExistingCertificate is true when the user supplies their own TLS cert
 	// (certificate.type=existing). When true, the cert-manager Certificate is
@@ -174,6 +183,7 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		LonghornEnabled:         settings.LonghornEnabled,
 		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
 		RootCASecretName:        rootCASecretName,
+		CAIssuerName:            certificateIssuerCA,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -233,6 +243,15 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 	// Default domain if not set
 	if data.Domain == "" {
 		data.Domain = "nebari.local"
+	}
+
+	// svc covers the short Service name the API server dials for webhooks,
+	// svc.cluster.local the fully qualified one. The root vouches for the
+	// platform domain only where it signs the gateway and per-app
+	// certificates; elsewhere those are public or the user's own.
+	data.RootCAPermittedDNSDomains = []string{"svc", "svc.cluster.local"}
+	if data.CertificateIssuer == certificateIssuerCA {
+		data.RootCAPermittedDNSDomains = append([]string{data.Domain}, data.RootCAPermittedDNSDomains...)
 	}
 
 	// External Keycloak URL - what Keycloak embeds in the iss claim of tokens.

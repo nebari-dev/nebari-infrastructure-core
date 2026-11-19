@@ -7,10 +7,13 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"io/fs"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +247,10 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 		wantOperatorName string
 		wantACMEEmail    string
 		wantACMEServer   string
+		// wantPermitted is the root CA's exact permitted dnsDomains: the
+		// domain only where the root signs the gateway and per-app
+		// certificates.
+		wantPermitted []string
 	}{
 		{
 			name:             "default uses the root CA",
@@ -252,6 +259,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			wantTrustManager: true,
 			wantGatewayCert:  true,
 			wantOperatorName: certificateIssuerCA,
+			wantPermitted:    []string{"example.com", "svc", "svc.cluster.local"},
 		},
 		{
 			name:             "selfsigned uses the root CA",
@@ -261,6 +269,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			wantTrustManager: true,
 			wantGatewayCert:  true,
 			wantOperatorName: certificateIssuerCA,
+			wantPermitted:    []string{"example.com", "svc", "svc.cluster.local"},
 		},
 		{
 			name: "letsencrypt uses letsencrypt for public certificates and runs the internal CA",
@@ -276,6 +285,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			wantOperatorName: certificateIssuerLetsEncrypt,
 			wantACMEEmail:    "admin@example.com",
 			wantACMEServer:   "https://acme-v02.api.letsencrypt.org/directory",
+			wantPermitted:    []string{"svc", "svc.cluster.local"},
 		},
 		{
 			name: "existing keeps selfsigned for operator managed certificates",
@@ -287,6 +297,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			wantRootCA:       true,
 			wantTrustManager: true,
 			wantOperatorName: certificateIssuerSelfSigned,
+			wantPermitted:    []string{"svc", "svc.cluster.local"},
 		},
 	}
 
@@ -331,6 +342,44 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				if !path.want && !os.IsNotExist(err) {
 					t.Errorf("expected %s to be skipped, stat error = %v", path.name, err)
 				}
+			}
+
+			// The CA issuer keeps its constant name on every type, whatever
+			// issuer the gateway and operator use.
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			caIssuer, err := os.ReadFile(filepath.Join(tmpDir, caIssuerPath))
+			if err != nil {
+				t.Fatalf("read CA issuer: %v", err)
+			}
+			var caIssuerObj struct {
+				Kind     string `json:"kind"`
+				Metadata struct {
+					Name string `json:"name"`
+				} `json:"metadata"`
+				Spec struct {
+					CA struct {
+						SecretName string `json:"secretName"`
+					} `json:"ca"`
+				} `json:"spec"`
+			}
+			if err := yaml.Unmarshal(caIssuer, &caIssuerObj); err != nil {
+				t.Fatalf("parse CA issuer: %v", err)
+			}
+			if caIssuerObj.Kind != "ClusterIssuer" || caIssuerObj.Metadata.Name != certificateIssuerCA || caIssuerObj.Spec.CA.SecretName != rootCASecretName {
+				t.Errorf("CA issuer = %s %q with ca.secretName %q, want ClusterIssuer %q with ca.secretName %q",
+					caIssuerObj.Kind, caIssuerObj.Metadata.Name, caIssuerObj.Spec.CA.SecretName, certificateIssuerCA, rootCASecretName)
+			}
+
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			rootCA, err := os.ReadFile(filepath.Join(tmpDir, rootCACertificatePath))
+			if err != nil {
+				t.Fatalf("read root CA certificate: %v", err)
+			}
+			if got := renderedPermittedDNSDomains(t, rootCA); !slices.Equal(got, tt.wantPermitted) {
+				t.Errorf("root CA permitted dnsDomains = %q, want %q", got, tt.wantPermitted)
+			}
+			if got := renderedExcludedIPRanges(t, rootCA); !slices.Equal(got, wantExcludedIPRanges) {
+				t.Errorf("root CA excluded ipRanges = %q, want %q", got, wantExcludedIPRanges)
 			}
 
 			if tt.wantLetsEncrypt {
@@ -439,6 +488,9 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 	if got := constraints.Permitted.DNSDomains; !slices.Equal(got, wantDomains) {
 		t.Errorf("root CA permitted dnsDomains = %q, want %q", got, wantDomains)
 	}
+	if got := renderedExcludedIPRanges(t, rootCA); !slices.Equal(got, wantExcludedIPRanges) {
+		t.Errorf("root CA excluded ipRanges = %q, want %q", got, wantExcludedIPRanges)
+	}
 
 	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
 	caIssuer, err := os.ReadFile(filepath.Join(tmpDir, caIssuerPath))
@@ -456,104 +508,264 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 	}
 }
 
+// wantExcludedIPRanges is every IPv4 and IPv6 address: the root CA may not
+// sign IP SANs on any certificate type.
+var wantExcludedIPRanges = []string{"0.0.0.0/0", "::/0"}
+
+// renderedRootCAConstraints is the part of a rendered root CA Certificate
+// manifest that holds its name constraints.
+type renderedRootCAConstraints struct {
+	Spec struct {
+		NameConstraints struct {
+			Permitted struct {
+				DNSDomains []string `json:"dnsDomains"`
+			} `json:"permitted"`
+			Excluded struct {
+				IPRanges []string `json:"ipRanges"`
+			} `json:"excluded"`
+		} `json:"nameConstraints"`
+	} `json:"spec"`
+}
+
+func parseRootCAConstraints(t *testing.T, manifest []byte) renderedRootCAConstraints {
+	t.Helper()
+	var cert renderedRootCAConstraints
+	if err := yaml.Unmarshal(manifest, &cert); err != nil {
+		t.Fatalf("parse root CA certificate: %v", err)
+	}
+	return cert
+}
+
 // renderedPermittedDNSDomains parses a rendered root CA Certificate manifest
 // and returns spec.nameConstraints.permitted.dnsDomains.
 func renderedPermittedDNSDomains(t *testing.T, manifest []byte) []string {
 	t.Helper()
-	var cert struct {
-		Spec struct {
-			NameConstraints struct {
-				Permitted struct {
-					DNSDomains []string `json:"dnsDomains"`
-				} `json:"permitted"`
-			} `json:"nameConstraints"`
-		} `json:"spec"`
-	}
-	if err := yaml.Unmarshal(manifest, &cert); err != nil {
-		t.Fatalf("parse root CA certificate: %v", err)
-	}
-	return cert.Spec.NameConstraints.Permitted.DNSDomains
+	return parseRootCAConstraints(t, manifest).Spec.NameConstraints.Permitted.DNSDomains
+}
+
+// renderedExcludedIPRanges parses a rendered root CA Certificate manifest
+// and returns spec.nameConstraints.excluded.ipRanges.
+func renderedExcludedIPRanges(t *testing.T, manifest []byte) []string {
+	t.Helper()
+	return parseRootCAConstraints(t, manifest).Spec.NameConstraints.Excluded.IPRanges
 }
 
 func TestRootCANameConstraints_ServiceNames(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := &config.NebariConfig{Domain: "nebari.example.com"}
-	if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
-		t.Fatalf("WriteAllToGit() error: %v", err)
+	letsencrypt := &config.CertificateConfig{
+		Type: config.CertificateTypeLetsEncrypt,
+		ACME: &config.ACMEConfig{Email: "admin@example.com"},
 	}
-	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
-	manifest, err := os.ReadFile(filepath.Join(tmpDir, rootCACertificatePath))
-	if err != nil {
-		t.Fatalf("read root CA certificate: %v", err)
+	existing := &config.CertificateConfig{
+		Type:           config.CertificateTypeExisting,
+		ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
 	}
-	permitted := renderedPermittedDNSDomains(t, manifest)
-
-	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generate root key: %v", err)
-	}
-	now := time.Now()
-	rootTmpl := &x509.Certificate{
-		SerialNumber:                big.NewInt(1),
-		Subject:                     pkix.Name{CommonName: "test root"},
-		NotBefore:                   now.Add(-time.Hour),
-		NotAfter:                    now.Add(time.Hour),
-		IsCA:                        true,
-		BasicConstraintsValid:       true,
-		KeyUsage:                    x509.KeyUsageCertSign,
-		PermittedDNSDomainsCritical: true,
-		PermittedDNSDomains:         permitted,
-	}
-	rootDER, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
-	if err != nil {
-		t.Fatalf("create root certificate: %v", err)
-	}
-	root, err := x509.ParseCertificate(rootDER)
-	if err != nil {
-		t.Fatalf("parse root certificate: %v", err)
-	}
-	pool := x509.NewCertPool()
-	pool.AddCert(root)
-
-	tests := []struct {
-		name   string
-		wantOK bool
+	types := []struct {
+		name        string
+		certificate *config.CertificateConfig
+		// signsDomain is true where the root signs the gateway and per-app
+		// certificates, so names under the domain must verify.
+		signsDomain bool
 	}{
-		{name: "webhook.pack.svc", wantOK: true},
-		{name: "webhook.pack.svc.cluster.local", wantOK: true},
-		{name: "app.nebari.example.com", wantOK: true},
-		{name: "example.com", wantOK: false},
-		{name: "10-0-0-1.pack.pod.cluster.local", wantOK: false},
+		{name: "selfsigned", signsDomain: true},
+		{name: "letsencrypt", certificate: letsencrypt},
+		{name: "existing", certificate: existing},
 	}
-	for i, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+	for _, ct := range types {
+		t.Run(ct.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cfg := &config.NebariConfig{Domain: "nebari.example.com", Certificate: ct.certificate}
+			if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			manifest, err := os.ReadFile(filepath.Join(tmpDir, rootCACertificatePath))
 			if err != nil {
-				t.Fatalf("generate leaf key: %v", err)
+				t.Fatalf("read root CA certificate: %v", err)
 			}
-			leafTmpl := &x509.Certificate{
-				SerialNumber: big.NewInt(int64(i + 2)),
-				Subject:      pkix.Name{CommonName: tt.name},
-				NotBefore:    now.Add(-time.Hour),
-				NotAfter:     now.Add(time.Hour),
-				KeyUsage:     x509.KeyUsageDigitalSignature,
-				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-				DNSNames:     []string{tt.name},
+			permitted := renderedPermittedDNSDomains(t, manifest)
+			var excluded []*net.IPNet
+			for _, cidr := range renderedExcludedIPRanges(t, manifest) {
+				_, ipNet, err := net.ParseCIDR(cidr)
+				if err != nil {
+					t.Fatalf("parse rendered excluded ipRange %q: %v", cidr, err)
+				}
+				excluded = append(excluded, ipNet)
 			}
-			leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, root, &leafKey.PublicKey, rootKey)
+
+			rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
-				t.Fatalf("create leaf certificate: %v", err)
+				t.Fatalf("generate root key: %v", err)
 			}
-			leaf, err := x509.ParseCertificate(leafDER)
+			now := time.Now()
+			rootTmpl := &x509.Certificate{
+				SerialNumber:                big.NewInt(1),
+				Subject:                     pkix.Name{CommonName: "test root"},
+				NotBefore:                   now.Add(-time.Hour),
+				NotAfter:                    now.Add(time.Hour),
+				IsCA:                        true,
+				BasicConstraintsValid:       true,
+				KeyUsage:                    x509.KeyUsageCertSign,
+				PermittedDNSDomainsCritical: true,
+				PermittedDNSDomains:         permitted,
+				ExcludedIPRanges:            excluded,
+			}
+			rootDER, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
 			if err != nil {
-				t.Fatalf("parse leaf certificate: %v", err)
+				t.Fatalf("create root certificate: %v", err)
 			}
-			_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: tt.name})
-			if gotOK := err == nil; gotOK != tt.wantOK {
-				t.Errorf("Verify(%q) error = %v, wantOK %v (permitted %q)", tt.name, err, tt.wantOK, permitted)
+			root, err := x509.ParseCertificate(rootDER)
+			if err != nil {
+				t.Fatalf("parse root certificate: %v", err)
+			}
+			pool := x509.NewCertPool()
+			pool.AddCert(root)
+
+			tests := []struct {
+				name   string
+				wantOK bool
+			}{
+				{name: "webhook.pack.svc", wantOK: true},
+				{name: "webhook.pack.svc.cluster.local", wantOK: true},
+				{name: "app.nebari.example.com", wantOK: ct.signsDomain},
+				{name: "example.com", wantOK: false},
+				{name: "10-0-0-1.pack.pod.cluster.local", wantOK: false},
+				// Leaves with only an IP SAN: DNS constraints alone do not
+				// restrict them, the excluded ranges must.
+				{name: "10.0.0.1", wantOK: false},
+				{name: "fd00::1", wantOK: false},
+			}
+			for i, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+					if err != nil {
+						t.Fatalf("generate leaf key: %v", err)
+					}
+					leafTmpl := &x509.Certificate{
+						SerialNumber: big.NewInt(int64(i + 2)),
+						Subject:      pkix.Name{CommonName: tt.name},
+						NotBefore:    now.Add(-time.Hour),
+						NotAfter:     now.Add(time.Hour),
+						KeyUsage:     x509.KeyUsageDigitalSignature,
+						ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+					}
+					if ip := net.ParseIP(tt.name); ip != nil {
+						leafTmpl.IPAddresses = []net.IP{ip}
+					} else {
+						leafTmpl.DNSNames = []string{tt.name}
+					}
+					leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, root, &leafKey.PublicKey, rootKey)
+					if err != nil {
+						t.Fatalf("create leaf certificate: %v", err)
+					}
+					leaf, err := x509.ParseCertificate(leafDER)
+					if err != nil {
+						t.Fatalf("parse leaf certificate: %v", err)
+					}
+					_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: tt.name})
+					if gotOK := err == nil; gotOK != tt.wantOK {
+						t.Errorf("Verify(%q) error = %v, wantOK %v (permitted %q, excluded %v)", tt.name, err, tt.wantOK, permitted, excluded)
+					}
+				})
 			}
 		})
 	}
+}
+
+// TestWriteAllToGit_NoDuplicateObjects guards against two rendered manifests
+// declaring the same object, which Argo CD applies in turn so the last one
+// silently wins (the CA issuer once rendered under the gateway issuer's name).
+func TestWriteAllToGit_NoDuplicateObjects(t *testing.T) {
+	tests := []struct {
+		name        string
+		certificate *config.CertificateConfig
+	}{
+		{name: "selfsigned", certificate: &config.CertificateConfig{Type: config.CertificateTypeSelfSigned}},
+		{name: "letsencrypt", certificate: &config.CertificateConfig{
+			Type: config.CertificateTypeLetsEncrypt,
+			ACME: &config.ACMEConfig{Email: "admin@example.com"},
+		}},
+		{name: "existing", certificate: &config.CertificateConfig{
+			Type:           config.CertificateTypeExisting,
+			ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cfg := &config.NebariConfig{Domain: "example.com", Certificate: tt.certificate}
+			if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{LonghornEnabled: true}, ""); err != nil {
+				t.Fatalf("WriteAllToGit() error: %v", err)
+			}
+
+			seen := map[string]string{}
+			clusterIssuers := 0
+			rendered := os.DirFS(tmpDir)
+			err := fs.WalkDir(rendered, ".", func(rel string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() || !strings.HasSuffix(rel, ".yaml") {
+					return err
+				}
+				content, err := fs.ReadFile(rendered, rel)
+				if err != nil {
+					return err
+				}
+				for i, doc := range splitYAMLDocuments(string(content)) {
+					var obj struct {
+						APIVersion string `json:"apiVersion"`
+						Kind       string `json:"kind"`
+						Metadata   struct {
+							Name      string `json:"name"`
+							Namespace string `json:"namespace"`
+						} `json:"metadata"`
+					}
+					if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+						t.Errorf("parse %s document %d: %v", rel, i, err)
+						continue
+					}
+					if obj.APIVersion == "" || obj.Kind == "" || obj.Metadata.Name == "" {
+						continue
+					}
+					if obj.Kind == "ClusterIssuer" {
+						clusterIssuers++
+					}
+					group, _, found := strings.Cut(obj.APIVersion, "/")
+					if !found {
+						group = "" // core API group, e.g. "v1"
+					}
+					key := group + "/" + obj.Kind + "/" + obj.Metadata.Namespace + "/" + obj.Metadata.Name
+					where := rel + " document " + strconv.Itoa(i)
+					if prev, ok := seen[key]; ok {
+						t.Errorf("%s is declared twice: %s and %s", key, prev, where)
+					}
+					seen[key] = where
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk rendered tree: %v", err)
+			}
+			if clusterIssuers == 0 {
+				t.Error("found no ClusterIssuer documents; the walk is not reading the rendered issuers")
+			}
+		})
+	}
+}
+
+// splitYAMLDocuments splits a multi-document YAML stream on its "---"
+// separator lines.
+func splitYAMLDocuments(content string) []string {
+	var docs []string
+	var current []string
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimRight(line, " ") == "---" {
+			docs = append(docs, strings.Join(current, "\n"))
+			current = nil
+			continue
+		}
+		current = append(current, line)
+	}
+	return append(docs, strings.Join(current, "\n"))
 }
 
 func TestWriteAllToGit_RendersReferenceGrantCrossNamespace(t *testing.T) {

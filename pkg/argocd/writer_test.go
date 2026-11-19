@@ -1762,7 +1762,7 @@ func TestHelmApps_ValueFilesRespectGitPath(t *testing.T) {
 	}
 }
 
-func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
+func TestWriteAllToGit_TrustManagerValuesBaseWithoutTrustBundle(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("trust-manager base.yaml is written without a trust_bundle", func(t *testing.T) {
@@ -1869,10 +1869,10 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 //
 // Scope note: this covers only the UNGATED case. envoy-gateway is never matched
 // by isBackupPath/isLonghornOnlyPath, so this test does not exercise the
-// gated-off removal path at all. The file-versus-directory gating regression is
-// pinned by TestWriteAllToGit_GatedValuesBase, and the structural guard behind
-// it by TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not de-scope
-// either of those on the assumption that this test covers them.
+// gated-off removal path at all. No values/<app>/base.yaml is gated today, so
+// the file-versus-directory gating regression is pinned only by the structural
+// guard test, TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not
+// de-scope it on the assumption that this test covers it.
 func TestWriteAllToGit_PreservesOverlays(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
