@@ -76,7 +76,7 @@ JOURNEY_LABEL_VALUE = "true"
 
 # Images the internal certificate journeys run. Pinned so a run is
 # reproducible; like busybox in k8s.py they are pulled on first use.
-TLS_SERVER_IMAGE = "python:3.13-alpine"
+TLS_SERVER_IMAGE = "python:3.13.18-alpine"
 TLS_CLIENT_IMAGE = "curlimages/curl:8.11.1"
 
 # Seconds to wait for cert-manager to issue a journey's Certificate.
