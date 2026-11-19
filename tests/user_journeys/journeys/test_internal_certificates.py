@@ -2,9 +2,10 @@
 
 The platform's promise to a pack: ask the cluster's own CA for a
 certificate for your Service, and every pod in the cluster trusts it
-through the trust-manager bundle, on every certificate type. The root is
-name-constrained to the cluster's domain and in-cluster Service names, so
-it cannot be used to impersonate anything else.
+through the trust-manager bundle, on every certificate type. The root may
+sign only in-cluster Service names (and names under the cluster's domain
+on selfsigned clusters, where it also signs the gateway), and no IP
+addresses, so it cannot vouch for any other DNS name or IP address.
 
 These run against the Kubernetes API and pods inside the cluster only; they
 need no gateway access.
@@ -92,9 +93,9 @@ def test_pod_trusts_internal_certificate_through_bundle(scratch_namespace):
 
 
 def test_root_rejects_names_outside_constraints(scratch_namespace):
-    """The root CA cannot vouch for a name outside the cluster's domain and
-    Service names: either cert-manager refuses to issue, or a client that
-    trusts the bundle refuses the certificate."""
+    """The root CA cannot vouch for a name outside its permitted names:
+    either cert-manager refuses to issue, or a client that trusts the
+    bundle refuses the certificate."""
     ns = scratch_namespace
 
     secret = certs.request_certificate(ns, OUTSIDE_SERVER, [OUTSIDE_NAME])
@@ -148,6 +149,10 @@ def test_ca_injected_webhook_is_called(scratch_namespace):
         f"{ns.name}-{HOOK}", ns.name, HOOK, HOOK, certs.WEBHOOK_TARGET_LABEL
     )
     webhook = certs.install_webhook(ns, manifest)
+    # The API server names the denying webhook in its response, and this
+    # run's webhook name carries the run-unique namespace, so a stale
+    # webhook from another run cannot satisfy the assertion below.
+    webhook_name = manifest["webhooks"][0]["name"]
     try:
         certs.wait_ca_injected(ns, webhook)
         certs.wait_webhook_consulted(ns, certs.WEBHOOK_TARGET_LABEL)
@@ -159,10 +164,12 @@ def test_ca_injected_webhook_is_called(scratch_namespace):
             outcome is not None
             and outcome.status == 403
             and WEBHOOK_DENIED_MESSAGE in (outcome.body or "")
+            and webhook_name in (outcome.body or "")
         ), (
             f"creating a ConfigMap labelled {certs.WEBHOOK_TARGET_LABEL} in "
-            f"{ns.name} was expected to be refused with 403 carrying the "
-            f"webhook's message {WEBHOOK_DENIED_MESSAGE!r}, proving the API "
+            f"{ns.name} was expected to be refused with 403 by webhook "
+            f"{webhook_name!r} carrying its message "
+            f"{WEBHOOK_DENIED_MESSAGE!r}, proving the API "
             "server called the webhook over TLS it verified with the CA "
             f"cert-manager injected from {certs.INTERNAL_ISSUER}; got: "
             f"{certs.describe_outcome(outcome)}"
