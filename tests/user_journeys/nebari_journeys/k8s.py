@@ -2,6 +2,8 @@
 
 Everything a journey creates is namespaced and carries the journey
 label, so the blast radius is bounded and leftovers are identifiable.
+The one cluster-scoped exception, the webhook journey's
+ValidatingWebhookConfiguration, is labelled and has its own sweep here.
 No action here asserts; assertions belong in the test files.
 
 `SweepResult` is imported from `nebari_journeys.sweep` rather than defined
@@ -93,6 +95,33 @@ def scratch_namespace_name() -> str:
     return f"{SCRATCH_NAMESPACE_PREFIX}{uuid.uuid4().hex[:8]}"
 
 
+def _sweep(names: list[str], delete) -> SweepResult:
+    """Delete each name that passes the scratch-prefix guard."""
+    result = SweepResult()
+    for name in names:
+        if not name.startswith(SCRATCH_NAMESPACE_PREFIX):
+            result.skipped.append(name)
+            continue
+        try:
+            delete(name=name)
+        except ApiException as exc:
+            # 404 means something else already removed it, which is the
+            # outcome the sweep wanted; anything else left it in place and
+            # the caller has to be told. Either way the sweep continues:
+            # one undeletable object must not strand the rest.
+            if exc.status == 404:
+                result.deleted.append(name)
+            else:
+                result.failed.append(name)
+        else:
+            result.deleted.append(name)
+    return result
+
+
+def _journey_selector() -> str:
+    return f"{constants.JOURNEY_LABEL_KEY}={constants.JOURNEY_LABEL_VALUE}"
+
+
 def sweep_stale_namespaces(cluster) -> SweepResult:
     """Delete journey namespaces left behind by crashed runs.
 
@@ -101,29 +130,42 @@ def sweep_stale_namespaces(cluster) -> SweepResult:
     foreign name is an anomaly: it is skipped, not deleted and not
     silently dropped.
     """
-    selector = f"{constants.JOURNEY_LABEL_KEY}={constants.JOURNEY_LABEL_VALUE}"
-    stale = cluster.core.list_namespace(label_selector=selector)
-    names = [ns.metadata.name for ns in stale.items]
+    stale = cluster.core.list_namespace(label_selector=_journey_selector())
+    return _sweep(
+        [ns.metadata.name for ns in stale.items], cluster.core.delete_namespace
+    )
 
-    result = SweepResult()
-    for name in names:
-        if not name.startswith(SCRATCH_NAMESPACE_PREFIX):
-            result.skipped.append(name)
-            continue
-        try:
-            cluster.core.delete_namespace(name=name)
-        except ApiException as exc:
-            # 404 means something else already removed it, which is the
-            # outcome the sweep wanted; anything else left it in place and
-            # the caller has to be told. Either way the sweep continues:
-            # one undeletable namespace must not strand the rest.
-            if exc.status == 404:
-                result.deleted.append(name)
-            else:
-                result.failed.append(name)
-        else:
-            result.deleted.append(name)
-    return result
+
+def sweep_stale_webhook_configurations(cluster) -> SweepResult:
+    """Delete journey ValidatingWebhookConfigurations left by crashed runs.
+
+    These are cluster-scoped, so deleting the scratch namespace does not
+    remove them. The guards are the namespace sweep's: the journey label
+    AND a name starting with SCRATCH_NAMESPACE_PREFIX (journeys name the
+    configuration after their scratch namespace).
+    """
+    stale = cluster.admission.list_validating_webhook_configuration(
+        label_selector=_journey_selector()
+    )
+    return _sweep(
+        [config.metadata.name for config in stale.items],
+        cluster.admission.delete_validating_webhook_configuration,
+    )
+
+
+def has_ready_endpoint(slices) -> bool:
+    """True when any EndpointSlice has an address ready to receive traffic.
+
+    A nil `ready` condition counts as ready: that is how the API defines it
+    (V1EndpointConditions.ready in kubernetes 36.0.3).
+    """
+    for endpoint_slice in slices:
+        for endpoint in endpoint_slice.endpoints or []:
+            conditions = endpoint.conditions
+            ready = conditions is None or conditions.ready is not False
+            if ready and endpoint.addresses:
+                return True
+    return False
 
 
 @dataclass
@@ -252,6 +294,32 @@ class ScratchNamespace:
 
         wait_for_condition(
             ready, timeout=timeout, description=f"pod {self.name}/{name} to be ready"
+        )
+
+    def wait_service_endpoint_ready(self, name: str, timeout: float = 120) -> None:
+        """Wait until the Service has a ready address in its EndpointSlices.
+
+        A Ready pod is not yet a reachable Service: the EndpointSlice
+        controller publishes the address afterwards, and a client (or the
+        API server calling a webhook) that dials in between is refused.
+
+        Necessary but not sufficient: kube-proxy programs the ClusterIP
+        shortly after this returns, so the first dial can still be refused.
+        Callers that dial retry transient connect errors on top of this
+        (certs.curl_command, certs.wait_webhook_consulted).
+        """
+
+        def ready() -> bool:
+            slices = self.cluster.discovery.list_namespaced_endpoint_slice(
+                namespace=self.name,
+                label_selector=f"kubernetes.io/service-name={name}",
+            )
+            return has_ready_endpoint(slices.items)
+
+        wait_for_condition(
+            ready,
+            timeout=timeout,
+            description=f"Service {self.name}/{name} to have a ready endpoint",
         )
 
     def delete_pod(self, name: str, timeout: float = 180) -> None:

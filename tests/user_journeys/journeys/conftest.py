@@ -15,6 +15,7 @@ from nebari_journeys.k8s import (
     ScratchNamespace,
     scratch_namespace_name,
     sweep_stale_namespaces,
+    sweep_stale_webhook_configurations,
 )
 
 
@@ -42,7 +43,29 @@ def sweep_leftovers(cluster):
             "!!! ANOMALY: namespaces carry the journey label but do not "
             f"match the scratch prefix, and were NOT deleted: {', '.join(result.skipped)}"
         )
+    _report_webhook_sweep(sweep_stale_webhook_configurations(cluster))
     return result
+
+
+def _report_webhook_sweep(result) -> None:
+    """Cluster-scoped webhook configurations outlive their namespace, so a
+    crashed run's are swept separately and reported the same way."""
+    if result.deleted:
+        print(
+            "swept stale journey ValidatingWebhookConfigurations: "
+            f"{', '.join(result.deleted)}"
+        )
+    if result.failed:
+        print(
+            "!!! ANOMALY: stale journey ValidatingWebhookConfigurations could NOT "
+            f"be deleted and are still on the cluster: {', '.join(result.failed)}"
+        )
+    if result.skipped:
+        print(
+            "!!! ANOMALY: ValidatingWebhookConfigurations carry the journey label "
+            "but do not match the scratch prefix, and were NOT deleted: "
+            f"{', '.join(result.skipped)}"
+        )
 
 
 @pytest.fixture(scope="session")

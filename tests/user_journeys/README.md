@@ -52,7 +52,7 @@ pixi run fmt                    # ruff format .
 | `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
 | `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a self-signed leaf (#447) or a privately issued chain such as Let's Encrypt staging. See "Three kinds of trust anchor" below for why this is split. |
-| `test_internal_certificates.py` | A pack can get a certificate for its Service from the cluster's internal CA and pods trust it, on every certificate type. A Certificate for `<svc>.<ns>.svc` and `<svc>.<ns>.svc.cluster.local` from `nebari-ca-issuer` is issued by `CN=Nebari root CA (<domain>)`; a pod that mounts the `nebari-trust-bundle` ConfigMap verifies it with curl while a pod without the bundle is rejected; and a Certificate for `example.com` is either refused by cert-manager or rejected by a bundle-trusting client, because the root is name-constrained (3 checks). Pulls `python:3.13-alpine` and `curlimages/curl:8.11.1` on first use. |
+| `test_internal_certificates.py` | A pack can get a certificate for its Service from the cluster's internal CA and pods trust it, on every certificate type. A Certificate for `<svc>.<ns>.svc` and `<svc>.<ns>.svc.cluster.local` from `nebari-ca-issuer` is issued by `CN=Nebari root CA (<domain>)`; a pod that mounts the `nebari-trust-bundle` ConfigMap verifies it with curl while a pod without the bundle is rejected; and a Certificate for `example.com` is either refused by cert-manager or rejected by a bundle-trusting client, because the root is name-constrained; and an admission webhook serving a `nebari-ca-issuer` certificate, whose ValidatingWebhookConfiguration gets its `caBundle` from cert-manager's `cert-manager.io/inject-ca-from`, is called by the API server: a labelled ConfigMap is refused with 403 and the webhook's message, an unlabelled one is created (4 checks). Every dial retries curl's transient connect errors, because kube-proxy programs a new ClusterIP shortly after its EndpointSlice is ready. Pulls `python:3.13-alpine` and `curlimages/curl:8.11.1` on first use. |
 
 ## Adding a journey
 
@@ -70,6 +70,7 @@ pixi run fmt                    # ruff format .
    `cluster.has_longhorn()` so the rest still runs.
 4. **Work inside `scratch_namespace`.** Never create cluster-scoped resources
    and never write outside the namespace.
+   The one exception is `test_ca_injected_webhook_is_called`, whose subject is a ValidatingWebhookConfiguration, which only exists cluster-scoped. It is named `<scratch namespace>-<webhook>`, carries the journey label, matches only that namespace, is deleted in a `finally`, and is swept (see "Cleanup of leftovers"). A new cluster-scoped resource needs all of that.
 5. **Never disable TLS verification.** No `verify=False`, no
    `ignore_https_errors=True`. Use the `trust_anchor` fixture; browser
    journeys additionally get an SPKI pin automatically (see "Chromium and
@@ -108,7 +109,7 @@ in one of them or being listed as suite-owned.
 
 ## Cleanup of leftovers
 
-Two sweeps, both reporting a `SweepResult(deleted, skipped, failed)`:
+Three sweeps, all reporting a `SweepResult(deleted, skipped, failed)`:
 `deleted` is what was removed, `skipped` is what carried the journey marker
 but failed the second guard and was deliberately left alone, and `failed` is
 what the sweep tried and could not remove. A sweep never aborts on one bad
@@ -118,6 +119,8 @@ item, and everything but `deleted` is printed as an `!!! ANOMALY` line.
 `journeys/conftest.py`) calls `sweep_stale_namespaces` at the start of every
 run. A namespace is deleted only if it carries the journey label *and* its
 name starts with `nebari-journey-`.
+
+**Webhook configurations.** The same fixture then calls `sweep_stale_webhook_configurations`. A ValidatingWebhookConfiguration is cluster-scoped, so deleting its scratch namespace does not remove it. The guards are the namespace sweep's: the journey label *and* a name starting with `nebari-journey-`.
 
 **Scratch realm users.** The `keycloak` fixture calls `sweep_scratch_users`
 when it is first built. A run killed between `create_user` and its teardown
