@@ -45,6 +45,17 @@ GATEWAY_CERTIFICATE_NAME = "nebari-gateway-cert"
 # pkg/argocd/templates/manifests/networking/gateway.yaml
 GATEWAY_NAME = "nebari-gateway"
 
+# pkg/argocd/writer.go. The ClusterIssuer backed by the cluster's root CA,
+# and the root CA Certificate and Secret behind it, render on every
+# certificate type.
+INTERNAL_ISSUER = "nebari-ca-issuer"
+ROOT_CA_SECRET = "nebari-root-ca"
+
+# pkg/argocd/templates/manifests/security/trust-bundle/bundle.yaml.
+# trust-manager projects this ConfigMap, under this key, into every namespace.
+TRUST_BUNDLE_CONFIGMAP = "nebari-trust-bundle"
+TRUST_BUNDLE_KEY = "ca-certificates.crt"
+
 # pkg/argocd/bootstrap.go, rootAppOfAppsTemplate
 ROOT_APP_NAME = "nebari-root"
 
@@ -62,3 +73,11 @@ LONGHORN_OIDC_CLIENT = "longhorn"
 # Owned by this suite; no Go counterpart.
 JOURNEY_LABEL_KEY = "nebari.dev/test-journey"
 JOURNEY_LABEL_VALUE = "true"
+
+# Images the internal certificate journeys run. Pinned so a run is
+# reproducible; like busybox in k8s.py they are pulled on first use.
+TLS_SERVER_IMAGE = "python:3.13-alpine"
+TLS_CLIENT_IMAGE = "curlimages/curl:8.11.1"
+
+# Seconds to wait for cert-manager to issue a journey's Certificate.
+CERTIFICATE_READY_TIMEOUT = 120
