@@ -107,13 +107,6 @@ type TemplateData struct {
 	// trust-manager Bundle. Empty when no trust_bundle is configured.
 	TrustBundlePEM string
 
-	// RootCAEnabled is true on every certificate type: the cluster's internal
-	// root CA and its nebari-ca-issuer always render. It signs the gateway and
-	// per-app certificates on selfsigned and internal certificates on
-	// letsencrypt and existing. Its certificate is added to the trust-manager
-	// Bundle so pods trust it.
-	RootCAEnabled bool
-
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
 	HTTPSPort int
 
@@ -213,7 +206,6 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 	}
 	// The internal CA renders on every certificate type; the switch only
 	// chooses which issuer serves the gateway and operator-managed certificates.
-	data.RootCAEnabled = true
 	switch certificateType {
 	case config.CertificateTypeSelfSigned:
 		data.CertificateIssuer = certificateIssuerCA
@@ -582,12 +574,11 @@ const (
 // The certificates Application is skipped alongside the Certificate because the
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
-// it would report as failed. Issuer manifests are selected independently:
-// letsencrypt uses the ACME issuer and existing uses the self-signed issuer
-// for operator-managed per-application certificates. The internal root CA and
-// its issuer render on every certificate type (for internal certificates on
-// letsencrypt and existing), and the self-signed issuer renders with the root
-// CA, which it signs.
+// it would report as failed. Only the ACME issuer is selected by type: it
+// renders for letsencrypt alone. The internal root CA, its nebari-ca-issuer and
+// the self-signed issuer (which signs the root, and the operator's per-app
+// certificates on existing) render on every certificate type, so they are
+// never skipped here.
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
@@ -596,10 +587,6 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 		return !data.GatewayTLSCrossNamespace
 	case letsencryptIssuerPath:
 		return data.CertificateIssuer != certificateIssuerLetsEncrypt
-	case selfSignedIssuerPath:
-		return data.CertificateIssuer != certificateIssuerSelfSigned && !data.RootCAEnabled
-	case rootCACertificatePath, caIssuerPath:
-		return !data.RootCAEnabled
 	default:
 		return false
 	}

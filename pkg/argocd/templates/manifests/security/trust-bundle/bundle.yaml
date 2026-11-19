@@ -19,7 +19,6 @@ spec:
     # trust-manager's default CA package (public roots), which
     # apps/trust-manager.yaml explicitly enables.
     - useDefaultCAs: true
-{{- if .RootCAEnabled }}
     # The cluster's root CA, which signs the gateway and per-app certificates
     # on certificate.type=selfsigned and packs' internal certificates on every
     # type, so pods trust the platform's own hostnames.
@@ -27,7 +26,6 @@ spec:
     - secret:
         name: {{ .RootCASecretName }}
         key: ca.crt
-{{- end }}
 {{- if .TrustBundlePEM }}
     # The org CA from the top-level trust_bundle.
     - inLine: |-
