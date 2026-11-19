@@ -2,13 +2,20 @@ package argocd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/goccy/go-yaml"
+	"sigs.k8s.io/yaml"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -411,12 +418,12 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 	var rootCADoc struct {
 		Spec struct {
 			NameConstraints *struct {
-				Critical  bool `yaml:"critical"`
+				Critical  bool `json:"critical"`
 				Permitted struct {
-					DNSDomains []string `yaml:"dnsDomains"`
-				} `yaml:"permitted"`
-			} `yaml:"nameConstraints"`
-		} `yaml:"spec"`
+					DNSDomains []string `json:"dnsDomains"`
+				} `json:"permitted"`
+			} `json:"nameConstraints"`
+		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(rootCA, &rootCADoc); err != nil {
 		t.Fatalf("parse root CA certificate: %v", err)
@@ -428,8 +435,9 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 	if !constraints.Critical {
 		t.Error("root CA nameConstraints are not critical, so clients that don't support them would ignore them")
 	}
-	if got, want := constraints.Permitted.DNSDomains, []string{"nebari.example.com"}; !slices.Equal(got, want) {
-		t.Errorf("root CA permitted dnsDomains = %v, want %v", got, want)
+	wantDomains := []string{"nebari.example.com", "svc", "svc.cluster.local"}
+	if got := constraints.Permitted.DNSDomains; !slices.Equal(got, wantDomains) {
+		t.Errorf("root CA permitted dnsDomains = %q, want %q", got, wantDomains)
 	}
 
 	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
@@ -445,6 +453,106 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 		if !strings.Contains(string(caIssuer), want) {
 			t.Errorf("CA issuer missing %q:\n%s", want, caIssuer)
 		}
+	}
+}
+
+// renderedPermittedDNSDomains parses a rendered root CA Certificate manifest
+// and returns spec.nameConstraints.permitted.dnsDomains.
+func renderedPermittedDNSDomains(t *testing.T, manifest []byte) []string {
+	t.Helper()
+	var cert struct {
+		Spec struct {
+			NameConstraints struct {
+				Permitted struct {
+					DNSDomains []string `json:"dnsDomains"`
+				} `json:"permitted"`
+			} `json:"nameConstraints"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(manifest, &cert); err != nil {
+		t.Fatalf("parse root CA certificate: %v", err)
+	}
+	return cert.Spec.NameConstraints.Permitted.DNSDomains
+}
+
+func TestRootCANameConstraints_ServiceNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NebariConfig{Domain: "nebari.example.com"}
+	if err := WriteAllToGit(context.Background(), tmpDir, cfg, nil, cluster.InfraSettings{}, ""); err != nil {
+		t.Fatalf("WriteAllToGit() error: %v", err)
+	}
+	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+	manifest, err := os.ReadFile(filepath.Join(tmpDir, rootCACertificatePath))
+	if err != nil {
+		t.Fatalf("read root CA certificate: %v", err)
+	}
+	permitted := renderedPermittedDNSDomains(t, manifest)
+
+	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate root key: %v", err)
+	}
+	now := time.Now()
+	rootTmpl := &x509.Certificate{
+		SerialNumber:                big.NewInt(1),
+		Subject:                     pkix.Name{CommonName: "test root"},
+		NotBefore:                   now.Add(-time.Hour),
+		NotAfter:                    now.Add(time.Hour),
+		IsCA:                        true,
+		BasicConstraintsValid:       true,
+		KeyUsage:                    x509.KeyUsageCertSign,
+		PermittedDNSDomainsCritical: true,
+		PermittedDNSDomains:         permitted,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatalf("create root certificate: %v", err)
+	}
+	root, err := x509.ParseCertificate(rootDER)
+	if err != nil {
+		t.Fatalf("parse root certificate: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(root)
+
+	tests := []struct {
+		name   string
+		wantOK bool
+	}{
+		{name: "webhook.pack.svc", wantOK: true},
+		{name: "webhook.pack.svc.cluster.local", wantOK: true},
+		{name: "app.nebari.example.com", wantOK: true},
+		{name: "example.com", wantOK: false},
+		{name: "10-0-0-1.pack.pod.cluster.local", wantOK: false},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				t.Fatalf("generate leaf key: %v", err)
+			}
+			leafTmpl := &x509.Certificate{
+				SerialNumber: big.NewInt(int64(i + 2)),
+				Subject:      pkix.Name{CommonName: tt.name},
+				NotBefore:    now.Add(-time.Hour),
+				NotAfter:     now.Add(time.Hour),
+				KeyUsage:     x509.KeyUsageDigitalSignature,
+				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+				DNSNames:     []string{tt.name},
+			}
+			leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, root, &leafKey.PublicKey, rootKey)
+			if err != nil {
+				t.Fatalf("create leaf certificate: %v", err)
+			}
+			leaf, err := x509.ParseCertificate(leafDER)
+			if err != nil {
+				t.Fatalf("parse leaf certificate: %v", err)
+			}
+			_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: tt.name})
+			if gotOK := err == nil; gotOK != tt.wantOK {
+				t.Errorf("Verify(%q) error = %v, wantOK %v (permitted %q)", tt.name, err, tt.wantOK, permitted)
+			}
+		})
 	}
 }
 

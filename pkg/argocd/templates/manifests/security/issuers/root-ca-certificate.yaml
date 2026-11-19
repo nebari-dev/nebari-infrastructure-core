@@ -18,8 +18,11 @@ spec:
   nameConstraints:
     critical: true
     permitted:
+      # svc covers the short Service name the API server dials for webhooks, svc.cluster.local the fully qualified one; NIC already assumes the cluster.local Service domain (KeycloakServiceURL).
       dnsDomains:
         - "{{ .Domain }}"
+        - "svc"
+        - "svc.cluster.local"
   issuerRef:
     name: selfsigned-issuer
     kind: ClusterIssuer
