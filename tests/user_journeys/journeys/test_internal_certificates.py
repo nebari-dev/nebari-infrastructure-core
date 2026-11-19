@@ -22,6 +22,13 @@ OUTSIDE_NAME = "example.com"
 # problem", and that must not pass as proof the name constraint holds.
 NAME_CONSTRAINT_VIOLATION = "permitted subtree violation"
 
+# curl's CURLE_PEER_FAILED_VERIFICATION: the server's certificate did not
+# verify against the CA store curl was given.
+CURL_PEER_VERIFICATION_FAILED = 60
+
+HOOK = "hook"
+WEBHOOK_DENIED_MESSAGE = "nebari-journey-webhook-denied"
+
 
 def _curl_failure(url: str, ca_file: str | None, code: int, output: str) -> str:
     return (
@@ -64,6 +71,7 @@ def test_pod_trusts_internal_certificate_through_bundle(scratch_namespace):
     certs.run_tls_client(ns, "without-bundle", mount_bundle=False)
     for pod in (SERVER, "with-bundle", "without-bundle"):
         ns.wait_pod_ready(pod)
+    ns.wait_service_endpoint_ready(SERVER)
 
     url = f"https://{SERVER}.{ns.name}.svc/"
 
@@ -75,9 +83,10 @@ def test_pod_trusts_internal_certificate_through_bundle(scratch_namespace):
     )
 
     code, output = certs.https_status(ns, "without-bundle", url, None)
-    assert code != 0 and "certificate" in output.lower(), (
+    assert code == CURL_PEER_VERIFICATION_FAILED and "certificate" in output.lower(), (
         "a pod WITHOUT the trust bundle was expected to reject the internal "
-        "certificate with a verification error, which is what proves the "
+        "certificate with a verification error (curl exit "
+        f"{CURL_PEER_VERIFICATION_FAILED}), which is what proves the "
         "bundle is doing the trusting: " + _curl_failure(url, None, code, output)
     )
 
@@ -104,6 +113,7 @@ def test_root_rejects_names_outside_constraints(scratch_namespace):
     certs.run_tls_client(ns, "with-bundle", mount_bundle=True)
     for pod in (OUTSIDE_SERVER, "with-bundle"):
         ns.wait_pod_ready(pod)
+    ns.wait_service_endpoint_ready(OUTSIDE_SERVER)
 
     url = f"https://{OUTSIDE_NAME}/"
     resolve = f"{OUTSIDE_NAME}:443:{certs.service_ip(ns, OUTSIDE_SERVER)}"
@@ -118,3 +128,51 @@ def test_root_rejects_names_outside_constraints(scratch_namespace):
             f"{url} (resolved via {resolve})", certs.BUNDLE_FILE, code, output
         )
     )
+
+
+def test_ca_injected_webhook_is_called(scratch_namespace):
+    """A pack's admission webhook serves a certificate from the internal
+    issuer, cert-manager injects the CA into its configuration, and the API
+    server calls it: the webhook's denial reaches the client."""
+    ns = scratch_namespace
+
+    secret = certs.request_certificate(ns, HOOK, certs.service_dns_names(HOOK, ns.name))
+    certs.wait_certificate_ready(ns, HOOK)
+    certs.run_denying_webhook(ns, HOOK, secret, WEBHOOK_DENIED_MESSAGE)
+    ns.wait_pod_ready(HOOK)
+    # failurePolicy is Fail: dialing a Service with no ready endpoint would
+    # surface as a call error, not as the webhook's denial.
+    ns.wait_service_endpoint_ready(HOOK)
+
+    manifest = certs.webhook_configuration_manifest(
+        f"{ns.name}-{HOOK}", ns.name, HOOK, HOOK, certs.WEBHOOK_TARGET_LABEL
+    )
+    webhook = certs.install_webhook(ns, manifest)
+    try:
+        certs.wait_ca_injected(ns, webhook)
+        certs.wait_webhook_consulted(ns, certs.WEBHOOK_TARGET_LABEL)
+
+        outcome = certs.create_configmap(
+            ns, "targeted", {certs.WEBHOOK_TARGET_LABEL: "true"}
+        )
+        assert (
+            outcome is not None
+            and outcome.status == 403
+            and WEBHOOK_DENIED_MESSAGE in (outcome.body or "")
+        ), (
+            f"creating a ConfigMap labelled {certs.WEBHOOK_TARGET_LABEL} in "
+            f"{ns.name} was expected to be refused with 403 carrying the "
+            f"webhook's message {WEBHOOK_DENIED_MESSAGE!r}, proving the API "
+            "server called the webhook over TLS it verified with the CA "
+            f"cert-manager injected from {certs.INTERNAL_ISSUER}; got: "
+            f"{certs.describe_outcome(outcome)}"
+        )
+
+        outcome = certs.create_configmap(ns, "untargeted", {})
+        assert outcome is None, (
+            f"a ConfigMap WITHOUT {certs.WEBHOOK_TARGET_LABEL} in {ns.name} is "
+            "outside the webhook's objectSelector and should be created "
+            f"normally; got: {certs.describe_outcome(outcome)}"
+        )
+    finally:
+        certs.delete_webhook(ns, webhook)

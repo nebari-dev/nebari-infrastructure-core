@@ -9,12 +9,17 @@ bundle. Nothing here asserts.
 
 Everything is created inside the scratch namespace and carries the
 journey labels, so deleting the namespace removes it and the namespace
-sweep catches anything a crashed run left behind.
+sweep catches anything a crashed run left behind. The one exception is
+the ValidatingWebhookConfiguration, which only exists cluster-scoped: it
+is labelled too, named after the scratch namespace, deleted by the
+journey in a `finally`, and caught by
+k8s.sweep_stale_webhook_configurations after a crash.
 """
 
 import textwrap
 
 from cryptography import x509
+from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
 
 from nebari_journeys import constants
@@ -24,7 +29,7 @@ from nebari_journeys.cluster import (
     CERTMANAGER_VERSION,
 )
 from nebari_journeys.k8s import JOURNEY_LABELS, ScratchNamespace
-from nebari_journeys.waits import poll_until_settled
+from nebari_journeys.waits import poll_until_settled, wait_for_condition
 
 CERTIFICATE_READY_TIMEOUT = constants.CERTIFICATE_READY_TIMEOUT
 
@@ -47,6 +52,15 @@ TLS_MOUNT_PATH = "/tls"
 CURL_MAX_TIME = 15
 EXEC_TIMEOUT = 60
 
+# kube-proxy programs a new Service's ClusterIP shortly after its
+# EndpointSlice turns ready (observed on kind, iptables mode: refused at
+# 0.05s, served at 0.11s), so the first dial can be refused or time out.
+# curl retries only those transient errors (--retry covers timeouts,
+# --retry-connrefused adds ECONNREFUSED); a certificate verification
+# failure is not transient and is never retried.
+CURL_RETRIES = 10
+CURL_RETRY_MAX_TIME = 30
+
 _SERVER_SCRIPT = textwrap.dedent(
     f"""\
     import http.server
@@ -57,6 +71,72 @@ _SERVER_SCRIPT = textwrap.dedent(
         def do_GET(self):
             body = b"ok\\n"
             self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+
+    server = http.server.ThreadingHTTPServer(("", {SERVER_PORT}), Handler)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain("{TLS_MOUNT_PATH}/tls.crt", "{TLS_MOUNT_PATH}/tls.key")
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    server.serve_forever()
+    """
+)
+
+
+# The denying admission webhook. It reuses the HTTPS server's shape (same
+# image, port, Secret mount and Service on 443) and answers every
+# AdmissionReview with allowed=False and the message from its environment.
+# It sets status.code 403 itself: a denial without a code reaches the client
+# as 400 (k8s.io/apiserver v0.36.2,
+# pkg/admission/plugin/webhook/errors/statuserror.go:36-39, ToStatusErr).
+DENY_MESSAGE_ENV = "DENY_MESSAGE"
+WEBHOOK_PATH = "/validate"
+WEBHOOK_TIMEOUT_SECONDS = 10
+
+# The label a ConfigMap carries to be sent to the journey's webhook. Only
+# labelled ConfigMaps in the scratch namespace are matched, so the webhook
+# (failurePolicy Fail) never blocks trust-manager writing its bundle there.
+WEBHOOK_TARGET_LABEL = "nebari.dev/journey-webhook-target"
+
+INJECT_CA_FROM_ANNOTATION = "cert-manager.io/inject-ca-from"
+CA_INJECTED_TIMEOUT = 60
+# Bounds the wait for the API server to start consulting a webhook it has
+# just been told about.
+WEBHOOK_CONSULTED_TIMEOUT = 60
+WEBHOOK_PROBE_CONFIGMAP = "webhook-probe"
+
+# Text the API server puts in every webhook denial (statuserror.go:29).
+_WEBHOOK_DENIAL = "denied the request"
+
+_WEBHOOK_SCRIPT = textwrap.dedent(
+    f"""\
+    import http.server
+    import json
+    import os
+    import ssl
+
+    MESSAGE = os.environ["{DENY_MESSAGE_ENV}"]
+
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers["Content-Length"])
+            review = json.loads(self.rfile.read(length))
+            body = json.dumps(
+                dict(
+                    apiVersion="admission.k8s.io/v1",
+                    kind="AdmissionReview",
+                    response=dict(
+                        uid=review["request"]["uid"],
+                        allowed=False,
+                        status=dict(code=403, message=MESSAGE),
+                    ),
+                )
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -148,6 +228,11 @@ def curl_command(
         "--show-error",
         "--max-time",
         str(CURL_MAX_TIME),
+        "--retry",
+        str(CURL_RETRIES),
+        "--retry-connrefused",
+        "--retry-max-time",
+        str(CURL_RETRY_MAX_TIME),
         "--output",
         "/dev/null",
         "--write-out",
@@ -160,8 +245,14 @@ def curl_command(
     return [*command, url]
 
 
-def tls_server_manifests(name: str, secret: str) -> tuple[dict, dict]:
-    """A Pod serving HTTPS from `secret`, and a Service on 443 in front of it."""
+def tls_server_manifests(
+    name: str, secret: str, script: str = _SERVER_SCRIPT, env: list[dict] | None = None
+) -> tuple[dict, dict]:
+    """A Pod serving HTTPS from `secret`, and a Service on 443 in front of it.
+
+    `script` is the Python program the Pod runs; by default it answers GET
+    with 200.
+    """
     selector = {"app.kubernetes.io/name": name}
     pod = {
         "metadata": {"name": name, "labels": _labels(**selector)},
@@ -171,7 +262,8 @@ def tls_server_manifests(name: str, secret: str) -> tuple[dict, dict]:
                 {
                     "name": "server",
                     "image": constants.TLS_SERVER_IMAGE,
-                    "command": ["python", "-c", _SERVER_SCRIPT],
+                    "command": ["python", "-c", script],
+                    "env": list(env or []),
                     "ports": [{"containerPort": SERVER_PORT}],
                     # Ready only once the socket listens, so a client
                     # dialing right after wait_pod_ready is not refused.
@@ -334,3 +426,179 @@ def https_status(
 ) -> tuple[int, str]:
     """curl's exit code and output (the HTTP status, or curl's error)."""
     return exec_with_exit_code(ns, client, curl_command(url, ca_file, resolve))
+
+
+def webhook_configuration_manifest(
+    name: str, namespace: str, service: str, certificate: str, label: str
+) -> dict:
+    """A ValidatingWebhookConfiguration whose CA cert-manager injects.
+
+    It has no caBundle of its own: the inject-ca-from annotation asks
+    cert-manager's cainjector to copy in the CA of `certificate`. It
+    matches only ConfigMap creates in `namespace` that carry `label`, and
+    fails closed, so a webhook the API server cannot call blocks the
+    request instead of letting it through.
+    """
+    return {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingWebhookConfiguration",
+        "metadata": {
+            "name": name,
+            "labels": _labels(),
+            "annotations": {INJECT_CA_FROM_ANNOTATION: f"{namespace}/{certificate}"},
+        },
+        "webhooks": [
+            {
+                "name": f"{service}.{namespace}.journey.nebari.dev",
+                "clientConfig": {
+                    "service": {
+                        "name": service,
+                        "namespace": namespace,
+                        "port": 443,
+                        "path": WEBHOOK_PATH,
+                    }
+                },
+                "rules": [
+                    {
+                        "operations": ["CREATE"],
+                        "apiGroups": [""],
+                        "apiVersions": ["v1"],
+                        "resources": ["configmaps"],
+                        "scope": "Namespaced",
+                    }
+                ],
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": namespace}
+                },
+                "objectSelector": {
+                    "matchExpressions": [{"key": label, "operator": "Exists"}]
+                },
+                "failurePolicy": "Fail",
+                "sideEffects": "None",
+                "admissionReviewVersions": ["v1"],
+                "timeoutSeconds": WEBHOOK_TIMEOUT_SECONDS,
+            }
+        ],
+    }
+
+
+def denying_webhook_manifests(
+    name: str, secret: str, message: str
+) -> tuple[dict, dict]:
+    """A Pod answering every AdmissionReview with a denial, and its Service."""
+    return tls_server_manifests(
+        name,
+        secret,
+        script=_WEBHOOK_SCRIPT,
+        env=[{"name": DENY_MESSAGE_ENV, "value": message}],
+    )
+
+
+def run_denying_webhook(
+    ns: ScratchNamespace, name: str, secret: str, message: str
+) -> str:
+    """Start the denying webhook Pod and its Service, both named `name`."""
+    pod, service = denying_webhook_manifests(name, secret, message)
+    ns.cluster.core.create_namespaced_pod(namespace=ns.name, body=pod)
+    ns.cluster.core.create_namespaced_service(namespace=ns.name, body=service)
+    return name
+
+
+def install_webhook(ns: ScratchNamespace, manifest: dict) -> str:
+    """Create a ValidatingWebhookConfiguration; returns its name.
+
+    It is cluster-scoped, so deleting the scratch namespace does not remove
+    it: the caller deletes it with delete_webhook in a `finally`, and
+    k8s.sweep_stale_webhook_configurations catches a crashed run's.
+    """
+    ns.cluster.admission.create_validating_webhook_configuration(body=manifest)
+    return manifest["metadata"]["name"]
+
+
+def delete_webhook(ns: ScratchNamespace, name: str) -> None:
+    try:
+        ns.cluster.admission.delete_validating_webhook_configuration(name=name)
+    except ApiException as exc:
+        if exc.status != 404:
+            raise
+
+
+def ca_injected(config) -> bool:
+    """True when every webhook in the configuration has a caBundle."""
+    webhooks = config.webhooks or []
+    return bool(webhooks) and all(w.client_config.ca_bundle for w in webhooks)
+
+
+def wait_ca_injected(
+    ns: ScratchNamespace, name: str, timeout: float = CA_INJECTED_TIMEOUT
+) -> None:
+    """Wait for cert-manager to write the caBundle into the configuration."""
+    wait_for_condition(
+        lambda: ca_injected(
+            ns.cluster.admission.read_validating_webhook_configuration(name=name)
+        ),
+        timeout=timeout,
+        description=(
+            f"cert-manager to inject a caBundle into ValidatingWebhookConfiguration "
+            f"{name} (annotation {INJECT_CA_FROM_ANNOTATION})"
+        ),
+    )
+
+
+def configmap_manifest(name: str, labels: dict[str, str]) -> dict:
+    return {
+        "metadata": {"name": name, "labels": {**JOURNEY_LABELS, **labels}},
+        "data": {"journey": "webhook"},
+    }
+
+
+def create_configmap(
+    ns: ScratchNamespace, name: str, labels: dict[str, str], dry_run: bool = False
+) -> ApiException | None:
+    """Create a ConfigMap; returns the API's rejection, or None if admitted."""
+    kwargs = {"dry_run": "All"} if dry_run else {}
+    try:
+        ns.cluster.core.create_namespaced_config_map(
+            namespace=ns.name, body=configmap_manifest(name, labels), **kwargs
+        )
+    except ApiException as exc:
+        return exc
+    return None
+
+
+def denied_by_a_webhook(outcome: ApiException | None) -> bool:
+    """True when the API server rejected a request on a webhook's answer."""
+    return outcome is not None and _WEBHOOK_DENIAL in (outcome.body or "")
+
+
+def describe_outcome(outcome: ApiException | None) -> str:
+    if outcome is None:
+        return "admitted"
+    return f"HTTP {outcome.status}: {outcome.body}"
+
+
+def wait_webhook_consulted(
+    ns: ScratchNamespace, label: str, timeout: float = WEBHOOK_CONSULTED_TIMEOUT
+) -> None:
+    """Wait until the API server sends a labelled ConfigMap to a webhook.
+
+    The API server learns about a new or newly injected configuration
+    through its own watch, so for a moment after wait_ca_injected it may
+    still admit the request without asking, or call with the configuration
+    as it was before the caBundle landed. This probes with dry-run creates,
+    which reach validating webhooks declaring sideEffects None but persist
+    nothing, until one comes back denied by a webhook.
+    """
+    outcome = poll_until_settled(
+        lambda: create_configmap(
+            ns, WEBHOOK_PROBE_CONFIGMAP, {label: "true"}, dry_run=True
+        ),
+        denied_by_a_webhook,
+        timeout=timeout,
+    )
+    if not denied_by_a_webhook(outcome):
+        raise TimeoutError(
+            f"timed out after {timeout:g}s waiting for the API server to send a "
+            f"ConfigMap labelled {label} in {ns.name} to a webhook; last "
+            f"outcome: {describe_outcome(outcome)}"
+        )
