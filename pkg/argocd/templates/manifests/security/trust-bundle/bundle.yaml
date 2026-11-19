@@ -21,7 +21,8 @@ spec:
     - useDefaultCAs: true
 {{- if .RootCAEnabled }}
     # The cluster's root CA, which signs the gateway and per-app certificates
-    # (certificate.type=selfsigned), so pods trust the platform's own hostnames.
+    # on certificate.type=selfsigned and packs' internal certificates on every
+    # type, so pods trust the platform's own hostnames.
     # cert-manager keeps it in the trust namespace, where trust-manager reads it.
     - secret:
         name: {{ .RootCASecretName }}

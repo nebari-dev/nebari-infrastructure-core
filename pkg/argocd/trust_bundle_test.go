@@ -21,7 +21,7 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 // TestTrustBundleTemplate_RendersValidYAML verifies the inline PEM is indented
 // correctly so the Bundle manifest parses as YAML and carries the certificate.
 func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
-	data := TemplateData{TrustManagerEnabled: true, TrustBundlePEM: testCAPEM}
+	data := TemplateData{TrustBundlePEM: testCAPEM}
 
 	content, err := templates.ReadFile("templates/manifests/security/trust-bundle/bundle.yaml")
 	if err != nil {
@@ -93,26 +93,32 @@ func TestWriteAllToGit_TrustManager(t *testing.T) {
 			wantOrgCA:   true,
 		},
 		{
-			name:        "letsencrypt with an org CA trusts only the org CA",
+			name:        "letsencrypt with an org CA trusts both",
 			certificate: letsencrypt,
 			orgCAPEM:    testCAPEM,
 			wantWritten: true,
+			wantRootCA:  true,
 			wantOrgCA:   true,
 		},
 		{
-			name:        "existing with an org CA trusts only the org CA",
+			name:        "existing with an org CA trusts both",
 			certificate: existing,
 			orgCAPEM:    testCAPEM,
 			wantWritten: true,
+			wantRootCA:  true,
 			wantOrgCA:   true,
 		},
 		{
-			name:        "letsencrypt without an org CA skips trust-manager",
+			name:        "letsencrypt without an org CA trusts the root CA",
 			certificate: letsencrypt,
+			wantWritten: true,
+			wantRootCA:  true,
 		},
 		{
-			name:        "existing without an org CA skips trust-manager",
+			name:        "existing without an org CA trusts the root CA",
 			certificate: existing,
+			wantWritten: true,
+			wantRootCA:  true,
 		},
 	}
 
