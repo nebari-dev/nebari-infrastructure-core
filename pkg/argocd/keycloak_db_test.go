@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,8 +70,10 @@ func TestKeycloakDBClusterTemplate_PinsShape(t *testing.T) {
 	}
 	// A single-instance Cluster must not get CNPG's primary PDB, which allows
 	// zero disruptions and blocks every drain of the database node (issue #724).
-	if spec["enablePDB"] != false {
-		t.Errorf("enablePDB = %v, want false (the single-instance primary PDB would block node drains)", spec["enablePDB"])
+	// With 2 or more instances CNPG can switch over before a drain, so the PDB
+	// is fine there. fmt.Sprint avoids depending on the YAML decoder's int type.
+	if fmt.Sprint(spec["instances"]) == "1" && spec["enablePDB"] != false {
+		t.Errorf("enablePDB = %v with instances = 1, want false (the primary PDB would block node drains)", spec["enablePDB"])
 	}
 	resources, _ := spec["resources"].(map[string]any)
 	requests, _ := resources["requests"].(map[string]any)
