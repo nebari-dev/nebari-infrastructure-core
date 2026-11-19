@@ -6,7 +6,7 @@ conformance_test: pending
 changes:
   - date: 2026-11-17
     kind: founding
-    hash: d97572038353301f
+    hash: 815e0261fbc6b30e
 ---
 # P7: Trust bundle
 
@@ -20,11 +20,11 @@ stable
 
 ## State
 
-partly built. The ConfigMap `nebari-trust-bundle` exists only when `trust_bundle` is set. There is no cluster CA in self-signed mode yet (#776 adds that CA and its issuer). The contract requires the bundle on every cluster. data-science-pack uses it today.
+partly built. The ConfigMap `nebari-trust-bundle` exists only when `trust_bundle` is set. There is no cluster CA yet: #776 adds one on self-signed clusters, and #785 runs it on every certificate type for internal certificates (P18). The contract requires the bundle on every cluster. data-science-pack uses it today.
 
 ## Interface
 
-ConfigMap `nebari-trust-bundle`, key `ca-certificates.crt`, in every opted-in namespace on every cluster, whether or not `trust_bundle` is set, so packs can mount it unconditionally. It holds the system roots, the organisation CA when one is configured, and the cluster's own CA in self-signed mode. Packs point `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` or the language equivalent at it.
+ConfigMap `nebari-trust-bundle`, key `ca-certificates.crt`, in every opted-in namespace on every cluster, whether or not `trust_bundle` is set, so packs can mount it unconditionally. It holds the system roots, the organisation CA when one is configured, and the root of the cluster's private CA, which signs the platform's own certificates in self-signed mode and internal certificates (P18) on every cluster. Packs point `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` or the language equivalent at it.
 
 ## Packs may rely on
 

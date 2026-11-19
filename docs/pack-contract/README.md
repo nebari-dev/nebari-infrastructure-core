@@ -22,7 +22,7 @@ Each promise page starts with YAML front matter that records its level, state, c
 
 ## Promises
 
-All seventeen are required for 1.0.
+All eighteen are required for 1.0.
 
 **This is the 1.0 contract, and most of it is not built yet.** It lists every promise contract 1.0 will make, so pack authors and NIC maintainers work toward the same target. Most promises are still planned or partly built; the table shows the state of each. A promise's level says what it will be once built; its state says what holds now. A planned promise carries no guarantee, whatever its level, and its interface may change until it is built (see [Compatibility](policy/compatibility.md#what-is-not-covered)).
 
@@ -45,8 +45,9 @@ All seventeen are required for 1.0.
 | P15 | GPU node label and taint | experimental | planned | [P15](p15-gpu-nodes.md) |
 | P16 | NetworkPolicy enforced | experimental | planned | [P16](p16-networkpolicy.md) |
 | P17 | Bucket binding | experimental | planned | [P17](p17-bucket-binding.md) |
+| P18 | Internal certificates | experimental | planned | [P18](p18-internal-certificates.md) |
 
-Before 1.0, these known problems are fixed, each with a regression test: NebariApp `gateway: internal` points at a Gateway NIC never creates; several repositories name the `selfsigned-issuer` ClusterIssuer, which exists only in self-signed mode; the operator publishes an auth-enabled route before its SecurityPolicy is accepted (nebari-operator #152); the software pack template uses `project: default`, `gateway: internal` and a `clientSecretRef` that does not work; and the realm's bootstrap `admin` user collides with packs' own `admin` users.
+Before 1.0, these known problems are fixed, each with a regression test: NebariApp `gateway: internal` points at a Gateway NIC never creates; llm-serving-pack names the `selfsigned-issuer` ClusterIssuer, which Let's Encrypt clusters do not have, and moves to the internal issuer (P18); the operator publishes an auth-enabled route before its SecurityPolicy is accepted (nebari-operator #152); the software pack template uses `project: default`, `gateway: internal` and a `clientSecretRef` that does not work; and the realm's bootstrap `admin` user collides with packs' own `admin` users.
 
 ## What is not promised
 

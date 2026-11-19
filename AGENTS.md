@@ -460,7 +460,7 @@ References:
 
 ### Pack Platform Contract
 
-[ADR-0023](docs/adr/0023-pack-platform-contract.md) (Proposed) defines what Nebari promises to software packs. The reference is [`docs/pack-contract/`](docs/pack-contract/README.md): one page per promise (P1-P17), the provided-not-promised, not-yet and do-not-rely-on lists, and the policy pages under `docs/pack-contract/policy/`. Packs rely on it, so treat it as a public interface, not as notes.
+[ADR-0023](docs/adr/0023-pack-platform-contract.md) (Proposed) defines what Nebari promises to software packs. The reference is [`docs/pack-contract/`](docs/pack-contract/README.md): one page per promise (P1-P18), the provided-not-promised, not-yet and do-not-rely-on lists, and the policy pages under `docs/pack-contract/policy/`. Packs rely on it, so treat it as a public interface, not as notes.
 
 **Before changing anything packs depend on**, check whether a promise page covers it. That includes NebariApp behavior, storage classes, CloudNativePG, the Keycloak groups claim, the trust bundle, the `nebari-apps` Argo CD project, telemetry, the platform values under `global.nebari`, and the names on the do-not-rely-on list. If a change would alter what a page says packs may rely on, stop and say so: under the [compatibility policy](docs/pack-contract/policy/compatibility.md) a built stable promise does not change incompatibly except for the listed exceptions, and the [proposals policy](docs/pack-contract/policy/proposals.md) requires a platform RFD for any change to a stable page's Promise, Level, Interface, may-rely or must-not-rely text. Experimental promises carry no stability guarantee and may change or be removed without notice through an ordinary pull request.
 

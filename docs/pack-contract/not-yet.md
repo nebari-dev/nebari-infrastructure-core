@@ -4,7 +4,7 @@ These were considered and are not in the contract. A pack that needs one solves 
 
 - Shared ReadWriteMany storage. It is reconsidered when two packs need shared files and cannot design around them. Object storage is the default way to share data (proposed in ADR-0019, NIC #586).
 - Automatic bucket creation (#660). It is the first candidate for the next contract version.
-- cert-manager issuers for a pack's own internal certificates.
+- Pod-to-pod mTLS. It belongs to a service mesh, which issues short-lived workload certificates to a proxy so apps never handle them, not to each pack. A mesh can issue from the same root as the internal issuer (P18), for example through cert-manager's `istio-csr`.
 - TCP and TLS passthrough.
 - Wildcard subdomains.
 - GitOps write access.

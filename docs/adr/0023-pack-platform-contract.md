@@ -43,7 +43,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 
 **Where it lives.** This ADR sets the contract, its levels and its policies. The [pack contract reference](../pack-contract/README.md) has one page per promise, the lists of what is not promised, and the policy pages. The NebariApp chapter stays in the operator spec, and the reference pins the spec version it includes. Conformance tests extend the ADR-0017 journey suite with a `pack_contract` group that runs on every target.
 
-**The promises.** Seventeen promises, nine stable and eight experimental, each with a level, a state (built, partly built or planned), an interface, what packs may and must not rely on, per-target notes and a conformance test. All seventeen are required for 1.0.
+**The promises.** Eighteen promises, nine stable and nine experimental, each with a level, a state (built, partly built or planned), an interface, what packs may and must not rely on, per-target notes and a conformance test. All eighteen are required for 1.0.
 
 **This is the 1.0 contract, and most of it is not built yet.** It lists every promise contract 1.0 will make, so pack authors and NIC maintainers work toward the same target. Most promises are still planned or partly built; the table shows the state of each. A promise's level says what it will be once built; its state says what holds now. A planned promise carries no guarantee, whatever its level, and its interface may change until it is built (see [Compatibility](../pack-contract/policy/compatibility.md#what-is-not-covered)).
 
@@ -66,6 +66,7 @@ Chosen option: **Option 2, NIC owns the contract and the operator spec is one ch
 | P15 | GPU node label and taint | experimental | planned |
 | P16 | NetworkPolicy enforced | experimental | planned |
 | P17 | Bucket binding | experimental | planned |
+| P18 | Internal certificates | experimental | planned |
 
 **Entry rules.** A capability enters the contract only when it has a proven need (two packs, or one plus a clear near-term need), works on every target (in-cluster where a cloud lacks it), has a stable, implementation-neutral interface (a Kubernetes or open standard, or a Nebari-owned abstraction, never one product's API; a promise bound to one product is accepted only when no neutral interface exists yet, and is marked and given a path to one), has a conformance test on every target, and fits the versioning rules. Details are in [Proposals and governance](../pack-contract/policy/proposals.md).
 
