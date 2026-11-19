@@ -231,7 +231,9 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 		certificate      *config.CertificateConfig
 		wantSelfSigned   bool
 		wantRootCA       bool
+		wantTrustManager bool
 		wantLetsEncrypt  bool
+		wantGatewayCert  bool
 		wantOperatorName string
 		wantACMEEmail    string
 		wantACMEServer   string
@@ -240,6 +242,8 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			name:             "default uses the root CA",
 			wantSelfSigned:   true,
 			wantRootCA:       true,
+			wantTrustManager: true,
+			wantGatewayCert:  true,
 			wantOperatorName: certificateIssuerCA,
 		},
 		{
@@ -247,14 +251,20 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 			certificate:      &config.CertificateConfig{Type: config.CertificateTypeSelfSigned},
 			wantSelfSigned:   true,
 			wantRootCA:       true,
+			wantTrustManager: true,
+			wantGatewayCert:  true,
 			wantOperatorName: certificateIssuerCA,
 		},
 		{
-			name: "letsencrypt uses only letsencrypt",
+			name: "letsencrypt uses letsencrypt for public certificates and runs the internal CA",
 			certificate: &config.CertificateConfig{
 				Type: config.CertificateTypeLetsEncrypt,
 				ACME: &config.ACMEConfig{Email: "admin@example.com"},
 			},
+			wantSelfSigned:   true,
+			wantRootCA:       true,
+			wantTrustManager: true,
+			wantGatewayCert:  true,
 			wantLetsEncrypt:  true,
 			wantOperatorName: certificateIssuerLetsEncrypt,
 			wantACMEEmail:    "admin@example.com",
@@ -267,6 +277,8 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
 			},
 			wantSelfSigned:   true,
+			wantRootCA:       true,
+			wantTrustManager: true,
 			wantOperatorName: certificateIssuerSelfSigned,
 		},
 	}
@@ -298,6 +310,11 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				{name: "CA issuer", path: caIssuerPath, want: tt.wantRootCA},
 				{name: "letsencrypt issuer", path: letsencryptIssuerPath, want: tt.wantLetsEncrypt},
 				{name: "cluster issuers application", path: "apps/cluster-issuers.yaml", want: true},
+				{name: "trust-manager application", path: "apps/trust-manager.yaml", want: tt.wantTrustManager},
+				{name: "trust bundle application", path: "apps/trust-bundle.yaml", want: tt.wantTrustManager},
+				{name: "trust bundle manifest", path: "manifests/security/trust-bundle/bundle.yaml", want: tt.wantTrustManager},
+				{name: "gateway certificate", path: gatewayCertificatePath, want: tt.wantGatewayCert},
+				{name: "certificates application", path: certificatesAppPath, want: tt.wantGatewayCert},
 			}
 			for _, path := range paths {
 				_, err := os.Stat(filepath.Join(tmpDir, path.path))
@@ -335,7 +352,7 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 				t.Errorf("operator values missing %q", wantIssuerValue)
 			}
 
-			if tt.certificate == nil || tt.certificate.Type != config.CertificateTypeExisting {
+			if tt.wantGatewayCert {
 				// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
 				gatewayCert, err := os.ReadFile(filepath.Join(tmpDir, gatewayCertificatePath))
 				if err != nil {

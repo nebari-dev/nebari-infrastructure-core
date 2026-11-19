@@ -51,8 +51,8 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 ├── apps/                            # One ArgoCD Application per app; root.yaml points here
 │   ├── root.yaml                    # App-of-apps root (recurse: false)
 │   ├── cert-manager.yaml
-│   ├── trust-manager.yaml           # Gated on trust_bundle
-│   ├── trust-bundle.yaml            # Gated on trust_bundle
+│   ├── trust-manager.yaml           # Rendered on every cluster
+│   ├── trust-bundle.yaml            # Rendered on every cluster
 │   ├── cluster-issuers.yaml
 │   ├── certificates.yaml
 │   ├── envoy-gateway.yaml
