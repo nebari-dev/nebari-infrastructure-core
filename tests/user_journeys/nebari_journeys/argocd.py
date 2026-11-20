@@ -19,6 +19,11 @@ ERROR_OPERATION_PHASES = frozenset({"Error", "Failed"})
 # could not even compare or sync), rather than an app having drifted.
 SYNC_ERROR_CONDITION_TYPES = frozenset({"ComparisonError", "SyncError"})
 
+# status.operationState.phase while a sync operation is in progress. With
+# `retry.limit: -1` (#450) that includes the waits between retries, so a
+# sync that can never succeed stays here instead of ending Failed.
+RUNNING_OPERATION_PHASE = "Running"
+
 
 @dataclass
 class Application:
@@ -26,6 +31,7 @@ class Application:
     sync_status: str
     health_status: str
     operation_phase: str | None = None
+    operation_message: str | None = None
     condition_types: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -38,6 +44,7 @@ class Application:
             sync_status=status.get("sync", {}).get("status", UNKNOWN),
             health_status=status.get("health", {}).get("status", UNKNOWN),
             operation_phase=operation_state.get("phase"),
+            operation_message=operation_state.get("message"),
             condition_types=tuple(c.get("type") for c in conditions if c.get("type")),
         )
 
@@ -46,6 +53,12 @@ class Application:
 
     def is_healthy(self) -> bool:
         return self.health_status == HEALTHY
+
+    def is_syncing(self) -> bool:
+        """True while a sync operation is in progress, including between
+        retries. Argo CD then reports `Retrying attempt #N: <error>` in
+        `operation_message`."""
+        return self.operation_phase == RUNNING_OPERATION_PHASE
 
     def has_sync_error(self) -> bool:
         """True when GitOps itself is broken, not merely OutOfSync.
@@ -95,7 +108,8 @@ def foundational_applications(cluster) -> list[Application]:
     ]
 
 
-# How long to let foundational health converge before reporting it.
+# How long to let foundational health and sync converge before reporting
+# them.
 #
 # The suite's whole premise is "any deployed cluster", and a cluster that
 # finished deploying minutes ago legitimately sits at Progressing: ArgoCD
@@ -106,6 +120,14 @@ def foundational_applications(cluster) -> list[Application]:
 #
 # Generous, because the cost of waiting is a slow pass and the cost of not
 # waiting is a false red.
+#
+# The wait is also the deadline for syncs, the way a Deployment's
+# progressDeadlineSeconds is for rollouts. Foundational apps retry failed
+# syncs forever (#450), so a sync that can never succeed never ends Failed.
+# A sync still running when the wait ends is reported as stuck. A sync that
+# is retrying because it lost a race with another app's webhook or CRD
+# leaves its app un-Healthy, so it is waited out like any other app that
+# isn't Healthy yet.
 HEALTH_CONVERGENCE_TIMEOUT = 300.0
 HEALTH_CONVERGENCE_INTERVAL = 10.0
 
@@ -118,13 +140,19 @@ def all_healthy(apps: list[Application]) -> bool:
     return bool(apps) and all(app.is_healthy() for app in apps)
 
 
+def all_settled(apps: list[Application]) -> bool:
+    """True when every application is Healthy and none is still syncing."""
+    return all_healthy(apps) and not any(app.is_syncing() for app in apps)
+
+
 def settled_foundational_applications(
     cluster,
     *,
     timeout: float = HEALTH_CONVERGENCE_TIMEOUT,
     interval: float = HEALTH_CONVERGENCE_INTERVAL,
 ) -> list[Application]:
-    """Foundational applications, once health has converged or time is up.
+    """Foundational applications, once they are all Healthy with no sync
+    in progress, or time is up.
 
     Returns the LAST snapshot either way (see `waits.poll_until_settled`),
     so the caller reports the real state of a cluster that never converged
@@ -132,7 +160,7 @@ def settled_foundational_applications(
     """
     return poll_until_settled(
         lambda: foundational_applications(cluster),
-        all_healthy,
+        all_settled,
         timeout=timeout,
         interval=interval,
     )

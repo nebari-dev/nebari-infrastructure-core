@@ -42,6 +42,13 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
     operation itself erroring or failing, or ArgoCD being unable to even
     compare or sync -- means GitOps itself is broken, which is a real
     platform failure and does fail this journey.
+
+    So does a sync still in progress when the wait ends. Foundational apps
+    retry failed syncs forever (#450), so a sync that can never succeed
+    stays Running instead of ending Failed. The wait is its deadline, the
+    way progressDeadlineSeconds is for a Deployment's rollout. A sync
+    retrying because it lost a race with another app leaves its app
+    un-Healthy, so the wait covers it like any app that isn't Healthy yet.
     """
     apps = settled_foundational_applications(cluster)
     assert apps, (
@@ -62,6 +69,11 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
     unhealthy = [
         f"{a.name}: health={a.health_status}" for a in apps if not a.is_healthy()
     ]
+    still_syncing = [
+        f"{a.name}: {a.operation_message or 'no message'}"
+        for a in apps
+        if a.is_syncing()
+    ]
     sync_errors = [
         f"{a.name}: operation phase={a.operation_phase!r}, "
         f"error conditions={[t for t in a.condition_types if t in ('ComparisonError', 'SyncError')]}"
@@ -74,6 +86,12 @@ def test_operator_sees_every_foundational_app_healthy(cluster):
         failures.append(
             f"foundational applications are not Healthy after "
             f"{HEALTH_CONVERGENCE_TIMEOUT:g}s:\n" + "\n".join(unhealthy)
+        )
+    if still_syncing:
+        failures.append(
+            f"foundational applications are still syncing after "
+            f"{HEALTH_CONVERGENCE_TIMEOUT:g}s, so their sync is stuck "
+            "retrying:\n" + "\n".join(still_syncing)
         )
     if sync_errors:
         failures.append(
