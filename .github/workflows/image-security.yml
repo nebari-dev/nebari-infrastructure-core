@@ -10,15 +10,18 @@ name: Container Image Security
 # findings and findings.jsonl for later reporting and tracking work.
 
 on:
-  push:
-    branches:
-      - main
-
-  pull_request:
-    branches:
-      - main
-
+  schedule:
+    - cron: '23 4 * * *'
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pkg/**'
+      - 'cmd/imagepin/**'
+      - 'scripts/image-scan.sh'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/image-security.yml'
 
 permissions:
   contents: read
