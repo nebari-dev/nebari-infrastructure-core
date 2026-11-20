@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"io/fs"
 	"math/big"
 	"net"
@@ -682,6 +683,12 @@ func TestRootCANameConstraints_ServiceNames(t *testing.T) {
 					_, err = leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: tt.name})
 					if gotOK := err == nil; gotOK != tt.wantOK {
 						t.Errorf("Verify(%q) error = %v, wantOK %v (permitted %q, excluded %v)", tt.name, err, tt.wantOK, permitted, excluded)
+					}
+					// A rejection must come from the name constraints, not from
+					// an unrelated failure such as a key usage mismatch.
+					var invalid x509.CertificateInvalidError
+					if !tt.wantOK && (!errors.As(err, &invalid) || invalid.Reason != x509.CANotAuthorizedForThisName) {
+						t.Errorf("Verify(%q) error = %v, want a CertificateInvalidError with reason CANotAuthorizedForThisName", tt.name, err)
 					}
 				})
 			}
