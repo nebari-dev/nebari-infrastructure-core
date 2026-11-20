@@ -33,9 +33,11 @@ spec:
       allowEmpty: false
     syncOptions:
       - CreateNamespace=true
-    # Retry indefinitely, see https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
+    # Retry indefinitely, on the latest revision so a fix from the next deploy
+    # is picked up. See https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
     retry:
       limit: -1
+      refresh: true
       backoff:
         duration: 5s
         factor: 2

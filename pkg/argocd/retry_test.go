@@ -16,7 +16,10 @@ import (
 // retries failed syncs without a limit. Argo CD does not retry a failed sync of
 // the same commit once the limit is reached, so an app that loses a race with
 // another app's webhook or CRD would stay broken until someone syncs it by
-// hand. See https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
+// hand. Each retry must also use the latest revision: an operation stays open
+// between retries and auto-sync skips an app with an open operation, so without
+// refresh a retry keeps applying the failed commit and never picks up a fix.
+// See https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
 func TestApplications_RetryIndefinitely(t *testing.T) {
 	rendered := map[string][]byte{}
 
@@ -59,7 +62,8 @@ func TestApplications_RetryIndefinitely(t *testing.T) {
 				Spec struct {
 					SyncPolicy struct {
 						Retry *struct {
-							Limit *int64 `yaml:"limit"`
+							Limit   *int64 `yaml:"limit"`
+							Refresh bool   `yaml:"refresh"`
 						} `yaml:"retry"`
 					} `yaml:"syncPolicy"`
 				} `yaml:"spec"`
@@ -76,6 +80,9 @@ func TestApplications_RetryIndefinitely(t *testing.T) {
 			}
 			if *retry.Limit >= 0 {
 				t.Errorf("spec.syncPolicy.retry.limit = %d, want a negative value (retry indefinitely)", *retry.Limit)
+			}
+			if !retry.Refresh {
+				t.Errorf("spec.syncPolicy.retry.refresh is not true, so retries keep applying the failed revision")
 			}
 		})
 	}
