@@ -84,7 +84,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 	return nil
 }
 
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, _ string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "hetzner.Deploy")
 	defer span.End()

@@ -19,6 +19,15 @@ const (
 	GatewayHTTPSNodePort = 30443
 )
 
+// Fixed name and namespace of the gateway's Envoy service when InfraSettings.
+// GatewayHostAddress is set. Envoy Gateway otherwise generates a name with a
+// hash suffix; pinning it lets the provider point in-cluster DNS for the
+// platform domain at the service before ArgoCD has created it.
+const (
+	GatewayServiceName      = "nebari-gateway"
+	GatewayServiceNamespace = "envoy-gateway-system"
+)
+
 // BackupBucketSpec describes an object-storage bucket/container the provider's
 // Terraform module should provision for Longhorn backups. A nil *BackupBucketSpec
 // in DeployOptions means "do not provision" (external or pre-existing bucket).
@@ -164,7 +173,9 @@ type Provider interface {
 	// with the same config should converge to the same infrastructure state. The
 	// backing tool is provider-specific (e.g., OpenTofu for AWS, hetzner-k3s for
 	// Hetzner). Use DeployOptions.DryRun to preview changes without applying them.
-	Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
+	// domain is the platform's top-level domain (empty when none is configured),
+	// for providers that set up cluster-level networking for it.
+	Deploy(ctx context.Context, projectName, domain string, clusterConfig *config.ClusterConfig, opts DeployOptions) error
 
 	// Destroy tears down all infrastructure resources in the correct order,
 	// respecting dependencies (e.g., node groups before cluster, cluster before VPC).

@@ -81,7 +81,7 @@ func TestProviderDeployFailsWithoutSubscription(t *testing.T) {
 		},
 	}
 	t.Setenv("AZURE_SUBSCRIPTION_ID", "")
-	err := p.Deploy(context.Background(), "p", cc, cluster.DeployOptions{})
+	err := p.Deploy(context.Background(), "p", "", cc, cluster.DeployOptions{})
 	if err == nil {
 		t.Fatal("expected Deploy to fail without subscription ID")
 	}

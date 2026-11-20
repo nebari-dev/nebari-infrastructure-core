@@ -170,7 +170,7 @@ pkg/
 type Provider interface {
     Name() string
     Validate(ctx, projectName, *config.ClusterConfig) error
-    Deploy(ctx, projectName, *config.ClusterConfig, DeployOptions) error
+    Deploy(ctx, projectName, domain string, *config.ClusterConfig, DeployOptions) error
     Destroy(ctx, projectName, *config.ClusterConfig, DestroyOptions) error
     GetKubeconfig(ctx, projectName, *config.ClusterConfig) ([]byte, error)
     Summary(*config.ClusterConfig) map[string]string
