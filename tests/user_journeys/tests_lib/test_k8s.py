@@ -2,13 +2,16 @@ import re
 from unittest.mock import MagicMock
 
 import pytest
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from nebari_journeys import constants
 from nebari_journeys.k8s import (
     ScratchNamespace,
+    has_ready_endpoint,
     scratch_namespace_name,
     sweep_stale_namespaces,
+    sweep_stale_webhook_configurations,
 )
 
 
@@ -273,3 +276,128 @@ def test_namespace_sweep_treats_an_already_gone_namespace_as_deleted():
 
     assert result.deleted == ["nebari-journey-aaa"]
     assert result.failed == []
+
+
+def _fake_webhook_configs(*names):
+    configs = []
+    for name in names:
+        config = MagicMock()
+        config.metadata.name = name
+        configs.append(config)
+    return MagicMock(items=configs)
+
+
+@pytest.mark.parametrize(
+    "listed,delete_errors,deleted,skipped,failed",
+    [
+        ([], {}, [], [], []),
+        (["nebari-journey-aaa-deny"], {}, ["nebari-journey-aaa-deny"], [], []),
+        # A labeled configuration with a foreign name is an anomaly: it is
+        # left alone, exactly as the namespace sweep treats one.
+        (["cert-manager-webhook"], {}, [], ["cert-manager-webhook"], []),
+        (
+            ["nebari-journey-aaa-deny", "cert-manager-webhook"],
+            {},
+            ["nebari-journey-aaa-deny"],
+            ["cert-manager-webhook"],
+            [],
+        ),
+        # One undeletable configuration must not strand the rest.
+        (
+            ["nebari-journey-aaa-deny", "nebari-journey-bbb-deny"],
+            {"nebari-journey-aaa-deny": 500},
+            ["nebari-journey-bbb-deny"],
+            [],
+            ["nebari-journey-aaa-deny"],
+        ),
+        # Already gone is the outcome the sweep wanted.
+        (
+            ["nebari-journey-aaa-deny"],
+            {"nebari-journey-aaa-deny": 404},
+            ["nebari-journey-aaa-deny"],
+            [],
+            [],
+        ),
+    ],
+)
+def test_webhook_configuration_sweep(listed, delete_errors, deleted, skipped, failed):
+    cluster = MagicMock()
+    cluster.admission.list_validating_webhook_configuration.return_value = (
+        _fake_webhook_configs(*listed)
+    )
+
+    def delete(name):
+        if name in delete_errors:
+            raise ApiException(status=delete_errors[name])
+
+    cluster.admission.delete_validating_webhook_configuration.side_effect = delete
+
+    result = sweep_stale_webhook_configurations(cluster)
+
+    cluster.admission.list_validating_webhook_configuration.assert_called_once_with(
+        label_selector=f"{constants.JOURNEY_LABEL_KEY}={constants.JOURNEY_LABEL_VALUE}"
+    )
+    assert result.deleted == deleted
+    assert result.skipped == skipped
+    assert result.failed == failed
+    attempted = [
+        call.kwargs["name"]
+        for call in cluster.admission.delete_validating_webhook_configuration.call_args_list
+    ]
+    assert not set(attempted) & set(skipped)
+
+
+def _slice(*endpoints):
+    return client.V1EndpointSlice(address_type="IPv4", endpoints=list(endpoints))
+
+
+def _endpoint(ready, addresses=("10.244.0.5",)):
+    conditions = None if ready == "unset" else client.V1EndpointConditions(ready=ready)
+    return client.V1Endpoint(addresses=list(addresses), conditions=conditions)
+
+
+@pytest.mark.parametrize(
+    "slices,expected",
+    [
+        ([], False),
+        ([_slice()], False),
+        ([client.V1EndpointSlice(address_type="IPv4", endpoints=None)], False),
+        ([_slice(_endpoint(False))], False),
+        ([_slice(_endpoint(True, addresses=()))], False),
+        ([_slice(_endpoint(True))], True),
+        # The API says a nil ready condition is to be read as true.
+        ([_slice(_endpoint("unset"))], True),
+        ([_slice(_endpoint(False)), _slice(_endpoint(True))], True),
+    ],
+)
+def test_has_ready_endpoint(slices, expected):
+    assert has_ready_endpoint(slices) is expected
+
+
+def test_wait_service_endpoint_ready_selects_the_services_slices(monkeypatch):
+    monkeypatch.setattr("nebari_journeys.waits.time.sleep", lambda _: None)
+    cluster = MagicMock()
+    cluster.discovery.list_namespaced_endpoint_slice.side_effect = [
+        MagicMock(items=[]),
+        MagicMock(items=[_slice(_endpoint(True))]),
+    ]
+    ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
+
+    ns.wait_service_endpoint_ready("tls-server", timeout=60)
+
+    calls = cluster.discovery.list_namespaced_endpoint_slice.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs == {
+        "namespace": "nebari-journey-abcd1234",
+        "label_selector": "kubernetes.io/service-name=tls-server",
+    }
+
+
+def test_wait_service_endpoint_ready_timeout_names_the_service():
+    cluster = MagicMock()
+    cluster.discovery.list_namespaced_endpoint_slice.return_value = MagicMock(
+        items=[_slice(_endpoint(False))]
+    )
+    ns = ScratchNamespace(cluster, "nebari-journey-abcd1234")
+    with pytest.raises(TimeoutError, match="nebari-journey-abcd1234/tls-server"):
+        ns.wait_service_endpoint_ready("tls-server", timeout=0)

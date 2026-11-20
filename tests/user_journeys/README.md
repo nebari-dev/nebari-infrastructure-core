@@ -9,9 +9,9 @@ merely that it deployed. Design and rationale: [ADR-0017](../../docs/adr/0017-us
 tests/user_journeys/
   pixi.toml, pyproject.toml, pytest.ini, pixi.lock   # environment and test config
   conftest.py            # only pytest_addoption for --keep-namespace
-  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, argocd, keycloak, ui
+  nebari_journeys/       # the action library: constants, waits, sweep, cluster, trust, k8s, certs, argocd, keycloak, ui
   tests_lib/              # unit tests OF the library, no cluster needed
-  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py
+  journeys/               # the journeys and their own conftest.py: test_smoke.py, test_identity.py, test_storage.py, test_tls.py, test_internal_certificates.py
 ```
 
 `journeys/` and `tests_lib/` each carry an `__init__.py`. Those are load
@@ -49,9 +49,10 @@ pixi run fmt                    # ruff format .
 | File | Journey |
 |---|---|
 | `test_smoke.py` | Every foundational ArgoCD app is Synced and Healthy. Runs first, so other failures are interpretable. |
-| `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on a self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server cannot trust the gateway certificate for server-side OIDC discovery (issue #490, root cause #447; issue #607 separately blocks in-cluster resolution of the issuer URL on the same shape). It skips there rather than failing, and runs (and can fail) normally on a cluster with a real issuing CA. |
+| `test_identity.py` | The nebari realm is configured as promised: a new user can sign in to ArgoCD through Keycloak; Longhorn UI access follows `longhorn-admins` membership (5 realm-level checks plus 3 browser-driven checks). The ArgoCD sign-in journey is marked `@pytest.mark.requires_trusted_ca` and **known broken** on any cluster whose gateway certificate is not publicly trusted, which includes every self-signed cluster: ArgoCD SSO is UNVERIFIED there, since ArgoCD's server does not mount `nebari-trust-bundle` and so cannot trust the cluster's root CA for server-side OIDC discovery (issue #490; issue #607 separately blocks in-cluster resolution of the issuer URL outside local clusters). It skips there rather than failing, and runs (and can fail) normally on a cluster with a publicly trusted certificate. |
 | `test_storage.py` | Data survives pod replacement; the volume is genuinely replicated; backups are configured and functional (3 checks). All three need Longhorn and skip without it. |
-| `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a self-signed leaf (#447) or a privately issued chain such as Let's Encrypt staging. See "Three kinds of trust anchor" below for why this is split. |
+| `test_tls.py` | Two separate questions. **Validity** (`test_gateway_serves_a_valid_certificate_for_this_domain`) runs on *every* cluster shape: a real handshake with full verification against whatever anchor the cluster itself serves, proving TLS 1.2+ is negotiated, the chain is complete, the certificate is unexpired and was issued for this domain. **Public trust** (`test_gateway_certificate_is_publicly_trusted`, marked `@pytest.mark.tls`) uses plain `verify=True` and skips where public trust is not on offer -- a chain to the cluster's own root CA on a self-signed cluster, another privately issued chain such as Let's Encrypt staging, or a self-signed leaf supplied as `certificate.existing_secret`. See "Three kinds of trust anchor" below for why this is split. |
+| `test_internal_certificates.py` | A pack can get a certificate for its Service from the cluster's internal CA and pods trust it, on every certificate type. A Certificate for `<svc>.<ns>.svc` and `<svc>.<ns>.svc.cluster.local` from `nebari-ca-issuer` is issued by `CN=Nebari root CA (<domain>)`; a pod that mounts the `nebari-trust-bundle` ConfigMap verifies it with curl while a pod without the bundle is rejected; and a Certificate for `example.com` is either refused by cert-manager or rejected by a bundle-trusting client, because the root is name-constrained; and an admission webhook serving a `nebari-ca-issuer` certificate, whose ValidatingWebhookConfiguration gets its `caBundle` from cert-manager's `cert-manager.io/inject-ca-from`, is called by the API server: a labelled ConfigMap is refused with 403 and the webhook's message, an unlabelled one is created (4 checks). Every dial retries curl's transient connect errors, because kube-proxy programs a new ClusterIP shortly after its EndpointSlice is ready. Pulls `python:3.13.18-alpine` and `curlimages/curl:8.11.1` on first use. |
 
 ## Adding a journey
 
@@ -69,6 +70,7 @@ pixi run fmt                    # ruff format .
    `cluster.has_longhorn()` so the rest still runs.
 4. **Work inside `scratch_namespace`.** Never create cluster-scoped resources
    and never write outside the namespace.
+   The one exception is `test_ca_injected_webhook_is_called`, whose subject is a ValidatingWebhookConfiguration, which only exists cluster-scoped. It is named `<scratch namespace>-<webhook>`, carries the journey label, matches only that namespace, is deleted in a `finally`, and is swept (see "Cleanup of leftovers"). A new cluster-scoped resource needs all of that.
 5. **Never disable TLS verification.** No `verify=False`, no
    `ignore_https_errors=True`. Use the `trust_anchor` fixture; browser
    journeys additionally get an SPKI pin automatically (see "Chromium and
@@ -93,20 +95,21 @@ other fails the Go build. Add new mirrored constants to both the Python module
 and that test's table.
 
 A name that mirrors Go or a manifest template belongs in `constants.py` and
-nowhere else, so the contract test can see it. Three pinning patterns exist:
+nowhere else, so the contract test can see it. Four pinning patterns exist:
 
 | Source | Test |
 |---|---|
 | A Go constant | `TestPythonConstantsMatchGo` |
 | `metadata.name` in a manifest template | `TestPythonResourceNamesMatchTemplates` |
 | A shell literal in `realm-setup-job.yaml` | `TestPythonRealmLiteralsMatchTemplate` |
+| The trust bundle's target ConfigMap key | `TestPythonTrustBundleKeyMatchesTemplate` |
 
 `TestPythonConstantsEnrollment` fails when a constant is added without landing
 in one of them or being listed as suite-owned.
 
 ## Cleanup of leftovers
 
-Two sweeps, both reporting a `SweepResult(deleted, skipped, failed)`:
+Three sweeps, all reporting a `SweepResult(deleted, skipped, failed)`:
 `deleted` is what was removed, `skipped` is what carried the journey marker
 but failed the second guard and was deliberately left alone, and `failed` is
 what the sweep tried and could not remove. A sweep never aborts on one bad
@@ -116,6 +119,8 @@ item, and everything but `deleted` is printed as an `!!! ANOMALY` line.
 `journeys/conftest.py`) calls `sweep_stale_namespaces` at the start of every
 run. A namespace is deleted only if it carries the journey label *and* its
 name starts with `nebari-journey-`.
+
+**Webhook configurations.** The same fixture then calls `sweep_stale_webhook_configurations`. A ValidatingWebhookConfiguration is cluster-scoped, so deleting its scratch namespace does not remove it. The guards are the namespace sweep's: the journey label *and* a name starting with `nebari-journey-`.
 
 **Scratch realm users.** The `keycloak` fixture calls `sweep_scratch_users`
 when it is first built. A run killed between `create_user` and its teardown
@@ -215,8 +220,8 @@ directions and produced two real bugs:
 | Classification | Cluster shape | `verify=` | Chromium | `tls`-marked journey |
 |---|---|---|---|---|
 | `publicly-trusted` | production ACME | `True` (system store) | no flags, real validation | runs |
-| `privately-issued` | LE **staging**, private CA | the cluster's own chain | SPKI pin | skips |
-| `self-signed-leaf` | kind / `selfsigned-issuer` | the leaf itself | SPKI pin | skips |
+| `privately-issued` | kind and other self-signed clusters (`nebari-ca-issuer`), LE **staging**, private CA | the cluster's own chain | SPKI pin | skips |
+| `self-signed-leaf` | a self-signed leaf supplied as `certificate.existing_secret` | the leaf itself | SPKI pin | skips |
 
 Classification is entirely **offline**: cert-manager writes the full chain
 into `tls.crt`, so the chain is verified against certifi's bundle without
@@ -248,8 +253,10 @@ Two deliberate edge cases, both tested:
 
 ### Chromium and self-signed clusters: SPKI pinning, honestly
 
-cert-manager's default `selfsigned-issuer` issues a self-signed **leaf**
-(`CA:FALSE`), not a proper root CA (issue #447, #490). `requests`/OpenSSL
+On a self-signed cluster the gateway certificate chains to the cluster's
+own root CA (`nebari-ca-issuer`, #447), which no browser trust store
+carries, and an operator can still supply a self-signed **leaf**
+(`CA:FALSE`) as `certificate.existing_secret`. `requests`/OpenSSL
 accepts a self-signed end-entity certificate as a trust anchor via `verify=`,
 which is why the `requests`-based journeys work unmodified. Chromium/NSS does
 not: a `CA:FALSE` certificate cannot be installed as a trust anchor at all, no
@@ -258,10 +265,13 @@ matter which NSS trust flag is used, so Chromium rejects it with
 
 For the browser journeys, `nebari_journeys.trust.chromium_args` launches
 Chromium with `--ignore-certificate-errors-spki-list=<hash>`, where `<hash>`
-is `spki_sha256_b64()` of the same anchor PEM the `requests` journeys already
-use. Read plainly, this pins Chromium's trust to the exact public key
-(SubjectPublicKeyInfo) read from the cluster's own gateway secret over the
-kubeconfig:
+is `spki_sha256_b64()` of the gateway's own certificate (the first one in
+the gateway secret's `tls.crt`), not the anchor PEM the `requests` journeys
+use. Chromium only matches the pin against keys in the chain the gateway
+sends, and that chain never includes a root CA, so a pin on the anchor would
+never match on a self-signed cluster. Read plainly, this pins Chromium's
+trust to the exact public key (SubjectPublicKeyInfo) read from the cluster's
+own gateway secret over the kubeconfig:
 
 - A certificate presenting any other key -- a MITM, or the gateway rotating
   to a new key without updating the pin -- is still rejected outright. In
@@ -276,23 +286,24 @@ kubeconfig:
 it.** It is applied only when a trust anchor was actually derived from the
 cluster (self-signed, or privately issued such as staging); a PUBLICLY
 TRUSTED cluster gets no extra Chromium flags
-at all, so it is driven exactly as a real user's browser would be. The real
-fix is issue #447: once cert-manager issues a proper CA for the gateway,
-Chromium validates the chain like any other browser, and the SPKI pin
-(`spki_sha256_b64`, the flag it feeds, and this whole section) should be
+at all, so it is driven exactly as a real user's browser would be. With a
+proper root CA in place (#447), the way to retire the pin is to trust that
+root in the test browser's store, after which the SPKI pin
+(`spki_sha256_b64`, the flag it feeds, and this whole section) can be
 removed.
 
 Because the SPKI pin is table stakes for the browser journeys to run at all
 on a self-signed cluster, but it explicitly does not restore hostname or
 chain checking, a small number of journeys whose entire SUBJECT is
 certificate validity or chain trust itself are marked `@pytest.mark.tls` (see
-`pytest.ini`) and are **skipped**, not passed under a weaker guarantee, when
-the derived anchor is a self-signed leaf
-(`nebari_journeys.trust.is_self_signed_leaf`). Every other journey, including
+`pytest.ini`) and are **skipped**, not passed under a weaker guarantee, whenever
+the gateway chain is not publicly trusted
+(`nebari_journeys.trust.classify_anchor`). Every other journey, including
 every browser journey that merely happens to travel over TLS to get
 somewhere, keeps running normally, pinned by the SPKI flag. The skip is
-announced once per session as a `UserWarning` reading `self signed cert
-detected, skipping tls tests`, whether or not any `tls`-marked test currently
+announced once per session as a `UserWarning` (`self signed cert detected,
+skipping tls tests` for a self-signed leaf, an explanation of private
+issuance otherwise), whether or not any `tls`-marked test currently
 exists, so an operator running locally can see that certificate validation
 has been narrowed for the browser rather than discovering it only when a
 `tls` journey silently skips later.
@@ -321,28 +332,29 @@ failed to query provider "https://keycloak.<domain>/realms/nebari":
 tls: failed to verify certificate: x509: certificate signed by unknown authority
 ```
 
-This is issue [#490](https://github.com/nebari-dev/nebari-infrastructure-core/issues/490),
-whose root cause is [#447](https://github.com/nebari-dev/nebari-infrastructure-core/issues/447):
-cert-manager's default `selfsigned-issuer` issues a self-signed LEAF
-(`CA:FALSE`), so there is no CA for ArgoCD to trust in the first place. A
-second, separate blocker exists on the same cluster shape, issue
-[#607](https://github.com/nebari-dev/nebari-infrastructure-core/issues/607):
-the external hostname does not even resolve from inside the cluster, so
-discovery can fail earlier still, with SERVFAIL. **ArgoCD SSO is UNVERIFIED
+This is issue [#490](https://github.com/nebari-dev/nebari-infrastructure-core/issues/490).
+Self-signed clusters now have a proper root CA
+([#447](https://github.com/nebari-dev/nebari-infrastructure-core/issues/447)),
+published to every namespace in the `nebari-trust-bundle` ConfigMap, but
+ArgoCD's server does not mount that bundle, so it still has nothing to
+verify the chain against. A second, separate blocker, issue
+[#607](https://github.com/nebari-dev/nebari-infrastructure-core/issues/607),
+applies outside local clusters: the external hostname may not resolve from
+inside the cluster, so discovery can fail earlier still, with SERVFAIL. **ArgoCD SSO is UNVERIFIED
 on a self-signed cluster, and is known broken, not merely untested.**
 
 The journey is marked `@pytest.mark.requires_trusted_ca` and is **skipped**,
-not failed, when the derived gateway anchor is a self-signed leaf (the
-`skip_trusted_ca_marked_tests_on_self_signed` fixture in
+not failed, whenever the gateway chain is not publicly trusted (the
+`skip_trusted_ca_marked_tests_without_public_trust` fixture in
 `journeys/conftest.py`, keyed off the same
-`nebari_journeys.trust.is_self_signed_leaf` check the `tls` marker uses).
+`nebari_journeys.trust.classify_anchor` result the `tls` marker uses).
 This is a different shape from the `tls` skip: `tls`-marked journeys are
 skipped because the TEST RUNNER cannot validate the chain; this journey is
 skipped because ArgoCD's server cannot, which no SPKI pin in this process
 can fix. The other identity journeys (realm configuration, groups scope,
 OIDC clients, redirect URIs) talk to Keycloak directly from the test runner
 over the trust anchor the suite derives, so they are unaffected and keep
-running on a self-signed cluster. On a cluster with a real issuing CA, the
+running on a self-signed cluster. On a cluster with a publicly trusted certificate, the
 sign-in journey runs normally and still fails if SSO is actually broken
 there -- the skip is scoped to a cluster shape that cannot physically work,
 not to the symptom.

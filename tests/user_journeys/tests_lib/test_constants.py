@@ -37,6 +37,13 @@ from nebari_journeys import constants
         ("LONGHORN_OIDC_CLIENT", "longhorn"),
         ("JOURNEY_LABEL_KEY", "nebari.dev/test-journey"),
         ("JOURNEY_LABEL_VALUE", "true"),
+        ("INTERNAL_ISSUER", "nebari-ca-issuer"),
+        ("ROOT_CA_SECRET", "nebari-root-ca"),
+        ("TRUST_BUNDLE_CONFIGMAP", "nebari-trust-bundle"),
+        ("TRUST_BUNDLE_KEY", "ca-certificates.crt"),
+        ("TLS_SERVER_IMAGE", "python:3.13.18-alpine"),
+        ("TLS_CLIENT_IMAGE", "curlimages/curl:8.11.1"),
+        ("CERTIFICATE_READY_TIMEOUT", 120),
     ],
 )
 def test_constant_has_expected_value(name, expected):

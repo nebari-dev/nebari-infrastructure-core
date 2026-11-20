@@ -21,7 +21,7 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 // TestTrustBundleTemplate_RendersValidYAML verifies the inline PEM is indented
 // correctly so the Bundle manifest parses as YAML and carries the certificate.
 func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
-	data := TemplateData{TrustManagerEnabled: true, TrustBundlePEM: testCAPEM}
+	data := TemplateData{TrustBundlePEM: testCAPEM, RootCASecretName: rootCASecretName}
 
 	content, err := templates.ReadFile("templates/manifests/security/trust-bundle/bundle.yaml")
 	if err != nil {
@@ -42,8 +42,8 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 		t.Fatalf("spec missing or wrong type in:\n%s", processed)
 	}
 	sources, ok := spec["sources"].([]any)
-	if !ok || len(sources) != 2 {
-		t.Fatalf("expected exactly two sources (useDefaultCAs + inLine), got %v", spec["sources"])
+	if !ok || len(sources) != 3 {
+		t.Fatalf("expected exactly three sources (useDefaultCAs, root CA secret, inLine), got %v", spec["sources"])
 	}
 	// System roots must be included alongside the org CA: consumers point
 	// SSL_CERT_FILE-style vars at the projected file, which replaces the
@@ -52,7 +52,17 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 	if useDefault, _ := defaultCAs["useDefaultCAs"].(bool); !useDefault {
 		t.Errorf("first source should set useDefaultCAs: true, got %v", sources[0])
 	}
-	src, _ := sources[1].(map[string]any)
+	// The cluster root CA renders on every certificate type, between the
+	// public roots and the org CA.
+	rootSrc, _ := sources[1].(map[string]any)
+	secret, _ := rootSrc["secret"].(map[string]any)
+	if name, _ := secret["name"].(string); name != rootCASecretName {
+		t.Errorf("second source should be secret %q, got %v", rootCASecretName, sources[1])
+	}
+	if key, _ := secret["key"].(string); key != "ca.crt" {
+		t.Errorf("root CA secret source key = %v, want ca.crt", secret["key"])
+	}
+	src, _ := sources[2].(map[string]any)
 	inLine, _ := src["inLine"].(string)
 	if !strings.Contains(inLine, "BEGIN CERTIFICATE") {
 		t.Errorf("inLine source did not preserve the PEM, got %q", inLine)
@@ -93,26 +103,32 @@ func TestWriteAllToGit_TrustManager(t *testing.T) {
 			wantOrgCA:   true,
 		},
 		{
-			name:        "letsencrypt with an org CA trusts only the org CA",
+			name:        "letsencrypt with an org CA trusts both",
 			certificate: letsencrypt,
 			orgCAPEM:    testCAPEM,
 			wantWritten: true,
+			wantRootCA:  true,
 			wantOrgCA:   true,
 		},
 		{
-			name:        "existing with an org CA trusts only the org CA",
+			name:        "existing with an org CA trusts both",
 			certificate: existing,
 			orgCAPEM:    testCAPEM,
 			wantWritten: true,
+			wantRootCA:  true,
 			wantOrgCA:   true,
 		},
 		{
-			name:        "letsencrypt without an org CA skips trust-manager",
+			name:        "letsencrypt without an org CA trusts the root CA",
 			certificate: letsencrypt,
+			wantWritten: true,
+			wantRootCA:  true,
 		},
 		{
-			name:        "existing without an org CA skips trust-manager",
+			name:        "existing without an org CA trusts the root CA",
 			certificate: existing,
+			wantWritten: true,
+			wantRootCA:  true,
 		},
 	}
 

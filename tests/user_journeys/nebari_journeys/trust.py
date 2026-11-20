@@ -5,13 +5,15 @@ domain does not resolve to the gateway, names are mapped for both the
 Python client and Chromium, which preserves real SNI and real
 certificate validation rather than bypassing it.
 
-The honest trade, spelled out (see issues #447 and #490): cert-manager's
-default `selfsigned-issuer` issues a self-signed LEAF certificate
-(`CA:FALSE`), not a proper root CA. `requests`/OpenSSL happily accepts a
-self-signed end-entity certificate as a trust anchor, which is why the
-API journeys work by pointing `verify=` at it directly. Chromium/NSS
-does not: a `CA:FALSE` certificate cannot be installed as a trust
-anchor at all, so no NSS trust-store trick makes Chromium accept it.
+The honest trade, spelled out (see issues #447 and #490): on a
+self-signed cluster the gateway chains to the cluster's own root CA
+(`nebari-ca-issuer`), which no browser trust store carries, and an
+operator can still supply a self-signed LEAF certificate (`CA:FALSE`)
+as `certificate.existing_secret`. `requests`/OpenSSL accepts either as
+a trust anchor, which is why the API journeys work by pointing
+`verify=` at it directly. Chromium/NSS does not: a `CA:FALSE`
+certificate cannot be installed as a trust anchor at all, and the
+suite does not install the root CA in the browser's store.
 
 The fix implemented here for the browser journeys is
 `--ignore-certificate-errors-spki-list=<hash>`, computed by
@@ -35,10 +37,10 @@ unmodified Chromium, which is why a PUBLICLY TRUSTED chain gets no extra
 flags at all (see `chromium_args` and `classify_anchor`). Note the
 condition is public trust, not "is this ACME": Let's Encrypt STAGING is
 ACME and is NOT publicly trusted, and every cloud fixture in
-.github/fixtures/deploy/ uses staging. The real fix is issue #447:
-once cert-manager issues a proper CA for the gateway, Chromium can
-validate the chain like any other browser, and this SPKI pin -- along
-with `spki_sha256_b64` and the flag it feeds -- should be removed.
+.github/fixtures/deploy/ uses staging. With a proper root CA in place
+(#447), the way to retire this pin is to trust that root in the test
+browser's store, after which this SPKI pin -- along with
+`spki_sha256_b64` and the flag it feeds -- can be removed.
 """
 
 import base64
@@ -255,9 +257,10 @@ def classify_anchor(
       `.github/fixtures/deploy/` uses staging, so this is the shape CI
       hits. Journeys whose subject is public trust must SKIP here: the
       failure is a deliberate CI choice, not a platform defect.
-    - SELF_SIGNED_LEAF: cert-manager's default `selfsigned-issuer` output,
-      a `CA:FALSE` certificate that is its own issuer (see the module
-      docstring).
+    - SELF_SIGNED_LEAF: a `CA:FALSE` certificate that is its own issuer,
+      as an operator-supplied `certificate.existing_secret` can be (see the
+      module docstring). NIC's own self-signed clusters are
+      PRIVATELY_ISSUED: their gateway chains to the cluster root CA.
 
     Verification is entirely OFFLINE, against certifi's bundle, using the
     chain the cluster secret already contains. That is deliberate: probing

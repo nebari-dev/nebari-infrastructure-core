@@ -46,14 +46,12 @@ extraEnv: |
     value: "https://keycloak.{{ .Domain }}{{ .KeycloakBasePath }}"
   - name: KC_FEATURES
     value: "token-exchange,admin-fine-grained-authz:v1"
-{{- if .TrustManagerEnabled }}
   # Keycloak 26 (Quarkus) ignores X509_CA_BUNDLE; the org CA is loaded
   # via the native truststore. KC_TRUSTSTORE_PATHS points at the
   # trust-manager-projected bundle mounted below and feeds every
   # outbound TLS call (IdP federation, token introspection).
   - name: KC_TRUSTSTORE_PATHS
     value: /etc/nebari/truststore
-{{- end }}
 proxy:
   mode: xforwarded
 livenessProbe: |
@@ -96,7 +94,6 @@ resources:
     memory: 1Gi
   limits:
     memory: 2Gi
-{{- if .TrustManagerEnabled }}
 extraVolumes: |
   - name: nebari-trust-bundle
     configMap:
@@ -108,4 +105,3 @@ extraVolumeMounts: |
   - name: nebari-trust-bundle
     mountPath: /etc/nebari/truststore
     readOnly: true
-{{- end }}

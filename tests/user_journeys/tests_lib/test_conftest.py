@@ -171,3 +171,28 @@ def test_an_unmarked_journey_never_skips_on_a_privately_issued_chain():
     """Scope check: staging must not disable the rest of the suite."""
     skip_tls(_request_marked(None), trust.PRIVATELY_ISSUED)
     skip_trusted_ca(_request_marked(None), trust.PRIVATELY_ISSUED)
+
+
+def _named(name):
+    obj = MagicMock()
+    obj.metadata.name = name
+    return obj
+
+
+def test_sweep_leftovers_also_sweeps_webhook_configurations(capsys):
+    """Webhook configurations are cluster-scoped and outlive their scratch
+    namespace, so the session sweep must clear a crashed run's too."""
+    cluster = MagicMock()
+    cluster.core.list_namespace.return_value = MagicMock(items=[])
+    cluster.admission.list_validating_webhook_configuration.return_value = MagicMock(
+        items=[_named("nebari-journey-aaa-hook"), _named("foreign-hook")]
+    )
+
+    _journeys_conftest.sweep_leftovers.__wrapped__(cluster)
+
+    cluster.admission.delete_validating_webhook_configuration.assert_called_once_with(
+        name="nebari-journey-aaa-hook"
+    )
+    out = capsys.readouterr().out
+    assert "nebari-journey-aaa-hook" in out
+    assert "!!! ANOMALY" in out and "foreign-hook" in out
