@@ -42,7 +42,7 @@ NIC releases on a `v0.x` line, with release candidates (`v0.Y.0-rc.N`) ahead of 
 | Envoy Gateway + gateway-config + httproutes + securitypolicies | ✅ |
 | PostgreSQL + Keycloak (Codecentric keycloakx chart) | ✅ |
 | CloudNativePG operator (per [ADR-0007](../../adr/0007-cloudnativepg-managed-databases.md)) | ✅ |
-| trust-manager + trust-bundle (conditional on `trust_bundle:`) | ✅ |
+| trust-manager + trust-bundle, with the cluster root CA and `nebari-ca-issuer` on every certificate type | ✅ |
 | Longhorn backup target + RecurringJobs (conditional on `backups.longhorn`) | ✅ |
 | AppProject scoping (`foundational` / `nebari-apps` / locked-down `default`) | ✅ |
 | Kind-level resource restriction within the AppProjects | ⏳ ([#480](https://github.com/nebari-dev/nebari-infrastructure-core/issues/480)) |

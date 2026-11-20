@@ -160,8 +160,9 @@ def trust_anchor(trust_anchor_pem, anchor_trust, tmp_path_factory) -> str | None
 
 SELF_SIGNED_WARNING = (
     "self signed cert detected, skipping tls tests "
-    "(see nebari_journeys.trust.is_self_signed_leaf and issue #447 for the "
-    "real fix: cert-manager issuing a proper CA for the gateway)"
+    "(see nebari_journeys.trust.is_self_signed_leaf; NIC signs its own gateway "
+    "certificates with the cluster root CA since #447, so this shape comes from "
+    "an operator-supplied certificate.existing_secret)"
 )
 
 PRIVATELY_ISSUED_WARNING = (
@@ -170,7 +171,9 @@ PRIVATELY_ISSUED_WARNING = (
     "cloud fixture in .github/fixtures/deploy/ uses the staging endpoint on "
     "purpose so CI never consumes production ACME rate limits. A journey whose "
     "SUBJECT is public trust cannot pass here, and its failure would report a "
-    "deliberate CI choice as a platform defect, so it is skipped. Point the "
+    "deliberate CI choice as a platform defect, so it is skipped. A self-signed "
+    "cluster has the same shape: its gateway chains to the cluster's own root "
+    "CA (nebari-ca-issuer). Point the "
     "suite at a cluster issued by a publicly trusted CA to run it."
 )
 
@@ -186,9 +189,10 @@ PRIVATELY_ISSUED_TRUSTED_CA_WARNING = (
 SELF_SIGNED_TRUSTED_CA_WARNING = (
     "self signed cert detected: ArgoCD cannot trust the gateway certificate for "
     "server-side OIDC discovery, so ArgoCD SSO is UNVERIFIED and known broken on "
-    "this cluster (#490, root cause #447; #607 blocks in-cluster resolution of the "
-    "issuer URL on the same shape). A cluster with a real issuing CA runs this "
-    "journey normally."
+    "this cluster (#490; #447 gave NIC's own clusters a root CA, so this leaf "
+    "comes from an operator-supplied certificate; #607 blocks in-cluster "
+    "resolution of the issuer URL outside local clusters). A cluster with a "
+    "publicly trusted certificate runs this journey normally."
 )
 
 
@@ -196,8 +200,10 @@ SELF_SIGNED_TRUSTED_CA_WARNING = (
 def self_signed_anchor(anchor_trust) -> bool:
     """True when the derived anchor is a self-signed leaf, not a real CA.
 
-    This is the shape cert-manager's default `selfsigned-issuer` produces
-    (see the nebari_journeys.trust module docstring): a `CA:FALSE`
+    NIC no longer produces this shape for its own gateway (#447 signs it
+    with the cluster root CA); it comes from an operator-supplied
+    `certificate.existing_secret` (see the nebari_journeys.trust module
+    docstring): a `CA:FALSE`
     end-entity certificate that Chromium cannot accept as a trust anchor
     by any NSS trick. Browser journeys still run, pinned to that
     certificate's public key via chromium_args' SPKI flag; only journeys
@@ -255,11 +261,10 @@ def skip_trusted_ca_marked_tests_without_public_trust(request, anchor_trust):
     that cannot trust the gateway's self-signed leaf. No SPKI pin fixes
     that: the pin only relaxes Chromium's trust in this process, and
     ArgoCD's server is a separate process with no such pin. See issues
-    #490 (ArgoCD's OIDC discovery fails TLS verification), #447 (root
-    cause: cert-manager's selfsigned-issuer produces a CA:FALSE leaf,
-    not a proper CA), and #607 (a second, separate blocker on the same
-    cluster shape: the external hostname does not resolve in-cluster at
-    all).
+    #490 (ArgoCD's OIDC discovery fails TLS verification: ArgoCD does
+    not mount `nebari-trust-bundle`, so the cluster root CA from #447 is
+    not available to it) and #607 (a second, separate blocker outside
+    local clusters: the external hostname may not resolve in-cluster).
     """
     if anchor_trust == trust.PUBLICLY_TRUSTED:
         return
