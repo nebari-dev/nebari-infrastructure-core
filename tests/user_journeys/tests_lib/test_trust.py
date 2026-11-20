@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 from nebari_journeys import trust
 from nebari_journeys.trust import (
     chromium_args,
+    gateway_certificate_pem,
     gateway_reachable,
     install_dns_mapping,
     is_self_signed_leaf,
@@ -716,3 +717,65 @@ def test_verifiable_hostname_uses_the_domain_when_there_is_no_anchor():
 def test_verifiable_hostname_uses_the_domain_when_the_certificate_has_no_sans():
     leaf, _ = make_cert("nebari.test")
     assert trust.verifiable_hostname(chain_pem(leaf), "nebari.test") == "nebari.test"
+
+
+# --- gateway_certificate_pem: what Chromium's SPKI pin is computed from ---
+#
+# Chromium's --ignore-certificate-errors-spki-list only matches keys in the
+# chain the server sends. With the cluster root CA (#447), ca.crt holds the
+# root, which the gateway never sends, so a pin on the trust anchor never
+# matches. The pin has to come from the gateway's own certificate.
+
+
+def test_gateway_certificate_is_the_first_certificate_in_tls_crt():
+    root, rk = make_cert("Nebari root CA", ca=True)
+    inter, ik = make_cert("Intermediate", root, rk, ca=True)
+    leaf, _ = make_cert("nebari.test", inter, ik, dns=["nebari.test"])
+    cluster = _cluster_with_tls_secret(
+        {"ca.crt": chain_pem(root), "tls.crt": chain_pem(leaf, inter)}
+    )
+
+    assert gateway_certificate_pem(cluster) == chain_pem(leaf)
+
+
+def test_spki_pin_comes_from_the_gateway_certificate_not_the_root_ca():
+    """The #776 regression: pinning ca.crt's key made Chromium fail with
+    ERR_CERT_AUTHORITY_INVALID on every self-signed cluster."""
+    root, rk = make_cert("Nebari root CA", ca=True)
+    leaf, _ = make_cert("nebari.test", root, rk, dns=["nebari.test"])
+    cluster = _cluster_with_tls_secret(
+        {"ca.crt": chain_pem(root), "tls.crt": chain_pem(leaf)}
+    )
+
+    args = chromium_args(
+        "nebari.test",
+        "10.0.0.5",
+        False,
+        gateway_certificate_pem(cluster),
+        anchor_trust=trust.PRIVATELY_ISSUED,
+    )
+
+    assert args == [
+        f"--ignore-certificate-errors-spki-list={spki_sha256_b64(chain_pem(leaf))}"
+    ]
+    assert spki_sha256_b64(chain_pem(root)) not in args[0]
+
+
+def test_gateway_certificate_is_none_without_tls_crt():
+    cluster = _cluster()
+    cluster.secret_value.side_effect = KeyError("tls.crt")
+    assert gateway_certificate_pem(cluster) is None
+
+
+def test_gateway_certificate_is_none_when_the_secret_is_absent():
+    cluster = _cluster()
+    cluster.secret_value.side_effect = ApiException(status=404, reason="Not Found")
+    assert gateway_certificate_pem(cluster) is None
+
+
+def test_gateway_certificate_403_propagates_and_names_the_secret():
+    cluster = _cluster(ref=("operator-supplied-tls", "platform-certs"))
+    cluster.secret_value.side_effect = ApiException(status=403, reason="Forbidden")
+    with pytest.raises(RuntimeError) as excinfo:
+        gateway_certificate_pem(cluster)
+    assert "platform-certs/operator-supplied-tls" in str(excinfo.value)

@@ -92,11 +92,21 @@ def trust_anchor_pem(cluster) -> str | None:
     """The raw anchor PEM, or None when the system trust store suffices.
 
     Fetched once per session and shared by `trust_anchor` (the file path
-    `requests` and Playwright's context options read) and by Chromium's
-    launch args (which need the PEM itself to compute the SPKI pin), so
-    the cluster's secret is read only once.
+    `requests` and Playwright's context options read) and `anchor_trust`.
+    Chromium's SPKI pin uses `gateway_certificate_pem` instead.
     """
     return trust.trust_anchor_pem(cluster)
+
+
+@pytest.fixture(scope="session")
+def gateway_certificate_pem(cluster) -> str | None:
+    """The gateway's own certificate, which Chromium's SPKI pin needs.
+
+    Not the anchor: Chromium matches the pin against the chain the gateway
+    sends, which doesn't include a root CA. See
+    `trust.gateway_certificate_pem`.
+    """
+    return trust.gateway_certificate_pem(cluster)
 
 
 @pytest.fixture(scope="session")
@@ -362,15 +372,15 @@ def browser_type_launch_args(
     platform_domain,
     gateway_address,
     dns_mapping,
-    trust_anchor_pem,
+    gateway_certificate_pem,
     anchor_trust,
 ):
-    """Map the platform domain for Chromium, and when a trust anchor was
-    derived from the cluster (a self-signed leaf, not a proper CA -- see
-    nebari_journeys.trust module docstring), pin Chromium's trust to its
-    exact public key via --ignore-certificate-errors-spki-list. When no
-    anchor was derived, the chain is publicly trusted (ACME) and nothing
-    extra is added: Chromium runs exactly as a real user's browser would.
+    """Map the platform domain for Chromium, and when the chain isn't
+    publicly trusted, pin Chromium's trust to the gateway certificate's
+    exact public key via --ignore-certificate-errors-spki-list (see the
+    nebari_journeys.trust module docstring). When the chain is publicly
+    trusted, nothing extra is added: Chromium runs exactly as a real
+    user's browser would.
     """
     args = list(browser_type_launch_args.get("args", []))
     args.extend(
@@ -378,7 +388,7 @@ def browser_type_launch_args(
             platform_domain,
             gateway_address,
             dns_mapping,
-            trust_anchor_pem,
+            gateway_certificate_pem,
             anchor_trust,
         )
     )
