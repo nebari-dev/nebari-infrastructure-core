@@ -1,4 +1,7 @@
 manager:
+  image:
+    repository: quay.io/nebari/nebari-operator
+    tag: "v0.2.0@sha256:8a4cc64e0a9812e06a2dc332a1cb5502c30011cf619fc31141cf81a75ef2b66e"
   # NIC's variables go in envOverrides, not env: the chart renders env and
   # then appends every envOverrides key without de-duplicating, so the same
   # name in both breaks the server-side apply. As a map, an overlay overrides

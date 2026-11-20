@@ -2156,3 +2156,377 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 		}
 	}
 }
+
+// TestCertManagerTemplate_ImagePin verifies the cert-manager server image is pinned
+// explicitly in the values, rather than inheriting the chart's appVersion
+// default. This keeps the running server version under review control, so a
+// chart bump cannot silently change (or un-patch) the deployed cert-manager.
+func TestCertManagerTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/cert-manager/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read cert-manager base values template: %v", err)
+	}
+
+	processed, err := processTemplate("values/cert-manager/base.yaml", content, TemplateData{})
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	type imagePin struct {
+		Repository string `yaml:"repository"`
+		Tag        string `yaml:"tag"`
+	}
+
+	type component struct {
+		Image imagePin `yaml:"image"`
+	}
+
+	var values struct {
+		Image           imagePin  `yaml:"image"`
+		Webhook         component `yaml:"webhook"`
+		Cainjector      component `yaml:"cainjector"`
+		ACMESolver      component `yaml:"acmesolver"`
+		StartupAPICheck component `yaml:"startupapicheck"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("cert-manager Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	// Assert the exact tag, not just that one is set. All cert-manager
+	// components must run an explicit, reviewed version rather than
+	// implicitly inheriting the Helm chart's appVersion.
+	const wantTag = "v1.17.2"
+
+	tests := []struct {
+		name           string
+		image          imagePin
+		wantRepository string
+	}{
+		{
+			name:           "image",
+			image:          values.Image,
+			wantRepository: "quay.io/jetstack/cert-manager-controller",
+		},
+		{
+			name:           "webhook.image",
+			image:          values.Webhook.Image,
+			wantRepository: "quay.io/jetstack/cert-manager-webhook",
+		},
+		{
+			name:           "cainjector.image",
+			image:          values.Cainjector.Image,
+			wantRepository: "quay.io/jetstack/cert-manager-cainjector",
+		},
+		{
+			name:           "acmesolver.image",
+			image:          values.ACMESolver.Image,
+			wantRepository: "quay.io/jetstack/cert-manager-acmesolver",
+		},
+		{
+			name:           "startupapicheck.image",
+			image:          values.StartupAPICheck.Image,
+			wantRepository: "quay.io/jetstack/cert-manager-startupapicheck",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.image.Repository != tt.wantRepository {
+				t.Errorf("repository = %q, want %q",
+					tt.image.Repository, tt.wantRepository)
+			}
+
+			if tt.image.Tag != wantTag {
+				t.Errorf("tag = %q, want %q: the cert-manager version must be an explicit, reviewed pin",
+					tt.image.Tag, wantTag)
+			}
+		})
+	}
+}
+
+// TestTrustManagerTemplate_ImagePin verifies the trust-manager server and default CA package
+// images are pinned explicitly in the values, rather than inheriting the chart's appVersion
+// default.
+func TestTrustManagerTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/trust-manager/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read trust-manager base values template: %v", err)
+	}
+
+	processed, err := processTemplate("values/trust-manager/base.yaml", content, TemplateData{})
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	type imagePin struct {
+		Repository string `yaml:"repository"`
+		Tag        string `yaml:"tag"`
+	}
+
+	var values struct {
+		Image               imagePin `yaml:"image"`
+		DefaultPackageImage imagePin `yaml:"defaultPackageImage"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("trust-manager Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	// Assert exact tags, not just that they are set. The trust-manager
+	// and default CA package images follow independent versioning
+	// schemes and must both have explicit, reviewed pins.
+	tests := []struct {
+		name           string
+		image          imagePin
+		wantRepository string
+		wantTag        string
+	}{
+		{
+			name:           "image",
+			image:          values.Image,
+			wantRepository: "quay.io/jetstack/trust-manager",
+			wantTag:        "v0.22.1",
+		},
+		{
+			name:           "defaultPackageImage",
+			image:          values.DefaultPackageImage,
+			wantRepository: "quay.io/jetstack/trust-pkg-debian-bookworm",
+			wantTag:        "20230311-deb12u1.6",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.image.Repository != tt.wantRepository {
+				t.Errorf("repository = %q, want %q",
+					tt.image.Repository, tt.wantRepository)
+			}
+
+			if tt.image.Tag != tt.wantTag {
+				t.Errorf("tag = %q, want %q: the trust-manager image version must be an explicit, reviewed pin",
+					tt.image.Tag, tt.wantTag)
+			}
+		})
+	}
+}
+
+// TestCloudNativePGTemplate_ImagePin verifies the CloudNativePG operator image is pinned
+// explicitly in the values, rather than inheriting the chart's appVersion default.
+func TestCloudNativePGTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/cloudnative-pg/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read cloudnative-pg base values template: %v", err)
+	}
+
+	processed, err := processTemplate("values/cloudnative-pg/base.yaml", content, TemplateData{})
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	var values struct {
+		Image struct {
+			Repository string `yaml:"repository"`
+			Tag        string `yaml:"tag"`
+		} `yaml:"image"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("cloudnative-pg Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	const wantRepository = "ghcr.io/cloudnative-pg/cloudnative-pg"
+	if values.Image.Repository != wantRepository {
+		t.Errorf("image.repository = %q, want %q",
+			values.Image.Repository, wantRepository)
+	}
+
+	// Assert the exact tag, not just that one is set. The CloudNativePG
+	// operator must run an explicit, reviewed version rather than
+	// implicitly inheriting the Helm chart's appVersion.
+	const wantTag = "1.30.0"
+	if values.Image.Tag != wantTag {
+		t.Errorf("image.tag = %q, want %q: the CloudNativePG operator version must be an explicit, reviewed pin",
+			values.Image.Tag, wantTag)
+	}
+}
+
+// TestEnvoyGatewayTemplate_ImagePin verifies the Envoy Gateway images are pinned
+// explicitly in the values, rather than inheriting the chart's appVersion default.
+func TestEnvoyGatewayTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/envoy-gateway/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read envoy-gateway base values template: %v", err)
+	}
+
+	processed, err := processTemplate("values/envoy-gateway/base.yaml", content, TemplateData{})
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	type imagePin struct {
+		Image string `yaml:"image"`
+	}
+
+	var values struct {
+		Global struct {
+			Images struct {
+				EnvoyGateway imagePin `yaml:"envoyGateway"`
+				RateLimit    imagePin `yaml:"ratelimit"`
+				EnvoyProxy   imagePin `yaml:"envoyProxy"`
+			} `yaml:"images"`
+		} `yaml:"global"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("envoy-gateway Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	// Assert exact image references, not just that they are set.
+	// Each Envoy Gateway component follows an independent versioning
+	// scheme and must have an explicit, reviewed image pin.
+	tests := []struct {
+		name      string
+		image     string
+		wantImage string
+	}{
+		{
+			name:      "global.images.envoyGateway.image",
+			image:     values.Global.Images.EnvoyGateway.Image,
+			wantImage: "docker.io/envoyproxy/gateway:v1.9.1",
+		},
+		{
+			name:      "global.images.ratelimit.image",
+			image:     values.Global.Images.RateLimit.Image,
+			wantImage: "docker.io/envoyproxy/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1",
+		},
+		{
+			name:      "global.images.envoyProxy.image",
+			image:     values.Global.Images.EnvoyProxy.Image,
+			wantImage: "docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.image != tt.wantImage {
+				t.Errorf("image = %q, want %q: the image must be an explicit, reviewed pin",
+					tt.image, tt.wantImage)
+			}
+		})
+	}
+}
+
+// TestOpenTelemetryCollectorTemplate_ImagePin verifies the OpenTelemetry Collector images are pinned
+// explicitly in the values, rather than inheriting the chart's appVersion default.
+func TestOpenTelemetryCollectorTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/opentelemetry-collector/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read opentelemetry-collector base values template: %v", err)
+	}
+
+	processed, err := processTemplate("values/opentelemetry-collector/base.yaml", content, TemplateData{})
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	var values struct {
+		Image struct {
+			Repository string `yaml:"repository"`
+			Tag        string `yaml:"tag"`
+		} `yaml:"image"`
+		InitContainers []struct {
+			Name  string `yaml:"name"`
+			Image string `yaml:"image"`
+		} `yaml:"initContainers"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("opentelemetry-collector Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	// Assert exact image pins to prevent unreviewed version changes
+	// in either the collector or the software-pack override initializer.
+	const wantRepository = "otel/opentelemetry-collector-k8s"
+	const wantTag = "0.143.0"
+
+	t.Run("image", func(t *testing.T) {
+		if values.Image.Repository != wantRepository {
+			t.Errorf("repository = %q, want %q",
+				values.Image.Repository, wantRepository)
+		}
+
+		if values.Image.Tag != wantTag {
+			t.Errorf("tag = %q, want %q: the collector version must be an explicit, reviewed pin",
+				values.Image.Tag, wantTag)
+		}
+	})
+
+	t.Run("initContainers/ensure-overrides", func(t *testing.T) {
+		const wantImage = "busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028"
+
+		for _, container := range values.InitContainers {
+			if container.Name == "ensure-overrides" {
+				if container.Image != wantImage {
+					t.Errorf("image = %q, want %q: the init container must be an explicit, reviewed pin",
+						container.Image, wantImage)
+				}
+				return
+			}
+		}
+
+		t.Error("missing ensure-overrides init container")
+	})
+}
+
+// TestNebariOperatorTemplate_ImagePin verifies the Nebari Operator images are pinned
+// explicitly in the values, rather than inheriting the chart's appVersion default.
+func TestNebariOperatorTemplate_ImagePin(t *testing.T) {
+	content, err := templates.ReadFile("templates/values/nebari-operator/base.yaml")
+	if err != nil {
+		t.Fatalf("failed to read nebari-operator base values template: %v", err)
+	}
+
+	data := TemplateData{
+		Domain:                  "test.example.com",
+		KeycloakServiceURL:      "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth",
+		KeycloakRealm:           "nebari",
+		KeycloakAdminSecretName: "nebari-realm-admin-credentials",
+		KeycloakNamespace:       "keycloak",
+		CertificateIssuer:       "letsencrypt-production",
+		KeycloakBasePath:        "/auth",
+	}
+
+	processed, err := processTemplate("values/nebari-operator/base.yaml", content, data)
+	if err != nil {
+		t.Fatalf("processTemplate(base) error: %v", err)
+	}
+
+	var values struct {
+		Manager struct {
+			Image struct {
+				Repository string `yaml:"repository"`
+				Tag        string `yaml:"tag"`
+			} `yaml:"image"`
+		} `yaml:"manager"`
+	}
+
+	if err := yaml.Unmarshal(processed, &values); err != nil {
+		t.Fatalf("nebari-operator Helm values are not valid YAML: %v\n%s", err, processed)
+	}
+
+	const wantRepository = "quay.io/nebari/nebari-operator"
+	if values.Manager.Image.Repository != wantRepository {
+		t.Errorf("manager.image.repository = %q, want %q",
+			values.Manager.Image.Repository, wantRepository)
+	}
+
+	// Assert the exact tag, not just that one is set. The Nebari
+	// Operator must run an explicit, reviewed version rather than
+	// implicitly inheriting the Helm chart's appVersion.
+	const wantTag = "v0.2.0"
+	if values.Manager.Image.Tag != wantTag {
+		t.Errorf("manager.image.tag = %q, want %q: the Nebari Operator version must be an explicit, reviewed pin",
+			values.Manager.Image.Tag, wantTag)
+	}
+}

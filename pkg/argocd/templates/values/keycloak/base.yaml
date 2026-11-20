@@ -13,6 +13,7 @@ replicas: 1
 image:
   repository: quay.io/keycloak/keycloak
   tag: "26.8.1"
+  digest: "sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332"
 http:
   relativePath: "{{ .KeycloakBasePath }}/"
 extraEnv: |

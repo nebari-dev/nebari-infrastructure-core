@@ -36,7 +36,7 @@ spec:
   # unset makes the Postgres major version an accidental side effect of a
   # cloudnative-pg chart bump. This is the 1.30.0 default (chart 0.29.0), so
   # pinning it changes nothing today; bump it deliberately.
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie@sha256:42708a75345b7a48fdd9257b071830783a97fd228529196b6313187a7198e185
   # Sizing carried over from the retired Bitnami postgresql app so the
   # database pod keeps Burstable QoS instead of BestEffort.
   resources:
