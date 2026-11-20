@@ -265,10 +265,13 @@ matter which NSS trust flag is used, so Chromium rejects it with
 
 For the browser journeys, `nebari_journeys.trust.chromium_args` launches
 Chromium with `--ignore-certificate-errors-spki-list=<hash>`, where `<hash>`
-is `spki_sha256_b64()` of the same anchor PEM the `requests` journeys already
-use. Read plainly, this pins Chromium's trust to the exact public key
-(SubjectPublicKeyInfo) read from the cluster's own gateway secret over the
-kubeconfig:
+is `spki_sha256_b64()` of the gateway's own certificate (the first one in
+the gateway secret's `tls.crt`), not the anchor PEM the `requests` journeys
+use. Chromium only matches the pin against keys in the chain the gateway
+sends, and that chain never includes a root CA, so a pin on the anchor would
+never match on a self-signed cluster. Read plainly, this pins Chromium's
+trust to the exact public key (SubjectPublicKeyInfo) read from the cluster's
+own gateway secret over the kubeconfig:
 
 - A certificate presenting any other key -- a MITM, or the gateway rotating
   to a new key without updating the pin -- is still rejected outright. In
@@ -283,10 +286,7 @@ kubeconfig:
 it.** It is applied only when a trust anchor was actually derived from the
 cluster (self-signed, or privately issued such as staging); a PUBLICLY
 TRUSTED cluster gets no extra Chromium flags
-at all, so it is driven exactly as a real user's browser would be. On a
-self-signed cluster the anchor is now the cluster's root CA, so the pin
-holds the root's key rather than the gateway leaf's; whether Chromium
-honours a pin on a key that is not the leaf's has not been tested. With a
+at all, so it is driven exactly as a real user's browser would be. With a
 proper root CA in place (#447), the way to retire the pin is to trust that
 root in the test browser's store, after which the SPKI pin
 (`spki_sha256_b64`, the flag it feeds, and this whole section) can be
