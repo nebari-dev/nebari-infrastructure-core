@@ -36,7 +36,7 @@ cert-manager writes the key, the certificate and the root (`ca.crt`) to the Secr
 
 ## What the root CA may sign
 
-The root CA carries critical X.509 name constraints, so clients reject any certificate it signs for names outside them, even if cert-manager issues it:
+The root CA carries critical X.509 name constraints. Clients that enforce them reject any certificate it signs for names outside them, even if cert-manager issues it. Clients built on OpenSSL or Go's `crypto/x509` enforce them. Java does not: its default trust manager ignores the name constraints of a trusted root, so Keycloak and any other JVM workload that mounts the bundle trusts a certificate from this root for any name. The constraints are:
 
 - DNS names under `svc` and `svc.cluster.local` on every cluster. `svc` is needed because the API server calls webhooks at `<service>.<namespace>.svc`.
 - DNS names under the cluster's `domain` only on `certificate.type: selfsigned`, where the root also signs the gateway and the operator's per-app certificates. On `letsencrypt` and `existing` clusters the root cannot vouch for names under the domain.
@@ -81,7 +81,7 @@ The value is `<namespace>/<Certificate name>`; cert-manager copies that Certific
 
 ## Who can issue
 
-Anyone who can create cert-manager `Certificate` or `CertificateRequest` resources in any namespace can get a certificate from `nebari-ca-issuer`. cert-manager's built-in approver approves every request to it, and nothing ties a request to the requester's own namespace, so a principal who can create Certificates in one namespace can get a certificate for another namespace's Service name. Grant those permissions only to principals you would trust to serve any in-cluster Service name.
+Anyone who can create cert-manager `Certificate` or `CertificateRequest` resources in any namespace can get a certificate from `nebari-ca-issuer`. cert-manager's built-in approver approves every request to it, and nothing ties a request to the requester's own namespace, so a principal who can create Certificates in one namespace can get a certificate for another namespace's Service name. Grant those permissions only to principals you would trust to serve any in-cluster Service name. JVM clients do not enforce the root's name constraints (see [What the root CA may sign](#what-the-root-ca-may-sign)), so for them a certificate from this issuer is trusted for any name, not only Service names. Limiting each namespace to its own Service names is tracked in [#788](https://github.com/nebari-dev/nebari-infrastructure-core/issues/788).
 
 ## What is not provided
 
