@@ -4,6 +4,7 @@ from nebari_journeys import constants
 from nebari_journeys.argocd import (
     Application,
     all_healthy,
+    all_settled,
     foundational_applications,
     is_foundational,
     settled_foundational_applications,
@@ -203,3 +204,65 @@ def test_settled_applications_returns_the_unhealthy_snapshot_on_timeout():
     cluster.applications.return_value = [_app("a", health="Degraded")]
     apps = settled_foundational_applications(cluster, timeout=0, interval=0)
     assert apps[0].health_status == "Degraded"
+
+
+# --- syncs still in progress ---
+#
+# Foundational apps retry failed syncs forever (#450), so a sync that can
+# never succeed stays Running instead of ending Failed. The convergence wait
+# is its deadline: the cluster counts as settled only when nothing is still
+# syncing, and whatever is still syncing when the wait ends is reported.
+
+RETRY_MESSAGE = "Retrying attempt #20: one or more objects failed to apply"
+
+
+def _syncing_app(name="keycloak", health="Healthy"):
+    obj = _app(name, health=health, operation_phase="Running")
+    obj["status"]["operationState"]["message"] = RETRY_MESSAGE
+    return obj
+
+
+def test_a_running_operation_is_syncing():
+    app = Application.from_object(_syncing_app())
+    assert app.is_syncing() is True
+    assert app.operation_message == RETRY_MESSAGE
+
+
+def test_an_operation_that_succeeded_after_retries_is_not_syncing():
+    """retryCount stays set after a sync finally succeeds."""
+    obj = _app("keycloak", operation_phase="Succeeded")
+    obj["status"]["operationState"]["retryCount"] = 8
+    assert Application.from_object(obj).is_syncing() is False
+
+
+def test_a_healthy_app_still_syncing_is_not_settled():
+    """The stuck case: the old resources keep the app Healthy while every
+    retry of the new sync fails."""
+    apps = [
+        Application.from_object(_app("a")),
+        Application.from_object(_syncing_app("b")),
+    ]
+    assert all_healthy(apps) is True
+    assert all_settled(apps) is False
+    assert all_settled(apps[:1]) is True
+
+
+def test_settled_applications_waits_out_a_sync_in_progress():
+    cluster = MagicMock()
+    cluster.applications.side_effect = [
+        [_syncing_app("a")],
+        [_app("a")],
+    ]
+    apps = settled_foundational_applications(cluster, timeout=5, interval=0)
+    assert apps[0].is_syncing() is False
+    assert cluster.applications.call_count == 2
+
+
+def test_settled_applications_returns_a_stuck_sync_on_timeout():
+    """The journey reports the app and Argo CD's retry message, so the wait
+    must hand back the app that is still syncing."""
+    cluster = MagicMock()
+    cluster.applications.return_value = [_syncing_app("a")]
+    apps = settled_foundational_applications(cluster, timeout=0, interval=0)
+    assert apps[0].is_syncing() is True
+    assert apps[0].operation_message == RETRY_MESSAGE
