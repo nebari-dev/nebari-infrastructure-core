@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/providers/cluster"
@@ -379,12 +382,37 @@ func TestWriteAllToGit_RootCA(t *testing.T) {
 		"namespace: cert-manager",
 		"isCA: true",
 		"secretName: " + rootCASecretName,
-		`- "nebari.example.com"`,
 		"name: " + certificateIssuerSelfSigned,
 	} {
 		if !strings.Contains(string(rootCA), want) {
 			t.Errorf("root CA certificate missing %q:\n%s", want, rootCA)
 		}
+	}
+
+	// The name constraints are what stop the root from vouching for other
+	// sites, so check their structure, not just that the strings appear.
+	var rootCADoc struct {
+		Spec struct {
+			NameConstraints *struct {
+				Critical  bool `yaml:"critical"`
+				Permitted struct {
+					DNSDomains []string `yaml:"dnsDomains"`
+				} `yaml:"permitted"`
+			} `yaml:"nameConstraints"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(rootCA, &rootCADoc); err != nil {
+		t.Fatalf("parse root CA certificate: %v", err)
+	}
+	constraints := rootCADoc.Spec.NameConstraints
+	if constraints == nil {
+		t.Fatalf("root CA certificate has no nameConstraints:\n%s", rootCA)
+	}
+	if !constraints.Critical {
+		t.Error("root CA nameConstraints are not critical, so clients that don't support them would ignore them")
+	}
+	if got, want := constraints.Permitted.DNSDomains, []string{"nebari.example.com"}; !slices.Equal(got, want) {
+		t.Errorf("root CA permitted dnsDomains = %v, want %v", got, want)
 	}
 
 	// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
