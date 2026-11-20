@@ -23,16 +23,18 @@ import (
 func TestApplications_RetryIndefinitely(t *testing.T) {
 	rendered := map[string][]byte{}
 
-	// Render every app template directly, so templates that WriteAllToGit
-	// skips for this config are still checked.
-	const appsDir = "templates/apps"
-	entries, err := templates.ReadDir(appsDir)
+	// Render every app NIC can deploy, as listed by Applications(), directly,
+	// so templates that WriteAllToGit skips for this config are still checked.
+	apps, err := Applications()
 	if err != nil {
-		t.Fatalf("read %s: %v", appsDir, err)
+		t.Fatalf("Applications() error: %v", err)
+	}
+	if len(apps) == 0 {
+		t.Fatal("Applications() returned no apps, so only the root app would be checked")
 	}
 	data := NewTemplateData(&config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{StorageClass: "gp2"})
-	for _, e := range entries {
-		name := path.Join(appsDir, e.Name())
+	for _, app := range apps {
+		name := path.Join("templates/apps", app+".yaml")
 		content, err := templates.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
