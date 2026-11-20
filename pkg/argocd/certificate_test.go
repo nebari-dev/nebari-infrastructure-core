@@ -347,6 +347,20 @@ func TestWriteAllToGit_SelectsCertificateIssuer(t *testing.T) {
 	}
 }
 
+func TestWriteAllToGit_RejectsUnknownCertificateType(t *testing.T) {
+	cfg := &config.NebariConfig{
+		Domain:      "example.com",
+		Certificate: &config.CertificateConfig{Type: "vault"},
+	}
+	err := WriteAllToGit(context.Background(), t.TempDir(), cfg, nil, cluster.InfraSettings{}, "")
+	if err == nil {
+		t.Fatal("WriteAllToGit() succeeded for an unknown certificate type, want an error")
+	}
+	if !strings.Contains(err.Error(), `"vault"`) {
+		t.Errorf("error %q does not name the certificate type", err)
+	}
+}
+
 func TestWriteAllToGit_RootCA(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NebariConfig{Domain: "nebari.example.com"}

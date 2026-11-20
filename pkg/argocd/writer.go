@@ -197,7 +197,8 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 	}
 
 	// Set certificate configuration. Each type picks its issuer explicitly, so a
-	// new type has to choose one instead of inheriting a fallback.
+	// new type has to choose one instead of inheriting a fallback. WriteAllToGit
+	// rejects a type that doesn't.
 	certificateType := config.CertificateTypeSelfSigned
 	if cfg.Certificate != nil && cfg.Certificate.Type != "" {
 		certificateType = cfg.Certificate.Type
@@ -381,6 +382,15 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 	defer span.End()
 
 	data := NewTemplateData(cfg, src, settings)
+
+	// NewTemplateData leaves the issuer empty for a certificate type it doesn't
+	// know. Validate rejects those, but a direct caller may skip it, and an empty
+	// issuer would render certificates that never get issued.
+	if data.CertificateIssuer == "" {
+		err := fmt.Errorf("no certificate issuer for certificate type %q", cfg.Certificate.Type)
+		span.RecordError(err)
+		return err
+	}
 
 	if trustBundlePEM != "" {
 		data.TrustManagerEnabled = true
