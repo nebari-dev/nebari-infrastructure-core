@@ -45,10 +45,10 @@ Chosen option: "A separate repo deployed by NIC as unconditional foundational so
 
 NIC takes on:
 
-- An Argo CD `Application` template for the nebari-user-secrets chart in `pkg/argocd/templates/apps/`, after cert-manager and Keycloak, since the chart needs a cert-manager CA and validates Keycloak tokens. The component has no `NebariApp` and no gateway route: users manage their secrets on the landing page, whose frontend nginx proxies to the component's cluster-internal management API, as it does for `nebari-webapi` ([nebari-dev/nebari-landing#236](https://github.com/nebari-dev/nebari-landing/issues/236)).
-- Applying the component's `cluster/` bundle (the two ValidatingAdmissionPolicies and their bindings) in a later sync wave than the chart, because policy B reads a ConfigMap the chart creates. Installing them in the other order only denies labelled pods until the chart is in, but the ordering avoids that window.
+- An Argo CD `Application` template for the nebari-user-secrets chart in `pkg/argocd/templates/apps/`, after cert-manager, trust-manager and Keycloak, since the chart takes its serving certificate from `nebari-ca-issuer`, its clients trust it through `nebari-trust-bundle` (both made always-on by [#787](https://github.com/nebari-dev/nebari-infrastructure-core/pull/787)), and it validates Keycloak tokens. The component has no `NebariApp` and no gateway route: users manage their secrets on the landing page, whose frontend nginx proxies to the component's cluster-internal management API, as it does for `nebari-webapi` ([nebari-dev/nebari-landing#236](https://github.com/nebari-dev/nebari-landing/issues/236)).
+- Applying the component's `cluster/` bundle (the two ValidatingAdmissionPolicies and their bindings, and the `user-secrets-injector` MutatingWebhookConfiguration) in a later sync wave than the chart, because policy B reads a ConfigMap the chart creates and the webhook's `caBundle` is injected from the chart's serving Certificate. Installing them in the other order only affects labelled pods until the chart is in, but the ordering avoids that window.
 - Rendering the creator registry (which namespaces and apps each creator may name users for) from the packs NIC knows are installed, through the existing values overlay seam ([ADR-0014](0014-helm-valuefiles-overlay-seam.md)).
-- Wiring the component and the landing page to each other, with values that must agree across the two charts: in the nebari-user-secrets chart, the landing namespace, the landing frontend pod selector and the landing SPA client id (which nebari-landing lets deployers override with `frontend.keycloak.clientId`); in the nebari-landing chart, the component's service address and the integration toggle. A wrong client id makes every secrets call fail with `401`, and a wrong namespace or selector makes the component's NetworkPolicy block the landing page, so NIC should derive both sides from one source. The landing namespace must also exist before the component's chart, which creates a Role there, and the landing page must keep working while the component is missing or not ready.
+- Wiring the component and the landing page to each other, with values that must agree across the two charts: in the nebari-user-secrets chart, the landing namespace, the landing frontend pod selector and the landing SPA client id (which nebari-landing lets deployers override with `frontend.keycloak.clientId`); in the nebari-landing chart, the component's service address and the integration toggle. A wrong client id makes every secrets call fail with `401`, and a wrong namespace or selector makes the component's NetworkPolicy block the landing page, so NIC should derive both sides from one source. The landing page must keep working while the component is missing or not ready.
 - A user journey test ([ADR-0017](0017-user-journey-tests-for-foundational-software.md)) once a consumer is wired: a user stores a secret and a notebook receives it, and a second user does not.
 
 The component is unconditional in the sense of [ADR-0006](0006-conditional-foundational-software-helm.md): it does not depend on provider or cluster shape. Installing it changes no workload, because nothing reaches a pod until a pack opts in.
@@ -63,6 +63,9 @@ The component is unconditional in the sense of [ADR-0006](0006-conditional-found
 **Bad:**
 - Every Nebari cluster runs the service and its two admission policies, including clusters where no pack has opted in yet.
 - Policy A is evaluated on every pod write and ServiceAccount token request in the cluster. It is designed to deny only requests involving user-secrets metadata, and the test matrix shows unrelated pods, scheduler bindings, kubelet status updates and kubelet token minting pass, but a CEL error in it would deny the requests it matches. The component mitigates this with a canary probe and a CI matrix; NIC inherits the blast radius.
+- The injector webhook is in the create path of pods carrying the user-secrets label, and only those. While the service is unreachable, pods a pack marks `strict` are refused and other labelled pods start without secrets.
+- The component keeps its master encryption key in a Kubernetes Secret, `user-secrets-kek`, and losing it loses every user's secrets. Until NIC backs up Kubernetes objects, operators back it up themselves.
+- The component depends on #787's always-on cluster CA and trust bundle.
 - NIC's supported Kubernetes versions must stay at 1.30 or later (ValidatingAdmissionPolicy GA), including the local provider's kind node image, and clusters must run the NodeRestriction admission plugin.
 - One more component in NIC's release and upgrade path.
 
@@ -70,7 +73,7 @@ The component is unconditional in the sense of [ADR-0006](0006-conditional-found
 
 ### Option 1: Separate repo, deployed by NIC as foundational software
 
-The service, init binary, helper, chart and `cluster/` bundle live in `nebari-dev/nebari-user-secrets` with their own release cycle and image, like `nebari-operator`. NIC renders an Argo CD application for the chart and applies the cluster bundle.
+The service (including its injector webhook), init binary, chart and `cluster/` bundle live in `nebari-dev/nebari-user-secrets` with their own release cycle and image, like `nebari-operator`. NIC renders an Argo CD application for the chart and applies the cluster bundle.
 
 **Pros:**
 - Matches the existing pattern for Nebari-owned foundational components.
@@ -118,6 +121,7 @@ Deploy an off-the-shelf secrets manager instead of a Nebari component.
 ## Links
 
 - Design and cluster-scoped objects under review: [nebari-dev/nebari-user-secrets#1](https://github.com/nebari-dev/nebari-user-secrets/pull/1) (`docs/design/user-secrets.md`, `cluster/REVIEW.md`)
+- [#787](https://github.com/nebari-dev/nebari-infrastructure-core/pull/787): always-on cluster CA (`nebari-ca-issuer`) and trust bundle, which the component's TLS depends on
 - [ADR-0006](0006-conditional-foundational-software-helm.md): conditional foundational software
 - [ADR-0014](0014-helm-valuefiles-overlay-seam.md): Helm valueFiles overlay seam
 - [ADR-0017](0017-user-journey-tests-for-foundational-software.md): user journey tests for foundational software
