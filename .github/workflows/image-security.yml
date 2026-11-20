@@ -1,5 +1,14 @@
 name: Container Image Security
 
+# Scans every container image NIC deploys: builds the inventory with
+# cmd/imagepin, then for each image generates an SBOM and scans it with Trivy
+# (scripts/image-scan.sh, which runs the same way locally).
+#
+# Report-only: findings never fail this workflow. It fails only when an image
+# can't be resolved, pulled or scanned. Results stay in this run: the job
+# summary shows counts, and the artifact holds the inventory, SBOMs, per-image
+# findings and findings.jsonl for later reporting and tracking work.
+
 on:
   push:
     branches:
@@ -12,6 +21,78 @@ on:
 
   workflow_dispatch:
 
-
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scan:
+    name: Scan deployed images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Unresolved images are recorded in the inventory and fail the scan step
+      # below, so the remaining images still get scanned. If rendering itself
+      # fails, no inventory is written and the scan step fails on that.
+      - name: Build image inventory
+        run: |
+          mkdir -p dist/image-scan
+          go run ./cmd/imagepin inventory -o dist/image-scan/inventory.json ||
+            echo "::warning::imagepin reported unresolved images; the scan step will fail on them"
+
+      - name: Cache Trivy databases
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/trivy/db
+            ~/.cache/trivy/java-db
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      # Pinned release, verified against the checksum Trivy publishes for it.
+      - name: Install Trivy 0.76.1
+        env:
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz \
+            --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      - name: Generate SBOMs and scan
+        run: bash scripts/image-scan.sh dist/image-scan/inventory.json dist/image-scan
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [[ -f dist/image-scan/summary.md ]]; then
+            cat dist/image-scan/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No scan summary was produced; see the step logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-security-scan
+          path: dist/image-scan/
+          if-no-files-found: warn
+          retention-days: 90
