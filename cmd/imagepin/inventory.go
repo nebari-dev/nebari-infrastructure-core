@@ -65,7 +65,7 @@ func (i *inventory) writeInventory(ctx context.Context, w io.Writer, r digestRes
 			Ref:     ref,
 			Status:  status,
 			SetBy:   "chart",
-			Mutable: status != "digest",
+			Mutable: status != statusDigest,
 			Sources: img.sources,
 		}
 		if img.setByNIC {

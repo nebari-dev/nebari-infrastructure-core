@@ -33,10 +33,16 @@ import (
 )
 
 func main() {
+	os.Exit(imagepin())
+}
+
+// imagepin is main with an exit code, so its deferred cleanup runs before
+// os.Exit.
+func imagepin() int {
 	commands := map[string]bool{"list": true, "digests": true, "plan": true, "inventory": true}
 	if len(os.Args) < 2 || !commands[os.Args[1]] {
 		fmt.Fprintln(os.Stderr, "usage: imagepin list|digests|plan|inventory [-kube-version v1.34.0] [-o file]")
-		os.Exit(2)
+		return 2
 	}
 	cmd := os.Args[1]
 
@@ -52,8 +58,9 @@ func main() {
 	r, err := run(ctx, inv, *kubeVersion)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "imagepin:", err)
-		os.Exit(1)
+		return 1
 	}
+	defer r.close()
 
 	ok := true
 	switch cmd {
@@ -72,18 +79,16 @@ func main() {
 		// JSON only on the output, so a pipeline can parse it; messages go to stderr.
 		w := os.Stdout
 		if *outPath != "" {
-			f, err := os.Create(*outPath)
+			f, err := os.Create(*outPath) //nolint:gosec // -o is the operator's chosen output path.
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "imagepin:", err)
-				r.close()
-				os.Exit(1)
+				return 1
 			}
 			w = f
 		}
 		var err error
 		ok, err = inv.writeInventory(ctx, w, newResolver(), r.withRecordedTag)
 		if w != os.Stdout {
-			// Closed here, not deferred: os.Exit below would skip a defer.
 			if cerr := w.Close(); err == nil {
 				err = cerr
 			}
@@ -96,26 +101,34 @@ func main() {
 			fmt.Fprintln(os.Stderr, "imagepin: one or more images could not be resolved; see \"error\" in the inventory")
 		}
 	}
-	r.close()
 	if !ok {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
+
+// Pin statuses returned by pinStatus.
+const (
+	statusDigest   = "digest"
+	statusTag      = "tag"
+	statusLatest   = "latest"
+	statusUntagged = "untagged"
+)
 
 // pinStatus classifies an image reference as rendered.
 func pinStatus(ref string) string {
 	if strings.Contains(ref, "@sha256:") {
-		return "digest"
+		return statusDigest
 	}
 	// A tag is a ':' after the last '/'. A ':' before it is a registry port.
 	name := ref[strings.LastIndex(ref, "/")+1:]
 	switch {
 	case strings.HasSuffix(name, ":latest"):
-		return "latest"
+		return statusLatest
 	case strings.Contains(name, ":"):
-		return "tag"
+		return statusTag
 	default:
-		return "untagged" // the runtime will pull :latest
+		return statusUntagged // the runtime will pull :latest
 	}
 }
 
@@ -138,20 +151,20 @@ func (i *inventory) sortedRefs() []string {
 func (i *inventory) printList(w io.Writer) {
 	counts := map[string]int{}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tSET BY\tIMAGE\tFOUND IN")
+	_, _ = fmt.Fprintln(tw, "STATUS\tSET BY\tIMAGE\tFOUND IN")
 	for _, ref := range i.sortedRefs() {
 		img := i.images[ref]
 		status := pinStatus(ref)
 		counts[status]++
 		sort.Strings(img.sources)
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", status, setBy(img), ref, img.sources[0])
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", status, setBy(img), ref, img.sources[0])
 		for _, s := range img.sources[1:] {
-			fmt.Fprintf(tw, "\t\t\t%s\n", s)
+			_, _ = fmt.Fprintf(tw, "\t\t\t%s\n", s)
 		}
 	}
 	_ = tw.Flush()
-	fmt.Fprintf(w, "\n%d images: %d digest, %d tag only, %d latest, %d untagged\n",
-		len(i.images), counts["digest"], counts["tag"], counts["latest"], counts["untagged"])
+	_, _ = fmt.Fprintf(w, "\n%d images: %d digest, %d tag only, %d latest, %d untagged\n",
+		len(i.images), counts[statusDigest], counts[statusTag], counts[statusLatest], counts[statusUntagged])
 }
 
 // printDigests resolves every reference and reports, without changing
@@ -171,19 +184,17 @@ func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, 
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tSET BY\tIMAGE\tDIGEST TODAY\tPLATFORMS")
+	_, _ = fmt.Fprintln(tw, "STATUS\tSET BY\tIMAGE\tDIGEST TODAY\tPLATFORMS")
 	for _, x := range rows {
-		digest, platforms := "-", "-"
+		digest, platforms := "ERROR", "-"
 		if x.res.err == nil {
 			digest = x.res.digest
 			platforms = "single"
 			if x.res.multiArch {
 				platforms = "multi"
 			}
-		} else {
-			digest = "ERROR"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", pinStatus(x.ref), setBy(x.img), x.ref, digest, platforms)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", pinStatus(x.ref), setBy(x.img), x.ref, digest, platforms)
 	}
 	_ = tw.Flush()
 
@@ -199,17 +210,17 @@ func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, 
 		if len(hits) == 0 {
 			return
 		}
-		fmt.Fprintf(w, "\n%s (%d)\n  %s\n", title, len(hits), why)
+		_, _ = fmt.Fprintf(w, "\n%s (%d)\n  %s\n", title, len(hits), why)
 		for _, x := range hits {
 			line := "  - " + x.ref
 			if d := detail(x); d != "" {
 				line += "\n      " + d
 			}
-			fmt.Fprintln(w, line)
+			_, _ = fmt.Fprintln(w, line)
 		}
 	}
 	firstSource := func(x row) string { return "found in " + x.img.sources[0] }
-	floating := func(x row) bool { s := pinStatus(x.ref); return s == "latest" || s == "untagged" }
+	floating := func(x row) bool { s := pinStatus(x.ref); return s == statusLatest || s == statusUntagged }
 
 	section("Errors", "Lookup failed. Nothing about these images was verified.",
 		func(x row) bool { return x.res.err != nil },
@@ -225,11 +236,11 @@ func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, 
 		func(x row) bool { return !x.img.setByNIC }, firstSource)
 	section("Tag pinned by NIC, not by digest",
 		"NIC controls these tags, but a tag can be re-pushed. These are the candidates for converting to a digest.",
-		func(x row) bool { return x.res.err == nil && x.img.setByNIC && pinStatus(x.ref) == "tag" },
+		func(x row) bool { return x.res.err == nil && x.img.setByNIC && pinStatus(x.ref) == statusTag },
 		func(x row) string { return "today: " + x.res.digest })
 
-	fmt.Fprintln(w, "\nA digest above is what the registry returns today. For any reference not pinned by digest,")
-	fmt.Fprintln(w, "a later pull can differ; checking that at deployment time is out of scope here.")
+	_, _ = fmt.Fprintln(w, "\nA digest above is what the registry returns today. For any reference not pinned by digest,")
+	_, _ = fmt.Fprintln(w, "a later pull can differ; checking that at deployment time is out of scope here.")
 
 	for _, x := range rows {
 		if x.res.err != nil {
@@ -241,15 +252,15 @@ func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, 
 
 func (i *inventory) printFooter(w io.Writer) {
 	if len(i.charts) > 0 {
-		fmt.Fprintln(w, "\nCharts rendered:")
+		_, _ = fmt.Fprintln(w, "\nCharts rendered:")
 		for _, c := range i.charts {
-			fmt.Fprintln(w, "  "+c)
+			_, _ = fmt.Fprintln(w, "  "+c)
 		}
 	}
 	if len(i.notes) > 0 {
-		fmt.Fprintln(w, "\nNotes (not covered by this listing):")
+		_, _ = fmt.Fprintln(w, "\nNotes (not covered by this listing):")
 		for _, n := range i.notes {
-			fmt.Fprintln(w, "  - "+n)
+			_, _ = fmt.Fprintln(w, "  - "+n)
 		}
 	}
 }

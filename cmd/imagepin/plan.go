@@ -100,7 +100,7 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 		switch {
 		case !img.setByNIC:
 			p.skipped = append(p.skipped, skip{ref, "set by the chart, not NIC: it can't be pinned through NIC's values"})
-		case pinStatus(ref) == "digest":
+		case pinStatus(ref) == statusDigest:
 			check := r.withRecordedTag(ref)
 			name, tag, digest := splitRef(check)
 			x := lookup(check)
@@ -116,7 +116,7 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 			default:
 				p.same = append(p.same, check)
 			}
-		case pinStatus(ref) != "tag":
+		case pinStatus(ref) != statusTag:
 			p.skipped = append(p.skipped, skip{ref, "floating tag: pin a fixed tag first, then convert it"})
 		case allManifests(img.sources):
 			x := lookup(ref)
@@ -138,7 +138,7 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 		var mine []*change
 		for _, ref := range sortedKeys(baseline.refs) {
 			img := r.inv.images[ref]
-			if img == nil || !img.setByNIC || pinStatus(ref) != "tag" {
+			if img == nil || !img.setByNIC || pinStatus(ref) != statusTag {
 				continue
 			}
 			c := &change{t: t, ref: ref}
@@ -456,10 +456,10 @@ func (p *plan) printUnchanged(w io.Writer) {
 		return
 	}
 	sort.Strings(p.same)
-	fmt.Fprintf(w, "\nIMAGE UNCHANGED (%d)\n", len(p.same))
-	fmt.Fprintln(w, "  Pinned by digest, and the tag still resolves to that digest. Nothing to do.")
+	_, _ = fmt.Fprintf(w, "\nIMAGE UNCHANGED (%d)\n", len(p.same))
+	_, _ = fmt.Fprintln(w, "  Pinned by digest, and the tag still resolves to that digest. Nothing to do.")
 	for _, ref := range p.same {
-		fmt.Fprintf(w, "  - %s\n", ref)
+		_, _ = fmt.Fprintf(w, "  - %s\n", ref)
 	}
 }
 
@@ -467,9 +467,9 @@ func (p *plan) printUnchanged(w io.Writer) {
 // It returns false if anything couldn't be resolved, placed or validated.
 func (p *plan) print(w io.Writer) bool {
 	ok := true
-	fmt.Fprintf(w, "DIGEST PIN PLAN  (digests resolved %s)\n", time.Now().UTC().Format("2006-01-02 15:04 MST"))
-	fmt.Fprintln(w, "Each digest is what its tag pointed to at the time above.")
-	fmt.Fprintln(w, "Keep each tag: it records the version for people; the digest is what gets pulled.")
+	_, _ = fmt.Fprintf(w, "DIGEST PIN PLAN  (digests resolved %s)\n", time.Now().UTC().Format("2006-01-02 15:04 MST"))
+	_, _ = fmt.Fprintln(w, "Each digest is what its tag pointed to at the time above.")
+	_, _ = fmt.Fprintln(w, "Keep each tag: it records the version for people; the digest is what gets pulled.")
 
 	byFile := map[string][]string{}
 	for _, c := range p.changes {
@@ -507,9 +507,9 @@ func (p *plan) print(w io.Writer) bool {
 
 	files := sortedKeys(byFile)
 	for _, f := range files {
-		fmt.Fprintf(w, "\n%s\n", f)
+		_, _ = fmt.Fprintf(w, "\n%s\n", f)
 		for _, s := range byFile[f] {
-			fmt.Fprint(w, s)
+			_, _ = fmt.Fprint(w, s)
 		}
 	}
 
@@ -520,29 +520,29 @@ func (p *plan) print(w io.Writer) bool {
 		}
 	}
 	if len(failed) > 0 {
-		fmt.Fprintf(w, "\nNOT PLANNED (%d)\n", len(failed))
+		_, _ = fmt.Fprintf(w, "\nNOT PLANNED (%d)\n", len(failed))
 		for _, c := range failed {
-			fmt.Fprintf(w, "  - %s\n      %s\n      %v\n", c.ref, c.t.label, c.err)
+			_, _ = fmt.Fprintf(w, "  - %s\n      %s\n      %v\n", c.ref, c.t.label, c.err)
 		}
 	}
 
 	if len(p.moved) > 0 {
-		fmt.Fprintf(w, "\nTAG MOVED UPSTREAM (%d)\n", len(p.moved))
-		fmt.Fprintln(w, "  The tag now names a different image than the pinned digest: the image for that")
-		fmt.Fprintln(w, "  version changed upstream. The pinned digest is still what gets pulled.")
+		_, _ = fmt.Fprintf(w, "\nTAG MOVED UPSTREAM (%d)\n", len(p.moved))
+		_, _ = fmt.Fprintln(w, "  The tag now names a different image than the pinned digest: the image for that")
+		_, _ = fmt.Fprintln(w, "  version changed upstream. The pinned digest is still what gets pulled.")
 		for _, m := range p.moved {
-			fmt.Fprintf(w, "  - %s\n      pinned:  %s\n      tag now: %s\n", m.ref, m.pinned, m.tagNow)
+			_, _ = fmt.Fprintf(w, "  - %s\n      pinned:  %s\n      tag now: %s\n", m.ref, m.pinned, m.tagNow)
 			for _, s := range m.sources {
-				fmt.Fprintf(w, "      found in %s\n", s)
+				_, _ = fmt.Fprintf(w, "      found in %s\n", s)
 			}
 		}
 	}
 
 	if len(p.skipped) > 0 {
 		sort.Slice(p.skipped, func(i, j int) bool { return p.skipped[i].ref < p.skipped[j].ref })
-		fmt.Fprintf(w, "\nNOT IN THIS PLAN (%d)\n", len(p.skipped))
+		_, _ = fmt.Fprintf(w, "\nNOT IN THIS PLAN (%d)\n", len(p.skipped))
 		for _, s := range p.skipped {
-			fmt.Fprintf(w, "  - %s\n      %s\n", s.ref, s.why)
+			_, _ = fmt.Fprintf(w, "  - %s\n      %s\n", s.ref, s.why)
 		}
 	}
 	return ok

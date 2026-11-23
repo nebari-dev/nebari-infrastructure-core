@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -78,7 +79,7 @@ func run(ctx context.Context, inv *inventory, kubeVersion string) (*renderer, er
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !(strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+		if d.IsDir() || (!strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml")) {
 			return nil
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // Reads our own temporary render.
@@ -107,7 +108,7 @@ func run(ctx context.Context, inv *inventory, kubeVersion string) (*renderer, er
 
 const manifestPrefix = "pkg/argocd/templates/"
 
-func (r *renderer) close() { _ = os.RemoveAll(r.work) }
+func (r *renderer) close() { _ = os.RemoveAll(r.work) } //nolint:gosec // r.work is our own os.MkdirTemp directory.
 
 // renderNIC writes NIC's GitOps output exactly as a deploy would, with every
 // optional component this listing should see turned on.
@@ -199,7 +200,7 @@ func (r *renderer) applications(ctx context.Context, gitops string) error {
 				chartPath, err = r.fetchGitChart(ctx, src.RepoURL, src.TargetRevision, src.Path)
 				chartLabel = src.Path + "@" + src.TargetRevision
 			default:
-				err = fmt.Errorf("Helm source has neither chart nor path")
+				err = errors.New("helm source has neither chart nor path")
 			}
 			if err != nil {
 				return fmt.Errorf("%s: %w", appLabel, err)
