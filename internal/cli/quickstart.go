@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
@@ -16,6 +19,14 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/config"
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/nic"
 )
+
+// dnsCheckTimeout bounds the lookup of the platform domain, so an offline
+// machine or a slow resolver doesn't hold up the deploy.
+const dnsCheckTimeout = 3 * time.Second
+
+// kindGatewayAddress is where kind publishes the gateway, used for the
+// /etc/hosts line when no deploy result carries the address (--dry-run).
+const kindGatewayAddress = "127.0.0.1"
 
 var (
 	quickstartOut       string
@@ -86,6 +97,17 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// A failed check doesn't stop the deploy: the cluster is fine either way,
+	// and the user can fix DNS while it runs. The warning is repeated after
+	// the summary, where it can't scroll away under the deploy logs.
+	dnsHost := "keycloak." + cfg.Domain
+	dnsCtx, cancelDNS := context.WithTimeout(ctx, dnsCheckTimeout)
+	dnsErr := quickstart.ResolvesToLoopback(dnsCtx, net.DefaultResolver, dnsHost)
+	cancelDNS()
+	if dnsErr != nil {
+		slog.Warn("The platform domain doesn't resolve to this machine, so the browser can't reach the platform", "host", dnsHost, "error", dnsErr)
+	}
+
 	if quickstartDryRun {
 		names, err := quickstart.PackNames()
 		if err != nil {
@@ -94,6 +116,9 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("\nDry run: wrote %s and deployed nothing.\n", quickstartOut)
 		fmt.Printf("Running without --dry-run deploys it and installs: %s\n\n", strings.Join(names, ", "))
+		if dnsErr != nil {
+			printDNSWarning(cfg, dnsHost, kindGatewayAddress)
+		}
 		return nil
 	}
 
@@ -138,7 +163,46 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 	// The summary replaces nic deploy's Argo CD, Keycloak and DNS boxes, which
 	// describe steps a quickstart user doesn't need.
 	printQuickstartSummary(cfg, result, quickstartOut)
+	if dnsErr != nil {
+		gatewayAddress := kindGatewayAddress
+		if result.LBEndpoint != nil && result.LBEndpoint.IP != "" {
+			gatewayAddress = result.LBEndpoint.IP
+		}
+		printDNSWarning(cfg, dnsHost, gatewayAddress)
+	}
 	return nil
+}
+
+// printDNSWarning prints the failed DNS check as the last thing in the output,
+// so it isn't lost above the summary. The default domain resolves through
+// public DNS, so a failure there points at the local resolver. A custom domain
+// may simply not be published anywhere.
+func printDNSWarning(cfg *config.NebariConfig, host, gatewayAddress string) {
+	hostsLine := gatewayAddress + " " + strings.Join(quickstart.Hostnames(cfg.Domain), " ")
+
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("  WARNING: YOUR BROWSER CAN'T REACH THE PLATFORM YET")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
+	if cfg.Domain == quickstart.DefaultDomain {
+		fmt.Printf("  %s doesn't resolve to this machine, although it does\n", host)
+		fmt.Println("  through public DNS. Your DNS resolver probably blocks public names that point")
+		fmt.Println("  at your own machine. Fix it with one of:")
+		fmt.Println()
+		fmt.Println("    - switch this machine's DNS to 1.1.1.1 or 8.8.8.8")
+		fmt.Println("    - turn on Secure DNS in your browser")
+		fmt.Println("    - add this line to /etc/hosts:")
+		fmt.Println()
+		fmt.Printf("        %s\n", hostsLine)
+	} else {
+		fmt.Printf("  %s doesn't resolve to this machine. Point the domain's\n", host)
+		fmt.Printf("  DNS records at %s, or add this line to /etc/hosts:\n", gatewayAddress)
+		fmt.Println()
+		fmt.Printf("    %s\n", hostsLine)
+	}
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
+	fmt.Println()
 }
 
 // writeQuickstartConfig writes content to path. An existing file with the same
