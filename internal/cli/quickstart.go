@@ -135,7 +135,8 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 
 	cleanup()
 
-	printDeployResult(cfg, result, false)
+	// The summary replaces nic deploy's Argo CD, Keycloak and DNS boxes, which
+	// describe steps a quickstart user doesn't need.
 	printQuickstartSummary(cfg, result, quickstartOut)
 	return nil
 }
