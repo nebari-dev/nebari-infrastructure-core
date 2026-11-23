@@ -37,6 +37,16 @@ type inventoryImage struct {
 	// Drift is set when a digest pin's tag now names a different image.
 	Drift string `json:"drift,omitempty"`
 
+	// Platforms lists the image Digest provides for each platform NIC can
+	// deploy on, with that platform's own digest: the exact image a node of
+	// that architecture pulls, and what gets scanned.
+	Platforms []platformDigest `json:"platforms,omitempty"`
+
+	// MissingPlatforms lists platforms NIC can deploy on that the vendor
+	// doesn't publish this image for: a deployment on that architecture
+	// can't run it. Recorded as a fact, not a failure.
+	MissingPlatforms []string `json:"missingPlatforms,omitempty"`
+
 	Sources []string `json:"sources"`
 	Error   string   `json:"error,omitempty"` // lookup failed; nothing verified
 }
@@ -50,7 +60,9 @@ type digestResolver interface {
 // writeInventory resolves every image and writes the inventory as JSON. It
 // returns false if any lookup failed; the file is still written, with the
 // error recorded on that image, so the failure is visible to the consumer.
-func (i *inventory) writeInventory(ctx context.Context, w io.Writer, r digestResolver, lookupRef func(string) string) (bool, error) {
+// platforms are the platforms r was asked to read; each image's
+// MissingPlatforms is measured against them.
+func (i *inventory) writeInventory(ctx context.Context, w io.Writer, r digestResolver, lookupRef func(string) string, platforms []string) (bool, error) {
 	out := inventoryFile{
 		Generated: time.Now().UTC().Format(time.RFC3339),
 		Images:    []inventoryImage{},
@@ -81,6 +93,8 @@ func (i *inventory) writeInventory(ctx context.Context, w io.Writer, r digestRes
 			e.MultiArch = res.multiArch
 			e.ScanRef = normalizeName(name) + "@" + res.digest
 			e.Drift = res.drift
+			e.Platforms = res.platforms
+			e.MissingPlatforms = missingPlatforms(platforms, res.platforms)
 		}
 		out.Images = append(out.Images, e)
 	}

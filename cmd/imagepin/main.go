@@ -49,6 +49,7 @@ func imagepin() int {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	kubeVersion := fs.String("kube-version", "v1.34.0", "Kubernetes version charts are rendered for")
 	outPath := fs.String("o", "", "inventory: write the JSON here instead of stdout")
+	platformList := fs.String("platforms", strings.Join(defaultPlatforms, ","), "inventory: platforms to list per image, comma-separated")
 	_ = fs.Parse(os.Args[2:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -87,7 +88,10 @@ func imagepin() int {
 			w = f
 		}
 		var err error
-		ok, err = inv.writeInventory(ctx, w, newResolver(), r.withRecordedTag)
+		platforms := strings.Split(*platformList, ",")
+		res := newResolver()
+		res.platforms = platforms
+		ok, err = inv.writeInventory(ctx, w, res, r.withRecordedTag, platforms)
 		if w != os.Stdout {
 			if cerr := w.Close(); err == nil {
 				err = cerr

@@ -99,9 +99,18 @@ func run(ctx context.Context, inv *inventory, kubeVersion string) (*renderer, er
 		return nil, err
 	}
 
+	if err := r.goInstalled(); err != nil {
+		r.close()
+		return nil, fmt.Errorf("images NIC installs from Go code: %w", err)
+	}
+
+	// Known gaps: images this inventory can't see from NIC's code.
 	inv.notes = append(inv.notes,
-		"Charts installed from Go code rather than Argo CD (Argo CD itself, Longhorn, AWS load balancer controller, cluster autoscaler, GPU operator) and kind/k3s node images.",
-		"Images a controller creates at run time from its own built-in defaults, when NIC's values don't set them.",
+		"Not covered: images preloaded inside the kind node image.",
+		"Not covered: Hetzner add-ons (defined in hetzner-k3s, not NIC) and the k3s release chosen at deploy time.",
+		"Not covered, accepted as trusted: EKS and AKS managed add-ons, which the cloud provider chooses and updates.",
+		"Not covered: per-deployment overrides (chart versions, image tags, node images, overlay values); this inventory is NIC's defaults.",
+		"Not covered: images a controller creates at run time from its own built-in defaults, when NIC doesn't set them.",
 	)
 	return r, nil
 }

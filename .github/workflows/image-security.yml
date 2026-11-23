@@ -8,6 +8,9 @@ name: Container Image Security
 # can't be resolved, pulled or scanned. Results stay in this run: the job
 # summary shows counts, and the artifact holds the inventory, SBOMs, per-image
 # findings and findings.jsonl for later reporting and tracking work.
+#
+# Scheduled and manual runs on main sign the report (the attest job). Every
+# other run, PRs included, shows in its summary what would have been signed.
 
 on:
   schedule:
@@ -25,6 +28,11 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # Identifies NIC's image scan report manifest (scripts/image-scan.sh writes
+  # it). An identifier, not a page: verifiers pass it to select this attestation.
+  REPORT_PREDICATE_TYPE: https://github.com/nebari-dev/nebari-infrastructure-core/attestations/image-scan-report/v1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -90,6 +98,23 @@ jobs:
             echo "No scan summary was produced; see the step logs." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Attestation dry run
+        if: success() && !(github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
+        run: |
+          p=dist/image-scan/attestation/predicate.json
+          {
+            echo "### Attestation (dry run)"
+            echo ""
+            echo "Signing happens only on scheduled or manual runs on \`main\`. This run would sign:"
+            echo ""
+            echo "- **Subjects:** $(wc -l < dist/image-scan/attestation/subjects.txt) image digests (index and per-platform)"
+            echo "- **Predicate type:** \`$REPORT_PREDICATE_TYPE\`"
+            echo "- **Predicate:** \`sha256:$(sha256sum "$p" | cut -d' ' -f1)\`, covering $(jq '.images | length' "$p") image/platform reports"
+            echo "- **Complete scan:** $(jq .complete "$p")"
+            echo ""
+            echo "Both files are in the \`attestation/\` folder of the artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload scan results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -98,3 +123,54 @@ jobs:
           path: dist/image-scan/
           if-no-files-found: warn
           retention-days: 90
+
+  # Signs the report from the scan job. Kept separate so only this job, which
+  # runs no scanner or third-party image, can obtain a signing identity.
+  attest:
+    name: Attest scan report
+    needs: scan
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # keyless signing identity (Sigstore)
+      attestations: write # store the attestation with GitHub
+    steps:
+      - name: Download scan results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image-security-scan
+          path: dist/image-scan
+
+      # Sign only a complete report, and only files that match the hashes the
+      # report manifest records for them.
+      - name: Check the report before signing
+        run: |
+          p=dist/image-scan/attestation/predicate.json
+          jq -e '.complete == true' "$p" >/dev/null ||
+            { echo "::error::scan was incomplete; not attesting"; exit 1; }
+          jq -r '.reports | to_entries[] | "\(.value | sub("^sha256:"; ""))  dist/image-scan/\(.key)"' "$p" |
+            sha256sum --check
+          test -s dist/image-scan/attestation/subjects.txt
+
+      # One attestation per run: every scanned image digest (index and
+      # per-platform) is a subject, and the signed predicate is a manifest of
+      # the report files' hashes and finding counts. NIC verifies it by digest
+      # through GitHub's attestation API, e.g.
+      #   gh attestation verify oci://<image>@<digest> \
+      #     --repo nebari-dev/nebari-infrastructure-core --predicate-type <REPORT_PREDICATE_TYPE>
+      #
+      # Admission controllers (e.g. the Sigstore Policy Controller) need
+      # attestations stored in the image's own registry. NIC deploys vendor
+      # images from registries it can't write to, so that isn't possible today.
+      # If self-hosting images ever becomes an option, explore per-digest
+      # attestations pushed to that registry (actions/attest with
+      # push-to-registry: true); the per-image SBOMs and findings this workflow
+      # already produces would be the inputs.
+      - name: Attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/image-scan/attestation/subjects.txt
+          predicate-type: ${{ env.REPORT_PREDICATE_TYPE }}
+          predicate-path: dist/image-scan/attestation/predicate.json

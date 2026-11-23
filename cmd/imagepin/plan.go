@@ -118,6 +118,8 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 			}
 		case pinStatus(ref) != statusTag:
 			p.skipped = append(p.skipped, skip{ref, "floating tag: pin a fixed tag first, then convert it"})
+		case allGoCode(img.sources):
+			p.skipped = append(p.skipped, skip{ref, "defined in NIC's Go code (" + img.sources[0] + "): pinning it needs a code change"})
 		case allManifests(img.sources):
 			x := lookup(ref)
 			for _, s := range img.sources {
@@ -437,6 +439,17 @@ func checkLabels(v any, where string) []string {
 		}
 	}
 	return bad
+}
+
+// allGoCode reports whether every source is a Go file in NIC itself, rather
+// than a rendered template: such an image can only be pinned by changing code.
+func allGoCode(sources []string) bool {
+	for _, s := range sources {
+		if !strings.HasPrefix(s, "pkg/") || strings.HasPrefix(s, manifestPrefix) || !strings.Contains(s, ".go") {
+			return false
+		}
+	}
+	return len(sources) > 0
 }
 
 func allManifests(sources []string) bool {

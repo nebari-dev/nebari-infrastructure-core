@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
@@ -19,11 +20,21 @@ type resolution struct {
 	pinnedGone bool   // the reference's own digest no longer exists
 	drift      string // tag now points elsewhere than the pinned digest
 	tagNow     string // for tag@digest: what the tag resolves to now
-	err        error
+
+	// platforms is what digest provides for each wanted platform; filled
+	// only when the resolver was asked for platforms (see resolver.platforms).
+	platforms []platformDigest
+
+	err error
 }
 
 type resolver struct {
 	client *auth.Client
+
+	// platforms, when set, also reads which of these platforms each resolved
+	// digest provides, and each one's own digest. Only the inventory needs
+	// it, so other commands skip the extra registry reads.
+	platforms []string
 }
 
 // newResolver uses your Docker credentials when present (useful for Docker Hub
@@ -61,6 +72,9 @@ func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 		if res.digest != digest {
 			return resolution{err: fmt.Errorf("registry returned %s for pinned %s", res.digest, digest)}
 		}
+		if err := r.readPlatforms(ctx, repo, desc, &res); err != nil {
+			return resolution{err: err}
+		}
 	}
 
 	lookup := tag
@@ -80,6 +94,9 @@ func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 		if digest == "" {
 			res.digest = desc.Digest.String()
 			res.multiArch = isIndex(desc.MediaType)
+			if err := r.readPlatforms(ctx, repo, desc, &res); err != nil {
+				return resolution{err: err}
+			}
 		} else {
 			res.tagNow = desc.Digest.String()
 			if res.tagNow != digest {
@@ -107,4 +124,18 @@ func normalizeName(name string) string {
 func isIndex(mediaType string) bool {
 	return mediaType == "application/vnd.oci.image.index.v1+json" ||
 		mediaType == "application/vnd.docker.distribution.manifest.list.v2+json"
+}
+
+// readPlatforms fills res.platforms for the digest desc names, when the
+// resolver was asked for platforms. A failure here is a failure to resolve.
+func (r *resolver) readPlatforms(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor, res *resolution) error {
+	if len(r.platforms) == 0 {
+		return nil
+	}
+	p, err := platformsOf(ctx, repo, desc, r.platforms)
+	if err != nil {
+		return fmt.Errorf("read platforms of %s: %w", desc.Digest, err)
+	}
+	res.platforms = p
+	return nil
 }

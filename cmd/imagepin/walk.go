@@ -149,6 +149,20 @@ var imageInText = regexp.MustCompile(`(?:[a-z0-9.-]+(?::[0-9]+)?/)+[a-z0-9._/-]+
 func (i *inventory) walk(value any, o origin) {
 	switch v := value.(type) {
 	case map[string]any:
+		// Some operators' custom resources (the GPU operator's ClusterPolicy)
+		// split an image into repository, image and version fields and
+		// assemble the reference at run time. Read those as one reference.
+		if ref, isTriple := splitImage(v); isTriple {
+			if ref != "" {
+				i.add(ref, o)
+			}
+			for key, child := range v {
+				if key != "repository" && key != "image" && key != "version" {
+					i.walk(child, o)
+				}
+			}
+			return
+		}
 		for key, child := range v {
 			// image: (pods) and imageName: (CNPG Cluster) hold one reference.
 			if key == "image" || key == "imageName" {
@@ -167,5 +181,38 @@ func (i *inventory) walk(value any, o origin) {
 		for _, m := range imageInText.FindAllString(v, -1) {
 			i.add(m, o)
 		}
+	}
+}
+
+// splitImage recognizes an operator component's image, written as separate
+// repository, image and version fields. isTriple is true when the map is such
+// a component. ref is the assembled reference, or "" when the component is
+// disabled (enabled: false) or has no version of its own: the operator then
+// supplies one at run time (the GPU operator uses its own version), and its
+// own image is already listed from its Deployment.
+//
+// A disabled component is skipped even without a repository: charts may omit
+// an empty one (the GPU operator's vGPU manager, whose image lives in a
+// customer's own registry, renders as just enabled: false and image).
+func splitImage(m map[string]any) (ref string, isTriple bool) {
+	name, ok := m["image"].(string)
+	if !ok || name == "" {
+		return "", false
+	}
+	if enabled, ok := m["enabled"].(bool); ok && !enabled {
+		return "", true
+	}
+	repo, ok := m["repository"].(string)
+	if !ok || repo == "" {
+		return "", false
+	}
+	version, _ := m["version"].(string)
+	switch {
+	case version == "":
+		return "", true
+	case strings.HasPrefix(version, "sha256:"):
+		return repo + "/" + name + "@" + version, true
+	default:
+		return repo + "/" + name + ":" + version, true
 	}
 }

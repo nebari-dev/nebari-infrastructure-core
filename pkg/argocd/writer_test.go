@@ -363,6 +363,7 @@ func TestKeycloakTemplate_ImagePin(t *testing.T) {
 		Image struct {
 			Repository string `yaml:"repository"`
 			Tag        string `yaml:"tag"`
+			Digest     string `yaml:"digest"`
 		} `yaml:"image"`
 	}
 	if err := yaml.Unmarshal(processed, &values); err != nil {
@@ -372,15 +373,10 @@ func TestKeycloakTemplate_ImagePin(t *testing.T) {
 	if values.Image.Repository != "quay.io/keycloak/keycloak" {
 		t.Errorf("image.repository = %q, want %q", values.Image.Repository, "quay.io/keycloak/keycloak")
 	}
-	// Assert the exact tag, not just that one is set. The point of the pin is
-	// that the running server version is a deliberate, reviewed value; a test
-	// that only checks for non-empty would let a chart bump or a stray edit
-	// move the deployed version without failing. Bump this alongside the tag in
-	// base.yaml when upgrading Keycloak on purpose.
-	const wantTag = "26.8.1"
-	if values.Image.Tag != wantTag {
-		t.Errorf("image.tag = %q, want %q: the Keycloak server version must be an explicit, reviewed pin", values.Image.Tag, wantTag)
-	}
+	// The running server version must be a deliberate, reviewed value. The
+	// digest makes it one: a chart bump or a stray edit can't move the
+	// deployed image without changing the pin (see assertDigestPin).
+	assertDigestPin(t, values.Image.Tag, values.Image.Digest)
 }
 
 // TestKeycloakTemplate_TrustBundle verifies the org CA bundle is wired into
@@ -2048,65 +2044,122 @@ func TestWriteAllToGit_WritesValuesReadme(t *testing.T) {
 // live in templates/values/<app>/base.yaml (the #406 overlay seam), so the
 // blocks are pinned there, nebari-operator's included.
 func TestFoundationalResourceDefaults(t *testing.T) {
+	// Compared by YAML path, not by text, so the order of keys around a
+	// resources block (an image pin above it, say) doesn't matter.
+	type quantities struct {
+		CPU    string `yaml:"cpu"`
+		Memory string `yaml:"memory"`
+	}
+	type resourceSpec struct {
+		Requests quantities `yaml:"requests"`
+		Limits   quantities `yaml:"limits"`
+	}
+	data := TemplateData{
+		Domain:                  "test.example.com",
+		KeycloakServiceURL:      "http://keycloak-keycloakx-http.keycloak.svc.cluster.local/auth",
+		KeycloakRealm:           "nebari",
+		KeycloakAdminSecretName: "nebari-realm-admin-credentials",
+		KeycloakNamespace:       "keycloak",
+		CertificateIssuer:       "letsencrypt-production",
+		KeycloakBasePath:        "/auth",
+	}
+
 	tests := []struct {
 		name     string
 		template string
-		want     []string
+		want     map[string]resourceSpec // YAML path -> resources
 	}{
 		{
 			name:     "cert-manager controller, webhook, cainjector",
-			template: "templates/values/cert-manager/base.yaml",
-			want: []string{
-				"resources:\n  requests:\n    cpu: 25m\n    memory: 64Mi\n  limits:\n    cpu: 200m\n    memory: 256Mi",
-				"webhook:\n  resources:\n    requests:\n      cpu: 10m\n      memory: 32Mi\n    limits:\n      cpu: 100m\n      memory: 128Mi",
-				"cainjector:\n  resources:\n    requests:\n      cpu: 10m\n      memory: 64Mi\n    limits:\n      cpu: 200m\n      memory: 256Mi",
+			template: "values/cert-manager/base.yaml",
+			want: map[string]resourceSpec{
+				"resources":            {Requests: quantities{"25m", "64Mi"}, Limits: quantities{"200m", "256Mi"}},
+				"webhook.resources":    {Requests: quantities{"10m", "32Mi"}, Limits: quantities{"100m", "128Mi"}},
+				"cainjector.resources": {Requests: quantities{"10m", "64Mi"}, Limits: quantities{"200m", "256Mi"}},
 			},
 		},
 		{
+			// No CPU limit: the empty CPU below asserts it is absent.
 			name:     "keycloak has no CPU limit",
-			template: "templates/values/keycloak/base.yaml",
-			want: []string{
-				"resources:\n  requests:\n    cpu: 250m\n    memory: 1Gi\n  limits:\n    memory: 2Gi",
+			template: "values/keycloak/base.yaml",
+			want: map[string]resourceSpec{
+				"resources": {Requests: quantities{"250m", "1Gi"}, Limits: quantities{"", "2Gi"}},
 			},
 		},
 		{
 			name:     "envoy gateway controller",
-			template: "templates/values/envoy-gateway/base.yaml",
-			want: []string{
-				"    resources:\n      requests:\n        cpu: 50m\n        memory: 128Mi\n      limits:\n        cpu: 500m\n        memory: 512Mi",
+			template: "values/envoy-gateway/base.yaml",
+			want: map[string]resourceSpec{
+				"deployment.envoyGateway.resources": {Requests: quantities{"50m", "128Mi"}, Limits: quantities{"500m", "512Mi"}},
 			},
 		},
 		{
+			// 256Mi request, not the 128Mi the kind audit measured: the
+			// agent settles at ~231Mi on EKS.
 			name:     "opentelemetry collector",
-			template: "templates/values/opentelemetry-collector/base.yaml",
-			want: []string{
-				// 256Mi request, not the 128Mi the kind audit measured: the
-				// agent settles at ~231Mi on EKS.
-				"resources:\n  requests:\n    cpu: 50m\n    memory: 256Mi\n  limits:\n    cpu: 250m\n    memory: 512Mi",
+			template: "values/opentelemetry-collector/base.yaml",
+			want: map[string]resourceSpec{
+				"resources": {Requests: quantities{"50m", "256Mi"}, Limits: quantities{"250m", "512Mi"}},
 			},
 		},
 		{
 			name:     "nebari-operator manager",
-			template: "templates/values/nebari-operator/base.yaml",
-			want: []string{
-				"  resources:\n    requests:\n      cpu: 10m\n      memory: 64Mi\n    limits:\n      cpu: 200m\n      memory: 128Mi",
+			template: "values/nebari-operator/base.yaml",
+			want: map[string]resourceSpec{
+				"manager.resources": {Requests: quantities{"10m", "64Mi"}, Limits: quantities{"200m", "128Mi"}},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, err := templates.ReadFile(tt.template)
+			content, err := templates.ReadFile("templates/" + tt.template)
 			if err != nil {
 				t.Fatalf("read %s: %v", tt.template, err)
 			}
-			for _, w := range tt.want {
-				if !strings.Contains(string(content), w) {
-					t.Errorf("%s missing expected block:\n%s", tt.template, w)
+			processed, err := processTemplate(tt.template, content, data)
+			if err != nil {
+				t.Fatalf("processTemplate(%s) error: %v", tt.template, err)
+			}
+			var doc map[string]any
+			if err := yaml.Unmarshal(processed, &doc); err != nil {
+				t.Fatalf("%s is not valid YAML: %v", tt.template, err)
+			}
+			for path, want := range tt.want {
+				node, ok := lookupPath(doc, path)
+				if !ok {
+					t.Errorf("%s: no %s", tt.template, path)
+					continue
+				}
+				raw, err := yaml.Marshal(node)
+				if err != nil {
+					t.Fatalf("%s: marshal %s: %v", tt.template, path, err)
+				}
+				var got resourceSpec
+				if err := yaml.Unmarshal(raw, &got); err != nil {
+					t.Fatalf("%s: %s: %v", tt.template, path, err)
+				}
+				if got != want {
+					t.Errorf("%s: %s = %+v, want %+v", tt.template, path, got, want)
 				}
 			}
 		})
 	}
+}
+
+// lookupPath returns the node at a dot-separated path of map keys.
+func lookupPath(doc map[string]any, path string) (any, bool) {
+	var node any = doc
+	for _, key := range strings.Split(path, ".") {
+		m, ok := node.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if node, ok = m[key]; !ok {
+			return nil, false
+		}
+	}
+	return node, true
 }
 
 // TestKeycloakNoCPULimit guards the deliberate absence of a Keycloak CPU
@@ -2161,6 +2214,43 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 // explicitly in the values, rather than inheriting the chart's appVersion
 // default. This keeps the running server version under review control, so a
 // chart bump cannot silently change (or un-patch) the deployed cert-manager.
+// sha256Digest is an image digest as the pins record it.
+var sha256Digest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// assertDigestPin checks that an image is pinned by digest, with the version
+// tag the digest was taken from recorded beside it. tag and digest are as
+// the values write them: a separate digest field, or digest "" with the
+// digest after "@" in tag (the tag@digest form).
+//
+// The version itself is deliberately not repeated in these tests. A digest
+// is immutable, so the deployed image changes only when someone edits the
+// pin in base.yaml, and that edit is what review sees; repeating the version
+// here would only make every bump a two-file change. What these tests guard
+// is that each image stays pinned: no inherited chart default, no floating
+// tag, no tag without a digest. Pins are produced with `make images-plan`.
+func assertDigestPin(t *testing.T, tag, digest string) {
+	t.Helper()
+	if digest == "" {
+		tag, digest, _ = strings.Cut(tag, "@")
+	}
+	if tag == "" || tag == "latest" {
+		t.Errorf("tag = %q: record the version tag the digest was taken from", tag)
+	}
+	if !sha256Digest.MatchString(digest) {
+		t.Errorf("digest = %q: the image must be pinned by a sha256 digest (see make images-plan)", digest)
+	}
+}
+
+// splitImageRef splits repository[:tag][@digest]. A ':' before the last '/'
+// is a registry port, not a tag.
+func splitImageRef(ref string) (repository, tag, digest string) {
+	repository, digest, _ = strings.Cut(ref, "@")
+	if i := strings.LastIndex(repository, ":"); i > strings.LastIndex(repository, "/") {
+		repository, tag = repository[:i], repository[i+1:]
+	}
+	return repository, tag, digest
+}
+
 func TestCertManagerTemplate_ImagePin(t *testing.T) {
 	content, err := templates.ReadFile("templates/values/cert-manager/base.yaml")
 	if err != nil {
@@ -2175,6 +2265,7 @@ func TestCertManagerTemplate_ImagePin(t *testing.T) {
 	type imagePin struct {
 		Repository string `yaml:"repository"`
 		Tag        string `yaml:"tag"`
+		Digest     string `yaml:"digest"`
 	}
 
 	type component struct {
@@ -2193,11 +2284,8 @@ func TestCertManagerTemplate_ImagePin(t *testing.T) {
 		t.Fatalf("cert-manager Helm values are not valid YAML: %v\n%s", err, processed)
 	}
 
-	// Assert the exact tag, not just that one is set. All cert-manager
-	// components must run an explicit, reviewed version rather than
-	// implicitly inheriting the Helm chart's appVersion.
-	const wantTag = "v1.17.2"
-
+	// Every cert-manager component must run an explicitly pinned image
+	// rather than inheriting the Helm chart's appVersion.
 	tests := []struct {
 		name           string
 		image          imagePin
@@ -2237,10 +2325,7 @@ func TestCertManagerTemplate_ImagePin(t *testing.T) {
 					tt.image.Repository, tt.wantRepository)
 			}
 
-			if tt.image.Tag != wantTag {
-				t.Errorf("tag = %q, want %q: the cert-manager version must be an explicit, reviewed pin",
-					tt.image.Tag, wantTag)
-			}
+			assertDigestPin(t, tt.image.Tag, tt.image.Digest)
 		})
 	}
 }
@@ -2262,6 +2347,7 @@ func TestTrustManagerTemplate_ImagePin(t *testing.T) {
 	type imagePin struct {
 		Repository string `yaml:"repository"`
 		Tag        string `yaml:"tag"`
+		Digest     string `yaml:"digest"`
 	}
 
 	var values struct {
@@ -2273,26 +2359,22 @@ func TestTrustManagerTemplate_ImagePin(t *testing.T) {
 		t.Fatalf("trust-manager Helm values are not valid YAML: %v\n%s", err, processed)
 	}
 
-	// Assert exact tags, not just that they are set. The trust-manager
-	// and default CA package images follow independent versioning
-	// schemes and must both have explicit, reviewed pins.
+	// The trust-manager and default CA package images follow independent
+	// versioning schemes; each must be explicitly pinned.
 	tests := []struct {
 		name           string
 		image          imagePin
 		wantRepository string
-		wantTag        string
 	}{
 		{
 			name:           "image",
 			image:          values.Image,
 			wantRepository: "quay.io/jetstack/trust-manager",
-			wantTag:        "v0.22.1",
 		},
 		{
 			name:           "defaultPackageImage",
 			image:          values.DefaultPackageImage,
 			wantRepository: "quay.io/jetstack/trust-pkg-debian-bookworm",
-			wantTag:        "20230311-deb12u1.6",
 		},
 	}
 
@@ -2303,10 +2385,7 @@ func TestTrustManagerTemplate_ImagePin(t *testing.T) {
 					tt.image.Repository, tt.wantRepository)
 			}
 
-			if tt.image.Tag != tt.wantTag {
-				t.Errorf("tag = %q, want %q: the trust-manager image version must be an explicit, reviewed pin",
-					tt.image.Tag, tt.wantTag)
-			}
+			assertDigestPin(t, tt.image.Tag, tt.image.Digest)
 		})
 	}
 }
@@ -2341,14 +2420,9 @@ func TestCloudNativePGTemplate_ImagePin(t *testing.T) {
 			values.Image.Repository, wantRepository)
 	}
 
-	// Assert the exact tag, not just that one is set. The CloudNativePG
-	// operator must run an explicit, reviewed version rather than
-	// implicitly inheriting the Helm chart's appVersion.
-	const wantTag = "1.30.0"
-	if values.Image.Tag != wantTag {
-		t.Errorf("image.tag = %q, want %q: the CloudNativePG operator version must be an explicit, reviewed pin",
-			values.Image.Tag, wantTag)
-	}
+	// The operator must run an explicitly pinned image rather than
+	// inheriting the Helm chart's appVersion. Its pin is tag@digest.
+	assertDigestPin(t, values.Image.Tag, "")
 }
 
 // TestEnvoyGatewayTemplate_ImagePin verifies the Envoy Gateway images are pinned
@@ -2382,37 +2456,37 @@ func TestEnvoyGatewayTemplate_ImagePin(t *testing.T) {
 		t.Fatalf("envoy-gateway Helm values are not valid YAML: %v\n%s", err, processed)
 	}
 
-	// Assert exact image references, not just that they are set.
 	// Each Envoy Gateway component follows an independent versioning
-	// scheme and must have an explicit, reviewed image pin.
+	// scheme; each must be explicitly pinned as repository:tag@digest.
 	tests := []struct {
-		name      string
-		image     string
-		wantImage string
+		name           string
+		image          string
+		wantRepository string
 	}{
 		{
-			name:      "global.images.envoyGateway.image",
-			image:     values.Global.Images.EnvoyGateway.Image,
-			wantImage: "docker.io/envoyproxy/gateway:v1.9.1",
+			name:           "global.images.envoyGateway.image",
+			image:          values.Global.Images.EnvoyGateway.Image,
+			wantRepository: "docker.io/envoyproxy/gateway",
 		},
 		{
-			name:      "global.images.ratelimit.image",
-			image:     values.Global.Images.RateLimit.Image,
-			wantImage: "docker.io/envoyproxy/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1",
+			name:           "global.images.ratelimit.image",
+			image:          values.Global.Images.RateLimit.Image,
+			wantRepository: "docker.io/envoyproxy/ratelimit",
 		},
 		{
-			name:      "global.images.envoyProxy.image",
-			image:     values.Global.Images.EnvoyProxy.Image,
-			wantImage: "docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4",
+			name:           "global.images.envoyProxy.image",
+			image:          values.Global.Images.EnvoyProxy.Image,
+			wantRepository: "docker.io/envoyproxy/envoy",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.image != tt.wantImage {
-				t.Errorf("image = %q, want %q: the image must be an explicit, reviewed pin",
-					tt.image, tt.wantImage)
+			repository, tag, digest := splitImageRef(tt.image)
+			if repository != tt.wantRepository {
+				t.Errorf("repository = %q, want %q", repository, tt.wantRepository)
 			}
+			assertDigestPin(t, tag, digest)
 		})
 	}
 }
@@ -2434,6 +2508,7 @@ func TestOpenTelemetryCollectorTemplate_ImagePin(t *testing.T) {
 		Image struct {
 			Repository string `yaml:"repository"`
 			Tag        string `yaml:"tag"`
+			Digest     string `yaml:"digest"`
 		} `yaml:"image"`
 		InitContainers []struct {
 			Name  string `yaml:"name"`
@@ -2445,10 +2520,9 @@ func TestOpenTelemetryCollectorTemplate_ImagePin(t *testing.T) {
 		t.Fatalf("opentelemetry-collector Helm values are not valid YAML: %v\n%s", err, processed)
 	}
 
-	// Assert exact image pins to prevent unreviewed version changes
-	// in either the collector or the software-pack override initializer.
+	// Both the collector and the software-pack override initializer must be
+	// explicitly pinned, so neither can change without an edit to the pin.
 	const wantRepository = "otel/opentelemetry-collector-k8s"
-	const wantTag = "0.143.0"
 
 	t.Run("image", func(t *testing.T) {
 		if values.Image.Repository != wantRepository {
@@ -2456,20 +2530,17 @@ func TestOpenTelemetryCollectorTemplate_ImagePin(t *testing.T) {
 				values.Image.Repository, wantRepository)
 		}
 
-		if values.Image.Tag != wantTag {
-			t.Errorf("tag = %q, want %q: the collector version must be an explicit, reviewed pin",
-				values.Image.Tag, wantTag)
-		}
+		assertDigestPin(t, values.Image.Tag, values.Image.Digest)
 	})
 
 	t.Run("initContainers/ensure-overrides", func(t *testing.T) {
-		const wantImage = "busybox@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028"
 
 		for _, container := range values.InitContainers {
 			if container.Name == "ensure-overrides" {
-				if container.Image != wantImage {
-					t.Errorf("image = %q, want %q: the init container must be an explicit, reviewed pin",
-						container.Image, wantImage)
+				// Pinned by digest alone: no tag is recorded, so drift checks
+				// (make images-plan) can't compare it to an upstream tag.
+				if _, _, digest := splitImageRef(container.Image); !sha256Digest.MatchString(digest) {
+					t.Errorf("image = %q: the init container must be pinned by a sha256 digest", container.Image)
 				}
 				return
 			}
@@ -2521,12 +2592,7 @@ func TestNebariOperatorTemplate_ImagePin(t *testing.T) {
 			values.Manager.Image.Repository, wantRepository)
 	}
 
-	// Assert the exact tag, not just that one is set. The Nebari
-	// Operator must run an explicit, reviewed version rather than
-	// implicitly inheriting the Helm chart's appVersion.
-	const wantTag = "v0.2.0"
-	if values.Manager.Image.Tag != wantTag {
-		t.Errorf("manager.image.tag = %q, want %q: the Nebari Operator version must be an explicit, reviewed pin",
-			values.Manager.Image.Tag, wantTag)
-	}
+	// The operator must run an explicitly pinned image rather than
+	// inheriting the Helm chart's appVersion. Its pin is tag@digest.
+	assertDigestPin(t, values.Manager.Image.Tag, "")
 }
