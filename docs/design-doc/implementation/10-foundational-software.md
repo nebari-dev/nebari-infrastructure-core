@@ -19,7 +19,7 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | **cert-manager** | `cert-manager.yaml` | TLS certificate automation |
 | **trust-manager** | `trust-manager.yaml` | Distributes CA trust bundles across namespaces (cert-manager's trust-manager) |
 | **trust-bundle** | `trust-bundle.yaml` | `Bundle` resource defining the cluster CA trust bundle |
-| **cluster-issuers** | `cluster-issuers.yaml` | `ClusterIssuer` resources (selfsigned and/or Let's Encrypt) |
+| **cluster-issuers** | `cluster-issuers.yaml` | `ClusterIssuer` resources and the cluster root CA on every certificate type: the root CA `Certificate` `nebari-root-ca`, `selfsigned-issuer` (signs the root, and the operator's per-app certificates on `existing`), `nebari-ca-issuer` (signs with the root: the gateway and per-app certificates on `selfsigned`, packs' in-cluster certificates everywhere; see [internal certificates](../../internal-certificates.md)), and `letsencrypt-issuer` on `letsencrypt` |
 | **certificates** | `certificates.yaml` | Initial `Certificate` resources for foundational hostnames |
 | **Envoy Gateway** | `envoy-gateway.yaml` | Kubernetes Gateway API implementation |
 | **gateway-config** | `gateway-config.yaml` | `Gateway` and listener configuration |
@@ -51,8 +51,8 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 ├── apps/                            # One ArgoCD Application per app; root.yaml points here
 │   ├── root.yaml                    # App-of-apps root (recurse: false)
 │   ├── cert-manager.yaml
-│   ├── trust-manager.yaml           # Gated on trust_bundle
-│   ├── trust-bundle.yaml            # Gated on trust_bundle
+│   ├── trust-manager.yaml           # Rendered on every cluster
+│   ├── trust-bundle.yaml            # Rendered on every cluster
 │   ├── cluster-issuers.yaml
 │   ├── certificates.yaml
 │   ├── envoy-gateway.yaml

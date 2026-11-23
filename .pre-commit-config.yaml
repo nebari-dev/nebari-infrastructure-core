@@ -4,6 +4,7 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
+        exclude: ^docs/(configuration|reference/cli)/
       - id: check-yaml
         exclude: ^pkg/argocd/templates/
       - id: check-added-large-files
