@@ -1,8 +1,8 @@
-# ADR-0021: Workload Sandboxing Capability Contract for Software Packs
+# ADR-0021: Workload Sandboxing for Software Packs
 
 ## Status
 
-Proposed.
+Proposed. Depends on the pack platform contract ([ADR-0023, #781](https://github.com/nebari-dev/nebari-infrastructure-core/pull/781)), also proposed: this ADR proposes sandboxing as promises in that contract, delivered through its P5 platform values.
 
 ## Date
 
@@ -15,187 +15,212 @@ Software packs increasingly run code nobody has reviewed line by line, such as c
 **Threat model.**
 
 - **In scope:** an agent's own commands misbehaving, meaning code it runs because of a prompt injection, a compromised dependency or a mistake. Unconfined, that code can reach whatever credentials, files and network the pod can. Many agent-sandbox failures are this kind of policy leakage, not escape.
-- **Out of scope:** an adversary determined to escape to the host. What this ADR delivers shares the host kernel and does not stop kernel exploits. Stronger levels such as gVisor or Kata raise the cost of escape, but NIC does not claim they contain such an adversary either: even VMs may not reliably contain cyber-capable agents ([Trail of Bits, 2026-08-26](https://blog.trailofbits.com/2026/08/26/vms-wont-contain-cyber-capable-agents/)).
+- **Out of scope:** an adversary determined to escape to the host. What this ADR delivers shares the host kernel and does not stop kernel exploits. Stronger isolation such as gVisor or Kata raises the cost of escape, but NIC does not claim it contains such an adversary either: even VMs may not reliably contain cyber-capable agents ([Trail of Bits, 2026-08-26](https://blog.trailofbits.com/2026/08/26/vms-wont-contain-cyber-capable-agents/)).
 - **Also not covered:** misuse of what the agent is allowed to do. If an agent is given a credential for its job, such as a token to push code, a prompt injection can still trick it into misusing that credential. A sandbox limits what the agent and its commands can reach, not what the agent chooses to do with access it legitimately has.
 
-**Why NIC is involved.** Whether a pack can do this depends on the cluster, for example the node's kernel or which container runtimes are installed, and a pack can't find that out for itself. Confining processes inside the pod with Landlock, a Linux kernel feature, needs no change to pod security, but needs node kernels with it enabled at a sufficient ABI, which packs cannot choose. Stronger isolation needs runtimes (such as gVisor or Kata) and node preparation only the cluster can provide, and network guarantees need enforcement in the cluster's network plugin.
+**Why NIC is involved.** Whether a pack can do this depends on the cluster, for example the node's kernel or which container runtimes are installed, and a pack can't find that out for itself: under Argo CD, Helm renders without cluster access. Confining processes inside the pod with Landlock, a Linux kernel feature, needs no change to pod security, but needs node kernels with it enabled at a sufficient ABI, which packs cannot choose. Clusters mix node groups (architectures, images, GPU nodes), so support can differ within one cluster. Stronger isolation needs runtimes (such as gVisor or Kata) and node preparation only the cluster can provide, and network guarantees need enforcement in the cluster's network plugin.
+
+**The pack platform contract.** ADR-0023 (#781) proposes how NIC states what packs may rely on: numbered promises, each with a page, a level (stable or experimental), entry rules and a conformance test that runs on every target. Platform facts reach packs as Helm values under `global.nebari` (P5), which NIC writes into the GitOps repository and the pack's Argo CD Application loads. An earlier revision of this ADR proposed its own versioned contract, with boundary levels and a mapping in `nic outputs`. That would have been a second, parallel contract, so this revision fits sandboxing into ADR-0023 instead.
 
 ## Decision Drivers
 
-- **Grow in steps.** Start with what works today; add stronger options later without breaking packs that already use the contract.
+- **One contract for packs.** Sandboxing follows ADR-0023's promises, levels, entry rules and conformance tests, and does not define its own versioning.
+- **Measure, don't predict.** What NIC tells packs is what it measured on the cluster's own nodes, not what a table says a node image should support.
 - **Packs get plain values.** A pack never queries the cluster; everything it needs arrives as Helm values.
-- **Name the protection, not the tool, but test it with a real tool.** Packs ask for a kind of protection. Every promise is backed by a test with a concrete consumer.
-- **Provider-neutral.** It works the same way on every cluster provider: capability flows through `InfraSettings`, with no provider-name switches outside `pkg/providers/cluster/`.
-- **Don't weaken pod security.** Prefer settings that pass Pod Security `restricted`.
-- **Keep NIC's part small.** Report what NIC knows; add configuration or components only when a real pack needs them.
-- **Fit high-security mode** ([ADR-0010](0010-high-security-mode.md)). Nothing here needs a privileged pod, so it works under `hardened`'s admission rules. A later option to fail the deploy on an unmet requirement would match `hardened`'s fail-closed deploys.
+- **Grow in steps.** Start with what works today; add stronger isolation later as separate promises, without changing what packs already use.
+- **Provider-neutral.** It works the same way on every cluster provider: capability flows through `InfraSettings` and provider interfaces, with no provider-name switches outside `pkg/providers/cluster/`.
+- **Don't weaken pod security.** Everything runs under Pod Security `restricted`.
+- **Keep NIC's part small.** Measure, report and label; NIC does not enforce the sandbox.
+- **Fit high-security mode** ([ADR-0010](0010-high-security-mode.md)). Nothing here needs a privileged pod. A later option to fail the deploy on an unmet requirement would match `hardened`'s fail-closed deploys.
 
 ## Considered Options
 
-Listed from least to most work for NIC.
-
-1. Do less: document which node setups work, maintain an example launcher, let operators give packs the exact runtime name (a `RuntimeClass`) as a Helm value, treat NetworkPolicy as general infrastructure work, and leave sandbox lifecycle to Agent Sandbox.
-2. Label qualifying node groups from a NIC-maintained table of node images.
+1. Do less: document which node setups work, maintain an example launcher, and let operators tell packs what to use.
+2. Predict support per node group from a NIC-maintained table of node images.
 3. Detect the capability per node with Node Feature Discovery.
-4. A tool-neutral contract with a published mapping of concrete values, starting with a tested description of Landlock on the normal runtime.
-5. Bake in one sandboxing tool (e.g. bubblewrap).
-6. Go straight to gVisor or Kata as the only option.
-7. Adopt a full sandbox platform (e.g. Agent Substrate).
+4. Measure at deploy and publish the result through the pack platform contract, as one promise per sandboxing capability.
+5. As 4, but as one sandboxing promise that grows to cover every capability.
+6. A separate sandboxing contract with its own versioned mapping and boundary levels (the earlier revision of this ADR).
+7. Bake in one sandboxing tool (e.g. bubblewrap).
+8. Go straight to gVisor or Kata as the only option.
+9. Adopt a full sandbox platform (e.g. Agent Substrate).
 
 ## Decision Outcome
 
-Chosen option: "Option 4". This ADR sets out the contract below. For now it delivers only one thing: a tested description of where Landlock works on the cluster's normal runtime, which `nic outputs` reports for each cluster. NIC does not enforce the sandbox; the pack does, by confining its own commands and refusing sandboxed work when it can't. NIC also doesn't stop `nic deploy` on a cluster that can't support it; it only reports it. A setting to make the deploy fail in that case can be added later without changing the contract.
+Chosen option: "Option 4". Sandboxing enters the pack platform contract as separate experimental promises, one per capability, each with its own page, entry-rule check, conformance test and graduation clock. This ADR proposes the first:
 
-The contract gives NIC a shared vocabulary for "what sandboxing this cluster supports", and ready-made settings for packs. Packs then ask for a kind of protection, not a specific tool, and the cluster's options can grow (for example adding gVisor or Kata) without packs having to change.
+> **P19 (number provisional): In-pod self-restriction reported.** A pack is told, per node group, whether a process in its pod can restrict itself with Landlock, and at what Landlock ABI, as NIC observed it on the cluster's default runtime at deploy time, and whether NIC can steer a pod onto the groups where it was observed.
 
-### The contract
+P19 promises the report, not Landlock: Landlock availability itself belongs on ADR-0023's "provided, not promised" list. The report is a Nebari-owned value about a Linux kernel interface; a Landlock ABI is a fact about that interface, not a portable isolation rating.
 
-The contract describes a cluster's sandboxing support in three independent parts:
+**Consumers.** [Javo](https://github.com/nebari-dev/javo-pack) runs commands from coding agents in user pods and already confines them with Landlock; it needs to know at install whether confinement can be established, and where to schedule the pods that use it. The near-term need is agents that run inside a user's own pod, such as a notebook extension or an agent in a hub terminal, whose commands sit next to the user's files and tokens ([review of #749](https://github.com/nebari-dev/nebari-infrastructure-core/pull/749#issuecomment-7051137389)). The same review suggests kagent as an agent platform; its sandboxing would use a NIC-provided runtime, so it is a consumer for a later runtime promise, not for P19.
 
-| Axis | Values | In this ADR |
-|---|---|---|
-| **Boundary level** between pod and host | `shared-kernel`, `mediated-kernel`, `hardware-virtualised` | `shared-kernel` (the default runtime); the other two reserved |
-| **In-pod capability** a workload uses inside its pod | `process-self-restriction`, `seccomp-user-notification`, `in-pod-namespaces` | `process-self-restriction` described; the other two reserved |
-| **Profile** of guarantees enforced around the pod | Compositions of atomic guarantees | Reserved; none defined |
+**How it is accepted.** Under ADR-0023 a new promise is decided by Core through a platform RFD; this ADR is the design that RFD would link to. P19 would enter as experimental and planned.
 
-**Qualified** means a NIC maintainer has tested a configuration (provider, node image, architecture, kernel line and container runtime version) with a working consumer, such as the sandbox probe, and recorded the result in the qualification record. It is a tested claim about that one configuration, not an ongoing promise of support.
+Later capabilities, such as a user-space-kernel runtime (gVisor), a VM-isolated runtime (Kata) or a sandbox profile (for example no service-account token), each enter as their own promise through the same process. They are named by the property they provide, not the product, as ADR-0023's neutral-interface rule requires.
 
-**Boundary levels.** At `shared-kernel`, code calls the host kernel directly; at `mediated-kernel`, it never makes system calls directly to the host kernel (for example gVisor); at `hardware-virtualised`, a hardware virtualisation boundary and a guest kernel separate it from the host (for example Kata).
+NIC does not enforce the sandbox; the pack does, by confining its own commands and refusing sandboxed work when it can't. NIC doesn't stop `nic deploy` on a cluster without Landlock; it reports it.
 
-Levels are an acceptance policy: an operator who accepts "at least `mediated-kernel`" accepts any qualified implementation at that level or above. This is a NIC policy convention, not an ecosystem standard or a security ranking: GKE, AKS and `RuntimeClass` expose concrete runtimes, and a user-space kernel and a VM protect in different ways. A higher level never promises that a pack runs unchanged (gVisor has no Landlock), so capabilities are never implied by a level, and NIC never substitutes one implementation for another on its own.
+### What NIC does on `nic deploy`
 
-**In-pod capabilities.** An in-pod capability is something a workload does to itself inside its pod, such as confining its own commands with Landlock (`process-self-restriction`, described under Decision Outcome). Capabilities are separate from levels because a level never implies them.
+1. **Name the node groups.** At provisioning, NIC sets a reserved label naming each node's group, `nebari.dev/node-group=<name>`, in every node-group definition it manages (Kind workers already carry it). It goes in the definition, not on nodes, because the cluster autoscaler builds new nodes, including scale-from-zero, from the definition. The label never changes with measurements, so measuring never changes infrastructure.
+2. **Measure.** After the cluster is up, NIC runs the sandbox probe as one short-lived pod per node on the cluster's default runtime, under Pod Security `restricted`. Each checks that a non-root process can confine itself and its children with Landlock, and records the ABI (about 7 seconds in the prototype).
+3. **Report per node group.** Every node counts, Ready or not. A group is `qualified` if every node was measured and passed, at the lowest ABI measured in it; `unsupported` if every node was measured and lacks Landlock at ABI 3 or newer; and `unknown` otherwise, including empty groups, unmeasured nodes, mixed results and groups that changed during measurement. The cluster is `qualified` if any group is, with `landlockAbi` the lowest observed among qualified groups.
+4. **Publish values.** NIC writes the result into the P5 platform values (below) and shows a per-group summary at the end of `nic deploy` and in `nic outputs`. Before publishing placement, it checks the group label is in each qualified group's definition and on its live nodes.
 
-**Profiles.** A profile is a set of guarantees the cluster enforces around a pod and the pod cannot change, composed of atomic guarantees that can each be enforced and checked from outside the workload, such as `no-service-account-token`, `no-secret-references`, `metadata-unreachable` or `default-deny-off-pod-egress`. Profiles are independent of the boundary level and form part of a requirement. NIC makes no blanket "no credentials" or "no network" claim: admission cannot see credentials in images, literal values or data, and "network" must say whether it covers off-pod, loopback and sidecar, own-node and request-layer traffic. Later ADRs define named profiles.
+The report is a snapshot: a group keeps its place in the placement until the next deploy, even if its nodes are replaced, and a group empty at the next deploy drops out until it is measured again. A changed placement re-renders the pack, which may restart or remove sandboxed workloads.
 
-**The published mapping.** To be sandboxed, a pod needs specific settings: today its security context, and later things like which container runtime to use and which nodes to run on. Some of these will differ between clusters, and a pack can't look them up itself: under ArgoCD, Helm can't read the cluster, and a runtime has to be named literally. So NIC publishes them, and they reach the pack as ordinary Helm values, like the domain or storage class.
+### What packs get
 
-NIC shows the mapping in `nic outputs`. It lists named requirements, each with concrete values for a pod spec. A pack that creates sandbox pods through [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/docs/) (a Kubernetes SIG project for creating sandbox pods on demand) puts the same values in its `SandboxTemplate` instead. Today there is one entry, `default`, the cluster's normal runtime:
+Under the P5 platform values:
 
 ```yaml
-version: 1
-requirements:
-  default:
-    level: shared-kernel
-    state: qualified          # or unknown / unsupported, derived from the node groups
-    capabilities: [process-self-restriction]   # listed only when qualified
-    podSecurityContext:       # together these meet Pod Security "restricted"
-      runAsNonRoot: true
-      seccompProfile: {type: RuntimeDefault}
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities: {drop: [ALL]}
+global:
+  nebari:
+    sandbox:
+      landlock:
+        state: qualified          # qualified / unknown / unsupported
+        landlockAbi: 4            # lowest ABI observed among qualified groups
+        groups:
+          general: {state: qualified, landlockAbi: 6}
+          ubuntu:  {state: qualified, landlockAbi: 4}
+          legacy:  {state: unsupported}
+          gpu:     {state: unknown}
+        placement:
+          available: true         # or false, with a reason
+          groupLabel: nebari.dev/node-group
+          affinity:               # selects every qualified group
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - {key: nebari.dev/node-group, operator: In, values: [general, ubuntu]}
 ```
 
-**How values reach a pack.** Today's `default` security settings are the same on every cluster, so a pack author ships them as chart defaults and nobody copies anything. The only part that varies by cluster today is `state`. The operator, who reads `nic outputs`, uses it to decide whether to turn on a pack's sandboxed features. The pack's startup check still refuses sandboxed work on any node that can't enforce it. Once entries carry values that do vary by cluster, such as a `runtimeClassName` or `placement`, the operator sets them when installing a pack, as they already do for the domain and storage class. With pack codegen ([ADR-0003](0003-software-pack-codegen.md)), NIC would fill them in automatically for packs whose `values.yaml` has a `sandbox` key, the same convention ADR-0003 proposes for `sharedStorage.storageClass`.
+A pack that needs a higher ABI than the cluster's `landlockAbi` picks the qualified groups at its minimum from `groups` and selects them by `groupLabel`. In this example a pack needing ABI 6 selects `general`.
 
-Later entries add fields such as `runtimeClassName`, `placement`, `workspaceStorageClass`, `profile` and `implementation`. These names are reserved now so that adding them breaks nothing. Consumers ignore fields they don't recognise, and an incompatible change bumps `version`.
+`placement.available` means NIC can restrict pods to these groups, not that a pod will fit there (taints, resources and storage still apply). It is true only where the provider sets the group label in its node-group definitions and steering has been verified on that provider. Elsewhere, or when no group is qualified, it is `{available: false, reason: ...}`, and a pack that needs steering refuses the sandboxed work rather than scheduling anywhere.
 
-A later entry might name a `RuntimeClass` that NIC installs (named after the implementation, such as `nebari-gvisor`), a provider-managed one (such as AKS's `kata-vm-isolation`), or the operator's own on an `existing` cluster, together with storage known to work with it. NIC never selects a class automatically in this ADR. Labels on runtime classes are inventory only, and nothing selects a class by label. If automatic selection is added later, finding no match or more than one must be treated as a failure.
+**Other sandbox promises.** Every sandbox promise publishes under `global.nebari.sandbox.<capability>` with `state` and, where they apply, `groups` and `placement`, plus fields of its own (a later runtime promise would add `runtimeClassName`). P19's page sets this shape, and later sandbox promises follow it. Capabilities protect against different things (confining a pod's own commands, a VM boundary, keeping the service-account token out), so one never implies or substitutes for another, and nothing ranks them. A helper in the nebari-app library chart may later choose among alternatives a pack lists in its own order; no helper is needed for this ADR.
 
-**What NIC's report means.** It is an expectation, not a guarantee. `state: qualified` means a matching configuration passed the probe and is in the qualification record. `unknown` means nobody has tested it, and NIC never upgrades it to `qualified` by comparing kernel versions. `nic outputs` also shows each node's kernel version and the Landlock version that kernel should provide (the *baseline*), but only as a hint: vendors backport features, and Landlock can be built in but not switched on. Whether a sandbox actually holds is decided only by the pack's startup check, on each node, every time. All of this concerns the cluster's normal runtime: gVisor and Kata run their own kernel, so later entries cover them.
+**Relationship to P5.** P5, as proposed in #781, tells packs not to rely on any `global.nebari` key outside its own table. This ADR asks that P5 also allow keys defined by other promise pages, carrying that promise's level, so that P19 and later promises can add keys without changing P5 each time.
 
-**Rules.**
+### The P19 promise page (summary)
 
-- **Fail closed.** If a pack cannot establish its sandbox, it refuses the work; it never falls back to weaker settings.
-- **Prove before promising.** Nothing is promised for a configuration until it is qualified.
-- **State a trust model.** Every later level, capability or profile says who is trusted, what hostile code may do, what NIC enforces, what the pack must enforce, and what is not covered.
+- **Packs may rely on:** a report on every target, true at deploy time for the nodes then in each `qualified` or `unsupported` group; when `placement.available` is true, placement selecting only `qualified` groups.
+- **Packs must not rely on:** Landlock being available, any minimum ABI, `unknown` groups behaving either way, or placement as a security guarantee (nodes added after a deploy were not measured).
+- **Per-target notes:** placement is unavailable on `existing`, Hetzner and Kind until steering is verified there; on `existing`, NIC reports what it measured without managing node groups.
+- **Conformance test:** under `tests/user_journeys/journeys/pack_contract/`, it checks the report against an independent probe of every node, and that a reference pack either schedules onto a qualified group and confines a command, or reports why it can't and refuses, on every target without skipping.
 
-### Delivered now
+### Rules
 
-**`process-self-restriction`.** A non-root process, with no extra privileges, restricts itself and everything it starts using Landlock: which files they can read or write (Landlock ABI 3 or newer), and which TCP ports they can connect to or listen on (ABI 4 or newer). Landlock doesn't cover UDP, files already open, or credentials already in the environment. So a pack still keeps the service-account token out (`automountServiceAccountToken: false`) and blocks other network access itself, for example with a seccomp filter. The other in-pod capabilities stay reserved.
+- **Fail closed.** When a pack's policy requires confinement and the report says it can't be provided (no group qualified at the ABI it needs, or placement unavailable), the pack refuses to launch the confined work: the agent, or each command. It never responds by turning its lock off and continuing unconfined. At runtime, the pack's launcher, in the workload's own container and security context, establishes every restriction the pack needs before running each untrusted command, and refuses to run it if any fails. An init container's restrictions don't carry over to the application container, so a check there is not enough.
+- **Prove before promising.** A promise's conformance test checks every claim on every target.
+- **State a trust model.** Every later sandbox promise says who is trusted, what hostile code may do, what NIC enforces, what the pack must enforce, and what is not covered.
 
-**Where it is qualified today:**
+### Landlock, and what it covers
 
-| Configuration | Expectation |
+This all concerns the cluster's default runtime: gVisor and Kata run their own kernel, and gVisor has no Landlock.
+
+A non-root process, with no extra privileges, restricts itself and everything it starts: which files they can read or write (ABI 3 is the minimum here because it adds truncation, without which a write restriction can be sidestepped), which TCP ports they can bind or connect to (ABI 4 or newer; ports, not destination addresses), and, from ABI 6, connecting to abstract UNIX sockets and signalling processes outside the sandbox, if the launcher asks for those scopes. Below ABI 6, a confined command can still connect to abstract UNIX sockets shared by every container in the pod, and signal other processes as normal OS permissions allow; the probe demonstrates both on an ABI 4 kernel (Ubuntu 24.04, kernel 6.8, the Hetzner kernel line). The ABIs measured so far (up to 6) don't cover UDP. Restricting itself doesn't take rights away from file descriptors a process already holds, or credentials already in its environment, so a pack still keeps the service-account token out (`automountServiceAccountToken: false`) and blocks other network access itself, for example with a seccomp filter.
+
+**Evidence so far.** NIC does not use this table; it measures on every deploy:
+
+| Configuration | Result |
 |---|---|
-| AWS, AL2023 x86_64, kernel 6.12 (Kubernetes 1.33–1.35) | Qualified, Landlock ABI 6 |
-| Hetzner, Ubuntu 24.04 x86_64, kernel 6.8 | Qualified, ABI 4 |
-| AWS below 1.33; Azure below 1.35 | Unsupported (kernel too old) |
-| Everything else (ARM, GPU or Bottlerocket images, AKS from 1.35, `existing`, kind) | Unknown until probed |
+| AWS EKS 1.34, AL2023 x86_64 and arm64, Bottlerocket 1.70, kernel 6.12 | Measured: ABI 6 |
+| Hetzner, Ubuntu 24.04 x86_64, kernel 6.8 | Measured: ABI 4 |
+| AWS below 1.33; Azure below 1.35 | Expected none: the default kernel lines predate a usable Landlock (not measured) |
 
-**Reporting.** Each cluster provider tells NIC, through `InfraSettings`, what it expects for each node group. `nic outputs`, and the end of `nic deploy`, show that, plus each node's kernel version as a hint. It never fails a deploy, labels nodes or adds configuration.
+### Before ADR-0023 is accepted
 
-The details are in [§20](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/docs/design-doc/implementation/20-workload-sandboxing.md): the probe, the example launcher, the full qualification record and how to redo it, the report format, and the test runs of gVisor, Kata and bubblewrap that shaped the contract.
+These don't depend on ADR-0023 or P5 and can be built now: the probe image, measurement and the per-group report in `nic deploy` and `nic outputs` (for operators), the group label in each provider's node-group definitions, provider experiments with steering, and test fixtures that exercise the proposed value shape privately. The pack-facing `global.nebari.sandbox` values and any claim of conformance wait until P5 and P19 are agreed, so that no pack comes to depend on an interface before it is accepted.
 
 ### What a pack author does
 
-**Today.** Ship the `default` security settings as chart defaults. Keep the service-account token and other credentials out of pods that run agent commands. At startup, check the Landlock version and refuse sandboxed work if it's too old. Confine each command (the example launcher shows how). Treat files those commands write as untrusted, since tools that run later outside the sandbox may execute them.
-
-**Later.** A pod that runs untrusted code uses a mapping entry naming a level and a profile, and the pack writes no isolation code.
+Follow the rules above. Put the placement on every pod that runs untrusted commands, including pods the pack creates at runtime for users. Keep the service-account token and other credentials out of those pods. A pack that needs the ABI 6 scopes requires them rather than applying them best effort. Treat files those commands write as untrusted, since tools that run later outside the sandbox may execute them.
 
 ### Out of scope
 
-- Installing gVisor or Kata, and defining profiles (which first need NetworkPolicy enforcement, [#691](https://github.com/nebari-dev/nebari-infrastructure-core/issues/691)).
-- Creating sandbox pods: that's the pack's job, or that of a tool such as Agent Sandbox.
+- Installing gVisor or Kata, and defining profiles; each is a later promise. Kata belongs on ADR-0023's "provided, not promised" list until more than one target offers it, and profiles that restrict network traffic wait for NetworkPolicy enforcement (P16, [#691](https://github.com/nebari-dev/nebari-infrastructure-core/issues/691)).
+- Creating sandbox pods: that's the pack's job, or that of a tool such as [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/docs/).
 - Choosing a runtime automatically.
 
 ### Security
 
-It relaxes nothing and runs under Pod Security `restricted`. It shares the host kernel, so it doesn't protect against kernel exploits.
+It relaxes nothing: the probe and packs run under Pod Security `restricted`. It shares the host kernel, so it doesn't protect against kernel exploits. Group labels are set by NIC through each provider's node-group configuration, not by anything running in the cluster; ordinary node labels are still a scheduling hint, not proof of who set them.
 
 ### Consequences
 
 **Good:**
 
-- A tested description of what the cluster's normal runtime offers, with no new components or configuration.
-- Packs get plain values, and later levels, capabilities and profiles can be added without breaking them.
+- What packs are told is measured on the cluster's own nodes on every deploy, and a conformance test checks it.
+- Placement works with the cluster autoscaler, including scale-from-zero for groups measured at the last deploy, and a measurement never changes infrastructure.
+- One contract for packs; later sandboxing capabilities are added, graduated or removed one at a time without affecting the others.
 
 **Bad:**
 
-- Most configurations are unknown until someone probes them, and older kernels don't qualify.
-- NIC doesn't block a deploy or steer pods away from unsuitable nodes; packs rely on their startup check.
-- Maintainers must keep the qualification record up to date.
-- The mapping is versioned before it has a second entry, and wiring values into packs is manual until ADR-0003.
+- `nic deploy` gains a step and NIC must maintain a multi-architecture probe image (mirrored for air-gapped installs).
+- Empty groups stay `unknown` until a node is started in them and measured.
+- Each provider must set the group label in its node-group definitions and have steering verified; so far only label propagation has been demonstrated, on EKS.
+- Placement can go stale between deploys, so packs depend on their launcher refusing to run, which shows as a failed command or pod rather than a silent gap.
 
 ## Options Detail
 
 ### Option 1: Do less
 
-NIC does all of this anyway, but without a shared description every pack has to work out separately what each cluster supports.
+NIC does most of this anyway, but every pack then has to work out separately what each cluster supports.
 
-### Option 2: Label node groups from an image table
+### Option 2: Predict from an image table
 
-A table to maintain for steering that helps little, and it doesn't confirm Landlock is switched on.
+A table to maintain, wrong whenever vendors backport features or ship Landlock built in but switched off, and the prototype found it calling configurations `unknown` that measure as qualified.
 
 ### Option 3: Node Feature Discovery
 
-An extra component with the same limits as 2.
+An extra component on every node, and it labels nodes directly, which new nodes from the autoscaler don't inherit.
 
-### Option 4: Tool-neutral contract (chosen)
+### Option 4: Separate promises per capability (chosen)
 
-Usable now, cheap, nothing relaxed, not tied to one tool.
+Each capability passes ADR-0023's entry rules on its own and graduates on its own clock. The cost is consistency between promises, handled by the shared shape and by combination promises owning combined tests.
 
-### Option 5: One sandboxing tool
+### Option 5: One sandboxing promise
+
+One page and one combined test, but later capabilities would enter as changes to an experimental page without the entry-rule check, the whole promise graduates or expires together, and a pack declaring it says little about what it actually uses.
+
+### Option 6: Separate sandboxing contract
+
+A second contract alongside ADR-0023, with its own versioning and vocabulary (its "levels" clash with ADR-0023's), and reserved names for things nothing yet uses.
+
+### Option 7: One sandboxing tool
 
 No route to stronger isolation.
 
-### Option 6: gVisor or Kata only
+### Option 8: gVisor or Kata only
 
-Needs installing per provider, adds overhead and breaks some workloads; kept as the reserved levels.
+Needs installing per provider, adds overhead and breaks some workloads; each can come later as its own promise.
 
-### Option 7: Full sandbox platform
+### Option 9: Full sandbox platform
 
-Pre-1.0, runs its own runtimes from privileged pods, and would be a separate system to trust rather than a level NIC provides.
+Runs its own runtimes from privileged pods, and would be a separate system to trust rather than something NIC provides.
 
-The full assessment of options 2, 3, 6 and 7 is in [§20](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/docs/design-doc/implementation/20-workload-sandboxing.md#option-2-node-group-labels-from-an-image-table).
+The earlier revision's assessment of options 2, 3, 8 and 9 is in its design doc ([§20, background only](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/docs/design-doc/implementation/20-workload-sandboxing.md#option-2-node-group-labels-from-an-image-table)).
 
 ## Open Questions
 
+- In which order should providers gain the group label and a verified steering journey (AKS, Hetzner, Kind)?
 - Should NIC's AKS module expose an `os_sku` setting, so Azure clusters below Kubernetes 1.35 can use Ubuntu 24.04?
-- Should the Pack Specification's security baseline point at this contract?
-- Is it worth automating the probe as short-lived pods that `nic outputs` runs on each node group, at the cost of maintaining a multi-architecture image?
+- Should an option fail `nic deploy` when no group is qualified, for `hardened` installs?
 
 ## Links
 
-The supporting design doc and the sandbox probe below are linked at a fixed commit on the author's fork; they are proposed for this repository together with the implementation, not with this ADR.
+The sandbox probe and its reference launcher come into this repository with P19's conformance test, under `tests/user_journeys/journeys/pack_contract/`, so that they are reviewed and updated here; until then they are on the author's fork at a fixed commit. The design doc on the fork describes the earlier revision of this ADR and is background only; where they differ, this ADR applies.
 
-- [Design doc: Workload Sandboxing (fork, fixed commit)](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/docs/design-doc/implementation/20-workload-sandboxing.md)
+- [ADR-0023: Pack Platform Contract (#781)](https://github.com/nebari-dev/nebari-infrastructure-core/pull/781)
+- [Design doc for the earlier revision, background only (fork, fixed commit)](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/docs/design-doc/implementation/20-workload-sandboxing.md)
 - [Sandbox probe and reference launcher (fork, fixed commit)](https://github.com/nenb/nebari-infrastructure-core/blob/bca13609252691012ad1dc495f90db47d38d7a69/tests/sandbox-probe/README.md)
-- [ADR-0003: Software Pack Codegen](0003-software-pack-codegen.md)
 - [ADR-0010: High-Security Mode](0010-high-security-mode.md)
 - [Trail of Bits: VMs won't contain cyber-capable agents](https://blog.trailofbits.com/2026/08/26/vms-wont-contain-cyber-capable-agents/)
 - [Landlock](https://docs.kernel.org/security/landlock.html)
 - [go-landlock](https://github.com/landlock-lsm/go-landlock)
-- [Kubernetes NodeRestriction admission plugin](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#noderestriction)
+- [Cluster Autoscaler: node group labels and scale-from-zero](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md)
 - [Agent Sandbox](https://agent-sandbox.sigs.k8s.io/docs/)
