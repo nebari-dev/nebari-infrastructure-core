@@ -12,9 +12,9 @@ metadata:
 spec:
   project: nebari-apps
   source:
-    repoURL: https://github.com/nebari-dev/nebi-pack
-    targetRevision: org-ca-bundle-key
-    path: .
+    repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+    chart: nebari-nebi-pack
+    targetRevision: 0.1.5
     helm:
       # data-science-pack derives Nebi's OIDC client ID from this release name.
       releaseName: nebi-pack
