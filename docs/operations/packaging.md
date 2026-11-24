@@ -173,6 +173,13 @@ hourly cron re-fires until the channel catches up. Starters trail the channel by
 up to one cron interval plus however long the `quay-publish` approval waits, so
 they inherit its delay: often many hours after the tag, with no upper bound.
 
+Because that approval is asked for long after the release, when nobody is
+watching for it, `check` also opens an issue labelled `starters-pending`, assigned
+to whoever cut each release still missing its starters, as soon as a publish is
+waiting for approval. The issue links the run to approve, gets a comment if that
+run changes, and is closed by the first run that finds every starter on quay.
+While one publish is waiting, `check` queues no other behind it.
+
 The workflow is two jobs. `check` holds no secrets and needs no approval: for each
 recent stable release, it asks quay which providers are missing that tag, then asks
 the channel whether it can serve the version on every platform that release's
@@ -181,7 +188,11 @@ starter template declares. Which providers a release should have comes from
 that shipped its starter, so adding a provider never makes older tags look
 incomplete. `publish` runs only when there is something to push, behind the
 `quay-publish` approval, builds each release's starters from that release's own
-tag, and re-checks quay before each push. So:
+tag, and re-checks quay before each push. After each push it checks the published
+bundle the way a user would: imports it, installs its `pixi.lock` with `--locked`,
+and confirms the `nic` that lock pins is the release's version and rejects the
+unedited config for its `CHANGEME` placeholder. The job never builds `nic` itself.
+So:
 
 - a provider that failed to publish is retried on a later tick, without touching
   the ones that succeeded;
@@ -213,8 +224,8 @@ A starter that published but then failed the round-trip check stays on quay, and
 later runs see it as present. The red run is the signal: delete that tag on quay
 and dispatch the workflow again.
 
-An older release whose `publish` keeps failing (a `make build` failure at that
-tag, a provider mismatch, `nebi publish` itself) cancels the newer releases on
+An older release whose `publish` keeps failing (a provider mismatch, `nebi
+publish` itself, a published lock that does not install) cancels the newer releases on
 every approved run, because `fail-fast` stops them behind it. To get out of that,
 dispatch the workflow with `tag=<newer release>`, which leaves the failing one out
 of the run, so the newer release publishes. Then publish the older release by hand
@@ -222,7 +233,8 @@ and re-tag `:latest` back to the newer one. From then on `check` only warns abou
 the older release, since a newer tag is already on quay.
 
 **Package on the channel but no starter on quay** means that workflow did not run
-or did not pass. Check its `quay-publish` approval first, then its most recent run.
+or did not pass. Check for an open `starters-pending` issue first (it links the run
+waiting for the `quay-publish` approval), then the workflow's most recent run.
 A release not on the channel yet is a notice, a warning after a day, and an error
 after three days; a backfill
 it refuses is a warning; a failed publish is an error. Tags already on quay, and
