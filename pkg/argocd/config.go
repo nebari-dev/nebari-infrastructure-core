@@ -7,17 +7,23 @@ import (
 
 const (
 	// defaultChartVersion is the Argo CD Helm chart version NIC installs.
-	// Chart 9.7.1 installs Argo CD v3.4.4. The previous pin, chart 9.4.1,
-	// shipped Argo CD v3.3.0, which is affected by GHSA-3v3m-wc6v-x4x3
-	// (critical), GHSA-h98r-wv3h-fr38 (high) and GHSA-rg3g-4rw9-gqrp
-	// (medium); v3.4.4 is past the highest patch floor of those three (3.4.2).
+	// Chart 10.10.5 installs Argo CD v3.5.5. Prefer the newest patch of a
+	// supported Argo CD minor: upstream ships its fixes, security ones
+	// included, as patch releases on the supported minors only, and the
+	// argo-helm chart stopped tracking 3.4 patches after chart 10.2.0.
+	//
+	// Chart 10.0.0 turned on global.networkPolicy.create, so every Argo CD
+	// component now gets an ingress NetworkPolicy. Only argocd-server's
+	// allows traffic from outside the argocd namespace (all ingress), which
+	// is the one the Gateway's HTTPRoute reaches. The repo-server and Redis
+	// accept connections only from other Argo CD pods.
 	//
 	// Keep this at v3.4 or later. The valueFiles overlay seam (#499,
 	// ADR-0014) needs glob expansion of helm.valueFiles, which Argo CD
 	// gained in 3.4 (argoproj/argo-cd#26768, cherry-picked to release-3.4
 	// as #26919). Downgrading below 3.4 would make overlays fail silently
 	// rather than error.
-	defaultChartVersion = "9.7.1"
+	defaultChartVersion = "10.10.5"
 
 	// DefaultNamespace is the namespace Argo CD is installed into.
 	DefaultNamespace = "argocd"
@@ -161,7 +167,7 @@ g, /argocd-viewers, role:readonly`
 // DefaultConfig returns the default Argo CD configuration
 func DefaultConfig() Config {
 	return Config{
-		Version:     defaultChartVersion, // Chart version that installs Argo CD v3.4.4
+		Version:     defaultChartVersion, // Chart version that installs Argo CD v3.5.5
 		Namespace:   DefaultNamespace,
 		ReleaseName: DefaultNamespace,
 		Timeout:     5 * time.Minute,
