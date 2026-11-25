@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -47,7 +48,8 @@ deploys it. Afterwards, edit that file and run 'nic deploy' to change the
 cluster, or run 'nic destroy' to delete it.
 
 The software packs are written into the local GitOps repository, where ArgoCD
-installs them. Edit or delete those files to change or remove the packs.
+installs them. Edit or delete those files and commit the change to change or
+remove the packs.
 
 Use --dry-run to write the config file without deploying.`,
 		RunE: runQuickstart,
@@ -169,7 +171,7 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 
 	// The summary replaces nic deploy's Argo CD, Keycloak and DNS boxes, which
 	// describe steps a quickstart user doesn't need.
-	printQuickstartSummary(cfg, result, quickstartOut)
+	printQuickstartSummary(cfg, result, quickstartOut, filepath.Join(repoDir, quickstart.AppsDir))
 	if dnsErr != nil {
 		gatewayAddress := kindGatewayAddress
 		if result.LBEndpoint != nil && result.LBEndpoint.IP != "" {
@@ -234,7 +236,7 @@ func writeQuickstartConfig(path string, content []byte, force bool) error {
 	return nil
 }
 
-func printQuickstartSummary(cfg *config.NebariConfig, result *nic.DeployResult, configPath string) {
+func printQuickstartSummary(cfg *config.NebariConfig, result *nic.DeployResult, configPath, packsDir string) {
 	port := ""
 	if result.LBEndpoint != nil && result.LBEndpoint.Port != 0 && result.LBEndpoint.Port != 443 {
 		port = fmt.Sprintf(":%d", result.LBEndpoint.Port)
@@ -262,6 +264,13 @@ func printQuickstartSummary(cfg *config.NebariConfig, result *nic.DeployResult, 
 	fmt.Println("  Your browser will warn that the connection isn't private, because the")
 	fmt.Println("  cluster signs its own certificates. This is expected for a local cluster.")
 	fmt.Println("  Choose to continue (\"Advanced\", then \"Proceed\"), once for each app.")
+	fmt.Println()
+	fmt.Println("  The software packs are Argo CD Applications in the local GitOps repository:")
+	fmt.Println()
+	fmt.Printf("    %s\n", packsDir)
+	fmt.Println()
+	fmt.Println("  To change or remove a pack, edit or delete its file and commit the change")
+	fmt.Println("  there. Argo CD only sees committed changes.")
 	fmt.Println()
 	fmt.Println("  Sign-in credentials:")
 	fmt.Println()

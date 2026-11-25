@@ -1,6 +1,8 @@
 package quickstart
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -41,6 +43,46 @@ func TestOptionsValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteIfAbsent(t *testing.T) {
+	tests := []struct {
+		name        string
+		existing    *string
+		wantWritten bool
+		wantContent string
+	}{
+		{name: "missing file is written", existing: nil, wantWritten: true, wantContent: "new"},
+		{name: "edited file is kept", existing: ptr("edited"), wantWritten: false, wantContent: "edited"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pack.yaml")
+			if tt.existing != nil {
+				if err := os.WriteFile(path, []byte(*tt.existing), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			written, err := writeIfAbsent(path, []byte("new"))
+			if err != nil {
+				t.Fatalf("writeIfAbsent() error: %v", err)
+			}
+			if written != tt.wantWritten {
+				t.Errorf("writeIfAbsent() written = %v, want %v", written, tt.wantWritten)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.wantContent {
+				t.Errorf("file content = %q, want %q", got, tt.wantContent)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 // TestRenderPacks_RetryIndefinitely verifies every pack Application retries
 // failed syncs without a limit and on the latest revision, like the

@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -29,6 +30,9 @@ import (
 	"github.com/nebari-dev/nebari-infrastructure-core/pkg/git"
 )
 
+// AppsDir is the directory of the GitOps repository the packs are written to.
+const AppsDir = "apps"
+
 const (
 	// ProjectName is the project_name of the quickstart cluster. It is fixed so
 	// re-running the quickstart reuses the same kind cluster and GitOps repository.
@@ -38,7 +42,6 @@ const (
 	DefaultDomain = "nebari.lvh.me"
 
 	packsDir   = "templates/packs"
-	appsDir    = "apps"
 	commitMsg  = "Add quickstart software packs"
 	rootApp    = "nebari-root"
 	argocdNS   = "argocd"
@@ -135,8 +138,9 @@ func PackNames() ([]string, error) {
 }
 
 // InstallPacks writes packs into the apps/ directory of the local GitOps
-// repository at repoDir and commits them. Re-running with the same packs
-// leaves the repository unchanged.
+// repository at repoDir and commits them. A pack whose file already exists is
+// left alone, so a rerun keeps the user's edits. A deleted pack file is
+// written again, since nothing records that it was deleted.
 func InstallPacks(ctx context.Context, repoDir string, packs map[string][]byte) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "quickstart.InstallPacks")
@@ -154,11 +158,15 @@ func InstallPacks(ctx context.Context, repoDir string, packs map[string][]byte) 
 	}
 
 	for name, content := range packs {
-		dest := filepath.Join(client.WorkDir(), appsDir, name)
-		if err := os.WriteFile(dest, content, git.GitOpsFileMode); err != nil {
+		dest := filepath.Join(client.WorkDir(), AppsDir, name)
+		// The pack files are the user's to edit, so a rerun only writes the
+		// ones that don't exist yet.
+		written, err := writeIfAbsent(dest, content)
+		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("write %s: %w", dest, err)
 		}
+		span.SetAttributes(attribute.Bool("pack."+name+".written", written))
 	}
 
 	if err := client.Commit(ctx, commitMsg); err != nil {
@@ -166,6 +174,23 @@ func InstallPacks(ctx context.Context, repoDir string, packs map[string][]byte) 
 		return err
 	}
 	return nil
+}
+
+// writeIfAbsent writes content to path only if the file doesn't exist, and
+// reports whether it wrote it. O_EXCL makes the check and the create one step.
+func writeIfAbsent(path string, content []byte) (bool, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, git.GitOpsFileMode) //nolint:gosec // path is inside the GitOps repo
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := f.Write(content); err != nil {
+		_ = f.Close()
+		return false, err
+	}
+	return true, f.Close()
 }
 
 // RefreshRoot asks ArgoCD to re-read the GitOps repository for nebari-root
