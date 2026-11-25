@@ -55,8 +55,47 @@ type Options struct {
 	HTTPSPort int
 }
 
-// RenderConfig renders the NIC config for the quickstart cluster.
+const (
+	defaultHTTPPort  = 80
+	defaultHTTPSPort = 443
+)
+
+// Validate checks the ports, so a bad flag fails before the config is written.
+// The local provider runs the same checks, but only inside Deploy, after the
+// file exists. Remove this once `nic validate` runs the cluster provider's
+// checks (https://github.com/nebari-dev/nebari-infrastructure-core/issues/520).
+func (o Options) Validate() error {
+	for _, p := range []struct {
+		flag string
+		port int
+	}{
+		{"--http-port", o.HTTPPort},
+		{"--https-port", o.HTTPSPort},
+	} {
+		if p.port < 0 || p.port > 65535 {
+			return fmt.Errorf("%s must be between 1 and 65535, got %d", p.flag, p.port)
+		}
+	}
+
+	httpPort, httpsPort := o.HTTPPort, o.HTTPSPort
+	if httpPort == 0 {
+		httpPort = defaultHTTPPort
+	}
+	if httpsPort == 0 {
+		httpsPort = defaultHTTPSPort
+	}
+	if httpPort == httpsPort {
+		return fmt.Errorf("--http-port and --https-port must differ, both are %d", httpPort)
+	}
+	return nil
+}
+
+// RenderConfig validates opts and renders the NIC config for the quickstart
+// cluster.
 func RenderConfig(opts Options) ([]byte, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, err
+	}
 	data := struct {
 		Options
 		ProjectName string
