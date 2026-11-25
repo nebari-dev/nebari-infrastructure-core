@@ -2181,7 +2181,7 @@ var sha256Digest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 // These tests check the form of a pin, not that its tag and digest belong
 // together: a wrong tag beside a valid digest passes here. `imagepin plan`
 // checks that against the registry and fails when they disagree.
-func assertDigestPin(t *testing.T, tag, digest string) {
+func assertDigestPin(t testing.TB, tag, digest string) {
 	t.Helper()
 	if digest == "" {
 		tag, digest, _ = strings.Cut(tag, "@")
@@ -2202,6 +2202,55 @@ func assertDigestPin(t *testing.T, tag, digest string) {
 	case !sha256Digest.MatchString(digest):
 		t.Errorf(`digest %q is not a sha256 digest ("sha256:" followed by 64 lowercase hex characters); `+
 			`copy it from make images-plan`, digest)
+	}
+}
+
+// errorRecorder is a testing.TB that records Errorf messages instead of
+// failing, so a test can check what an assertion helper reports.
+type errorRecorder struct {
+	testing.TB
+	errs []string
+}
+
+func (r *errorRecorder) Helper() {}
+
+func (r *errorRecorder) Errorf(format string, args ...any) {
+	r.errs = append(r.errs, fmt.Sprintf(format, args...))
+}
+
+// TestAssertDigestPin_Messages checks that assertDigestPin accepts both pin
+// forms and that each kind of bad pin gets its own message naming what is
+// wrong. want holds one substring per expected message, in order.
+func TestAssertDigestPin_Messages(t *testing.T) {
+	const valid = "sha256:a8b1a7279538af1f88faacac41132ce72d1ba389f6fb7d1a4b4c524044a5e801"
+	tests := []struct {
+		name        string
+		tag, digest string
+		want        []string
+	}{
+		{name: "tag and digest field", tag: "1.30.0", digest: valid},
+		{name: "tag@digest in the tag field", tag: "1.30.0@" + valid},
+		{name: "no tag", digest: valid, want: []string{"no tag recorded beside the digest"}},
+		{name: "no tag in tag@digest form", tag: "@" + valid, want: []string{"no tag recorded beside the digest"}},
+		{name: "latest", tag: "latest", digest: valid, want: []string{`tag is "latest"`}},
+		{name: "no digest", tag: "1.30.0", want: []string{"no digest:"}},
+		{name: "truncated digest", tag: "1.30.0", digest: "sha256:a8b1", want: []string{`digest "sha256:a8b1" is not a sha256 digest`}},
+		{name: "uppercase digest", tag: "1.30.0", digest: strings.ToUpper(valid), want: []string{"is not a sha256 digest"}},
+		{name: "neither", want: []string{"no tag recorded beside the digest", "no digest:"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &errorRecorder{TB: t}
+			assertDigestPin(rec, tt.tag, tt.digest)
+			if len(rec.errs) != len(tt.want) {
+				t.Fatalf("got %d messages, want %d:\n%s", len(rec.errs), len(tt.want), strings.Join(rec.errs, "\n"))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(rec.errs[i], want) {
+					t.Errorf("message %d = %q, want it to contain %q", i, rec.errs[i], want)
+				}
+			}
+		})
 	}
 }
 

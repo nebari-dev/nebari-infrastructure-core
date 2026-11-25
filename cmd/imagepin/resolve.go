@@ -113,18 +113,26 @@ func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 	return res
 }
 
-// normalizeName expands the Docker short forms a container runtime accepts:
-// "busybox" -> "docker.io/library/busybox", "otel/x" -> "docker.io/otel/x".
-// The first path segment is a registry only if it looks like a host.
+// normalizeName expands the Docker Hub forms a container runtime accepts into
+// the full name a registry lookup needs: "busybox", "docker.io/busybox" and
+// "index.docker.io/busybox" -> "docker.io/library/busybox"; "otel/x" ->
+// "docker.io/otel/x". Otherwise the first path segment is a registry only if
+// it looks like a host, and the name is returned unchanged.
 func normalizeName(name string) string {
 	first, rest, found := strings.Cut(name, "/")
-	if found && (strings.ContainsAny(first, ".:") || first == "localhost") {
-		return name
-	}
-	if !found {
+	switch {
+	case !found:
 		return "docker.io/library/" + name
+	case first == "docker.io" || first == "index.docker.io":
+		if !strings.Contains(rest, "/") {
+			rest = "library/" + rest // official images live under library/
+		}
+		return "docker.io/" + rest
+	case strings.ContainsAny(first, ".:") || first == "localhost":
+		return name
+	default:
+		return "docker.io/" + name
 	}
-	return "docker.io/" + first + "/" + rest
 }
 
 func isIndex(mediaType string) bool {

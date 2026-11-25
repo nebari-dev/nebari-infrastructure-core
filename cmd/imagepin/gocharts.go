@@ -49,10 +49,56 @@ func (r *renderer) goInstalled() error {
 		return err
 	}
 	c := constReader{root: root}
+	charts := goCharts(&c)
+	iscsi := c.get("pkg/storage/longhorn", "iscsiDaemonSetYAML")
+	if c.err != nil {
+		return c.err
+	}
 
+	for _, gc := range charts {
+		path, err := r.fetchRepoChart(gc.repo, gc.chart, gc.version)
+		if err != nil {
+			return fmt.Errorf("%s: %w", gc.defined, err)
+		}
+		t := &target{
+			label: gc.defined + " -> " + gc.chart + " " + gc.version, chartPath: path,
+			release: gc.release, namespace: gc.namespace, values: gc.values,
+		}
+		r.targets = append(r.targets, t)
+		docs, err := r.renderDocs(t, t.values)
+		if err != nil {
+			return fmt.Errorf("%s: %w", t.label, err)
+		}
+		nicValues := stringLeaves(t.values, map[string]bool{})
+		for _, name := range sortedKeys(docs) {
+			if err := r.inv.manifest([]byte(docs[name]), origin{source: t.label + " -> " + name, nicValues: nicValues}); err != nil {
+				return err
+			}
+		}
+		if gc.note != "" {
+			r.inv.notes = append(r.inv.notes, gc.note)
+		}
+	}
+
+	// NIC applies this DaemonSet directly; its images are NIC's choice.
+	if err := r.inv.manifest([]byte(iscsi), origin{source: "pkg/storage/longhorn/iscsi.go (iscsiDaemonSetYAML)", nicManifest: true}); err != nil {
+		return err
+	}
+
+	// kind's default node image, used when a local deployment sets no node_image.
+	r.inv.add(defaults.Image, origin{source: "sigs.k8s.io/kind defaults.Image (default node image when node_image is unset)", nicManifest: true})
+	return nil
+}
+
+// goCharts lists the charts NIC installs with Helm's Go SDK. Each entry's
+// defined is the file that calls action.NewInstall for it, and every such
+// call under pkg/ needs an entry here: TestGoCharts_CoverEveryInstallSite
+// fails otherwise, so a new Go-installed chart can't drop out of the
+// inventory and the scan unnoticed. Check c.err after calling.
+func goCharts(c *constReader) []goChart {
 	argo := argocd.DefaultConfig()
 	awsCfg := &aws.Config{} // NIC's defaults: no user overrides
-	charts := []goChart{
+	return []goChart{
 		{
 			defined: "pkg/argocd/helm.go",
 			repo:    c.get("pkg/argocd", "repoURL"), chart: chartBase(c.get("pkg/argocd", "chartName")),
@@ -97,44 +143,6 @@ func (r *renderer) goInstalled() error {
 			note: "GPU operator (installed only with GPU node groups): driver and toolkit disabled as in NIC's gpuOperatorHelmValues, mirrored here; other components the ClusterPolicy enables are listed even where they only run on matching nodes (MIG, vGPU, sandbox workloads).",
 		},
 	}
-	iscsi := c.get("pkg/storage/longhorn", "iscsiDaemonSetYAML")
-	if c.err != nil {
-		return c.err
-	}
-
-	for _, gc := range charts {
-		path, err := r.fetchRepoChart(gc.repo, gc.chart, gc.version)
-		if err != nil {
-			return fmt.Errorf("%s: %w", gc.defined, err)
-		}
-		t := &target{
-			label: gc.defined + " -> " + gc.chart + " " + gc.version, chartPath: path,
-			release: gc.release, namespace: gc.namespace, values: gc.values,
-		}
-		r.targets = append(r.targets, t)
-		docs, err := r.renderDocs(t, t.values)
-		if err != nil {
-			return fmt.Errorf("%s: %w", t.label, err)
-		}
-		nicValues := stringLeaves(t.values, map[string]bool{})
-		for _, name := range sortedKeys(docs) {
-			if err := r.inv.manifest([]byte(docs[name]), origin{source: t.label + " -> " + name, nicValues: nicValues}); err != nil {
-				return err
-			}
-		}
-		if gc.note != "" {
-			r.inv.notes = append(r.inv.notes, gc.note)
-		}
-	}
-
-	// NIC applies this DaemonSet directly; its images are NIC's choice.
-	if err := r.inv.manifest([]byte(iscsi), origin{source: "pkg/storage/longhorn/iscsi.go (iscsiDaemonSetYAML)", nicManifest: true}); err != nil {
-		return err
-	}
-
-	// kind's default node image, used when a local deployment sets no node_image.
-	r.inv.add(defaults.Image, origin{source: "sigs.k8s.io/kind defaults.Image (default node image when node_image is unset)", nicManifest: true})
-	return nil
 }
 
 // chartBase turns the Helm CLI form "repo/chart" into the chart name.
@@ -200,6 +208,18 @@ func constString(dir, name string) (string, error) {
 	return "", fmt.Errorf("constant not found")
 }
 
+// declaresModule reports whether a go.mod declares module path. It compares
+// whole lines with surrounding space trimmed, so a go.mod with Windows line
+// endings still matches.
+func declaresModule(gomod []byte, path string) bool {
+	for _, line := range strings.Split(string(gomod), "\n") {
+		if strings.TrimSpace(line) == "module "+path {
+			return true
+		}
+	}
+	return false
+}
+
 // moduleRoot finds the NIC repository root from the working directory, so the
 // tool reads the source it was run from.
 func moduleRoot() (string, error) {
@@ -209,7 +229,7 @@ func moduleRoot() (string, error) {
 	}
 	for {
 		data, err := os.ReadFile(filepath.Join(dir, "go.mod")) //nolint:gosec // Walking up to this repository's own go.mod.
-		if err == nil && strings.Contains(string(data), "module "+modulePath+"\n") {
+		if err == nil && declaresModule(data, modulePath) {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
