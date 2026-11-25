@@ -71,7 +71,7 @@ func TestWriteIfAbsent(t *testing.T) {
 			if written != tt.wantWritten {
 				t.Errorf("writeIfAbsent() written = %v, want %v", written, tt.wantWritten)
 			}
-			got, err := os.ReadFile(path)
+			got, err := os.ReadFile(path) //nolint:gosec // test-owned temp path
 			if err != nil {
 				t.Fatal(err)
 			}
