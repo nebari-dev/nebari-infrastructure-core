@@ -118,22 +118,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// stays as a safety net; cleanup is idempotent).
 	cleanup()
 
-	printDeployResult(cfg, result, deployDryRun)
-
-	return nil
-}
-
-// printDeployResult prints the post-deploy access instructions.
-func printDeployResult(cfg *config.NebariConfig, result *nic.DeployResult, dryRun bool) {
 	if result.ArgoCDInstalled {
 		printArgoCDInstructions(cfg)
 	}
 	if result.KeycloakInstalled {
 		printKeycloakInstructions(cfg)
 	}
-	if cfg.DNS == nil && cfg.Domain != "" && !dryRun {
+	if cfg.DNS == nil && cfg.Domain != "" && !deployDryRun {
 		printDNSGuidance(cfg, result.LBEndpoint)
 	}
+
+	return nil
 }
 
 // checkPlanOutWritable verifies that path can be created or overwritten: its
