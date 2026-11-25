@@ -2204,6 +2204,38 @@ func splitImageRef(ref string) (repository, tag, digest string) {
 	return repository, tag, digest
 }
 
+// TestKeycloakManifests_ImagePin verifies the images NIC's own Keycloak
+// manifests run are pinned by digest, like the chart values above.
+func TestKeycloakManifests_ImagePin(t *testing.T) {
+	tests := []struct {
+		file  string
+		field string
+	}{
+		{file: "templates/manifests/keycloak/keycloak-db-cluster.yaml", field: "imageName:"},
+		{file: "templates/manifests/keycloak/realm-setup-job.yaml", field: "image:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			content, err := templates.ReadFile(tt.file)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.file, err)
+			}
+			var ref string
+			for _, line := range strings.Split(string(content), "\n") {
+				if v, ok := strings.CutPrefix(strings.TrimSpace(line), tt.field); ok {
+					ref = strings.Trim(strings.TrimSpace(v), `"`)
+					break
+				}
+			}
+			if ref == "" {
+				t.Fatalf("no %q line in %s", tt.field, tt.file)
+			}
+			_, tag, digest := splitImageRef(ref)
+			assertDigestPin(t, tag, digest)
+		})
+	}
+}
+
 func TestCertManagerTemplate_ImagePin(t *testing.T) {
 	content, err := templates.ReadFile("templates/values/cert-manager/base.yaml")
 	if err != nil {
