@@ -258,10 +258,10 @@ truth; the cluster is replaceable. To restore onto a new cluster:
 3. In the Longhorn UI under **Backup**, locate the backup volume and restore it
    as described in the [Restore runbook](#restore-runbook-same-cluster).
 
-## Migration from nebari-longhorn-backup-pack
+## Migration from nebari-longhorn-backup-pack (now `longhorn-backup-pack`)
 
 If you previously managed Longhorn backups via the
-[nebari-longhorn-backup-pack](https://github.com/nebari-dev/nebari-longhorn-backup-pack)
+[longhorn-backup-pack](https://github.com/nebari-dev/longhorn-backup-pack)
 Helm chart, migrate with a one-time cutover:
 
 1. Uninstall the pack release:
