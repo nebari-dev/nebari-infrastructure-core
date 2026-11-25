@@ -30,7 +30,7 @@ nebari-infrastructure-core/
 ├── docs/                 # Comprehensive design documentation
 ├── examples/             # Sample configuration files
 ├── .github/              # GitHub Actions CI/CD workflows
-└── scripts/              # Development and testing scripts
+└── scripts/              # Dev and CI scripts, plus the published install.sh
 ```
 
 ## Command Line Interface (cmd/nic/)
