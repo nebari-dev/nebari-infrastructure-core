@@ -2177,16 +2177,31 @@ var sha256Digest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 // here would only make every bump a two-file change. What these tests guard
 // is that each image stays pinned: no inherited chart default, no floating
 // tag, no tag without a digest. Pins are produced with `make images-plan`.
+//
+// These tests check the form of a pin, not that its tag and digest belong
+// together: a wrong tag beside a valid digest passes here. `imagepin plan`
+// checks that against the registry and fails when they disagree.
 func assertDigestPin(t *testing.T, tag, digest string) {
 	t.Helper()
 	if digest == "" {
 		tag, digest, _ = strings.Cut(tag, "@")
 	}
-	if tag == "" || tag == "latest" {
-		t.Errorf("tag = %q: record the version tag the digest was taken from", tag)
+	switch tag {
+	case "":
+		t.Errorf("no tag recorded beside the digest: set the tag to the version the digest was resolved from " +
+			"(make images-plan prints both); without it, review can't see which version is deployed " +
+			"and imagepin plan can't check the tag against the digest")
+	case "latest":
+		t.Errorf(`tag is "latest": set the version tag the digest was resolved from instead (make images-plan prints both); ` +
+			`"latest" names no version, so review can't see what is deployed, and it moves with every release, so imagepin plan reports a mismatch as soon as the next build ships`)
 	}
-	if !sha256Digest.MatchString(digest) {
-		t.Errorf("digest = %q: the image must be pinned by a sha256 digest (see make images-plan)", digest)
+	switch {
+	case digest == "":
+		t.Errorf("no digest: pin the image by digest so a re-pushed tag can't change what is deployed " +
+			"(make images-plan prints the digest for the tag)")
+	case !sha256Digest.MatchString(digest):
+		t.Errorf(`digest %q is not a sha256 digest ("sha256:" followed by 64 lowercase hex characters); `+
+			`copy it from make images-plan`, digest)
 	}
 }
 
