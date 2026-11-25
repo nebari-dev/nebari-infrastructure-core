@@ -166,7 +166,8 @@ expect_pin() { # <desc> <value> <expected>
 digest="$(printf 'ab%.0s' {1..32})"
 expect_pin "unset"                ""                          "<none>"
 expect_pin "lower-case digest"    "$digest"                   "$digest"
-expect_pin "upper-case digest"    "${digest^^}"               "$digest"
+# tr, not ${digest^^}: that is bash 4+, and macOS ships bash 3.2 as /bin/bash.
+expect_pin "upper-case digest"    "$(printf %s "$digest" | tr a-f A-F)" "$digest"
 expect_pin "63 characters"        "${digest:1}"               abort
 expect_pin "non-hex character"    "${digest:1}g"              abort
 expect_pin "with a filename"      "$digest  nic.tar.gz"       abort
@@ -177,7 +178,7 @@ expect_pin "with a filename"      "$digest  nic.tar.gz"       abort
 # `cosign verify-blob` / `gh` their exit codes. The rule under test: with no
 # capable verifier the install degrades to checksum-only (or stops under
 # NIC_REQUIRE_SIGNATURE); with one, nothing degrades, for any tag.
-auth_case() { # <cosign: absent|VERSION> <gh: absent|loggedout|pass|fail> <bundle http code> <verify rc> <require> <tag>
+auth_case() { # <cosign: absent|VERSION> <gh: absent|loggedout|old|pass|fail> <bundle http code> <verify rc> <require> <tag>
   (
     STUB_COSIGN="$1" STUB_GH="$2" STUB_CODE="$3" STUB_VERIFY="$4"
     NIC_REQUIRE_SIGNATURE="$5"
@@ -197,11 +198,21 @@ auth_case() { # <cosign: absent|VERSION> <gh: absent|loggedout|pass|fail> <bundl
       [[ $1 == verify-blob ]] && printf 'COSIGN-ARGS: %s\n' "$*" >&2
       return "$STUB_VERIFY"
     }
+    # `old` is a gh from before `gh attestation`: it answers the --help probe
+    # with its root help, which has no --cert-identity. A real verify records
+    # its arguments so the pinned identity can be asserted below.
     gh() {
       case "$1" in
-        auth)        [[ $STUB_GH == pass || $STUB_GH == fail ]] ;;
-        attestation) [[ $STUB_GH == pass ]] ;;
-        *)           return 1 ;;
+        auth) [[ $STUB_GH == pass || $STUB_GH == fail || $STUB_GH == old ]] ;;
+        attestation)
+          if [[ " $* " == *" --help "* ]]; then
+            if [[ $STUB_GH == old ]]; then printf 'Work seamlessly with GitHub from the command line.\n'
+            else printf '      --cert-identity string   Enforce that the SAN matches exactly\n'; fi
+            return 0
+          fi
+          printf 'GH-ARGS: %s\n' "$*" >&2
+          [[ $STUB_GH == pass ]] ;;
+        *) return 1 ;;
       esac
     }
     tmp="$(mktemp -d)"; : >"$tmp/checksums.txt"
@@ -254,10 +265,16 @@ require_msg="$LAST_MSG"
 expect_auth "gh logged out: checksum-only"                install absent loggedout 200  0      0       v0.14.0
 expect_auth "gh logged out, NIC_REQUIRE_SIGNATURE=1"      abort   absent loggedout 200  0      1       v0.14.0
 expect_auth "gh logged in, attestation verifies"          install absent pass      200  0      0       v0.14.0
+gh_pass_msg="$LAST_MSG"
 expect_auth "gh logged in, attestation fails"             abort   absent fail      200  0      0       v0.14.0
 gh_failed_msg="$LAST_MSG"
 expect_auth "gh logged in, pre-signing tag"               abort   absent fail      200  0      0       v0.9.0
 gh_unsigned_msg="$LAST_MSG"
+# A gh without `gh attestation` would abort every install with the tampering
+# message, so it counts as no verifier, like a cosign below the floor.
+expect_auth "gh too old to pin: checksum-only"            install absent old       200  0      0       v0.14.0
+old_gh_msg="$LAST_MSG"
+expect_auth "gh too old, NIC_REQUIRE_SIGNATURE=1"         abort   absent old       200  0      1       v0.14.0
 
 # What each message tells the user to do matters as much as the exit code: a
 # pinned digest is offered only where the premise holds (the release cannot
@@ -279,6 +296,8 @@ expect_msg "the bundle-fetch-failure message names NIC_EXPECTED_SHA256"         
 expect_msg "the NIC_REQUIRE_SIGNATURE message names NIC_EXPECTED_SHA256"        "$require_msg"      NIC_EXPECTED_SHA256 yes
 expect_msg "an affected cosign is named with its advisory"                      "$affected_msg"     GHSA-fx35-mq7g-6g98 yes
 expect_msg "an affected cosign is never asked to verify"                        "$affected_msg"     COSIGN-ARGS no
+expect_msg "a gh without attestation is named, with the version to upgrade to"  "$old_gh_msg"       "gh >= $GH_MIN" yes
+expect_msg "a gh without attestation is never asked to verify"                  "$old_gh_msg"       GH-ARGS no
 
 # The verify-blob invocation itself: offline against the pinned root, with the
 # exact identity at this tag rather than a regexp. cosign 2.x needs --offline and
@@ -293,6 +312,17 @@ expect_msg "cosign 3.x verify-blob omits the deprecated --new-bundle-format" "$v
 expect_msg "verify-blob uses the pinned --trusted-root"     "$valid_msg" "--trusted-root"        yes
 expect_msg "verify-blob pins the exact identity at the tag" "$valid_msg" "$identity"             yes
 expect_msg "verify-blob does not use an identity regexp"    "$valid_msg" "identity-regexp"       no
+issuer="https://token.actions.githubusercontent.com"
+expect_msg "verify-blob pins the GitHub Actions OIDC issuer" "$valid_msg" "--certificate-oidc-issuer $issuer" yes
+
+# The gh invocation: the same identity, exact and at the tag. --signer-workflow
+# matches the workflow path with no ref, which lets an older attested release
+# pass under a newer tag.
+gh_identity="--cert-identity https://github.com/${NIC_REPO}/.github/workflows/release.yml@refs/tags/v0.14.0 "
+expect_msg "gh attestation verify is scoped to NIC_REPO"          "$gh_pass_msg" "--repo ${NIC_REPO} " yes
+expect_msg "gh attestation verify pins the exact identity at the tag" "$gh_pass_msg" "$gh_identity" yes
+expect_msg "gh attestation verify pins the GitHub Actions OIDC issuer" "$gh_pass_msg" "--cert-oidc-issuer $issuer" yes
+expect_msg "gh attestation verify does not use --signer-workflow" "$gh_pass_msg" "--signer-workflow" no
 
 # --- 6. the pinned trust root -------------------------------------------------
 # The trust root is fetched by digest and checked against it, so a wrong or
@@ -324,6 +354,37 @@ expect_root good ok
 expect_root bad  abort
 expect_root fail abort
 expect_msg "the trust-root fetch failure names NIC_EXPECTED_SHA256" "$LAST_MSG" NIC_EXPECTED_SHA256 yes
+
+# Run from a checkout, install.sh prefers the root next to it over the download.
+# That copy is held to the same digest: a tampered one aborts, and a good one is
+# used without touching the network. install.sh keys the lookup on $0, so it is
+# run as a copy inside a scratch checkout, with a fetch that always fails so a
+# run that skipped the local copy cannot pass.
+local_root_case() { # <good|bad> -> ok|abort, then the messages
+  (
+    d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+    mkdir -p "$d/scripts/trusted-roots"
+    cp "$installer" "$d/scripts/install.sh"
+    root="$d/scripts/trusted-roots/${TRUSTED_ROOT_SHA256}.json"
+    if [[ $1 == good ]]; then cp "scripts/trusted-roots/${TRUSTED_ROOT_SHA256}.json" "$root"
+    else printf '{}\n' >"$root"; fi
+    # shellcheck disable=SC2016  # expanded by the inner sh, not here
+    if out="$(NIC_INSTALL_SH_SOURCE_ONLY=1 sh -c '. "$0"; fetch() { echo "FETCHED $*" >&2; return 22; }; fetch_trusted_root "$1"' \
+      "$d/scripts/install.sh" "$d/root.json" 2>&1)"; then printf 'ok\n%s' "$out"
+    else printf 'abort\n%s' "$out"; fi
+  )
+}
+expect_local_root() { # <good|bad> <expected>
+  local res got; res="$(local_root_case "$1")"; got="${res%%$'\n'*}"
+  if [[ $got == "$2" ]]; then ok "local trust root '$1' -> $got"
+  else bad "local trust root '$1' -> $got, expected $2"; fi
+  LAST_MSG="${res#*$'\n'}"
+}
+expect_local_root good ok
+expect_msg "a good local trust root is used without a download" "$LAST_MSG" FETCHED no
+expect_local_root bad  abort
+expect_msg "a tampered local trust root fails the digest check"  "$LAST_MSG" "does not match the digest" yes
+expect_msg "a tampered local trust root is not replaced by a download" "$LAST_MSG" FETCHED no
 
 # --- 7. main() with a pinned digest --------------------------------------------
 # A pinned digest is a verifier of its own: the archive is compared against it

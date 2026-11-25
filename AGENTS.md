@@ -432,9 +432,13 @@ change what the installer accepts.
 
 Authenticity handling has one rule worth keeping straight: the installer
 degrades to checksum-only **only** when no capable verifier is on the host (no
-cosign at the floor, no logged-in `gh`), and `NIC_REQUIRE_SIGNATURE=1` turns even
-that into a stop. Once a verifier is present nothing degrades, for any tag: a
-missing, unfetchable or failing signature is fatal. That includes releases below
+cosign at the floor, no logged-in `gh` that has `gh attestation`), and
+`NIC_REQUIRE_SIGNATURE=1` turns even that into a stop. Once a verifier is present
+nothing degrades, for any tag: a missing, unfetchable or failing signature is
+fatal. Both verifiers pin the same exact certificate identity, the release
+workflow at `refs/tags/<tag>`. Never relax either to a workflow-only or regexp
+match (`gh`'s `--signer-workflow` is one): without the ref, an older signed
+release served under a newer tag verifies. That includes releases below
 `SIGNING_SINCE`, because "this release predates signing" is exactly what a
 forged release marked latest would claim; those install only against a digest
 the user pins with `NIC_EXPECTED_SHA256`.

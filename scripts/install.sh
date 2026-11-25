@@ -19,8 +19,8 @@
 # Authenticity is checked with the first capable verifier on the host: cosign
 # (>= 2.6.5 on 2.x, >= 3.1.3 on 3.x) over checksums.txt, pinned to the release
 # workflow's identity at this exact tag and verified offline against a pinned
-# Sigstore trust root; otherwise a logged-in `gh`, over the archive's
-# build-provenance attestation. Integrity proves the bytes were not corrupted;
+# Sigstore trust root; otherwise a logged-in `gh` (>= 2.47.0), over the archive's
+# build-provenance attestation, pinned to the same identity. Integrity proves the bytes were not corrupted;
 # authenticity proves who produced them.
 #
 # Authenticity degrades in exactly one case: no capable verifier on the host. The
@@ -42,6 +42,9 @@ NIC_REQUIRE_SIGNATURE="${NIC_REQUIRE_SIGNATURE:-0}"
 # newer than 2.6.5 and still affected.
 COSIGN_MIN_V2="2.6.5"
 COSIGN_MIN_V3="3.1.3"
+# The first gh with `gh attestation verify --cert-identity`. Only used in
+# messages: gh_capable probes for the flag itself.
+GH_MIN="2.47.0"
 # The first release that publishes checksums.txt.sigstore.json and a
 # build-provenance attestation. It only shapes the error message: a release below
 # it can still be installed, but only against a digest the user pins, because
@@ -219,11 +222,15 @@ verify_with_cosign() {
 
   # A bundle plus --trusted-root needs no network and writes nothing to
   # ~/.sigstore, so a failure below has one meaning: the signature does not
-  # verify. cosign 2.x needs that spelled out: --offline keeps it from the
-  # transparency-log lookup, and --new-bundle-format makes it refuse a
-  # legacy-format bundle outright. 3.x does both already and warns that the
-  # flags are deprecated, so they are passed to 2.x only. The identity is exact,
-  # not a regexp, so nothing in the tag or NIC_REPO can act as a metacharacter.
+  # verify. On cosign 2.x, --offline keeps it from the transparency-log lookup
+  # and --new-bundle-format makes it refuse a legacy-format bundle outright.
+  # 3.x has no flag that refuses one: it still falls back to the legacy path when
+  # a bundle does not parse as the new format. What stops a legacy bundle on 3.x
+  # here is --trusted-root itself, which cosign rejects on the legacy path
+  # ("--trusted-root only supported with --new-bundle-format"), so keep it. 3.x
+  # warns that both 2.x flags are deprecated, so they are passed to 2.x only. The
+  # identity is exact, not a regexp, so nothing in the tag or NIC_REPO can act as
+  # a metacharacter.
   set --
   case "$(cosign_version)" in
     2.*) set -- --offline --new-bundle-format ;;
@@ -246,22 +253,36 @@ verify_with_cosign() {
 # for that digest), so the two cannot be told apart and neither may degrade.
 verify_with_gh() {
   tmp="$1"; tag="$2"; tarball="$3"
-  # --signer-workflow pins the attestation to the same release workflow the
-  # cosign branch pins its certificate identity to. Without it this accepts a
-  # provenance statement from any workflow in the repo.
+  # The exact certificate identity the cosign branch pins: the release workflow
+  # at this tag. --signer-workflow is not enough, because gh turns it into a
+  # prefix match on the workflow path with no ref, so an older attested release
+  # served under this tag would pass. The archive name carries the version, but
+  # that name is chosen by whoever serves it, so only the certificate binds the
+  # bytes to the tag.
   if gh attestation verify "${tmp}/nic.tar.gz" --repo "${NIC_REPO}" \
-    --signer-workflow "${NIC_REPO}/.github/workflows/release.yml" >/dev/null; then
-    log "Authenticity verified (gh attestation, build provenance from the release workflow)"
+    --cert-identity "https://github.com/${NIC_REPO}/.github/workflows/release.yml@refs/tags/${tag}" \
+    --cert-oidc-issuer 'https://token.actions.githubusercontent.com' >/dev/null; then
+    log "Authenticity verified (gh attestation, build provenance from the release workflow at ${tag})"
     return 0
   fi
   if version_lt "${tag#v}" "$SIGNING_SINCE"; then
     fail_unsigned_release "$tag" "$tarball" "build-provenance attestation"
   fi
-  fail "gh attestation verify found no build provenance from ${NIC_REPO}'s release workflow for ${tarball} (see gh's error above); refusing to install. gh reports a substituted archive the same way it reports a missing attestation, so this cannot be told apart from tampering. Do not bypass this check. If gh cannot reach api.github.com, install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x), which verifies offline. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
+  fail "gh attestation verify found no build provenance from ${NIC_REPO}'s release workflow at ${tag} for ${tarball} (see gh's error above); refusing to install. gh reports a substituted archive the same way it reports a missing attestation, so this cannot be told apart from tampering. Do not bypass this check. If gh cannot reach api.github.com, install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x), which verifies offline. Please report it at https://github.com/${NIC_REPO}/issues and see ${DOCS_URL}."
+}
+
+# True (0) when this gh can run the pinned attestation check. `gh attestation`
+# arrived in gh 2.47.0; older builds would fail every install with the tampering
+# message, so they count as no verifier at all, like a cosign below the floor.
+# This probes for the exact flag verify_with_gh passes rather than parsing
+# `gh --version`, so a dev build still qualifies, and an old gh that prints its
+# root help for the unknown command still does not.
+gh_capable() {
+  gh attestation verify --help 2>/dev/null | grep -q -- '--cert-identity '
 }
 
 # Authenticity, from the first capable verifier: cosign at the floor, then a
-# logged-in gh. With neither, the install continues on the checksum alone with a
+# logged-in gh that has `gh attestation`. With neither, the install continues on the checksum alone with a
 # warning, unless NIC_REQUIRE_SIGNATURE asks for it to stop.
 verify_authenticity() {
   tmp="$1"; tag="$2"; base="$3"; tarball="$4"
@@ -278,17 +299,20 @@ verify_authenticity() {
   fi
 
   if command -v gh >/dev/null 2>&1; then
-    if gh auth status --hostname github.com >/dev/null 2>&1; then
+    if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+      gh_note="gh is not logged in"
+    elif ! gh_capable; then
+      gh_note="this gh has no 'gh attestation verify --cert-identity' (upgrade to gh >= ${GH_MIN})"
+    else
       verify_with_gh "$tmp" "$tag" "$tarball"
       return 0
     fi
-    gh_note="gh is not logged in"
   else
     gh_note="gh not found"
   fi
 
   if bool_env NIC_REQUIRE_SIGNATURE "$NIC_REQUIRE_SIGNATURE"; then
-    fail "NIC_REQUIRE_SIGNATURE is set, but nothing on this host can verify ${tag} (${cosign_note}; ${gh_note}); refusing to install on the checksum alone. Install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x) or log in to gh, or set NIC_EXPECTED_SHA256 to a digest from a source you trust. See ${DOCS_URL}"
+    fail "NIC_REQUIRE_SIGNATURE is set, but nothing on this host can verify ${tag} (${cosign_note}; ${gh_note}); refusing to install on the checksum alone. Install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x) or log in to gh (>= ${GH_MIN}), or set NIC_EXPECTED_SHA256 to a digest from a source you trust. See ${DOCS_URL}"
   fi
   log "note: authenticity NOT verified (${cosign_note}; ${gh_note}); only the checksum is checked."
   log "      Install cosign (>= ${COSIGN_MIN_V2} on 2.x, >= ${COSIGN_MIN_V3} on 3.x) to verify the signature, or see ${DOCS_URL}"

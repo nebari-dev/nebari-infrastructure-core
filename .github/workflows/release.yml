@@ -139,11 +139,14 @@ jobs:
           NIC_VERSION: ${{ github.ref_name }}
           NIC_REQUIRE_SIGNATURE: '1'
           INSTALL_DIR: ${{ runner.temp }}/nic-bin
-        # The grep asserts that cosign is what verified it, so this keeps testing
-        # the trust root even if the installer's choice of verifier changes.
+        # Fed on stdin, as `curl | sh` feeds it: run as `sh scripts/install.sh`,
+        # $0 would point at the checkout and the installer would use the local
+        # trust root instead of fetching it from main the way users do. The grep
+        # asserts that cosign is what verified it, so this keeps testing the
+        # trust root even if the installer's choice of verifier changes.
         run: |
           set -euo pipefail
-          sh scripts/install.sh 2>&1 | tee "$RUNNER_TEMP/install.log"
+          sh < scripts/install.sh 2>&1 | tee "$RUNNER_TEMP/install.log"
           if ! grep -q '^Authenticity verified (cosign' "$RUNNER_TEMP/install.log"; then
             echo "::error::the install did not verify the release with cosign; see the log above"
             exit 1
