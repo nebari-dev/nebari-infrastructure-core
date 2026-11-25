@@ -33,7 +33,7 @@ Take a fresh **off-cluster** backup before touching topology. In-cluster
 snapshots live on the same disks you may be about to remove, so they do not
 protect you — only an S3 backup does.
 
-- Install / confirm [`nebari-longhorn-backup-pack`](https://github.com/nebari-dev/nebari-longhorn-backup-pack)
+- Install / confirm [`longhorn-backup-pack`](https://github.com/nebari-dev/longhorn-backup-pack)
   and a configured `BackupTarget/default` (S3 bucket + credential secret).
 - Trigger an **on-demand backup of every volume** right before the switch (the
   scheduled job is daily — don't rely on a backup up to 24h old).
