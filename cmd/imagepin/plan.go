@@ -58,17 +58,19 @@ type change struct {
 }
 
 type plan struct {
-	changes  []*change
-	direct   []directEdit // images in NIC's own manifests
-	moved    []moved      // digest pins whose tag now names a different image
-	same     []string     // digest pins whose tag still names the pinned image
-	skipped  []skip
-	resolved map[string]resolution
+	changes    []*change
+	direct     []directEdit // images in NIC's own manifests
+	mismatched []mismatch   // digest pins whose tag resolves to a different digest
+	unchecked  []skip       // digest pins whose tag couldn't be looked up
+	same       []string     // digest pins whose tag resolves to the pinned digest
+	skipped    []skip
+	resolved   map[string]resolution
 }
 
-// moved is a tag@digest pin whose tag now resolves to a different digest:
-// the image published under that version changed upstream.
-type moved struct {
+// mismatch is a tag@digest pin whose tag resolves to a different digest than
+// the one pinned. The registry can't say why: the tag or digest may have been
+// edited without the other, or the publisher may have re-pushed the tag.
+type mismatch struct {
 	ref, pinned, tagNow string
 	sources             []string
 }
@@ -108,11 +110,11 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 			case x.err != nil:
 				p.skipped = append(p.skipped, skip{ref, "pinned by digest, but the lookup failed: " + x.err.Error()})
 			case tag == "":
-				p.skipped = append(p.skipped, skip{ref, "pinned by digest, and no tag is recorded (not rendered, not in NIC's values), so an upstream change can't be detected"})
-			case x.tagNow == "":
-				p.skipped = append(p.skipped, skip{ref, "pinned by digest; " + x.drift})
-			case x.tagNow != digest:
-				p.moved = append(p.moved, moved{ref: name + ":" + tag, pinned: digest, tagNow: x.tagNow, sources: img.sources})
+				p.skipped = append(p.skipped, skip{ref, "pinned by digest with no tag recorded (not rendered, not in NIC's values), so there is no tag to check against the digest"})
+			case x.tagCheckErr != "":
+				p.unchecked = append(p.unchecked, skip{ref, x.tagCheckErr})
+			case x.tagMismatch != "":
+				p.mismatched = append(p.mismatched, mismatch{ref: name + ":" + tag, pinned: digest, tagNow: x.tagNow, sources: img.sources})
 			default:
 				p.same = append(p.same, check)
 			}
@@ -193,7 +195,7 @@ func buildPlan(ctx context.Context, r *renderer, res *resolver) *plan {
 // withRecordedTag returns ref with its tag restored, when the chart dropped
 // the tag from the rendered reference. Charts with a digest field render
 // repo@digest; the tag the pin was made from is still in NIC's values, next
-// to the digest, and is what the drift check needs. Refs that already carry a
+// to the digest, and is what the tag check needs. Refs that already carry a
 // tag, or whose tag is recorded nowhere, are returned unchanged.
 func (r *renderer) withRecordedTag(ref string) string {
 	name, tag, digest := splitRef(ref)
@@ -539,15 +541,31 @@ func (p *plan) print(w io.Writer) bool {
 		}
 	}
 
-	if len(p.moved) > 0 {
-		_, _ = fmt.Fprintf(w, "\nTAG MOVED UPSTREAM (%d)\n", len(p.moved))
-		_, _ = fmt.Fprintln(w, "  The tag now names a different image than the pinned digest: the image for that")
-		_, _ = fmt.Fprintln(w, "  version changed upstream. The pinned digest is still what gets pulled.")
-		for _, m := range p.moved {
-			_, _ = fmt.Fprintf(w, "  - %s\n      pinned:  %s\n      tag now: %s\n", m.ref, m.pinned, m.tagNow)
+	if len(p.mismatched) > 0 {
+		ok = false
+		_, _ = fmt.Fprintf(w, "\nTAG AND DIGEST DISAGREE (%d)\n", len(p.mismatched))
+		_, _ = fmt.Fprintln(w, "  Each pin below records a tag and a digest, but the tag resolves to a different")
+		_, _ = fmt.Fprintln(w, "  digest in the registry. The pinned digest is what gets deployed, so the tag in")
+		_, _ = fmt.Fprintln(w, "  the values file does not describe the image that runs.")
+		_, _ = fmt.Fprintln(w, "  This happens when the tag or digest was edited without updating the other")
+		_, _ = fmt.Fprintln(w, "  (check this change's diff), or when the publisher re-pushed the tag to a new")
+		_, _ = fmt.Fprintln(w, "  image. To keep the deployed image, correct the tag; to move to the tag's image,")
+		_, _ = fmt.Fprintln(w, "  replace the digest with the one the tag resolves to.")
+		for _, m := range p.mismatched {
+			_, _ = fmt.Fprintf(w, "  - %s\n      pin records:     %s\n      tag resolves to: %s\n", m.ref, m.pinned, m.tagNow)
 			for _, s := range m.sources {
 				_, _ = fmt.Fprintf(w, "      found in %s\n", s)
 			}
+		}
+	}
+
+	if len(p.unchecked) > 0 {
+		ok = false
+		_, _ = fmt.Fprintf(w, "\nTAG NOT CHECKED (%d)\n", len(p.unchecked))
+		_, _ = fmt.Fprintln(w, "  The pinned digest resolved, but its tag could not be looked up, so whether the")
+		_, _ = fmt.Fprintln(w, "  tag matches the digest is unknown. Re-run; if it persists, check the registry.")
+		for _, u := range p.unchecked {
+			_, _ = fmt.Fprintf(w, "  - %s\n      %s\n", u.ref, u.why)
 		}
 	}
 

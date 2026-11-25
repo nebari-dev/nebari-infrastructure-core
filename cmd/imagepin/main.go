@@ -76,6 +76,9 @@ func imagepin() int {
 		ok = p.print(os.Stdout)
 		inv.printFooter(os.Stdout)
 		p.printUnchanged(os.Stdout) // no-op items last
+		if !ok {
+			fmt.Fprintln(os.Stderr, "imagepin: the plan found problems; see NOT PLANNED, TAG AND DIGEST DISAGREE or TAG NOT CHECKED above")
+		}
 	case "inventory":
 		// JSON only on the output, so a pipeline can parse it; messages go to stderr.
 		w := os.Stdout
@@ -175,7 +178,7 @@ func (i *inventory) printList(w io.Writer) {
 // anything. It returns false if any lookup failed or a pinned digest is gone.
 //
 // lookupRef maps a rendered reference to the one to resolve; it restores a
-// tag the chart dropped, so digest pins still get their drift check.
+// tag the chart dropped, so a digest pin's tag can still be checked against it.
 func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, lookupRef func(string) string) bool {
 	type row struct {
 		ref string
@@ -229,9 +232,14 @@ func (i *inventory) printDigests(ctx context.Context, w io.Writer, r *resolver, 
 	section("Errors", "Lookup failed. Nothing about these images was verified.",
 		func(x row) bool { return x.res.err != nil },
 		func(x row) string { return x.res.err.Error() })
-	section("Tag moved upstream", "The pinned digest still pulls the reviewed image, but the tag next to it now names something else.",
-		func(x row) bool { return x.res.drift != "" },
-		func(x row) string { return x.res.drift })
+	section("Tag and digest disagree",
+		"The pinned digest is what gets deployed, but the tag recorded next to it resolves to a different digest, so the tag does not describe the deployed image. Run `make images-plan` for what to do.",
+		func(x row) bool { return x.res.tagMismatch != "" },
+		func(x row) string { return x.res.tagMismatch })
+	section("Tag not checked",
+		"The pinned digest resolved, but its tag could not be looked up, so whether the tag matches the digest is unknown.",
+		func(x row) bool { return x.res.tagCheckErr != "" },
+		func(x row) string { return x.res.tagCheckErr })
 	section("Floating: latest or no tag",
 		"Today's digest can be scanned, but the next pull can return a different image. Pinning by digest needs a fixed tag to track first.",
 		func(x row) bool { return x.res.err == nil && floating(x) }, firstSource)

@@ -18,8 +18,13 @@ type resolution struct {
 	digest     string // what the reference points to now
 	multiArch  bool   // digest is a multi-platform index / manifest list
 	pinnedGone bool   // the reference's own digest no longer exists
-	drift      string // tag now points elsewhere than the pinned digest
-	tagNow     string // for tag@digest: what the tag resolves to now
+	tagNow     string // for tag@digest: the digest the tag resolves to
+
+	// For tag@digest only. tagMismatch is set when the tag resolves to a
+	// different digest than the one pinned; tagCheckErr is set when the tag
+	// couldn't be looked up, so the pin's tag was not checked at all.
+	tagMismatch string
+	tagCheckErr string
 
 	// platforms is what digest provides for each wanted platform; filled
 	// only when the resolver was asked for platforms (see resolver.platforms).
@@ -52,7 +57,8 @@ func newResolver() *resolver {
 //
 //   - tag only:     resolve the tag (this is "today's" digest; tags can move)
 //   - digest:       confirm the pinned digest still exists
-//   - tag + digest: also resolve the tag, and report drift if it moved
+//   - tag + digest: also resolve the tag, and report a mismatch if it
+//     resolves to a different digest than the one pinned
 func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 	name, tag, digest := splitRef(ref)
 	repo, err := remote.NewRepository(normalizeName(name))
@@ -85,8 +91,8 @@ func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 		desc, err := repo.Resolve(ctx, lookup)
 		if err != nil {
 			if digest != "" {
-				// The pin still works; only the drift check failed.
-				res.drift = fmt.Sprintf("could not resolve tag %q to check for drift: %v", lookup, err)
+				// The pinned digest resolved; only the tag lookup failed.
+				res.tagCheckErr = fmt.Sprintf("could not look up tag %q to check it against the pinned digest: %v", lookup, err)
 				return res
 			}
 			return resolution{err: err}
@@ -100,7 +106,7 @@ func (r *resolver) resolve(ctx context.Context, ref string) resolution {
 		} else {
 			res.tagNow = desc.Digest.String()
 			if res.tagNow != digest {
-				res.drift = fmt.Sprintf("tag %q has moved upstream: now %s", tag, desc.Digest)
+				res.tagMismatch = fmt.Sprintf("tag %q resolves to %s, but the pin records %s; the pinned digest is what gets deployed", tag, res.tagNow, digest)
 			}
 		}
 	}

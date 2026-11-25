@@ -34,8 +34,14 @@ type inventoryImage struct {
 	// a later pull may return a different image than the one scanned.
 	Mutable bool `json:"mutable"`
 
-	// Drift is set when a digest pin's tag now names a different image.
-	Drift string `json:"drift,omitempty"`
+	// TagMismatch is set when a digest pin records a tag that resolves to a
+	// different digest than the one pinned. The pinned digest is what gets
+	// deployed and scanned; the tag next to it does not describe that image.
+	TagMismatch string `json:"tagMismatch,omitempty"`
+
+	// TagCheckError is set when a digest pin's tag couldn't be looked up, so
+	// whether the tag matches the pinned digest is unknown.
+	TagCheckError string `json:"tagCheckError,omitempty"`
 
 	// Platforms lists the image Digest provides for each platform NIC can
 	// deploy on, with that platform's own digest: the exact image a node of
@@ -92,7 +98,8 @@ func (i *inventory) writeInventory(ctx context.Context, w io.Writer, r digestRes
 			e.Digest = res.digest
 			e.MultiArch = res.multiArch
 			e.ScanRef = normalizeName(name) + "@" + res.digest
-			e.Drift = res.drift
+			e.TagMismatch = res.tagMismatch
+			e.TagCheckError = res.tagCheckErr
 			e.Platforms = res.platforms
 			e.MissingPlatforms = missingPlatforms(platforms, res.platforms)
 		}
