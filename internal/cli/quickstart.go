@@ -142,6 +142,13 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 		span.RecordError(err)
 		return err
 	}
+	// Deploy only warns when Argo CD fails to install. Without it nothing
+	// syncs the platform or the packs, so return the error here.
+	if !result.ArgoCDInstalled {
+		err := errors.New("the Argo CD install failed, so the platform and software packs can't be deployed (see the warnings above)")
+		span.RecordError(err)
+		return err
+	}
 
 	repoDir := config.DefaultLocalRepositoryPath(cfg.ProjectName)
 	if err := quickstart.InstallPacks(ctx, repoDir, packs); err != nil {
