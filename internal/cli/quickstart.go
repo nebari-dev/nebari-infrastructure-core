@@ -107,7 +107,7 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 	dnsErr := quickstart.ResolvesToLoopback(dnsCtx, net.DefaultResolver, dnsHost)
 	cancelDNS()
 	if dnsErr != nil {
-		slog.Warn("The platform domain doesn't resolve to this machine, so the browser can't reach the platform", "host", dnsHost, "error", dnsErr)
+		slog.Warn("The platform domain didn't resolve to this machine, so the browser may not reach the platform", "host", dnsHost, "error", dnsErr)
 	}
 
 	if quickstartDryRun {
@@ -119,7 +119,7 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\nDry run: wrote %s and deployed nothing.\n", quickstartOut)
 		fmt.Printf("Running without --dry-run deploys it and installs: %s\n\n", strings.Join(names, ", "))
 		if dnsErr != nil {
-			printDNSWarning(cfg, dnsHost, kindGatewayAddress)
+			printDNSWarning(cfg, dnsHost, kindGatewayAddress, dnsErr)
 		}
 		return nil
 	}
@@ -177,23 +177,44 @@ func runQuickstart(cmd *cobra.Command, args []string) error {
 		if result.LBEndpoint != nil && result.LBEndpoint.IP != "" {
 			gatewayAddress = result.LBEndpoint.IP
 		}
-		printDNSWarning(cfg, dnsHost, gatewayAddress)
+		printDNSWarning(cfg, dnsHost, gatewayAddress, dnsErr)
 	}
 	return nil
 }
 
 // printDNSWarning prints the failed DNS check as the last thing in the output,
 // so it isn't lost above the summary. The default domain resolves through
-// public DNS, so a failure there points at the local resolver. A custom domain
-// may simply not be published anywhere.
-func printDNSWarning(cfg *config.NebariConfig, host, gatewayAddress string) {
+// public DNS, so a wrong or missing answer there points at the local resolver,
+// while a lookup that didn't finish (offline, timeout) says nothing about it.
+// A custom domain may simply not be published anywhere.
+func printDNSWarning(cfg *config.NebariConfig, host, gatewayAddress string, dnsErr error) {
 	hostsLine := gatewayAddress + " " + strings.Join(quickstart.Hostnames(cfg.Domain), " ")
+	unchecked := cfg.Domain == quickstart.DefaultDomain && !quickstart.ResolverChangedAnswer(dnsErr)
 
+	heading := "WARNING: YOUR BROWSER CAN'T REACH THE PLATFORM YET"
+	if unchecked {
+		heading = "WARNING: COULDN'T CHECK THAT YOUR BROWSER CAN REACH THE PLATFORM"
+	}
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
-	fmt.Println("  WARNING: YOUR BROWSER CAN'T REACH THE PLATFORM YET")
+	fmt.Println("  " + heading)
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
-	if cfg.Domain == quickstart.DefaultDomain {
+	switch {
+	case cfg.Domain != quickstart.DefaultDomain:
+		fmt.Printf("  %s doesn't resolve to this machine. Point the domain's\n", host)
+		fmt.Printf("  DNS records at %s, or add this line to /etc/hosts:\n", gatewayAddress)
+		fmt.Println()
+		fmt.Printf("    %s\n", hostsLine)
+	case unchecked:
+		// The lookup didn't finish (offline, timeout), so the resolver may be
+		// fine. Say only what is known.
+		fmt.Printf("  Couldn't check whether %s resolves to this machine:\n", host)
+		fmt.Printf("  %v\n", dnsErr)
+		fmt.Println()
+		fmt.Println("  If the browser can't reach the platform, add this line to /etc/hosts:")
+		fmt.Println()
+		fmt.Printf("    %s\n", hostsLine)
+	default:
 		fmt.Printf("  %s doesn't resolve to this machine, although it does\n", host)
 		fmt.Println("  through public DNS. Your DNS resolver probably blocks public names that point")
 		fmt.Println("  at your own machine. Fix it with one of:")
@@ -203,11 +224,6 @@ func printDNSWarning(cfg *config.NebariConfig, host, gatewayAddress string) {
 		fmt.Println("    - add this line to /etc/hosts:")
 		fmt.Println()
 		fmt.Printf("        %s\n", hostsLine)
-	} else {
-		fmt.Printf("  %s doesn't resolve to this machine. Point the domain's\n", host)
-		fmt.Printf("  DNS records at %s, or add this line to /etc/hosts:\n", gatewayAddress)
-		fmt.Println()
-		fmt.Printf("    %s\n", hostsLine)
 	}
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
