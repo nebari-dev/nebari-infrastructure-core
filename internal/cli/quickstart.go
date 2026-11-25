@@ -235,12 +235,6 @@ func writeQuickstartConfig(path string, content []byte, force bool) error {
 }
 
 func printQuickstartSummary(cfg *config.NebariConfig, result *nic.DeployResult, configPath string) {
-	// Config discovery finds ./config.yaml on its own; anything else needs -f.
-	fileFlag := ""
-	if configPath != "config.yaml" {
-		fileFlag = " -f " + configPath
-	}
-
 	port := ""
 	if result.LBEndpoint != nil && result.LBEndpoint.Port != 0 && result.LBEndpoint.Port != 443 {
 		port = fmt.Sprintf(":%d", result.LBEndpoint.Port)
@@ -271,11 +265,13 @@ func printQuickstartSummary(cfg *config.NebariConfig, result *nic.DeployResult, 
 	fmt.Println()
 	fmt.Println("  Sign-in credentials:")
 	fmt.Println()
-	fmt.Printf("    nic outputs --show-secrets%s\n", fileFlag)
+	// Always pass -f: config discovery prefers NIC_CONFIG_PATH over
+	// ./config.yaml, which could point these commands at another cluster.
+	fmt.Printf("    nic outputs --show-secrets -f %s\n", configPath)
 	fmt.Println()
 	fmt.Println("  To delete the cluster:")
 	fmt.Println()
-	fmt.Printf("    nic destroy%s\n", fileFlag)
+	fmt.Printf("    nic destroy -f %s\n", configPath)
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════════════════")
 	fmt.Println()
