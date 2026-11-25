@@ -2163,10 +2163,6 @@ func TestEnvoyProxyDataPlaneResources(t *testing.T) {
 	}
 }
 
-// TestCertManagerTemplate_ImagePin verifies the cert-manager server image is pinned
-// explicitly in the values, rather than inheriting the chart's appVersion
-// default. This keeps the running server version under review control, so a
-// chart bump cannot silently change (or un-patch) the deployed cert-manager.
 // sha256Digest is an image digest as the pins record it.
 var sha256Digest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
