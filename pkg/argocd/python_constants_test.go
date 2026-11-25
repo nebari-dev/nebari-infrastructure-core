@@ -64,6 +64,8 @@ func TestPythonConstantsMatchGo(t *testing.T) {
 		{"GATEWAY_HTTPS_NODE_PORT", strconv.Itoa(cluster.GatewayHTTPSNodePort)},
 		{"GATEWAY_TLS_SECRET", config.DefaultGatewayTLSSecretName},
 		{"ARGOCD_NAMESPACE", DefaultNamespace},
+		{"INTERNAL_ISSUER", certificateIssuerCA},
+		{"ROOT_CA_SECRET", rootCASecretName},
 	}
 
 	for _, tt := range tests {
@@ -86,6 +88,10 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 	suiteOwned := map[string]bool{
 		"JOURNEY_LABEL_KEY":   true,
 		"JOURNEY_LABEL_VALUE": true,
+		// Images and a timeout the internal certificate journeys choose.
+		"TLS_SERVER_IMAGE":          true,
+		"TLS_CLIENT_IMAGE":          true,
+		"CERTIFICATE_READY_TIMEOUT": true,
 	}
 
 	enrolled := map[string]bool{}
@@ -101,6 +107,8 @@ func TestPythonConstantsEnrollment(t *testing.T) {
 		"LONGHORN_BACKUP_APP",
 		"REALM_NAME", "ARGOCD_ADMINS_GROUP", "ARGOCD_VIEWERS_GROUP",
 		"LONGHORN_ADMINS_GROUP", "ARGOCD_OIDC_CLIENT", "LONGHORN_OIDC_CLIENT",
+		"INTERNAL_ISSUER", "ROOT_CA_SECRET",
+		"TRUST_BUNDLE_CONFIGMAP", "TRUST_BUNDLE_KEY",
 	} {
 		enrolled[name] = true
 	}
@@ -172,6 +180,11 @@ func TestPythonResourceNamesMatchTemplates(t *testing.T) {
 			templatePath: "templates/apps/longhorn-backup.yaml",
 			pythonName:   "LONGHORN_BACKUP_APP",
 		},
+		{
+			name:         "trust bundle configmap name",
+			templatePath: trustBundlePath,
+			pythonName:   "TRUST_BUNDLE_CONFIGMAP",
+		},
 	}
 
 	python := parsePythonConstants(t, pythonConstantsPath)
@@ -191,6 +204,36 @@ func TestPythonResourceNamesMatchTemplates(t *testing.T) {
 					pythonValue, pythonConstantsPath)
 			}
 		})
+	}
+}
+
+// trustBundlePath is the trust-manager Bundle whose name is the ConfigMap it
+// projects into every namespace, under its target key.
+const trustBundlePath = "templates/manifests/security/trust-bundle/bundle.yaml"
+
+// TestPythonTrustBundleKeyMatchesTemplate pins TRUST_BUNDLE_KEY against the
+// Bundle's target ConfigMap key. Pods mount the projected file by this key, so
+// a rename would leave the journey's client without the bundle file while the
+// ConfigMap itself still exists.
+func TestPythonTrustBundleKeyMatchesTemplate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Clean(trustBundlePath))
+	if err != nil {
+		t.Fatalf("read %s: %v", trustBundlePath, err)
+	}
+
+	m := regexp.MustCompile(`(?m)^\s*configMap:\s*\n\s*key:\s*(\S+)\s*$`).FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("no target configMap key found in %s; it may have changed", trustBundlePath)
+	}
+
+	python := parsePythonConstants(t, pythonConstantsPath)
+	pythonValue, ok := python["TRUST_BUNDLE_KEY"]
+	if !ok {
+		t.Fatalf("TRUST_BUNDLE_KEY missing from %s", pythonConstantsPath)
+	}
+	if m[1] != pythonValue {
+		t.Errorf("TRUST_BUNDLE_KEY = %q in %s, %q in %s",
+			m[1], trustBundlePath, pythonValue, pythonConstantsPath)
 	}
 }
 

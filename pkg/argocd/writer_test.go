@@ -177,6 +177,9 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 			if data.GatewayHTTPNodePort != cluster.GatewayHTTPNodePort || data.GatewayHTTPSNodePort != cluster.GatewayHTTPSNodePort {
 				t.Errorf("gateway NodePorts = %d/%d, want %d/%d", data.GatewayHTTPNodePort, data.GatewayHTTPSNodePort, cluster.GatewayHTTPNodePort, cluster.GatewayHTTPSNodePort)
 			}
+			if data.GatewayServiceName != cluster.GatewayServiceName {
+				t.Errorf("GatewayServiceName = %q, want %q", data.GatewayServiceName, cluster.GatewayServiceName)
+			}
 		})
 	}
 }
@@ -413,9 +416,8 @@ func TestKeycloakTemplate_TrustBundle(t *testing.T) {
 		return string(processed), values
 	}
 
-	t.Run("mounts bundle and sets truststore path when enabled", func(t *testing.T) {
+	t.Run("mounts the trust bundle and sets the truststore path on every cluster", func(t *testing.T) {
 		data := baseData()
-		data.TrustManagerEnabled = true
 		data.TrustBundlePEM = testCAPEM
 
 		out, values := helmValues(t, data)
@@ -436,24 +438,6 @@ func TestKeycloakTemplate_TrustBundle(t *testing.T) {
 		}
 		if _, ok := values["extraVolumeMounts"].(string); !ok {
 			t.Errorf("expected extraVolumeMounts string in Helm values, got: %#v", values["extraVolumeMounts"])
-		}
-	})
-
-	t.Run("omits bundle wiring when disabled", func(t *testing.T) {
-		out, values := helmValues(t, baseData())
-
-		for _, unwanted := range []string{
-			"KC_TRUSTSTORE_PATHS",
-			"nebari-trust-bundle",
-			"extraVolumes:",
-			"extraVolumeMounts:",
-		} {
-			if strings.Contains(out, unwanted) {
-				t.Errorf("did not expect %q when trust-manager disabled, got:\n%s", unwanted, out)
-			}
-		}
-		if _, ok := values["extraVolumes"]; ok {
-			t.Errorf("did not expect extraVolumes key when disabled, got: %#v", values["extraVolumes"])
 		}
 	})
 }
@@ -1353,6 +1337,8 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 
 		for _, want := range []string{
 			"envoyService:",
+			// The provider's in-cluster DNS rule targets this name.
+			"name: " + cluster.GatewayServiceName,
 			"type: NodePort",
 			// Local, Envoy Gateway's default, would drop traffic arriving at
 			// the control plane's host ports whenever Envoy runs on a worker.
@@ -1389,7 +1375,9 @@ func TestWriteAllToGit_GatewayHostAddress(t *testing.T) {
 			StorageClass: "gp2",
 		})
 
-		for _, unwanted := range []string{"envoyService:", "NodePort", "externalTrafficPolicy"} {
+		// Renaming the service on a cloud provider would replace its load
+		// balancer and change the address DNS records point at.
+		for _, unwanted := range []string{"envoyService:", "NodePort", "externalTrafficPolicy", "name: " + cluster.GatewayServiceName} {
 			if strings.Contains(out, unwanted) {
 				t.Errorf("envoyproxy.yaml should not contain %q for cloud providers, got:\n%s", unwanted, out)
 			}
@@ -1770,49 +1758,14 @@ func TestHelmApps_ValueFilesRespectGitPath(t *testing.T) {
 	}
 }
 
-func TestWriteAllToGit_GatedValuesBase(t *testing.T) {
+func TestWriteAllToGit_TrustManagerValuesBaseWithoutTrustBundle(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("disabled gates remove base.yaml but preserve overlays", func(t *testing.T) {
-		tmpDir := t.TempDir()
-
-		// Seed a user overlay and a stale base.yaml from a previous
-		// enabled-state run.
-		overlayDir := filepath.Join(tmpDir, "values", "trust-manager", "overlays")
-		if err := os.MkdirAll(overlayDir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(overlayDir, "50-user.yaml"), []byte("user: overlay\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml"), []byte("stale: true\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-
-		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		settings := cluster.InfraSettings{StorageClass: "gp2"}
-		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil { // trustBundlePEM="" => TrustManagerEnabled=false
-			t.Fatalf("WriteAllToGit() error: %v", err)
-		}
-
-		basePath := filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")
-		if _, err := os.Stat(basePath); !os.IsNotExist(err) {
-			t.Error("stale base.yaml should be removed when the app is disabled")
-		}
-		overlay, err := os.ReadFile(filepath.Join(tmpDir, "values", "trust-manager", "overlays", "50-user.yaml")) //nolint:gosec // path is t.TempDir() + constant
-		if err != nil {
-			t.Fatalf("user overlay was destroyed: %v", err)
-		}
-		if string(overlay) != "user: overlay\n" {
-			t.Errorf("user overlay content changed: %q", overlay)
-		}
-	})
-
-	t.Run("enabled gates write base.yaml", func(t *testing.T) {
+	t.Run("trust-manager base.yaml is written without a trust_bundle", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.NebariConfig{Domain: "test.example.com"}
 		settings := cluster.InfraSettings{StorageClass: "gp2"}
-		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, testCAPEM); err != nil { // PEM => TrustManagerEnabled=true
+		if err := WriteAllToGit(ctx, tmpDir, cfg, nil, settings, ""); err != nil { // no trust_bundle: trust-manager still renders
 			t.Fatalf("WriteAllToGit() error: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(tmpDir, "values", "trust-manager", "base.yaml")); err != nil {
@@ -1911,11 +1864,11 @@ func TestRemoveStaleTemplate_RefusesValuesDirRecursion(t *testing.T) {
 // repeated regeneration runs.
 //
 // Scope note: this covers only the UNGATED case. envoy-gateway is never matched
-// by isTrustBundlePath/isLonghornOnlyPath, so this test does not exercise the
-// gated-off removal path at all. The file-versus-directory gating regression is
-// pinned by TestWriteAllToGit_GatedValuesBase, and the structural guard behind
-// it by TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not de-scope
-// either of those on the assumption that this test covers them.
+// by isBackupPath/isLonghornOnlyPath, so this test does not exercise the
+// gated-off removal path at all. No values/<app>/base.yaml is gated today, so
+// the file-versus-directory gating regression is pinned only by the structural
+// guard test, TestRemoveStaleTemplate_RefusesValuesDirRecursion. Do not
+// de-scope it on the assumption that this test covers it.
 func TestWriteAllToGit_PreservesOverlays(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

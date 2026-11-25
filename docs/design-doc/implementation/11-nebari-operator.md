@@ -84,7 +84,7 @@ Operators of Nebari clusters and software-pack authors should treat the upstream
 | `KeycloakRealm` | NIC default (`nebari`) | Realm the operator talks to. Surfaces as `KEYCLOAK_REALM`. |
 | `KeycloakAdminSecretName` | NIC default | Name of the K8s secret the operator reads for Keycloak admin credentials. Surfaces as `KEYCLOAK_ADMIN_SECRET_NAME`. |
 | `KeycloakNamespace` | NIC default (`keycloak`) | Namespace containing the admin secret. Surfaces as `KEYCLOAK_ADMIN_SECRET_NAMESPACE`. |
-| `CertificateIssuer` | NIC choice (`selfsigned-issuer` or `letsencrypt-issuer`, based on whether `dns.<provider>` is set) | cert-manager `ClusterIssuer` name the operator should reference when creating Certificate resources. Surfaces as `TLS_CLUSTER_ISSUER_NAME`. |
+| `CertificateIssuer` | NIC choice by `certificate.type` (`nebari-ca-issuer` for `selfsigned`, `letsencrypt-issuer` for `letsencrypt`, `selfsigned-issuer` for `existing`) | cert-manager `ClusterIssuer` name the operator should reference when creating Certificate resources. Surfaces as `TLS_CLUSTER_ISSUER_NAME`. |
 
 The operator does not see any other parts of `NebariConfig`. In particular, it does not know which cluster provider is in use.
 

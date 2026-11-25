@@ -21,7 +21,7 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0123456789==
 // TestTrustBundleTemplate_RendersValidYAML verifies the inline PEM is indented
 // correctly so the Bundle manifest parses as YAML and carries the certificate.
 func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
-	data := TemplateData{TrustManagerEnabled: true, TrustBundlePEM: testCAPEM}
+	data := TemplateData{TrustBundlePEM: testCAPEM, RootCASecretName: rootCASecretName}
 
 	content, err := templates.ReadFile("templates/manifests/security/trust-bundle/bundle.yaml")
 	if err != nil {
@@ -42,8 +42,8 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 		t.Fatalf("spec missing or wrong type in:\n%s", processed)
 	}
 	sources, ok := spec["sources"].([]any)
-	if !ok || len(sources) != 2 {
-		t.Fatalf("expected exactly two sources (useDefaultCAs + inLine), got %v", spec["sources"])
+	if !ok || len(sources) != 3 {
+		t.Fatalf("expected exactly three sources (useDefaultCAs, root CA secret, inLine), got %v", spec["sources"])
 	}
 	// System roots must be included alongside the org CA: consumers point
 	// SSL_CERT_FILE-style vars at the projected file, which replaces the
@@ -52,7 +52,17 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 	if useDefault, _ := defaultCAs["useDefaultCAs"].(bool); !useDefault {
 		t.Errorf("first source should set useDefaultCAs: true, got %v", sources[0])
 	}
-	src, _ := sources[1].(map[string]any)
+	// The cluster root CA renders on every certificate type, between the
+	// public roots and the org CA.
+	rootSrc, _ := sources[1].(map[string]any)
+	secret, _ := rootSrc["secret"].(map[string]any)
+	if name, _ := secret["name"].(string); name != rootCASecretName {
+		t.Errorf("second source should be secret %q, got %v", rootCASecretName, sources[1])
+	}
+	if key, _ := secret["key"].(string); key != "ca.crt" {
+		t.Errorf("root CA secret source key = %v, want ca.crt", secret["key"])
+	}
+	src, _ := sources[2].(map[string]any)
 	inLine, _ := src["inLine"].(string)
 	if !strings.Contains(inLine, "BEGIN CERTIFICATE") {
 		t.Errorf("inLine source did not preserve the PEM, got %q", inLine)
@@ -63,42 +73,125 @@ func TestTrustBundleTemplate_RendersValidYAML(t *testing.T) {
 }
 
 func TestWriteAllToGit_TrustManager(t *testing.T) {
-	appPath := func(dir string) string {
-		return filepath.Join(dir, "apps", "trust-manager.yaml")
+	letsencrypt := &config.CertificateConfig{
+		Type: config.CertificateTypeLetsEncrypt,
+		ACME: &config.ACMEConfig{Email: "admin@example.com"},
 	}
-	bundlePath := func(dir string) string {
-		return filepath.Join(dir, "manifests", "security", "trust-bundle", "bundle.yaml")
+	existing := &config.CertificateConfig{
+		Type:           config.CertificateTypeExisting,
+		ExistingSecret: &config.ExistingSecretRef{Name: "user-tls"},
 	}
 
-	t.Run("skipped when no trust bundle", func(t *testing.T) {
-		dir := t.TempDir()
-		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, ""); err != nil {
-			t.Fatalf("WriteAllToGit: %v", err)
-		}
-		if _, err := os.Stat(appPath(dir)); !os.IsNotExist(err) {
-			t.Errorf("expected trust-manager app to be skipped, stat err = %v", err)
-		}
-		if _, err := os.Stat(bundlePath(dir)); !os.IsNotExist(err) {
-			t.Errorf("expected trust-bundle manifest to be skipped, stat err = %v", err)
-		}
-	})
+	tests := []struct {
+		name        string
+		certificate *config.CertificateConfig
+		orgCAPEM    string
+		wantWritten bool
+		wantRootCA  bool
+		wantOrgCA   bool
+	}{
+		{
+			name:        "selfsigned trusts the root CA",
+			wantWritten: true,
+			wantRootCA:  true,
+		},
+		{
+			name:        "selfsigned with an org CA trusts both",
+			orgCAPEM:    testCAPEM,
+			wantWritten: true,
+			wantRootCA:  true,
+			wantOrgCA:   true,
+		},
+		{
+			name:        "letsencrypt with an org CA trusts both",
+			certificate: letsencrypt,
+			orgCAPEM:    testCAPEM,
+			wantWritten: true,
+			wantRootCA:  true,
+			wantOrgCA:   true,
+		},
+		{
+			name:        "existing with an org CA trusts both",
+			certificate: existing,
+			orgCAPEM:    testCAPEM,
+			wantWritten: true,
+			wantRootCA:  true,
+			wantOrgCA:   true,
+		},
+		{
+			name:        "letsencrypt without an org CA trusts the root CA",
+			certificate: letsencrypt,
+			wantWritten: true,
+			wantRootCA:  true,
+		},
+		{
+			name:        "existing without an org CA trusts the root CA",
+			certificate: existing,
+			wantWritten: true,
+			wantRootCA:  true,
+		},
+	}
 
-	t.Run("written when trust bundle set", func(t *testing.T) {
-		dir := t.TempDir()
-		cfg := &config.NebariConfig{Domain: "test.example.com"}
-		if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, testCAPEM); err != nil {
-			t.Fatalf("WriteAllToGit: %v", err)
-		}
-		if _, err := os.Stat(appPath(dir)); err != nil {
-			t.Errorf("expected trust-manager app to be written: %v", err)
-		}
-		got, err := os.ReadFile(bundlePath(dir))
-		if err != nil {
-			t.Fatalf("read rendered bundle: %v", err)
-		}
-		if !strings.Contains(string(got), "BEGIN CERTIFICATE") {
-			t.Errorf("rendered bundle missing PEM, got:\n%s", got)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &config.NebariConfig{Domain: "test.example.com", Certificate: tt.certificate}
+			if err := WriteAllToGit(context.Background(), dir, cfg, nil, provider.InfraSettings{StorageClass: "gp2"}, tt.orgCAPEM); err != nil {
+				t.Fatalf("WriteAllToGit: %v", err)
+			}
+
+			for _, path := range []string{"apps/trust-manager.yaml", "apps/trust-bundle.yaml", "values/trust-manager/base.yaml"} {
+				_, err := os.Stat(filepath.Join(dir, path))
+				if tt.wantWritten && err != nil {
+					t.Errorf("expected %s to be written: %v", path, err)
+				}
+				if !tt.wantWritten && !os.IsNotExist(err) {
+					t.Errorf("expected %s to be skipped, stat err = %v", path, err)
+				}
+			}
+
+			bundlePath := filepath.Join(dir, "manifests", "security", "trust-bundle", "bundle.yaml")
+			// #nosec G304 -- the path is fixed beneath the test-owned t.TempDir.
+			got, err := os.ReadFile(bundlePath)
+			if !tt.wantWritten {
+				if !os.IsNotExist(err) {
+					t.Errorf("expected bundle manifest to be skipped, stat err = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("read rendered bundle: %v", err)
+			}
+
+			var doc map[string]any
+			if err := yaml.Unmarshal(got, &doc); err != nil {
+				t.Fatalf("rendered Bundle is not valid YAML: %v\n%s", err, got)
+			}
+			spec, _ := doc["spec"].(map[string]any)
+			sources, _ := spec["sources"].([]any)
+
+			var hasDefaultCAs, hasRootCA, hasOrgCA bool
+			for _, s := range sources {
+				src, _ := s.(map[string]any)
+				if useDefault, _ := src["useDefaultCAs"].(bool); useDefault {
+					hasDefaultCAs = true
+				}
+				if secret, ok := src["secret"].(map[string]any); ok {
+					hasRootCA = secret["name"] == rootCASecretName && secret["key"] == "ca.crt"
+				}
+				if inLine, ok := src["inLine"].(string); ok {
+					hasOrgCA = strings.Contains(inLine, "BEGIN CERTIFICATE")
+				}
+			}
+			if !hasDefaultCAs {
+				t.Errorf("bundle must always include the default CAs, got sources %v", sources)
+			}
+			if hasRootCA != tt.wantRootCA {
+				t.Errorf("bundle includes the root CA = %v, want %v:\n%s", hasRootCA, tt.wantRootCA, got)
+			}
+			if hasOrgCA != tt.wantOrgCA {
+				t.Errorf("bundle includes the org CA = %v, want %v:\n%s", hasOrgCA, tt.wantOrgCA, got)
+			}
+		})
+	}
 }

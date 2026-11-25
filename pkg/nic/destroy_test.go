@@ -22,7 +22,7 @@ func (f *fakeClusterProvider) Validate(context.Context, string, *config.ClusterC
 	return nil
 }
 
-func (f *fakeClusterProvider) Deploy(context.Context, string, *config.ClusterConfig, cluster.DeployOptions) error {
+func (f *fakeClusterProvider) Deploy(context.Context, string, string, *config.ClusterConfig, cluster.DeployOptions) error {
 	return nil
 }
 

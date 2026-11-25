@@ -5,13 +5,15 @@ domain does not resolve to the gateway, names are mapped for both the
 Python client and Chromium, which preserves real SNI and real
 certificate validation rather than bypassing it.
 
-The honest trade, spelled out (see issues #447 and #490): cert-manager's
-default `selfsigned-issuer` issues a self-signed LEAF certificate
-(`CA:FALSE`), not a proper root CA. `requests`/OpenSSL happily accepts a
-self-signed end-entity certificate as a trust anchor, which is why the
-API journeys work by pointing `verify=` at it directly. Chromium/NSS
-does not: a `CA:FALSE` certificate cannot be installed as a trust
-anchor at all, so no NSS trust-store trick makes Chromium accept it.
+The honest trade, spelled out (see issues #447 and #490): on a
+self-signed cluster the gateway chains to the cluster's own root CA
+(`nebari-ca-issuer`), which no browser trust store carries, and an
+operator can still supply a self-signed LEAF certificate (`CA:FALSE`)
+as `certificate.existing_secret`. `requests`/OpenSSL accepts either as
+a trust anchor, which is why the API journeys work by pointing
+`verify=` at it directly. Chromium/NSS does not: a `CA:FALSE`
+certificate cannot be installed as a trust anchor at all, and the
+suite does not install the root CA in the browser's store.
 
 The fix implemented here for the browser journeys is
 `--ignore-certificate-errors-spki-list=<hash>`, computed by
@@ -35,10 +37,10 @@ unmodified Chromium, which is why a PUBLICLY TRUSTED chain gets no extra
 flags at all (see `chromium_args` and `classify_anchor`). Note the
 condition is public trust, not "is this ACME": Let's Encrypt STAGING is
 ACME and is NOT publicly trusted, and every cloud fixture in
-.github/fixtures/deploy/ uses staging. The real fix is issue #447:
-once cert-manager issues a proper CA for the gateway, Chromium can
-validate the chain like any other browser, and this SPKI pin -- along
-with `spki_sha256_b64` and the flag it feeds -- should be removed.
+.github/fixtures/deploy/ uses staging. With a proper root CA in place
+(#447), the way to retire this pin is to trust that root in the test
+browser's store, after which this SPKI pin -- along with
+`spki_sha256_b64` and the flag it feeds -- can be removed.
 """
 
 import base64
@@ -114,6 +116,37 @@ def trust_anchor_pem(cluster) -> str | None:
         if pem and pem.strip():
             return pem
     return None
+
+
+def gateway_certificate_pem(cluster) -> str | None:
+    """The gateway's own certificate (the first one in tls.crt), or None.
+
+    This is what Chromium's SPKI pin needs, not `trust_anchor_pem`.
+    `--ignore-certificate-errors-spki-list` only matches keys in the chain
+    the server sends, and the gateway sends tls.crt, which doesn't include
+    a root CA. On a self-signed cluster ca.crt holds the cluster's root CA
+    (#447), so a pin on the anchor never matches and Chromium fails with
+    ERR_CERT_AUTHORITY_INVALID. The gateway's own certificate is always
+    sent.
+
+    Errors are handled like `trust_anchor_pem`: None when the secret or
+    the key is missing, RuntimeError for any other API error.
+    """
+    name, namespace = cluster.gateway_tls_secret_ref()
+    try:
+        pem = cluster.secret_value(namespace, name, LEAF_KEY)
+    except KeyError:
+        return None
+    except ApiException as error:
+        if error.status == NOT_FOUND_STATUS:
+            return None
+        raise RuntimeError(
+            f"could not read {LEAF_KEY!r} from secret {namespace}/{name}: {error}"
+        ) from error
+    if not pem or not pem.strip():
+        return None
+    first = x509.load_pem_x509_certificates(pem.encode())[0]
+    return first.public_bytes(Encoding.PEM).decode()
 
 
 def is_self_signed_leaf(pem: str) -> bool:
@@ -224,9 +257,10 @@ def classify_anchor(
       `.github/fixtures/deploy/` uses staging, so this is the shape CI
       hits. Journeys whose subject is public trust must SKIP here: the
       failure is a deliberate CI choice, not a platform defect.
-    - SELF_SIGNED_LEAF: cert-manager's default `selfsigned-issuer` output,
-      a `CA:FALSE` certificate that is its own issuer (see the module
-      docstring).
+    - SELF_SIGNED_LEAF: a `CA:FALSE` certificate that is its own issuer,
+      as an operator-supplied `certificate.existing_secret` can be (see the
+      module docstring). NIC's own self-signed clusters are
+      PRIVATELY_ISSUED: their gateway chains to the cluster root CA.
 
     Verification is entirely OFFLINE, against certifi's bundle, using the
     chain the cluster secret already contains. That is deliberate: probing
@@ -480,7 +514,7 @@ def chromium_args(
     domain: str,
     address: str,
     mapping_needed: bool,
-    trust_anchor_pem: str | None = None,
+    gateway_cert_pem: str | None = None,
     anchor_trust: str = PUBLICLY_TRUSTED,
 ) -> list[str]:
     """Chromium flags mapping the domain and, where needed, pinning trust.
@@ -497,15 +531,14 @@ def chromium_args(
     requests and fails under Chromium for reasons that look like a platform
     fault.
 
-    `trust_anchor_pem`, when given, is the same PEM `trust_anchor_pem()`
-    (the module-level function in this file) derived from the cluster: a
-    self-signed leaf that Chromium/NSS cannot accept as a CA (see the
-    module docstring for why). This emits
+    `gateway_cert_pem`, when given, is the gateway's own certificate from
+    `gateway_certificate_pem()`, not the trust anchor: Chromium only
+    matches the pin against keys in the chain the server sends, and that
+    chain doesn't include a root CA. This emits
     `--ignore-certificate-errors-spki-list=<hash>`, pinning Chromium's
-    trust to that certificate's exact public key. When no anchor was
-    derived -- the cluster's certificate chain is publicly trusted (ACME)
-    -- nothing is emitted here, so an ACME cluster is driven by exactly
-    the flags a real user's browser would see.
+    trust to that certificate's exact public key. When the chain is
+    publicly trusted, nothing is emitted here, so the cluster is driven by
+    exactly the flags a real user's browser would see.
     """
     args = []
     if mapping_needed:
@@ -524,8 +557,8 @@ def chromium_args(
     # they could have -- while this module's docstring claimed the exact
     # opposite. Verified against a live production-ACME cluster before the
     # fix: the flag was present.
-    if anchor_trust != PUBLICLY_TRUSTED and trust_anchor_pem:
+    if anchor_trust != PUBLICLY_TRUSTED and gateway_cert_pem:
         args.append(
-            f"--ignore-certificate-errors-spki-list={spki_sha256_b64(trust_anchor_pem)}"
+            f"--ignore-certificate-errors-spki-list={spki_sha256_b64(gateway_cert_pem)}"
         )
     return args

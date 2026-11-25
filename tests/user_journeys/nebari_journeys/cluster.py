@@ -66,6 +66,8 @@ class Cluster:
     core: client.CoreV1Api
     custom: client.CustomObjectsApi
     storage: client.StorageV1Api = None
+    admission: client.AdmissionregistrationV1Api = None
+    discovery: client.DiscoveryV1Api = None
 
     @classmethod
     def connect(cls) -> "Cluster":
@@ -86,6 +88,8 @@ class Cluster:
             core=client.CoreV1Api(),
             custom=client.CustomObjectsApi(),
             storage=client.StorageV1Api(),
+            admission=client.AdmissionregistrationV1Api(),
+            discovery=client.DiscoveryV1Api(),
         )
 
     def api_host(self) -> str | None:

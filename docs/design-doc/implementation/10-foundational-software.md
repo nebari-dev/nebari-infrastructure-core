@@ -19,7 +19,7 @@ The authoritative app set is the YAML under `pkg/argocd/templates/apps/`:
 | **cert-manager** | `cert-manager.yaml` | TLS certificate automation |
 | **trust-manager** | `trust-manager.yaml` | Distributes CA trust bundles across namespaces (cert-manager's trust-manager) |
 | **trust-bundle** | `trust-bundle.yaml` | `Bundle` resource defining the cluster CA trust bundle |
-| **cluster-issuers** | `cluster-issuers.yaml` | `ClusterIssuer` resources (selfsigned and/or Let's Encrypt) |
+| **cluster-issuers** | `cluster-issuers.yaml` | `ClusterIssuer` resources and the cluster root CA on every certificate type: the root CA `Certificate` `nebari-root-ca`, `selfsigned-issuer` (signs the root, and the operator's per-app certificates on `existing`), `nebari-ca-issuer` (signs with the root: the gateway and per-app certificates on `selfsigned`, packs' in-cluster certificates everywhere; see [internal certificates](../../internal-certificates.md)), and `letsencrypt-issuer` on `letsencrypt` |
 | **certificates** | `certificates.yaml` | Initial `Certificate` resources for foundational hostnames |
 | **Envoy Gateway** | `envoy-gateway.yaml` | Kubernetes Gateway API implementation |
 | **gateway-config** | `gateway-config.yaml` | `Gateway` and listener configuration |
@@ -51,8 +51,8 @@ Sketch of what `pkg/argocd` writes into the GitOps repo at the `repository.exist
 ├── apps/                            # One ArgoCD Application per app; root.yaml points here
 │   ├── root.yaml                    # App-of-apps root (recurse: false)
 │   ├── cert-manager.yaml
-│   ├── trust-manager.yaml           # Gated on trust_bundle
-│   ├── trust-bundle.yaml            # Gated on trust_bundle
+│   ├── trust-manager.yaml           # Rendered on every cluster
+│   ├── trust-bundle.yaml            # Rendered on every cluster
 │   ├── cluster-issuers.yaml
 │   ├── certificates.yaml
 │   ├── envoy-gateway.yaml
@@ -135,9 +135,21 @@ Cross-app dependencies are expressed via ArgoCD sync waves on each `Application`
 
 The waves are the authoritative ordering; do not infer it from the table in §10.2. Note in particular that cert-manager is **not** first: Envoy Gateway precedes it.
 
+Waves order when each Application is created, but Argo CD does not wait for an Application to be Healthy before the next wave (it has had no health check for Applications since 1.8), so an app can still reach a webhook or CRD that isn't ready yet. Retries cover that gap (§10.8).
+
 ## 10.8 Health and Readiness
 
-Foundational software health is observed via ArgoCD's own sync/health status, not a hardcoded list in NIC. NIC's `deploy` command does not block waiting for every component; it prints follow-up instructions (how to reach ArgoCD, how to reach Keycloak) and exits. Users who want to wait for full health can watch ArgoCD's UI or run `kubectl wait` against the relevant Applications.
+Foundational software health is observed via ArgoCD's own sync/health status, not a hardcoded list in NIC. NIC's `deploy` command does not block waiting for every component; it prints follow-up instructions (how to reach ArgoCD, how to reach Keycloak) and exits. Users who want to wait for full health can watch ArgoCD's UI or run `kubectl wait` against the relevant Applications, waiting for `Synced` as well as `Healthy`, since health alone misses a stuck sync.
+
+Foundational Applications retry failed syncs indefinitely (`retry.limit: -1`, with backoff from 5 seconds doubling up to 3 minutes) and retry on the latest revision (`retry.refresh: true`). An app that loses a race with another app's webhook or CRD heals once that app is ready, and a fix pushed by the next `nic deploy` is picked up by the retries ([#450](https://github.com/nebari-dev/nebari-infrastructure-core/issues/450)). The cost is that a sync that can never succeed never ends `Failed`. Its app stays `OutOfSync`, `status.operationState.phase` stays `Running`, and the error is in `status.operationState.message` as `Retrying attempt #N: <error>`, with `retryCount` climbing. The app can stay `Healthy` while the old resources keep working.
+
+So treat an app as stuck when it's still syncing after a deadline, the way `progressDeadlineSeconds` works for a Deployment's rollout, not when it reaches `Failed`. To see the error:
+
+```bash
+kubectl -n argocd get applications -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,OPERATION:.status.operationState.phase,MESSAGE:.status.operationState.message'
+```
+
+For alerting, use how long an app has been `OutOfSync` (for example `argocd_app_info{sync_status="OutOfSync"}` for longer than your deadline), not the `Failed` phase. The smoke journey uses its convergence wait as the deadline.
 
 A first-class `nic status` / health-check subcommand does not exist today; that work is tracked but not started.
 

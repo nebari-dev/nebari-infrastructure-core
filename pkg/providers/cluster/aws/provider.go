@@ -294,7 +294,7 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 }
 
 // Deploy deploys AWS infrastructure using stateless reconciliation
-func (p *Provider) Deploy(ctx context.Context, projectName string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
+func (p *Provider) Deploy(ctx context.Context, projectName, _ string, clusterConfig *config.ClusterConfig, opts cluster.DeployOptions) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
 	ctx, span := tracer.Start(ctx, "aws.Deploy")
 	defer span.End()

@@ -30,12 +30,20 @@ var templates embed.FS
 
 const (
 	templateDir = "templates"
-	// certificateIssuerSelfSigned is the cert-manager Issuer used when the user has
-	// not configured a real ACME provider.
+	// certificateIssuerSelfSigned signs each certificate with its own key. It
+	// signs the root CA, and the operator's per-app certificates with
+	// certificate.type=existing.
 	certificateIssuerSelfSigned = "selfsigned-issuer"
+	// certificateIssuerCA signs with the cluster's root CA. It issues the
+	// gateway and per-app certificates with certificate.type=selfsigned, so
+	// they all chain to one trust anchor.
+	certificateIssuerCA = "nebari-ca-issuer"
 	// certificateIssuerLetsEncrypt is the cert-manager ACME Issuer used when the
 	// user explicitly selects Let's Encrypt.
 	certificateIssuerLetsEncrypt = "letsencrypt-issuer"
+	// rootCASecretName names both the root CA Certificate and its Secret in the
+	// cert-manager namespace.
+	rootCASecretName = "nebari-root-ca" //nolint:gosec // Secret name reference, not a credential
 )
 
 // TemplateData holds the dynamic values for template processing
@@ -51,9 +59,21 @@ type TemplateData struct {
 	StorageClass string // Provider-appropriate storage class for persistent volumes
 
 	// Certificate configuration
-	CertificateIssuer string // "selfsigned-issuer" or "letsencrypt-issuer"
+	CertificateIssuer string // "nebari-ca-issuer", "letsencrypt-issuer" or "selfsigned-issuer"
 	ACMEEmail         string
 	ACMEServer        string
+	// RootCASecretName names the root CA Certificate and Secret that back
+	// nebari-ca-issuer.
+	RootCASecretName string
+	// CAIssuerName names the ClusterIssuer that signs with the root CA. It is
+	// the same on every certificate type; CertificateIssuer only matches it on
+	// selfsigned.
+	CAIssuerName string
+	// RootCAPermittedDNSDomains lists the DNS domains the root CA may sign:
+	// the in-cluster Service domains on every type, and the platform domain
+	// only on selfsigned, where the root signs the gateway and per-app
+	// certificates.
+	RootCAPermittedDNSDomains []string
 
 	// UseExistingCertificate is true when the user supplies their own TLS cert
 	// (certificate.type=existing). When true, the cert-manager Certificate is
@@ -78,13 +98,13 @@ type TemplateData struct {
 	// mappings and the rendered service cannot drift.
 	GatewayHTTPNodePort  int
 	GatewayHTTPSNodePort int
-
-	// TrustManagerEnabled gates the trust-manager app and Bundle manifest. True
-	// when a top-level trust_bundle is configured.
-	TrustManagerEnabled bool
+	// GatewayServiceName pins the Envoy service's name when GatewayHostAddress
+	// is set, threaded from the cluster package constant so the provider's
+	// in-cluster DNS rule and the rendered service cannot drift.
+	GatewayServiceName string
 
 	// TrustBundlePEM is the raw PEM of the org CA, rendered inline into the
-	// trust-manager Bundle. Empty unless TrustManagerEnabled is true.
+	// trust-manager Bundle. Empty when no trust_bundle is configured.
 	TrustBundlePEM string
 
 	// HTTPSPort is the port used for HTTPS redirects (default: 443).
@@ -150,10 +170,13 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		GatewayHostAddress:      settings.GatewayHostAddress,
 		GatewayHTTPNodePort:     cluster.GatewayHTTPNodePort,
 		GatewayHTTPSNodePort:    cluster.GatewayHTTPSNodePort,
+		GatewayServiceName:      cluster.GatewayServiceName,
 		LoadBalancerAnnotations: settings.LoadBalancerAnnotations,
 		KeycloakBasePath:        settings.KeycloakBasePath,
 		LonghornEnabled:         settings.LonghornEnabled,
 		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
+		RootCASecretName:        rootCASecretName,
+		CAIssuerName:            certificateIssuerCA,
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -174,8 +197,19 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		data.GitPath = src.RepoPath()
 	}
 
-	// Set certificate configuration
-	if cfg.Certificate != nil && cfg.Certificate.Type == config.CertificateTypeLetsEncrypt {
+	// Set certificate configuration. Each type picks its issuer explicitly, so a
+	// new type has to choose one instead of inheriting a fallback. WriteAllToGit
+	// rejects a type that doesn't.
+	certificateType := config.CertificateTypeSelfSigned
+	if cfg.Certificate != nil && cfg.Certificate.Type != "" {
+		certificateType = cfg.Certificate.Type
+	}
+	// The internal CA renders on every certificate type; the switch only
+	// chooses which issuer serves the gateway and operator-managed certificates.
+	switch certificateType {
+	case config.CertificateTypeSelfSigned:
+		data.CertificateIssuer = certificateIssuerCA
+	case config.CertificateTypeLetsEncrypt:
 		data.CertificateIssuer = certificateIssuerLetsEncrypt
 		// Precondition: Validate() requires ACME configuration for letsencrypt.
 		// Keep the nil guard because WriteAllToGit can also be called directly.
@@ -186,7 +220,9 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 				data.ACMEServer = "https://acme-v02.api.letsencrypt.org/directory"
 			}
 		}
-	} else {
+	case config.CertificateTypeExisting:
+		// The gateway uses the user's certificate. The operator still needs an
+		// issuer for per-app certificates.
 		data.CertificateIssuer = certificateIssuerSelfSigned
 	}
 
@@ -199,6 +235,15 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 	// Default domain if not set
 	if data.Domain == "" {
 		data.Domain = "nebari.local"
+	}
+
+	// svc covers the short Service name the API server dials for webhooks,
+	// svc.cluster.local the fully qualified one. The root vouches for the
+	// platform domain only where it signs the gateway and per-app
+	// certificates; elsewhere those are public or the user's own.
+	data.RootCAPermittedDNSDomains = []string{"svc", "svc.cluster.local"}
+	if data.CertificateIssuer == certificateIssuerCA {
+		data.RootCAPermittedDNSDomains = append([]string{data.Domain}, data.RootCAPermittedDNSDomains...)
 	}
 
 	// External Keycloak URL - what Keycloak embeds in the iss claim of tokens.
@@ -348,10 +393,16 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 
 	data := NewTemplateData(cfg, src, settings)
 
-	if trustBundlePEM != "" {
-		data.TrustManagerEnabled = true
-		data.TrustBundlePEM = trustBundlePEM
+	// NewTemplateData leaves the issuer empty for a certificate type it doesn't
+	// know. Validate rejects those, but a direct caller may skip it, and an empty
+	// issuer would render certificates that never get issued.
+	if data.CertificateIssuer == "" {
+		err := fmt.Errorf("no certificate issuer for certificate type %q", cfg.Certificate.Type)
+		span.RecordError(err)
+		return err
 	}
+
+	data.TrustBundlePEM = trustBundlePEM
 
 	span.SetAttributes(
 		attribute.String("work_dir", workDir),
@@ -399,11 +450,6 @@ func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig
 
 		// Longhorn backup templates are gated on backups being enabled.
 		if isBackupPath(relPath) && !data.LonghornBackupEnabled {
-			return removeStaleTemplate(relPath, destPath, d)
-		}
-
-		// trust-manager templates only apply when a trust bundle is configured
-		if isTrustBundlePath(relPath) && !data.TrustManagerEnabled {
 			return removeStaleTemplate(relPath, destPath, d)
 		}
 
@@ -509,24 +555,14 @@ func isLonghornOnlyPath(relPath string) bool {
 		strings.HasPrefix(relPath, "manifests/networking/policies")
 }
 
-// isTrustBundlePath returns true if the relative path is a trust-manager-related
-// template (the chart Application, the Bundle Application, the Bundle manifest,
-// or the chart's base values). values/trust-manager is matched at its base.yaml
-// FILE rather than at the directory, so the gate removes only the file NIC
-// owns, with the removeStaleTemplate values/ guard underneath it.
-func isTrustBundlePath(relPath string) bool {
-	return relPath == "apps/trust-manager.yaml" ||
-		relPath == "apps/trust-bundle.yaml" ||
-		relPath == "values/trust-manager/base.yaml" ||
-		strings.HasPrefix(relPath, "manifests/security/trust-bundle")
-}
-
 const (
 	gatewayCertificatePath    = "manifests/security/certificates/gateway-certificate.yaml"
 	certificatesAppPath       = "apps/certificates.yaml"
 	gatewayReferenceGrantPath = "manifests/networking/gateway-tls-referencegrant.yaml"
 	letsencryptIssuerPath     = "manifests/security/issuers/letsencrypt-clusterissuer.yaml"
 	selfSignedIssuerPath      = "manifests/security/issuers/selfsigned-clusterissuer.yaml"
+	rootCACertificatePath     = "manifests/security/issuers/root-ca-certificate.yaml"
+	caIssuerPath              = "manifests/security/issuers/ca-clusterissuer.yaml"
 )
 
 // skipCertificateTemplate reports whether a cert-related template should be
@@ -538,10 +574,11 @@ const (
 // The certificates Application is skipped alongside the Certificate because the
 // gateway cert is the only resource in manifests/security/certificates. Leaving
 // the Application would point it at an empty directory (allowEmpty: false) and
-// it would report as failed. Issuer manifests are selected independently:
-// letsencrypt uses the ACME issuer, while selfsigned and existing use the
-// self-signed issuer (the latter remains available for operator-managed
-// per-application certificates).
+// it would report as failed. Only the ACME issuer is selected by type: it
+// renders for letsencrypt alone. The internal root CA, its nebari-ca-issuer and
+// the self-signed issuer (which signs the root, and the operator's per-app
+// certificates on existing) render on every certificate type, so they are
+// never skipped here.
 func skipCertificateTemplate(relPath string, data TemplateData) bool {
 	switch relPath {
 	case gatewayCertificatePath, certificatesAppPath:
@@ -550,8 +587,6 @@ func skipCertificateTemplate(relPath string, data TemplateData) bool {
 		return !data.GatewayTLSCrossNamespace
 	case letsencryptIssuerPath:
 		return data.CertificateIssuer != certificateIssuerLetsEncrypt
-	case selfSignedIssuerPath:
-		return data.CertificateIssuer != certificateIssuerSelfSigned
 	default:
 		return false
 	}
