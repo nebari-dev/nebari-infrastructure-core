@@ -12,7 +12,8 @@ deploys it. Afterwards, edit that file and run 'nic deploy' to change the
 cluster, or run 'nic destroy' to delete it.
 
 The software packs are written into the local GitOps repository, where ArgoCD
-installs them. Edit or delete those files to change or remove the packs.
+installs them. Edit or delete those files and commit the change to change or
+remove the packs.
 
 Use --dry-run to write the config file without deploying.
 
