@@ -25,6 +25,7 @@ NIC has four testing levels today, plus one (health) that is planned but not yet
 - **Where they run**: On demand via `workflow_dispatch` (pick one provider or `all`) and on every published release.
 - **Cost control**: One run at a time per cloud provider (concurrency groups), Let's Encrypt staging certificates, and teardown in the action's post step with the deploy step time-boxed below the job timeout so destroy always has budget. The journey step is time-boxed the same way and for the same reason.
 - **Staging certificates and the journeys**: because every cloud fixture uses the Let's Encrypt *staging* endpoint, the gateway chain is real but not publicly trusted. `nebari_journeys.trust.classify_anchor` recognises that as its own state, so certificate *validity* (expiry, hostname, chain completeness, TLS version) is still asserted on these clusters and only the *public trust* assertion is skipped. See `tests/user_journeys/README.md`, "Three kinds of trust anchor".
+- **Shared storage**: the Azure fixture enables `files`, so the shared-volume journey (two non-root pods on one ReadWriteMany volume) runs against Azure Files over NFS. Fixtures without a cloud-managed ReadWriteMany class skip it.
 
 ### User journey tests (end-to-end behaviour)
 

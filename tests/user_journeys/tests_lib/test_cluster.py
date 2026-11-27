@@ -6,7 +6,12 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
 
 from nebari_journeys import constants
-from nebari_journeys.cluster import LONGHORN_STORAGE_CLASS, Cluster
+from nebari_journeys.cluster import (
+    AZURE_FILES_PROVISIONER,
+    EFS_PROVISIONER,
+    LONGHORN_STORAGE_CLASS,
+    Cluster,
+)
 from nebari_journeys.waits import wait_for_value
 
 
@@ -235,6 +240,65 @@ def test_require_longhorn_skips_and_names_what_was_missing():
 def test_require_longhorn_does_not_skip_when_longhorn_is_present():
     cluster = _longhorn_cluster([LONGHORN_STORAGE_CLASS])
     assert cluster.require_longhorn() is None
+
+
+def _provisioned_cluster(classes):
+    """A cluster whose StorageClasses are (name, provisioner, parameters)."""
+    storage = MagicMock()
+    items = []
+    for name, provisioner, parameters in classes:
+        sc = MagicMock()
+        sc.metadata.name = name
+        sc.provisioner = provisioner
+        sc.parameters = parameters
+        items.append(sc)
+    storage.list_storage_class.return_value = MagicMock(items=items)
+    return Cluster(core=MagicMock(), custom=MagicMock(), storage=storage)
+
+
+# The SMB classes AKS ships on every cluster.
+AKS_SMB_CLASSES = [
+    ("azurefile-csi", AZURE_FILES_PROVISIONER, {"skuName": "Standard_LRS"}),
+    ("azurefile-csi-premium", AZURE_FILES_PROVISIONER, {"skuName": "Premium_LRS"}),
+]
+
+
+def test_rwx_storage_class_finds_efs_by_provisioner_not_name():
+    """The operator can rename the class, so the name is not the signal."""
+    cluster = _provisioned_cluster(
+        [("gp3", "ebs.csi.aws.com", {}), ("renamed-shared", EFS_PROVISIONER, {})]
+    )
+    assert cluster.rwx_storage_class() == "renamed-shared"
+
+
+def test_rwx_storage_class_finds_azure_files_over_nfs():
+    cluster = _provisioned_cluster(
+        AKS_SMB_CLASSES
+        + [("azurefile-nfs", AZURE_FILES_PROVISIONER, {"protocol": "nfs"})]
+    )
+    assert cluster.rwx_storage_class() == "azurefile-nfs"
+
+
+def test_rwx_storage_class_ignores_azure_files_over_smb():
+    """Every AKS cluster ships SMB classes, which NIC does not create."""
+    cluster = _provisioned_cluster(AKS_SMB_CLASSES)
+    assert cluster.rwx_storage_class() is None
+
+
+def test_rwx_storage_class_handles_a_class_without_parameters():
+    cluster = _provisioned_cluster([("azurefile", AZURE_FILES_PROVISIONER, None)])
+    assert cluster.rwx_storage_class() is None
+
+
+def test_require_rwx_skips_and_names_the_provisioners():
+    cluster = _provisioned_cluster([("managed-csi", "disk.csi.azure.com", {})])
+    with pytest.raises(pytest.skip.Exception, match=EFS_PROVISIONER):
+        cluster.require_rwx()
+
+
+def test_require_rwx_returns_the_class_name():
+    cluster = _provisioned_cluster([("efs-sc", EFS_PROVISIONER, {})])
+    assert cluster.require_rwx() == "efs-sc"
 
 
 def _longhorn_node(ready=True, allow_scheduling=True):

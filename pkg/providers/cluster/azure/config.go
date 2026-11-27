@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Config is the user-facing Azure cluster configuration as parsed from the
@@ -22,6 +26,17 @@ type Config struct {
 	Network               *NetworkConfig       `yaml:"network,omitempty"`
 	NodeGroups            map[string]NodeGroup `yaml:"node_groups"`
 	Tags                  map[string]string    `yaml:"tags,omitempty"`
+	Files                 *FilesConfig         `yaml:"files,omitempty"`
+}
+
+// FilesConfig enables a ReadWriteMany StorageClass backed by Azure Files over
+// NFS. The Azure Files CSI driver ships with AKS and creates a storage account
+// and one file share per PersistentVolumeClaim, so NIC only creates the
+// StorageClass and opens the node subnet to Azure Storage.
+type FilesConfig struct {
+	Enabled          bool   `yaml:"enabled,omitempty"`
+	SKU              string `yaml:"sku,omitempty"`                // default: PremiumV2_LRS. PremiumV2_LRS, PremiumV2_ZRS, Premium_LRS or Premium_ZRS. PremiumV2 needs kubernetes_version 1.35 or later
+	StorageClassName string `yaml:"storage_class_name,omitempty"` // default: azurefile-nfs
 }
 
 // NetworkConfig groups all VNet/subnet/CIDR knobs.
@@ -85,6 +100,73 @@ func (c *Config) Validate() error {
 	if c.Network != nil {
 		if err := c.Network.validate(); err != nil {
 			return err
+		}
+	}
+
+	if c.FilesEnabled() {
+		if err := c.Files.validate(c.KubernetesVersion); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+const (
+	defaultFilesSKU              = "PremiumV2_LRS"
+	defaultFilesStorageClassName = "azurefile-nfs"
+
+	// filesV2MinMinor is the first AKS minor version whose managed Azure Files
+	// CSI driver (v1.35.0 and later) supports the provisioned v2 SKUs. AKS
+	// ships driver v1.<minor>.x on Kubernetes 1.<minor>.
+	filesV2MinMinor = 35
+)
+
+// filesSKUs lists the SKUs that support NFS file shares. NFS needs SSD
+// (Premium) storage, so the Standard SKUs are rejected.
+var filesSKUs = []string{"PremiumV2_LRS", "PremiumV2_ZRS", "Premium_LRS", "Premium_ZRS"}
+
+// FilesEnabled reports whether the Azure Files NFS StorageClass is enabled.
+func (c *Config) FilesEnabled() bool {
+	return c.Files != nil && c.Files.Enabled
+}
+
+// FilesSKU returns the storage account SKU for NFS file shares.
+func (c *Config) FilesSKU() string {
+	if c.Files == nil || c.Files.SKU == "" {
+		return defaultFilesSKU
+	}
+	return c.Files.SKU
+}
+
+// FilesStorageClassName returns the name of the Azure Files NFS StorageClass.
+func (c *Config) FilesStorageClassName() string {
+	if c.Files == nil || c.Files.StorageClassName == "" {
+		return defaultFilesStorageClassName
+	}
+	return c.Files.StorageClassName
+}
+
+func (f *FilesConfig) validate(kubernetesVersion string) error {
+	sku := f.SKU
+	if sku == "" {
+		sku = defaultFilesSKU
+	}
+	if !slices.Contains(filesSKUs, sku) {
+		return fmt.Errorf("cluster.azure.files.sku %q is invalid (expected one of %s)", f.SKU, strings.Join(filesSKUs, ", "))
+	}
+
+	if strings.HasPrefix(sku, "PremiumV2_") && kubernetesVersion != "" {
+		// kubernetesVersion already matched kubernetesVersionRE in Validate.
+		minor, _ := strconv.Atoi(strings.Split(kubernetesVersion, ".")[1])
+		if minor < filesV2MinMinor {
+			return fmt.Errorf("cluster.azure.files.sku %q needs kubernetes_version 1.%d or later (got %q). Use Premium_LRS or Premium_ZRS on older versions", sku, filesV2MinMinor, kubernetesVersion)
+		}
+	}
+
+	if f.StorageClassName != "" {
+		if errs := validation.IsDNS1123Subdomain(f.StorageClassName); len(errs) > 0 {
+			return fmt.Errorf("cluster.azure.files.storage_class_name %q is invalid: %s", f.StorageClassName, strings.Join(errs, ", "))
 		}
 	}
 

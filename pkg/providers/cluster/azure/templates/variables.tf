@@ -46,6 +46,11 @@ variable "existing_node_subnet_id" {
   default = null
 }
 
+variable "node_subnet_service_endpoints" {
+  type    = list(string)
+  default = []
+}
+
 variable "network_plugin" {
   type    = string
   default = "azure"
