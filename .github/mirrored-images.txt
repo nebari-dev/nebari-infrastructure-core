@@ -1,0 +1,7 @@
+# Third-party images NIC points its charts at instead of their upstream
+# registries. .github/workflows/mirror-images.yml copies each line to quay by
+# digest, and TestRedisImageIsMirrored (pkg/argocd/config_test.go) checks that
+# NIC's Helm values reference a line here.
+#
+# <source repository>@<index digest> <destination repository>:<tag>
+ecr-public.aws.com/docker/library/redis@sha256:08ad0b1d280850169a790dba1393ff7a90aef951fc19632cf4d3ce4f78e679ba quay.io/nebari/redis:8.2.3-alpine
