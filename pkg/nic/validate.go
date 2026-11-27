@@ -29,7 +29,7 @@ func (c *Client) Validate(ctx context.Context, cfg *config.NebariConfig) error {
 		return err
 	}
 
-	if err := cfg.Validate(validateOptions(ctx, c.registry)); err != nil {
+	if err := cfg.Validate(ctx, validateOptions(ctx, c.registry)); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}

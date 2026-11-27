@@ -20,6 +20,14 @@ repository:
       # ssh:
       #   env: GIT_SSH_PRIVATE_KEY
 
+# Optional: shared gateway tuning. request_buffer_limit is the largest request
+# the gateway buffers per client connection; larger requests get HTTP 413.
+# LLM traffic through Envoy AI Gateway is buffered whole, so coding assistants
+# need far more than Envoy's 32Ki default. Default: 10Mi. Each connection can
+# grow to the limit, so raise it only as far as your largest requests need.
+# gateway:
+#   request_buffer_limit: 20Mi
+
 cluster:
   azure:
     region: eastus

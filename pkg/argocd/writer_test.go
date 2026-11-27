@@ -158,7 +158,7 @@ func TestNewTemplateData_WithInfraSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: "test.example.com"}
-			data := NewTemplateData(cfg, nil, tt.settings)
+			data := NewTemplateData(context.Background(), cfg, nil, tt.settings)
 			if data.StorageClass != tt.wantStorageClass {
 				t.Errorf("StorageClass = %q, want %q", data.StorageClass, tt.wantStorageClass)
 			}
@@ -190,7 +190,7 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 		StorageClass:     "hcloud-volumes",
 		KeycloakBasePath: "/auth",
 	}
-	data := NewTemplateData(cfg, nil, settings)
+	data := NewTemplateData(context.Background(), cfg, nil, settings)
 
 	if !strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
 		t.Errorf("KeycloakServiceURL = %q, should end with /auth", data.KeycloakServiceURL)
@@ -198,7 +198,7 @@ func TestNewTemplateData_KeycloakServiceURL(t *testing.T) {
 
 	// Without base path
 	settings.KeycloakBasePath = ""
-	data = NewTemplateData(cfg, nil, settings)
+	data = NewTemplateData(context.Background(), cfg, nil, settings)
 	if strings.HasSuffix(data.KeycloakServiceURL, "/auth") {
 		t.Errorf("KeycloakServiceURL = %q, should NOT end with /auth", data.KeycloakServiceURL)
 	}
@@ -736,7 +736,7 @@ func TestServiceHTTPRoutes_TargetHTTPSListener(t *testing.T) {
 // than failing, which would leave the realm-setup Job and the Keycloak
 // StatefulSet pointing at a nameless secret key. Pin the rendered strings.
 func TestKeycloakSecretCoordinatesRender(t *testing.T) {
-	data := NewTemplateData(&config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{})
+	data := NewTemplateData(context.Background(), &config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{})
 
 	tests := []struct {
 		name     string
@@ -820,7 +820,7 @@ func TestNewTemplateData_KeycloakIssuerURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: tt.domain}
 			settings := cluster.InfraSettings{KeycloakBasePath: tt.keycloakBasePath}
-			data := NewTemplateData(cfg, nil, settings)
+			data := NewTemplateData(context.Background(), cfg, nil, settings)
 
 			if data.KeycloakIssuerURL != tt.wantIssuerURL {
 				t.Errorf("KeycloakIssuerURL = %q, want %q", data.KeycloakIssuerURL, tt.wantIssuerURL)

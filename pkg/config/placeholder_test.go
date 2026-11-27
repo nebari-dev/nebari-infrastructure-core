@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -270,7 +271,7 @@ func TestValidateDoesNotRejectPlaceholders(t *testing.T) {
 		ClusterProviders:    []string{"aws"},
 		RepositoryProviders: []string{"existing"},
 	}
-	if err := cfg.Validate(opts); err != nil {
+	if err := cfg.Validate(context.Background(), opts); err != nil {
 		t.Fatalf("Validate() = %v, want nil (placeholder check must not gate Validate)", err)
 	}
 }

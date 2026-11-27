@@ -89,7 +89,7 @@ func (c *Client) Destroy(ctx context.Context, cfg *config.NebariConfig, opts Des
 
 	reg := c.registry
 
-	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
+	if err := cfg.Validate(ctx, validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}

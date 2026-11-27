@@ -1,12 +1,15 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+
+	"go.opentelemetry.io/otel"
 )
 
 // ValidateOptions configures validation behavior.
@@ -45,6 +48,9 @@ type NebariConfig struct {
 
 	// Backups configures off-cluster backup scheduling (Longhorn). Optional.
 	Backups *BackupsConfig `yaml:"backups,omitempty"`
+
+	// Gateway tunes the shared nebari-gateway (e.g. its request buffer limit). Optional.
+	Gateway *GatewayConfig `yaml:"gateway,omitempty"`
 
 	// sourcePath and sourceRaw record where this config was parsed from, when it
 	// was parsed from YAML at all. Checks that must inspect the original document
@@ -434,7 +440,16 @@ var safeProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // Validate checks that the configuration is valid.
 // The opts parameter provides the set of valid provider names, injected by the caller.
 // Returns an error describing the first validation failure encountered.
-func (c *NebariConfig) Validate(opts ValidateOptions) error {
+func (c *NebariConfig) Validate(ctx context.Context, opts ValidateOptions) (err error) {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "config.NebariConfig.Validate")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+		}
+	}()
+
 	if c.ProjectName == "" {
 		return fmt.Errorf("project_name field is required")
 	}
@@ -474,6 +489,10 @@ func (c *NebariConfig) Validate(opts ValidateOptions) error {
 
 	if err := c.Backups.Validate(c.Cluster.ProviderName()); err != nil {
 		return fmt.Errorf("invalid backups: %w", err)
+	}
+
+	if err := c.Gateway.Validate(ctx); err != nil {
+		return fmt.Errorf("invalid gateway: %w", err)
 	}
 
 	return nil

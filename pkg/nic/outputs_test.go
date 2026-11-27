@@ -27,6 +27,7 @@ import (
 // secret names, keys, or the issuer URL formula.
 func testTemplateData(domain string) argocd.TemplateData {
 	return argocd.NewTemplateData(
+		context.Background(),
 		&config.NebariConfig{Domain: domain},
 		nil,
 		cluster.InfraSettings{},
@@ -231,6 +232,7 @@ func nodePortGatewayService(httpNodePort, httpsNodePort int32) *corev1.Service {
 // resolveOutputs dials a port the test controls instead of the real 443.
 func hostPortData(port int) argocd.TemplateData {
 	return argocd.NewTemplateData(
+		context.Background(),
 		&config.NebariConfig{Domain: "nebari.local"},
 		nil,
 		cluster.InfraSettings{GatewayHostAddress: "127.0.0.1", HTTPSPort: port},

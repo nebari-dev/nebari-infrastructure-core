@@ -2,6 +2,7 @@ package argocd
 
 import (
 	"bytes"
+	"context"
 	"path"
 	"testing"
 	"text/template"
@@ -32,7 +33,7 @@ func TestApplications_RetryIndefinitely(t *testing.T) {
 	if len(apps) == 0 {
 		t.Fatal("Applications() returned no apps, so only the root app would be checked")
 	}
-	data := NewTemplateData(&config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{StorageClass: "gp2"})
+	data := NewTemplateData(context.Background(), &config.NebariConfig{Domain: "test.example.com"}, nil, cluster.InfraSettings{StorageClass: "gp2"})
 	for _, app := range apps {
 		name := path.Join("templates/apps", app+".yaml")
 		content, err := templates.ReadFile(name)

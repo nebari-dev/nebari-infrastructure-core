@@ -365,7 +365,7 @@ func TestStructuralValidatePermitsZoneInconsistency(t *testing.T) {
 			"cloudflare": map[string]any{},
 		}),
 	} {
-		if err := cfg.Validate(opts); err != nil {
+		if err := cfg.Validate(context.Background(), opts); err != nil {
 			t.Errorf("structural Validate() unexpected error for %q: %v", cfg.Domain, err)
 		}
 	}

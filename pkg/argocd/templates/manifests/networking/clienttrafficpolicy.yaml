@@ -1,0 +1,26 @@
+# Raises the per-connection buffer limit on nebari-gateway (#389). Envoy AI
+# Gateway buffers the whole request body to read the model name, and Envoy
+# Gateway's default limit of 32Ki (internal/xds/translator/listener.go) rejects
+# realistic LLM client requests with HTTP 413 before they reach the backend.
+# The limit is set by gateway.request_buffer_limit in the NIC config.
+#
+# A Gateway-wide policy also covers listeners attached through a ListenerSet,
+# unless a more specific policy targets that ListenerSet. Only one Gateway-wide
+# ClientTrafficPolicy can attach to nebari-gateway: Envoy Gateway applies the
+# oldest by creation time and marks later ones Conflicted, so a pack must not
+# ship its own Gateway-wide policy (it would block or lose to this one).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: nebari-gateway-buffer-limit
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/name: nebari-gateway-buffer-limit
+    app.kubernetes.io/managed-by: nebari-infrastructure-core
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: nebari-gateway
+  connection:
+    bufferLimit: "{{ .GatewayRequestBufferLimit }}"
