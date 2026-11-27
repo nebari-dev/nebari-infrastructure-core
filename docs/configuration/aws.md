@@ -9,6 +9,7 @@ Configuration options specific to Amazon Web Services (EKS).
 - [Config](#config)
 - [AWSLoadBalancerControllerConfig](#awsloadbalancercontrollerconfig)
 - [ClusterAutoscalerConfig](#clusterautoscalerconfig)
+- [NetworkPolicyConfig](#networkpolicyconfig)
 - [NodeGroup](#nodegroup)
 - [Taint](#taint)
 - [EFSConfig](#efsconfig)
@@ -44,6 +45,7 @@ Configuration options specific to Amazon Web Services (EKS).
 | Longhorn | `longhorn` | `*longhorn.Config` | No |  |
 | AWSLoadBalancerController | `aws_load_balancer_controller` | `*AWSLoadBalancerControllerConfig` | No |  |
 | ClusterAutoscaler | `cluster_autoscaler` | `*ClusterAutoscalerConfig` | No |  |
+| NetworkPolicy | `network_policy` | `*NetworkPolicyConfig` | No | NetworkPolicy enforcement by the VPC CNI. On by default. Turning it on for an existing cluster starts enforcing every NetworkPolicy already on it. |
 | LoadBalancerScheme | `load_balancer_scheme` | string | No |  |
 | EnableIRSA | `enable_irsa` | `*bool` | No | EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for Service Accounts. When unset, the upstream module default (true) applies. Set false when the cluster relies exclusively on EKS... |
 
@@ -66,6 +68,19 @@ Configuration options specific to Amazon Web Services (EKS).
 | Enabled | `enabled` | `*bool` | No |  |
 | ChartVersion | `chart_version` | string | No |  |
 | ImageTag | `image_tag` | string | No |  |
+
+---
+
+## NetworkPolicyConfig
+
+NetworkPolicyConfig configures NetworkPolicy enforcement by the VPC CNI
+addon.
+
+| Field | YAML Key | Type | Required | Description |
+|-------|----------|------|----------|-------------|
+| Enabled | `enabled` | `*bool` | No | Enforce NetworkPolicy (the addon's enableNetworkPolicy). Default: true. |
+| Mode | `mode` | string | No | Enforcement mode. Only standard is supported: a pod no NetworkPolicy selects is open. Default: standard. |
+| EventLogs | `event_logs` | bool | No | Log allow and deny decisions on each node (nodeAgent.enablePolicyEventLogs), for debugging denied traffic. Default: false. |
 
 ---
 

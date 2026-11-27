@@ -1,6 +1,7 @@
 module "eks_cluster" {
-  source  = "nebari-dev/eks-cluster/aws"
-  version = "0.11.0"
+  # TODO: switch back to the registry source and the release that includes
+  # nebari-dev/terraform-aws-eks-cluster#57 before this merges.
+  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feat/vpc-cni-network-policy"
 
 
   project_name                             = var.project_name
@@ -35,6 +36,8 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
+  network_policy_enabled                   = var.network_policy_enabled
+  network_policy_event_logs                = var.network_policy_event_logs
 
   longhorn_backup_bucket_create        = var.backup_bucket_create
   longhorn_backup_bucket_name          = var.backup_bucket_name

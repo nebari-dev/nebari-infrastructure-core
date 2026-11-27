@@ -43,7 +43,10 @@ type Config struct {
 	Longhorn                  *longhorn.Config                 `yaml:"longhorn,omitempty"`
 	AWSLoadBalancerController *AWSLoadBalancerControllerConfig `yaml:"aws_load_balancer_controller,omitempty"`
 	ClusterAutoscaler         *ClusterAutoscalerConfig         `yaml:"cluster_autoscaler,omitempty"`
-	LoadBalancerScheme        string                           `yaml:"load_balancer_scheme,omitempty"`
+	// NetworkPolicy enforcement by the VPC CNI. On by default. Turning it on for
+	// an existing cluster starts enforcing every NetworkPolicy already on it.
+	NetworkPolicy      *NetworkPolicyConfig `yaml:"network_policy,omitempty"`
+	LoadBalancerScheme string               `yaml:"load_balancer_scheme,omitempty"`
 	// EnableIRSA toggles creation of the EKS OIDC provider for IAM Roles for
 	// Service Accounts. When unset, the upstream module default (true) applies.
 	// Set false when the cluster relies exclusively on EKS Pod Identity, or
@@ -162,6 +165,50 @@ func (c *Config) ClusterAutoscalerImageTag() string {
 		return ""
 	}
 	return fmt.Sprintf("v%s.0", c.KubernetesVersion)
+}
+
+// NetworkPolicyConfig configures NetworkPolicy enforcement by the VPC CNI
+// addon.
+type NetworkPolicyConfig struct {
+	// Enforce NetworkPolicy (the addon's enableNetworkPolicy). Default: true.
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// Enforcement mode. Only standard is supported: a pod no NetworkPolicy
+	// selects is open. Default: standard.
+	Mode string `yaml:"mode,omitempty"`
+	// Log allow and deny decisions on each node (nodeAgent.enablePolicyEventLogs),
+	// for debugging denied traffic. Default: false.
+	EventLogs bool `yaml:"event_logs,omitempty"`
+}
+
+const networkPolicyModeStandard = "standard"
+
+// NetworkPolicyEnabled returns whether the VPC CNI enforces NetworkPolicy.
+// Defaults to true.
+func (c *Config) NetworkPolicyEnabled() bool {
+	if c.NetworkPolicy == nil || c.NetworkPolicy.Enabled == nil {
+		return true
+	}
+	return *c.NetworkPolicy.Enabled
+}
+
+// NetworkPolicyEventLogs returns whether the VPC CNI network policy agent logs
+// allow and deny decisions. Defaults to false.
+func (c *Config) NetworkPolicyEventLogs() bool {
+	return c.NetworkPolicy != nil && c.NetworkPolicy.EventLogs
+}
+
+// validateNetworkPolicy checks the network_policy block. Strict mode is
+// rejected until NIC ships a NetworkPolicy for each of its own namespaces
+// (nebari-dev/nebari-infrastructure-core#800); without them, strict cuts off
+// every NIC component, DNS included.
+func validateNetworkPolicy(c *Config) error {
+	if c.NetworkPolicy == nil || c.NetworkPolicy.Mode == "" || c.NetworkPolicy.Mode == networkPolicyModeStandard {
+		return nil
+	}
+	if c.NetworkPolicy.Mode == "strict" {
+		return fmt.Errorf("network_policy.mode: strict is not supported yet (see https://github.com/nebari-dev/nebari-infrastructure-core/issues/800); use %q", networkPolicyModeStandard)
+	}
+	return fmt.Errorf("network_policy.mode: invalid mode %q (must be %q)", c.NetworkPolicy.Mode, networkPolicyModeStandard)
 }
 
 type NodeGroup struct {

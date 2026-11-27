@@ -155,6 +155,16 @@ variable "enable_irsa" {
   default = true
 }
 
+variable "network_policy_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "network_policy_event_logs" {
+  type    = bool
+  default = false
+}
+
 variable "backup_bucket_create" {
   type    = bool
   default = false

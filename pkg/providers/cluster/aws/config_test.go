@@ -398,3 +398,74 @@ func TestProviderInfraSettingsStorageClass(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworkPolicyEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "nil NetworkPolicy defaults to enabled",
+			config:   Config{NetworkPolicy: nil},
+			expected: true,
+		},
+		{
+			name:     "empty NetworkPolicy defaults to enabled",
+			config:   Config{NetworkPolicy: &NetworkPolicyConfig{}},
+			expected: true,
+		},
+		{
+			name:     "explicitly enabled",
+			config:   Config{NetworkPolicy: &NetworkPolicyConfig{Enabled: boolPtr(true)}},
+			expected: true,
+		},
+		{
+			name:     "explicitly disabled",
+			config:   Config{NetworkPolicy: &NetworkPolicyConfig{Enabled: boolPtr(false)}},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.NetworkPolicyEnabled()
+			if got != tt.expected {
+				t.Errorf("NetworkPolicyEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNetworkPolicyEventLogs(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   Config
+		expected bool
+	}{
+		{
+			name:     "nil NetworkPolicy defaults to off",
+			config:   Config{NetworkPolicy: nil},
+			expected: false,
+		},
+		{
+			name:     "unset defaults to off",
+			config:   Config{NetworkPolicy: &NetworkPolicyConfig{}},
+			expected: false,
+		},
+		{
+			name:     "explicitly on",
+			config:   Config{NetworkPolicy: &NetworkPolicyConfig{EventLogs: true}},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.NetworkPolicyEventLogs()
+			if got != tt.expected {
+				t.Errorf("NetworkPolicyEventLogs() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
