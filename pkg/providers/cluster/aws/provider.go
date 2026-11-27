@@ -220,6 +220,11 @@ func (p *Provider) Validate(ctx context.Context, projectName string, clusterConf
 		return err
 	}
 
+	if err := validateNetworkPolicy(awsCfg); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
 	// Validate load_balancer_scheme if specified
 	if awsCfg.LoadBalancerScheme != "" && !contains(validLoadBalancerSchemes, awsCfg.LoadBalancerScheme) {
 		err := fmt.Errorf("invalid load_balancer_scheme %q (must be one of: %v)",

@@ -299,3 +299,64 @@ func TestInfraSettings_LoadBalancerScheme(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateNetworkPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      Config
+		errContains string
+	}{
+		{name: "unset is valid", config: Config{}},
+		{name: "empty block is valid", config: Config{NetworkPolicy: &NetworkPolicyConfig{}}},
+		{name: "standard mode is valid", config: Config{NetworkPolicy: &NetworkPolicyConfig{Mode: "standard"}}},
+		{name: "disabled is valid", config: Config{NetworkPolicy: &NetworkPolicyConfig{Enabled: boolPtr(false)}}},
+		{
+			name:        "strict mode is not supported yet",
+			config:      Config{NetworkPolicy: &NetworkPolicyConfig{Mode: "strict"}},
+			errContains: "network_policy.mode",
+		},
+		{
+			name:        "unknown mode is rejected",
+			config:      Config{NetworkPolicy: &NetworkPolicyConfig{Mode: "Standard"}},
+			errContains: "network_policy.mode",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNetworkPolicy(&tt.config)
+			if tt.errContains == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.errContains)
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Fatalf("expected error containing %q, got: %v", tt.errContains, err)
+			}
+		})
+	}
+}
+
+func TestValidate_NetworkPolicyMode(t *testing.T) {
+	p := NewProvider()
+	cfg := &config.ClusterConfig{Providers: map[string]any{"aws": map[string]any{
+		"region":             "us-west-2",
+		"kubernetes_version": "1.34",
+		"network_policy":     map[string]any{"mode": "strict"},
+		"node_groups": map[string]any{
+			"general": map[string]any{"instance": "m5.large"},
+		},
+	}}}
+
+	err := p.Validate(context.Background(), "test-project", cfg)
+	if err == nil {
+		t.Fatal("expected error for network_policy.mode strict, got nil")
+	}
+	if !strings.Contains(err.Error(), "network_policy.mode") {
+		t.Fatalf("expected error to mention network_policy.mode, got: %v", err)
+	}
+}

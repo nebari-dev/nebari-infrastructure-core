@@ -59,11 +59,15 @@ type TFVars struct {
 	ExtraCABundle                 *string              `json:"extra_ca_bundle,omitempty"`
 	// No omitempty: a false value must be emitted so it overrides the module's
 	// `true` default when the autoscaler is disabled.
-	EnableClusterAutoscalerPodIdentity bool   `json:"enable_cluster_autoscaler_pod_identity"`
-	EnableIRSA                         *bool  `json:"enable_irsa,omitempty"`
-	BackupBucketCreate                 bool   `json:"backup_bucket_create"`
-	BackupBucketName                   string `json:"backup_bucket_name,omitempty"`
-	BackupBucketForceDestroy           bool   `json:"backup_bucket_force_destroy"`
+	EnableClusterAutoscalerPodIdentity bool  `json:"enable_cluster_autoscaler_pod_identity"`
+	EnableIRSA                         *bool `json:"enable_irsa,omitempty"`
+	// No omitempty: a false value must be emitted so it overrides the
+	// template's `true` default when enforcement is disabled.
+	NetworkPolicyEnabled     bool   `json:"network_policy_enabled"`
+	NetworkPolicyEventLogs   bool   `json:"network_policy_event_logs"`
+	BackupBucketCreate       bool   `json:"backup_bucket_create"`
+	BackupBucketName         string `json:"backup_bucket_name,omitempty"`
+	BackupBucketForceDestroy bool   `json:"backup_bucket_force_destroy"`
 	// BackupPodIdentityEnable provisions a keyless IAM-role (EKS Pod Identity)
 	// association for Longhorn's service account, scoped to the backup bucket.
 	BackupPodIdentityEnable bool `json:"backup_pod_identity_enable"`
@@ -184,6 +188,8 @@ func (c *Config) toTFVars(projectName, caBundle string, backup *cluster.BackupBu
 		// Only provision the autoscaler's IAM role / pod identity association
 		// when the autoscaler itself will be installed (see provider deploy).
 		EnableClusterAutoscalerPodIdentity: c.ClusterAutoscalerEnabled(),
+		NetworkPolicyEnabled:               c.NetworkPolicyEnabled(),
+		NetworkPolicyEventLogs:             c.NetworkPolicyEventLogs(),
 	}
 
 	// Set pointer fields only when values are provided, so omitempty excludes them from JSON.

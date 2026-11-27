@@ -1,6 +1,6 @@
 module "eks_cluster" {
   source  = "nebari-dev/eks-cluster/aws"
-  version = "0.11.0"
+  version = "0.12.0"
 
 
   project_name                             = var.project_name
@@ -35,6 +35,8 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
+  vpc_cni_network_policy_enabled           = var.network_policy_enabled
+  vpc_cni_network_policy_event_logs        = var.network_policy_event_logs
 
   longhorn_backup_bucket_create        = var.backup_bucket_create
   longhorn_backup_bucket_name          = var.backup_bucket_name

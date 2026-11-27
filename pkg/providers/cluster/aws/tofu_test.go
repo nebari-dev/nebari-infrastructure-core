@@ -615,3 +615,60 @@ func TestToTFVarsNodeGroupAvailabilityZones(t *testing.T) {
 		t.Errorf("user-a: expected availability_zones [us-west-2a], got %v", vars.NodeGroups["user-a"]["availability_zones"])
 	}
 }
+
+func TestToTFVarsNetworkPolicy(t *testing.T) {
+	nodeGroups := map[string]NodeGroup{"general": {Instance: "m5.xlarge"}}
+	tests := []struct {
+		name              string
+		networkPolicy     *NetworkPolicyConfig
+		expectedEnabled   bool
+		expectedEventLogs bool
+	}{
+		{
+			name:            "enforcement on by default",
+			networkPolicy:   nil,
+			expectedEnabled: true,
+		},
+		{
+			name:            "enforcement explicitly disabled",
+			networkPolicy:   &NetworkPolicyConfig{Enabled: boolPtr(false)},
+			expectedEnabled: false,
+		},
+		{
+			name:              "event logs on",
+			networkPolicy:     &NetworkPolicyConfig{EventLogs: true},
+			expectedEnabled:   true,
+			expectedEventLogs: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{Region: "us-west-2", NodeGroups: nodeGroups, NetworkPolicy: tt.networkPolicy}
+			vars := cfg.toTFVars("test-project", "", nil, "")
+			if vars.NetworkPolicyEnabled != tt.expectedEnabled {
+				t.Errorf("NetworkPolicyEnabled = %v, want %v", vars.NetworkPolicyEnabled, tt.expectedEnabled)
+			}
+			if vars.NetworkPolicyEventLogs != tt.expectedEventLogs {
+				t.Errorf("NetworkPolicyEventLogs = %v, want %v", vars.NetworkPolicyEventLogs, tt.expectedEventLogs)
+			}
+
+			// Both values must always be emitted: with omitempty, a false
+			// network_policy_enabled would be dropped and the template's true
+			// default would turn enforcement back on.
+			raw, err := json.Marshal(vars)
+			if err != nil {
+				t.Fatalf("marshal TFVars: %v", err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("unmarshal TFVars: %v", err)
+			}
+			for _, key := range []string{"network_policy_enabled", "network_policy_event_logs"} {
+				if _, ok := decoded[key]; !ok {
+					t.Errorf("TFVars JSON is missing %q", key)
+				}
+			}
+		})
+	}
+}
