@@ -176,7 +176,7 @@ ports:
     protocol: TCP
 
 # Software-pack extension point: see ADR-0008. A Nebari software
-# pack (e.g. nebari-lgtm-pack) creates a ConfigMap named
+# pack (e.g. lgtm-pack) creates a ConfigMap named
 # `opentelemetry-collector-overrides` in the `monitoring` namespace
 # containing a `relay.yaml` key — a partial OTel config that's
 # deep-merged with the base config above at collector startup. The

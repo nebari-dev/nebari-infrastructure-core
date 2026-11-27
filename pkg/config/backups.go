@@ -162,7 +162,7 @@ func normalizePrefix(p string) string {
 }
 
 // fiveFieldCron matches a 5-field cron expression (same guard the
-// nebari-longhorn-backup-pack chart used). It is intentionally permissive about
+// longhorn-backup-pack chart used). It is intentionally permissive about
 // field contents — it only enforces the 5-field shape.
 var fiveFieldCron = regexp.MustCompile(`^(\S+\s+){4}\S+$`)
 

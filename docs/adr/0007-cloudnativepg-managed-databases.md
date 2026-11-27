@@ -16,8 +16,8 @@ The Bitnami situation makes that structural gap concrete. On 2025-08-28, Broadco
 
 This is already biting across the ecosystem, with each pack inventing its own workaround for the same upstream disruption:
 
-- [`nebari-superset-pack`](https://github.com/nebari-dev/nebari-superset-pack) pins its bundled Postgres and Redis to the `bitnamilegacy/` mirror, with an explicit comment in `chart/values.yaml` that upstream defaults now "reference removed tags." The pack is running on a frozen image set.
-- [`nebari-mlflow-pack`](https://github.com/nebari-dev/nebari-mlflow-pack) enables a bundled Postgres sub-chart from the upstream mlflow community chart, with values matching the standard Bitnami shape (`auth.existingSecret`, `primary.persistence`, `postgres-password` key).
+- [`superset-pack`](https://github.com/nebari-dev/superset-pack) pins its bundled Postgres and Redis to the `bitnamilegacy/` mirror, with an explicit comment in `chart/values.yaml` that upstream defaults now "reference removed tags." The pack is running on a frozen image set.
+- [`mlflow-pack`](https://github.com/nebari-dev/mlflow-pack) enables a bundled Postgres sub-chart from the upstream mlflow community chart, with values matching the standard Bitnami shape (`auth.existingSecret`, `primary.persistence`, `postgres-password` key).
 - NIC core's foundational Keycloak Postgres at `pkg/argocd/templates/apps/postgresql.yaml` uses the Bitnami chart at v18.2.0.
 
 Three packs, three independent responses to the same upstream change. The Bitnami paywall won't be the last disruption packs face; the next one will fragment the same way unless the platform owns the database contract.
@@ -28,7 +28,7 @@ Issue [#303](https://github.com/nebari-dev/nebari-infrastructure-core/issues/303
 
 - Give packs a self-service database contract owned by the platform, so the next upstream disruption (after Bitnami) doesn't fragment the same way.
 - Centralize database lifecycle management around the platform rather than around individual contributors; no person-in-the-loop for the routine "I need a Postgres" case.
-- Remove the dependency on `bitnamilegacy/` frozen images for the packs currently relying on it (`nebari-superset-pack`, NIC core's Keycloak Postgres, and the implicit Bitnami-derived sub-chart in `nebari-mlflow-pack`).
+- Remove the dependency on `bitnamilegacy/` frozen images for the packs currently relying on it (`superset-pack`, NIC core's Keycloak Postgres, and the implicit Bitnami-derived sub-chart in `mlflow-pack`).
 - Match the existing per-pack provisioning pattern (Keycloak OIDC client) so the operator's responsibility surface stays consistent.
 - Preserve pack flexibility: any pack that has a reason to use its own database elsewhere (managed RDS, hosted DBaaS, self-managed cluster) must remain free to do that. This ADR establishes a default, not a mandate.
 

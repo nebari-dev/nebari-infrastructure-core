@@ -1544,7 +1544,7 @@ func TestWriteApplication_OtelCollector_OverridesExtensionPoint(t *testing.T) {
 	}
 	baseContent := string(baseRaw)
 
-	// Software packs (e.g. nebari-lgtm-pack) drop a ConfigMap named
+	// Software packs (e.g. lgtm-pack) drop a ConfigMap named
 	// `opentelemetry-collector-overrides` containing `relay.yaml`; the init
 	// container resolves it (or falls back to `{}`) into an emptyDir that the
 	// collector reads via an extra --config flag. This sidesteps the upstream

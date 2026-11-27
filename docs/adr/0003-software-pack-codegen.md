@@ -10,7 +10,7 @@ Proposed
 
 ## Context
 
-NIC deploys a fixed set of foundational services (cert-manager, Keycloak, PostgreSQL, etc.) as ArgoCD Applications written to a GitOps repository. Users who want to extend their Nebari deployment with additional software packs - like [nebari-data-science-pack](https://github.com/nebari-dev/nebari-data-science-pack) - must manually author ArgoCD Application manifests and wire up Helm values for domain, storage class, Keycloak integration, and other deployment-specific settings.
+NIC deploys a fixed set of foundational services (cert-manager, Keycloak, PostgreSQL, etc.) as ArgoCD Applications written to a GitOps repository. Users who want to extend their Nebari deployment with additional software packs - like [data-science-pack](https://github.com/nebari-dev/data-science-pack) - must manually author ArgoCD Application manifests and wire up Helm values for domain, storage class, Keycloak integration, and other deployment-specific settings.
 
 This is error-prone and creates a barrier to adoption. NIC already has all the deployment context needed to generate these manifests automatically.
 
@@ -100,11 +100,11 @@ Three layers with clear precedence (highest wins):
 ```yaml
 software_packs:
   # Git repo source (minimal)
-  - url: "https://github.com/nebari-dev/nebari-data-science-pack"
+  - url: "https://github.com/nebari-dev/data-science-pack"
     version: "v0.1.0-alpha.10"
 
   # Git repo source with overrides
-  - url: "https://github.com/nebari-dev/nebari-data-science-pack"
+  - url: "https://github.com/nebari-dev/data-science-pack"
     version: "v0.1.0-alpha.10"
     namespace: "datascience"
     values:
@@ -114,7 +114,7 @@ software_packs:
         enabled: true
 
   # With external values file
-  - url: "https://github.com/nebari-dev/nebari-data-science-pack"
+  - url: "https://github.com/nebari-dev/data-science-pack"
     version: "v0.1.0-alpha.10"
     values_file: "overrides/data-science.yaml"
 
@@ -189,7 +189,7 @@ metadata:
 spec:
   project: software-packs
   source:
-    repoURL: https://github.com/nebari-dev/nebari-data-science-pack
+    repoURL: https://github.com/nebari-dev/data-science-pack
     targetRevision: v0.1.0-alpha.10
     path: .
     helm:
@@ -279,4 +279,4 @@ New and modified packages:
 ## Links
 
 - [GitHub Issue #152](https://github.com/nebari-dev/nebari-infrastructure-core/issues/152)
-- [nebari-data-science-pack](https://github.com/nebari-dev/nebari-data-science-pack) - reference software pack
+- [data-science-pack](https://github.com/nebari-dev/data-science-pack) - reference software pack

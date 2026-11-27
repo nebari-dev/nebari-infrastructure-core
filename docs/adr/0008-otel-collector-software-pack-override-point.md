@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The OpenTelemetry Collector is deployed as a foundational service in NIC, configured with sensible defaults for metrics collection (pod scraping, cAdvisor, kubelet). However, software packs like `nebari-lgtm-pack` need to customize the collector's configuration — adding exporters (OTLP to Mimir/Tempo/Loki), adjusting pipelines, or enabling additional receivers.
+The OpenTelemetry Collector is deployed as a foundational service in NIC, configured with sensible defaults for metrics collection (pod scraping, cAdvisor, kubelet). However, software packs like `lgtm-pack` need to customize the collector's configuration — adding exporters (OTLP to Mimir/Tempo/Loki), adjusting pipelines, or enabling additional receivers.
 
 ArgoCD's `ignoreDifferences` mechanism would be the natural way to let external resources modify a shared ConfigMap, but it has a critical bug: ignored differences are not preserved across sync operations (argoproj/argo-cd#7478). This means any configuration injected by a software pack would be reverted on the next ArgoCD sync.
 
@@ -141,7 +141,7 @@ collector:
 **Guidance:**
 
 - Reserve the override for the **single telemetry-backend pack** (e.g.
-  `nebari-lgtm-pack`) that defines *where* telemetry is exported.
+  `lgtm-pack`) that defines *where* telemetry is exported.
 - **Producer** packs that merely generate telemetry must use the collector's
   ingest paths instead: send OTLP to the collector's `4317`/`4318` endpoints,
   or annotate pods with `prometheus.io/scrape`. They must never write the
