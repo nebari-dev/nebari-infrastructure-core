@@ -35,7 +35,7 @@ cluster:
 
 To upgrade without turning enforcement on, set `enabled: false`. Policies stay inert, as before.
 
-`event_logs: true` makes the network policy agent log every allow and deny decision to a file on each node, which helps when working out why traffic is blocked. See the [network policy agent README](https://github.com/aws/aws-network-policy-agent#readme) for where it writes them.
+`event_logs: true` makes the network policy agent log every allow and deny decision on each node, which helps when working out why traffic is blocked. The decisions are written to `/var/log/aws-routed-eni/network-policy-agent.log` on the node, not to CloudWatch.
 
 `mode: strict`, where a pod no policy selects gets no traffic at all, is not supported yet. It needs a NetworkPolicy for each of NIC's own namespaces first. See [#800](https://github.com/nebari-dev/nebari-infrastructure-core/issues/800).
 

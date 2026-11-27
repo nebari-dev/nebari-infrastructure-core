@@ -36,8 +36,8 @@ module "eks_cluster" {
   node_security_group_additional_rules     = var.node_security_group_additional_rules
   extra_ca_bundle                          = var.extra_ca_bundle
   enable_irsa                              = var.enable_irsa
-  network_policy_enabled                   = var.network_policy_enabled
-  network_policy_event_logs                = var.network_policy_event_logs
+  vpc_cni_network_policy_enabled           = var.network_policy_enabled
+  vpc_cni_network_policy_event_logs        = var.network_policy_event_logs
 
   longhorn_backup_bucket_create        = var.backup_bucket_create
   longhorn_backup_bucket_name          = var.backup_bucket_name
