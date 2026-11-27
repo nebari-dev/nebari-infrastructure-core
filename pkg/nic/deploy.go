@@ -98,7 +98,7 @@ func (c *Client) Deploy(ctx context.Context, cfg *config.NebariConfig, opts Depl
 	}
 
 	// Validate configuration with registered providers
-	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
+	if err := cfg.Validate(ctx, validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}

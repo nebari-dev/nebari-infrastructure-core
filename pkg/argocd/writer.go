@@ -113,6 +113,10 @@ type TemplateData struct {
 	// LoadBalancerAnnotations are added to the Gateway's provisioned LoadBalancer Service.
 	LoadBalancerAnnotations map[string]string
 
+	// GatewayRequestBufferLimit is the per-connection request buffer limit
+	// rendered into the gateway's ClientTrafficPolicy (a Kubernetes quantity).
+	GatewayRequestBufferLimit string
+
 	// KeycloakBasePath is appended to the Keycloak in-cluster URL (e.g., "/auth").
 	KeycloakBasePath string
 
@@ -155,7 +159,11 @@ type TemplateData struct {
 
 // NewTemplateData creates TemplateData from NebariConfig, the resolved GitOps
 // repository source, and provider InfraSettings.
-func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings) TemplateData {
+func NewTemplateData(ctx context.Context, cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings) TemplateData {
+	tracer := otel.Tracer("nebari-infrastructure-core")
+	ctx, span := tracer.Start(ctx, "argocd.NewTemplateData")
+	defer span.End()
+
 	keycloakServiceName := "keycloak-keycloakx-http"
 
 	httpsPort := settings.HTTPSPort
@@ -177,6 +185,8 @@ func NewTemplateData(cfg *config.NebariConfig, src repository.Source, settings c
 		LonghornOIDCSecretName:  LonghornOIDCClientSecretName,
 		RootCASecretName:        rootCASecretName,
 		CAIssuerName:            certificateIssuerCA,
+
+		GatewayRequestBufferLimit: cfg.Gateway.RequestBufferLimitOrDefault(ctx),
 
 		KeycloakNamespace:            KeycloakDefaultNamespace,
 		KeycloakServiceName:          keycloakServiceName,
@@ -388,10 +398,10 @@ func WriteAll(ctx context.Context, fn func(appName string) (io.WriteCloser, erro
 // layer (empty when no bundle is configured); it is not re-read from disk here.
 func WriteAllToGit(ctx context.Context, workDir string, cfg *config.NebariConfig, src repository.Source, settings cluster.InfraSettings, trustBundlePEM string) error {
 	tracer := otel.Tracer("nebari-infrastructure-core")
-	_, span := tracer.Start(ctx, "argocd.WriteAllToGit")
+	ctx, span := tracer.Start(ctx, "argocd.WriteAllToGit")
 	defer span.End()
 
-	data := NewTemplateData(cfg, src, settings)
+	data := NewTemplateData(ctx, cfg, src, settings)
 
 	// NewTemplateData leaves the issuer empty for a certificate type it doesn't
 	// know. Validate rejects those, but a direct caller may skip it, and an empty

@@ -158,7 +158,7 @@ func InstallFoundationalServices(ctx context.Context, cfg *config.NebariConfig, 
 
 	// 1. Install ArgoCD AppProjects (foundational scoped, nebari-apps, default deny-all)
 	settings := clusterProvider.InfraSettings(cfg.Cluster)
-	projectData := NewTemplateData(cfg, src, settings)
+	projectData := NewTemplateData(ctx, cfg, src, settings)
 	if err := InstallProject(ctx, kubeconfigBytes, projectData); err != nil {
 		span.RecordError(err)
 		status.Send(ctx, status.NewUpdate(status.LevelWarning, "Failed to install ArgoCD Project").

@@ -459,6 +459,21 @@ func TestNebariConfigValidate(t *testing.T) {
 			wantErr:     true,
 			errContains: "invalid backups",
 		},
+		{
+			name: "invalid gateway request buffer limit",
+			config: NebariConfig{
+				ProjectName: "test-project",
+				Cluster: &ClusterConfig{
+					Providers: map[string]any{"aws": map[string]any{}},
+				},
+				Repository: &RepositoryConfig{
+					Providers: map[string]any{"existing": map[string]any{}},
+				},
+				Gateway: &GatewayConfig{RequestBufferLimit: "50MB"},
+			},
+			wantErr:     true,
+			errContains: "invalid gateway",
+		},
 	}
 
 	opts := ValidateOptions{
@@ -468,7 +483,7 @@ func TestNebariConfigValidate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate(opts)
+			err := tt.config.Validate(context.Background(), opts)
 
 			if tt.wantErr {
 				if err == nil {

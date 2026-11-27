@@ -124,6 +124,12 @@ var configFiles = []configFile{
 		docDesc:  "Off-cluster backup scheduling for Longhorn volumes (S3/Azure targets, retention, keyless auth).",
 	},
 	{
+		// GatewayConfig is a top-level NebariConfig field in its own file.
+		path:     "pkg/config/gateway.go",
+		docTitle: "Gateway Configuration",
+		docDesc:  "Tuning for the shared nebari-gateway, such as the request buffer limit that bounds LLM request size.",
+	},
+	{
 		// longhorn.Config is referenced as *longhorn.Config from the AWS, Hetzner
 		// and existing-cluster provider configs but lives outside pkg/config and
 		// pkg/providers, so neither the allowlist above nor provider discovery

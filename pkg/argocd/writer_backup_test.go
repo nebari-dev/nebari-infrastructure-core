@@ -29,7 +29,7 @@ func TestNewTemplateDataBackups(t *testing.T) {
 			},
 		},
 	}
-	d := NewTemplateData(cfg, nil, cluster.InfraSettings{})
+	d := NewTemplateData(context.Background(), cfg, nil, cluster.InfraSettings{})
 	if !d.LonghornBackupEnabled {
 		t.Fatal("expected LonghornBackupEnabled true")
 	}
@@ -51,7 +51,7 @@ func TestNewTemplateDataBackups(t *testing.T) {
 }
 
 func TestNewTemplateDataBackupsDisabled(t *testing.T) {
-	d := NewTemplateData(&config.NebariConfig{ProjectName: "p"}, nil, cluster.InfraSettings{})
+	d := NewTemplateData(context.Background(), &config.NebariConfig{ProjectName: "p"}, nil, cluster.InfraSettings{})
 	if d.LonghornBackupEnabled {
 		t.Fatal("expected disabled when no backups block")
 	}

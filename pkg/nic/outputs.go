@@ -122,7 +122,7 @@ func (c *Client) Outputs(ctx context.Context, cfg *config.NebariConfig, opts Out
 
 	reg := c.registry
 
-	if err := cfg.Validate(validateOptions(ctx, reg)); err != nil {
+	if err := cfg.Validate(ctx, validateOptions(ctx, reg)); err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
@@ -154,7 +154,7 @@ func (c *Client) Outputs(ctx context.Context, cfg *config.NebariConfig, opts Out
 	// The same TemplateData the deploy path renders manifests from, so the
 	// secret names, keys, and issuer URL formula reported here cannot drift
 	// from the objects this binary placed in the cluster.
-	data := argocd.NewTemplateData(cfg, nil, clusterProvider.InfraSettings(cfg.Cluster))
+	data := argocd.NewTemplateData(ctx, cfg, nil, clusterProvider.InfraSettings(cfg.Cluster))
 
 	outputs, err := resolveOutputs(ctx, k8sClient, data, opts)
 	if err != nil {

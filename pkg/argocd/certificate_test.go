@@ -82,7 +82,7 @@ func TestNewTemplateData_Certificate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.NebariConfig{Domain: "test.example.com", Certificate: tt.cert}
-			data := NewTemplateData(cfg, nil, settings)
+			data := NewTemplateData(context.Background(), cfg, nil, settings)
 
 			if data.GatewayTLSSecretName != tt.wantSecretName {
 				t.Errorf("GatewayTLSSecretName = %q, want %q", data.GatewayTLSSecretName, tt.wantSecretName)

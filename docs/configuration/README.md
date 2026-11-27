@@ -24,6 +24,7 @@ This directory contains auto-generated documentation for Nebari Infrastructure C
 
 - [Trust Bundle Configuration](trust-bundle.md) - Enterprise CA trust-bundle propagation to worker-node OS trust stores and, via trust-manager, into the cluster.
 - [Backups Configuration](backups.md) - Off-cluster backup scheduling for Longhorn volumes (S3/Azure targets, retention, keyless auth).
+- [Gateway Configuration](gateway.md) - Tuning for the shared nebari-gateway, such as the request buffer limit that bounds LLM request size.
 - [Longhorn Storage Configuration](longhorn.md) - Distributed block storage settings shared by the cloud providers, including dedicated-node scheduling.
 - [Cloudflare DNS Configuration](cloudflare.md) - Configuration options for Cloudflare DNS provider.
 - [Existing GitOps Repository Configuration](repository-existing.md) - Configuration options for pointing ArgoCD at a GitOps repository you already host.
