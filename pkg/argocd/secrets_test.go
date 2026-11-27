@@ -138,6 +138,27 @@ func TestConfigureGitRepoAccess(t *testing.T) {
 		}
 	})
 
+	t.Run("uses the configured token username", func(t *testing.T) {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+		client := fake.NewSimpleClientset(ns)
+
+		src := repository.RemoteSource{
+			URL:      "https://bitbucket.org/example/repo.git",
+			PushAuth: repository.TokenAuth{Token: "bb_test_token", Username: "x-token-auth"},
+		}
+
+		if err := ConfigureGitRepoAccess(ctx, client, src, namespace); err != nil {
+			t.Fatalf("ConfigureGitRepoAccess() error = %v", err)
+		}
+		secret, err := client.CoreV1().Secrets(namespace).Get(ctx, "gitops-repo-creds", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get secret: %v", err)
+		}
+		if got := getSecretVal(secret, "username"); got != "x-token-auth" {
+			t.Errorf("secret username = %q, want %q", got, "x-token-auth")
+		}
+	})
+
 	t.Run("returns error when no credentials provided", func(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
 		client := fake.NewSimpleClientset(ns)
