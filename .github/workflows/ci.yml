@@ -203,7 +203,7 @@ jobs:
         run: chmod +x nic
 
       - name: Deploy
-        uses: nebari-dev/deploy-nebari-action@13484a5f9f42f8378b88d4426d3b0244522e347d # v0.3.0
+        uses: nebari-dev/deploy-nebari-action@0156325a933300fe42afd63371b30a28ff6678cd # v0.4.0
         with:
           nic-binary: nic
 
