@@ -1,7 +1,6 @@
 module "eks_cluster" {
-  # TODO: switch back to the registry source and the release that includes
-  # nebari-dev/terraform-aws-eks-cluster#57 before this merges.
-  source = "git::https://github.com/nebari-dev/terraform-aws-eks-cluster.git?ref=feat/vpc-cni-network-policy"
+  source  = "nebari-dev/eks-cluster/aws"
+  version = "0.12.0"
 
 
   project_name                             = var.project_name
