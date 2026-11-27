@@ -101,6 +101,12 @@ type Config struct {
 
 	// Values are custom Helm values to apply
 	Values map[string]any
+
+	// ForceUpgrade upgrades an existing release even when its chart version
+	// already matches, for values that must reach the cluster without a chart
+	// bump. Deploy sets it when Argo CD's OIDC client secret differs from the
+	// stored one.
+	ForceUpgrade bool
 }
 
 // ConfigWithOIDC returns an Argo CD configuration with Keycloak OIDC SSO enabled.
