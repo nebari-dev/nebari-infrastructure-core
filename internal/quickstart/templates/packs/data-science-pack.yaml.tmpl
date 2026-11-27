@@ -1,0 +1,89 @@
+# Installed by `nic quickstart`. This file is yours: edit it to change the
+# JupyterHub configuration, or delete it to uninstall the Data Science Pack,
+# then commit the change, since Argo CD only sees committed changes. Running
+# quickstart again keeps your edits but puts the file back if it was deleted.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-science-pack
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: nebari-software-packs
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nebari-apps
+  source:
+    repoURL: https://raw.githubusercontent.com/nebari-dev/helm-repository/gh-pages/
+    chart: nebari-data-science-pack
+    targetRevision: 0.1.7
+    helm:
+      releaseName: data-science-pack
+      valuesObject:
+        keycloak:
+          hostname: keycloak.{{ .Domain }}
+        jupyterhub:
+          custom:
+            # Mount the cluster's CA bundle in user and app pods, so notebooks
+            # trust the platform's self-signed certificates.
+            trust-bundle-enabled: true
+            # The chart derives the hub's Keycloak client ID as
+            # jupyterhub-<fullname>, which only matches the client the operator
+            # creates when the pack runs in a namespace named jupyterhub. Without
+            # this, the hub can't get users a Nebi token. Remove once
+            # https://github.com/nebari-dev/data-science-pack/issues/248 is fixed.
+            jupyterhub-client-id: data-science-data-science-pack-nebari-data-science-pack
+          hub:
+            # The chart's hub volumes, copied from its values.yaml (Helm
+            # replaces lists), with org-ca required instead of optional. The
+            # chart mounts it as optional, so a hub that starts before the
+            # bundle exists runs without the cluster's CA. Quickstart clusters
+            # always have the bundle, so the hub waits for it instead.
+            extraVolumes:
+              - name: custom-config
+                configMap:
+                  name: nebari-data-science-pack-hub-config
+              - name: oauth-client
+                secret:
+                  secretName: data-science-pack-nebari-data-science-pack-oidc-client
+                  optional: true
+              - name: org-ca
+                configMap:
+                  name: nebari-trust-bundle
+              - name: ca-merged
+                emptyDir: {}
+            config:
+              KeyCloakOAuthenticator:
+                # The hub's login calls go through pycurl, whose libcurl
+                # ignores SSL_CERT_FILE, so point it at the CA bundle the hub
+                # merges at startup.
+                http_request_kwargs:
+                  ca_certs: /etc/ssl/certs-extra/ca-bundle.crt
+        sharedStorage:
+          nfsServer:
+            # kind nodes run on overlayfs, where the NFS server's NFSv4 export
+            # is broken. See the chart's shared-pvc.yaml.
+            mountOptions:
+              - nfsvers=3
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-science
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # The nebari-operator only manages namespaces carrying this label.
+    managedNamespaceMetadata:
+      labels:
+        nebari.dev/managed: "true"
+    syncOptions:
+      - CreateNamespace=true
+    # Retry indefinitely, on the latest revision so a fix from the next deploy
+    # is picked up. See https://github.com/nebari-dev/nebari-infrastructure-core/issues/450
+    retry:
+      limit: -1
+      refresh: true
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
