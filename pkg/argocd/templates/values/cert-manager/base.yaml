@@ -8,6 +8,12 @@ installCRDs: true
 global:
   leaderElection:
     namespace: cert-manager
+
+image:
+  repository: quay.io/jetstack/cert-manager-controller
+  tag: "v1.17.2"
+  digest: "sha256:2c314feeb5e8b1a250a93be96542f086abc9df2de8e1a0cd7bd491cc7cc7ac08"
+
 config:
   enableGatewayAPI: true
 # Serialize ACME HTTP-01 challenges to avoid a race when two Certificates
@@ -29,6 +35,10 @@ resources:
     cpu: 200m
     memory: 256Mi
 webhook:
+  image:
+    repository: quay.io/jetstack/cert-manager-webhook
+    tag: "v1.17.2"
+    digest: "sha256:37b16a9dff004a755e5be11a4369aea4d5dd5895f98e1f7def886adca7f5c7b6"
   resources:
     requests:
       cpu: 10m
@@ -37,6 +47,10 @@ webhook:
       cpu: 100m
       memory: 128Mi
 cainjector:
+  image:
+    repository: quay.io/jetstack/cert-manager-cainjector
+    tag: "v1.17.2"
+    digest: "sha256:ec56edb1161dbcdcb60b5408dd040c877b9f70161b71270c6439ad185796b5b7"
   resources:
     requests:
       cpu: 10m
@@ -44,3 +58,15 @@ cainjector:
     limits:
       cpu: 200m
       memory: 256Mi
+
+acmesolver:
+  image:
+    repository: quay.io/jetstack/cert-manager-acmesolver
+    tag: "v1.17.2"
+    digest: "sha256:bba1a80cf367bd9fbf1b8c90c589eea88861c169841ecbc406cf15d5900d30ac"
+
+startupapicheck:
+  image:
+    repository: quay.io/jetstack/cert-manager-startupapicheck
+    tag: "v1.17.2"
+    digest: "sha256:e18989b4f9126a94ee40856589eba247519d55225b68b49e82a06934c27c2910"

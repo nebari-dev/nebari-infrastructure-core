@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters tofu-lock
+.PHONY: help build test test-unit test-integration test-coverage test-race clean fmt vet lint vuln install pre-commit release-snapshot docs starters tofu-lock images-plan images-scan
 
 # Variables
 BINARY_NAME=nic
@@ -146,6 +146,15 @@ deps-update: ## Update Go dependencies
 	go get -u ./...
 	go mod tidy
 	@echo "Dependencies updated successfully"
+
+images-plan: ## Show validated digest pins for deployed images after a tag bump (read-only; needs network)
+	go run ./cmd/imagepin plan
+
+images-scan: ## Resolve deployed images to digests, generate SBOMs and scan them, as CI does (needs network, trivy, jq)
+	@rm -rf dist/image-scan && mkdir -p dist/image-scan
+	go run ./cmd/imagepin inventory -o dist/image-scan/inventory.json || \
+		echo "imagepin reported unresolved images; the scan will fail on them"
+	bash scripts/image-scan.sh dist/image-scan/inventory.json dist/image-scan
 
 CLUSTER_PROVIDERS ?= $(patsubst pkg/providers/cluster/%/templates/main.tf,%,$(wildcard pkg/providers/cluster/*/templates/main.tf))
 TOFU_PLATFORMS := linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64

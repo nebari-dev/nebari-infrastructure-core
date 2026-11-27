@@ -5,6 +5,9 @@ frontend:
     realm: "{{ .KeycloakRealm }}"
   oauth2Proxy:
     oidcIssuerUrl: "{{ .KeycloakIssuerURL }}/realms/{{ .KeycloakRealm }}"
+  image:
+    repository: quay.io/nebari/nebari-landing
+    tag: "latest"
 
 webapi:
   keycloak:
